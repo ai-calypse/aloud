@@ -27,7 +27,10 @@ pub struct Macro {
 /// when both match. Each is replaced everywhere it occurs. A trigger that is
 /// blank, or does not appear, is a no-op.
 pub fn expand(text: &str, macros: &[Macro]) -> String {
-    let mut ordered: Vec<&Macro> = macros.iter().filter(|m| !m.trigger.trim().is_empty()).collect();
+    let mut ordered: Vec<&Macro> = macros
+        .iter()
+        .filter(|m| !m.trigger.trim().is_empty())
+        .collect();
     // Longest trigger first: a specific phrase should not be pre-empted by a
     // shorter one it contains.
     ordered.sort_by_key(|m| std::cmp::Reverse(m.trigger.trim().len()));
@@ -108,12 +111,18 @@ mod tests {
     fn does_not_fire_inside_a_larger_word() {
         // "sig" must not expand inside "signature".
         let macros = [m("sig", "— Jane")];
-        assert_eq!(expand("my signature is sig", &macros), "my signature is — Jane");
+        assert_eq!(
+            expand("my signature is sig", &macros),
+            "my signature is — Jane"
+        );
     }
 
     #[test]
     fn longest_trigger_wins() {
-        let macros = [m("my email", "personal@x.com"), m("my work email", "jane@work.com")];
+        let macros = [
+            m("my email", "personal@x.com"),
+            m("my work email", "jane@work.com"),
+        ];
         assert_eq!(expand("use my work email", &macros), "use jane@work.com");
     }
 

@@ -92,7 +92,10 @@ pub fn run() {
             // The live hotkey config, shared between AppState (written on a
             // rebind) and the listener thread (which reads it every event).
             let hotkey_config = Arc::new(Mutex::new(
-                settings.lock().map(|s| s.hotkeys.clone()).unwrap_or_default(),
+                settings
+                    .lock()
+                    .map(|s| s.hotkeys.clone())
+                    .unwrap_or_default(),
             ));
             app.manage(AppState {
                 settings: settings.clone(),

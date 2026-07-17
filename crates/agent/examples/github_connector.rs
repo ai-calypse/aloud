@@ -26,7 +26,9 @@ async fn main() {
 
     match args.next().as_deref() {
         Some("create") => {
-            let title = args.next().unwrap_or_else(|| "Test issue from Aloud".into());
+            let title = args
+                .next()
+                .unwrap_or_else(|| "Test issue from Aloud".into());
             let action = action("github.create_issue", &[("repo", &repo), ("title", &title)]);
             report(connector.execute(&action).await);
         }

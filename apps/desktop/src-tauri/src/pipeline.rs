@@ -193,18 +193,18 @@ impl Pipeline {
     /// unavailable: pasting the unpolished words beats pasting nothing. Voice
     /// macros expand last, on whichever text we settled on.
     async fn post_process(&self, raw: &str, settings: &Settings) -> String {
-        let cleaned = if !settings.post_processing_enabled || settings.groq_api_key.trim().is_empty()
-        {
-            raw.to_string()
-        } else {
-            match self.clean_up(raw, settings).await {
-                Ok(text) => text,
-                Err(e) => {
-                    tracing::warn!(%e, "post-processing failed; pasting raw transcript");
-                    raw.to_string()
+        let cleaned =
+            if !settings.post_processing_enabled || settings.groq_api_key.trim().is_empty() {
+                raw.to_string()
+            } else {
+                match self.clean_up(raw, settings).await {
+                    Ok(text) => text,
+                    Err(e) => {
+                        tracing::warn!(%e, "post-processing failed; pasting raw transcript");
+                        raw.to_string()
+                    }
                 }
-            }
-        };
+            };
 
         // Expand shorthand after cleanup, so the model's spacing/casing fixes
         // land before a trigger is matched, and so macros work even with
@@ -463,8 +463,7 @@ impl Pipeline {
             return Ok(());
         }
         // Tolerate a trigger phrase said out of habit while holding the key.
-        let command =
-            aloud_agent::command_from_trigger(&command).unwrap_or(command);
+        let command = aloud_agent::command_from_trigger(&command).unwrap_or(command);
         crate::agent::run(&self.app, command, &settings).await
     }
 

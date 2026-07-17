@@ -67,10 +67,16 @@ impl GitHubConnector {
         let title = entity(action, "title")?;
         // Body is optional; an empty --body is valid and keeps gh from opening
         // an editor, which would hang a headless invocation forever.
-        let body = action.entities.get("body").map(String::as_str).unwrap_or("");
+        let body = action
+            .entities
+            .get("body")
+            .map(String::as_str)
+            .unwrap_or("");
 
         let output = Command::new("gh")
-            .args(["issue", "create", "--repo", repo, "--title", title, "--body", body])
+            .args([
+                "issue", "create", "--repo", repo, "--title", title, "--body", body,
+            ])
             .output()
             .await
             .context("running gh issue create")?;
@@ -96,7 +102,10 @@ impl GitHubConnector {
                 "No open issues.".to_string()
             } else {
                 let count = list.lines().count();
-                format!("{count} open issue{}:\n{list}", if count == 1 { "" } else { "s" })
+                format!(
+                    "{count} open issue{}:\n{list}",
+                    if count == 1 { "" } else { "s" }
+                )
             }
         }))
     }
@@ -118,7 +127,10 @@ fn entity<'a>(action: &'a ParsedAction, key: &str) -> Result<&'a str> {
 /// A CLI failure is not retryable: `gh` already retries transient network
 /// errors itself, so a non-zero exit here is a real problem (bad repo, no
 /// permission, offline) that a blind retry would not fix.
-fn gh_result(output: &std::process::Output, on_success: impl FnOnce(&str) -> String) -> ExecutionResult {
+fn gh_result(
+    output: &std::process::Output,
+    on_success: impl FnOnce(&str) -> String,
+) -> ExecutionResult {
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         ExecutionResult::ok(on_success(&stdout))
@@ -151,7 +163,10 @@ mod tests {
         ParsedAction {
             action: "github.create_issue".into(),
             app: "github".into(),
-            entities: entities.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            entities: entities
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
             confidence: 1.0,
             requires_confirmation: true,
         }
@@ -182,13 +197,20 @@ mod tests {
         let out = output(0, "https://github.com/o/r/issues/7\n", "");
         let result = gh_result(&out, |url| format!("Opened issue: {}", url.trim()));
         assert!(result.success);
-        assert_eq!(result.message, "Opened issue: https://github.com/o/r/issues/7");
+        assert_eq!(
+            result.message,
+            "Opened issue: https://github.com/o/r/issues/7"
+        );
     }
 
     #[test]
     fn failure_is_not_retryable_and_message_is_cleaned() {
         // gh already retries transient network errors, so its failures are terminal.
-        let out = output(1, "", "error: could not resolve to a Repository\nHINT: check the name\n");
+        let out = output(
+            1,
+            "",
+            "error: could not resolve to a Repository\nHINT: check the name\n",
+        );
         let result = gh_result(&out, |_| unreachable!("formatter must not run on failure"));
         assert!(!result.success);
         assert!(!result.retryable);
@@ -200,7 +222,11 @@ mod tests {
         let out = output(0, "\n", "");
         let result = gh_result(&out, |list| {
             let list = list.trim();
-            if list.is_empty() { "No open issues.".into() } else { format!("{} issues", list.lines().count()) }
+            if list.is_empty() {
+                "No open issues.".into()
+            } else {
+                format!("{} issues", list.lines().count())
+            }
         });
         assert_eq!(result.message, "No open issues.");
     }
