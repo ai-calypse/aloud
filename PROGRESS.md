@@ -39,14 +39,18 @@ unaffected; cloud transcription and LLM cleanup need a new key in settings.
 | Recording overlay | ✅ verified by screenshot |
 | Notes window | ✅ commands verified on real notes; UI unscreenshotted |
 | Settings UI | ✅ round-trip verified; UI unscreenshotted |
+| Ask mode | ✅ trigger routing verified on real speech |
+| Command mode | ✅ clipboard fallback + prompt shape verified |
+| Meeting notes | ✅ no-data-loss path verified |
+| Agent Mode (Phase 9) | ✅ schema/parser/dispatcher; connectors need OAuth |
 
-88 tests · clippy clean · typecheck clean.
+117 tests · clippy clean · typecheck clean.
 
 ## Not done
 
-Ask panel · command mode · meeting notes · onboarding · realtime streaming ·
-app context · Composio · voice macros · app rules · updater ·
-signing/notarization · Agent Mode (Phase 9).
+Onboarding · realtime streaming · app context · Composio · voice macros ·
+app rules · updater · signing/notarization · Agent Mode connectors (need
+OAuth setup).
 
 macOS blocked `screencapture` behind a permission prompt, so the notes and
 settings windows are verified at the data layer but not visually.

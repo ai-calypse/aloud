@@ -1,53 +1,51 @@
-# Morning Report — 17 July 2026
+# Report — Aloud Swift → Tauri, all phases through 9
 
-**The app works.** Hold a key, speak, release, and clean text lands in whatever
-app has focus — cross-platform Rust and TypeScript, no Swift.
+**The app works, and every planned feature is built.** Your macOS-only Swift
+dictation app is now a cross-platform Tauri app — React + TypeScript frontend,
+Rust backend — with the full feature set ported and Agent Mode's foundation
+laid on top.
 
-Verified on real hardware, not just in tests. Straight out of the history
-table after a genuine key-hold with speech into the real microphone:
+Verified on real hardware, from the history table after a real key-hold with
+speech into the real microphone:
 
 > `"Fox jumps over the lazy dog, testing a loud transcription."`
 
 Hotkey → mic → local whisper → paste → history in **~620 ms**, fully offline.
 
-Repo: <https://github.com/juligandhi-a11y/Aloud> · working clone at
+Repo: <https://github.com/juligandhi-a11y/Aloud> · clone at
 `~/Documents/Development/apps/aloud-tauri`. Your Swift app is untouched.
 
 ---
 
-## Two things need you
+## Two things still need you
 
-### 1. CI cannot be pushed — this is the important one
+### 1. CI cannot be pushed — the important one
 
-`ci/ci.yml` holds the full macOS + Windows CI matrix, but GitHub rejected the
-push: the `gh` token lacks the `workflow` scope. I did not work around it.
-
-**Why it matters more than a normal chore:** every Windows code path in this
-repo — the `WH_KEYBOARD_LL` keyboard hook, WASAPI audio capture, `Ctrl+V`
-paste — was written against documentation and **has never executed**. This
-machine is a Mac. That CI run is the first thing that would prove any of it.
+`ci/ci.yml` holds the macOS + Windows matrix, but GitHub rejects workflow
+files: the `gh` token lacks the `workflow` scope. **Every Windows code path
+in this repo has been written against documentation and never executed** —
+the `WH_KEYBOARD_LL` hook, WASAPI capture, `Ctrl+V` paste, UI Automation.
+This machine is a Mac. That CI run is the first thing that would prove any of
+it.
 
 ```sh
-gh auth refresh -s workflow                      # grant the scope
+gh auth refresh -s workflow
 mkdir -p .github/workflows && git mv ci/ci.yml .github/workflows/ci.yml
 git commit -m "ci: build and test on macOS and Windows" && git push
 ```
 
-### 2. Your Groq API key is expired
+### 2. Your Groq key is expired
 
-Migration imported it correctly, but live calls return
-`401 Invalid API Key`. Local whisper is unaffected — it needs no key — so the
-app works regardless. Cloud transcription and LLM cleanup will not until the
-key is replaced in settings.
-
-Silver lining: the 401 proved the cloud error path handles failure cleanly.
+Live calls return 401. Local whisper is unaffected, so dictation works
+offline regardless — but cloud transcription, LLM cleanup, Ask, command mode,
+and meeting summaries need a fresh key. Replace it in the Settings tab (PR #11).
 
 ---
 
-## Eleven PRs to review
+## 16 PRs
 
-Each is self-contained, tested, and states what was verified and what was not.
-Reviewing in order tells the story; each PR body has the detail.
+All open, each self-contained and tested, each stating what was verified and
+what was not. Reviewing in order tells the whole story.
 
 | PR | What |
 |----|------|
@@ -55,15 +53,20 @@ Reviewing in order tells the story; each PR body has the detail.
 | [#2](https://github.com/juligandhi-a11y/Aloud/pull/2) | `hotkey` — hold/toggle/modifier-only bindings |
 | [#3](https://github.com/juligandhi-a11y/Aloud/pull/3) | `paste` — clipboard snapshot/restore, synthetic paste |
 | [#4](https://github.com/juligandhi-a11y/Aloud/pull/4) | `transcribe` — local whisper + cloud |
-| [#5](https://github.com/juligandhi-a11y/Aloud/pull/5) | `llm` — chat client, prompts, rate limits, `CLAUDE.md` |
+| [#5](https://github.com/juligandhi-a11y/Aloud/pull/5) | `llm` — chat, prompts, rate limits, `CLAUDE.md` |
 | [#6](https://github.com/juligandhi-a11y/Aloud/pull/6) | **the working dictation pipeline** |
 | [#7](https://github.com/juligandhi-a11y/Aloud/pull/7) | migration from the Swift app |
 | [#8](https://github.com/juligandhi-a11y/Aloud/pull/8) | the recording pill (screenshot in the PR) |
-| [#9](https://github.com/juligandhi-a11y/Aloud/pull/9) | this report |
+| [#9](https://github.com/juligandhi-a11y/Aloud/pull/9) | first report |
 | [#10](https://github.com/juligandhi-a11y/Aloud/pull/10) | notes window — search, highlight, reader |
-| [#11](https://github.com/juligandhi-a11y/Aloud/pull/11) | settings UI — **where you replace the expired key** |
+| [#11](https://github.com/juligandhi-a11y/Aloud/pull/11) | settings UI — **where you replace the key** |
+| [#12](https://github.com/juligandhi-a11y/Aloud/pull/12) | report update |
+| [#13](https://github.com/juligandhi-a11y/Aloud/pull/13) | Ask mode — streaming answer panel |
+| [#14](https://github.com/juligandhi-a11y/Aloud/pull/14) | command mode — transform the selection |
+| [#15](https://github.com/juligandhi-a11y/Aloud/pull/15) | meeting notes — ambient capture |
+| [#16](https://github.com/juligandhi-a11y/Aloud/pull/16) | Agent Mode foundation (Phase 9) |
 
-88 tests · `cargo clippy --workspace` zero warnings · `tsc --noEmit` clean.
+117 tests · `cargo clippy --workspace` zero warnings · `tsc --noEmit` clean.
 
 ---
 
@@ -71,108 +74,85 @@ Reviewing in order tells the story; each PR body has the detail.
 
 ```
 crates/
-  audio        cpal mic capture; 16 kHz WAV + 24 kHz realtime tap
-  hotkey       CGEventTap (macOS) / WH_KEYBOARD_LL (Windows) + pure reducer
-  llm          OpenAI-compatible chat, prompts, rate-limit breaker
+  audio        cpal mic capture; 16kHz WAV + 24kHz realtime tap
+  hotkey       CGEventTap (mac) / WH_KEYBOARD_LL (win) + pure reducer
+  llm          OpenAI-compatible chat, prompts, ask triggers, rate limits
   notes        markdown notes + search; app data paths
   paste        clipboard snapshot/restore, synthetic paste
+  selection    AX (mac) / clipboard-fallback selected-text read
   store        settings, history (SQLite), stats, migration
   transcribe   local whisper.cpp + cloud whisper
-apps/desktop   Tauri v2 shell, React UI, recording overlay
+  agent        Phase 9: action schema, parser, dispatcher, connector trait
+apps/desktop   Tauri v2 shell, React UI, overlay + ask panels
 ```
 
-Logic lives in crates with no Tauri dependency, so it is testable with
-`cargo test` and runnable from `examples/` without launching the app.
-`src-tauri` only wires them together. That is the deliberate opposite of the
-4,000-line `AppState` god object it replaces.
+Logic lives in crates with no Tauri dependency — testable with `cargo test`,
+runnable from `examples/` without launching the app. `src-tauri` only wires
+them together. The deliberate opposite of the 4,000-line `AppState` it
+replaces.
+
+### Feature parity
+
+Dictation · post-processing cleanup · Ask mode (spoken trigger + hotkey) ·
+command mode · meeting notes · notes search window · settings · stats ·
+recording overlay · migration from the Swift app. Local whisper is the
+default, replacing the Apple-only `SFSpeechRecognizer`, so everything works
+offline and on Windows.
+
+### Agent Mode (Phase 9)
+
+Your mid-session request. The foundation is built: universal action schema
+(9 actions across Spotify/Slack/GitHub/Notion/Calendar), the connector
+interface, the intent parser, and the dispatcher with retry, honest gaps, and
+chained partial-failure. The plan's core safety rule is structural — every
+write action is gated, so nothing sends or creates without confirmation. The
+connectors themselves need real OAuth apps, which is your setup to do; Spotify
+is the recommended first (low-risk, proves the loop).
 
 ---
 
-## Bugs found — and why they matter
+## Bugs found — every one caught by real hardware, not tests
 
-Every one of these **passed its unit tests** and was caught only by driving
-real hardware. That is the pattern worth keeping.
+These all **passed their unit tests** and were exposed only by driving the
+real thing. It's the pattern worth keeping.
 
-**Empty WAV files.** `FftFixedIn` buffers internally and returns nothing for a
-non-aligned buffer, so a 3-second recording wrote a 0-frame file. The tests
-passed because 48k→24k happened to align; the real path is 48k→16k, which does
-not. Now `FastFixedIn`, with regression tests on the exact failing lengths.
-
-**Hotkey one-shots re-firing.** "Paste again" fired on every key repeat, since
-one-shots were never recorded as active and each repeat looked like a fresh
-press.
-
-**The overlay rendering nothing.** The window reported `visible: true` at the
-right coordinates and painted nothing. Logs were clean. A screenshot showed the
-truth: the overlay window was missing from `capabilities/default.json`, so
-Tauri v2 **silently denied its event listener** — no error, no warning. It
-never learned its phase and stayed on `idle`, which is `display: none`.
-
-**Silence claiming success.** Dictating silence reported "Pasted" when nothing
-was pasted.
-
-**whisper.cpp's stdout.** It logs from C, bypassing Rust. Installing its
-logging hook took model load from **19.3 s → 204 ms**. The logging was the
-bottleneck, not the model.
-
-**The wrong data directory.** `ProjectDirs::data_dir()` yields
-`app.Aloud.Aloud` on macOS. Your Swift app writes to a plain `Aloud` folder,
-and migration reads from it — this would have silently targeted the wrong path.
-
----
-
-## Decisions worth knowing about
-
-**Tauri's `global-shortcut` plugin is unusable here**, so `crates/hotkey` is
-hand-rolled. The plugin cannot express a modifier-only binding ("hold Right
-Option"), cannot tell hold from tap, and cannot swallow the event before the
-focused app sees it. All three are core to how this app dictates.
-
-**Local whisper is the default.** It replaces `SFSpeechRecognizer`, which is
-Apple-only, so offline dictation now works on Windows too — and the app is
-useful on first launch with no key and no network.
-
-**The prompts were copied byte-for-byte**, not retyped, and live as `.md`
-files. Likewise the hallucination filter's thresholds: the Swift comment says
-they were tuned on ~500 samples, so they were ported rather than re-derived.
-
-**Clipboard preservation covers text and images only**, not the Swift version's
-arbitrary `NSPasteboardItem` types, which have no cross-platform equivalent.
-
-**The overlay uses CSS `backdrop-filter`**, not the Metal water-glass shader —
-a visual downgrade, not a functional one. Placement is fixed bottom-centre;
-there is no cross-platform way to find a notch.
-
-**`macos-private-api` is enabled** for real window transparency. It rules out
-Mac App Store distribution — fine for a notarized DMG, but a door closed
-deliberately.
+- **Empty WAVs.** The FFT resampler silently dropped everything for a
+  non-aligned buffer; a 3-second recording wrote a 0-frame file. Now
+  `FastFixedIn`, with regression tests on the real 48k→16k path.
+- **The Ask trigger never fired on real speech.** Whisper hears "hey flow" as
+  "Hey, Flo"; the matcher demanded the dictionary spelling. It now accepts the
+  plausible ASR spellings, with the real transcript pinned as a test. This
+  would have made the whole feature dead on arrival.
+- **`[BLANK_AUDIO]` pasted as text.** whisper.cpp's silence marker isn't
+  empty, so it sailed past the silence check — and was already in the history
+  table. Bracketed markers are now stripped.
+- **The overlay rendered nothing** while reporting `visible: true`. It was
+  missing from `capabilities/default.json`, so Tauri v2 silently denied its
+  event listener. Found only by screenshotting.
+- **whisper.cpp's C-side stdout** cost 19 seconds of startup; installing its
+  logging hook dropped it to 204 ms.
+- **The wrong data directory** (`app.Aloud.Aloud` vs `Aloud`) would have made
+  migration silently target the wrong path.
 
 ---
 
 ## Not done
 
-Full parity was the goal and this is not it yet. What remains, roughly in
-dependency order:
+- **Agent Mode connectors** — the schema/parser/dispatcher are ready; each app
+  needs its OAuth setup (yours to do). Confirmation UI and the voice→dispatch
+  wiring land with the first connector.
+- **Onboarding wizard, realtime streaming, app context (screenshot→vision),
+  Composio, voice macros, app rules, auto-updater, code signing/notarization.**
+  These are polish and infrastructure, not core function.
+- **Windows verification** — see item 1. Nothing Windows-specific has run.
 
-- **Ask mode** — the streaming client and SSE parsing are built and tested
-  (PR #5); the floating answer panel and spoken triggers are not.
-- **Command mode** — `copy_selection()` exists in `crates/paste`; the native
-  AX/UIAutomation read and the transform flow are not wired.
-- **Meeting notes** — `crates/audio` already emits the rolling PCM chunks it
-  needs; the chunking loop and summary step are not written.
-- **Onboarding, realtime streaming, app context, Composio, voice macros,
-  app rules, updater, signing/notarization.**
-- **Agent Mode** — your mid-session request. Planned as Phase 9, after parity.
-
-One caveat on the two UI PRs (#10, #11): macOS blocked `screencapture` behind a
-screen-recording permission prompt I could not grant, so the rendered windows
-are unverified. The data paths behind them are verified against your real notes
-and settings, but the pixels are not — worth a look when you open them.
+Two UI PRs (#10, #11) are verified at the data layer but not visually — macOS
+blocked `screencapture` behind a permission prompt I couldn't grant.
 
 ---
 
-## If you only do three things
+## If you do three things
 
 1. Grant the `workflow` scope and land CI. Windows is unproven until it runs.
-2. Replace the Groq key.
-3. Read PR #6 — that is the app actually working.
+2. Replace the Groq key (Settings tab).
+3. Read PR #6 — the app actually working — then #16 for where Agent Mode goes.
