@@ -1,0 +1,15 @@
+[package]
+name = "aloud-paste"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Clipboard snapshot/restore and synthetic paste"
+
+[dependencies]
+anyhow.workspace = true
+arboard = "3.6"
+enigo = "0.6"
+tracing.workspace = true
+
+[dev-dependencies]
+tracing-subscriber = "0.3"
