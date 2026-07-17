@@ -28,7 +28,11 @@ serde.workspace = true
 serde_json.workspace = true
 specta.workspace = true
 specta-typescript = "0.0.12"
-tauri = { version = "2", features = ["tray-icon"] }
+# macos-private-api: required for a genuinely transparent window on macOS,
+# which the recording overlay depends on. It rules out Mac App Store
+# distribution, which this app does not use (it ships as a notarized DMG).
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tokio = { version = "1", features = ["time"] }
 tauri-plugin-opener = "2"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 tracing.workspace = true

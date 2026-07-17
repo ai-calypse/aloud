@@ -19,8 +19,24 @@
         "height": 640,
         "visible": false,
         "resizable": true
+      },
+      {
+        "label": "overlay",
+        "url": "overlay.html",
+        "width": 220,
+        "height": 64,
+        "visible": false,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "shadow": false,
+        "skipTaskbar": true,
+        "focus": false,
+        "acceptFirstMouse": false
       }
     ],
+    "macOSPrivateApi": true,
     "security": {
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:"
     }

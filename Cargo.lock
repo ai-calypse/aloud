@@ -59,6 +59,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "tauri-specta",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]

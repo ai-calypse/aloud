@@ -8,11 +8,15 @@ use aloud_store::{History, Settings, Stats};
 use aloud_transcribe::{cloud::CloudTranscriber, local::LocalTranscriber, Engine, Transcriber};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
+use std::time::Duration;
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
 use tauri::{AppHandle, Emitter};
+
+/// How long the pill stays up after a dictation finishes.
+const OVERLAY_LINGER: Duration = Duration::from_millis(900);
 
 /// What the UI reflects. Mirrors the Swift overlay's phases.
 #[derive(Debug, Clone, Copy, Serialize, specta::Type)]
@@ -68,9 +72,24 @@ impl Pipeline {
         })
     }
 
+    /// Publishes the phase and drives the overlay's visibility with it, so
+    /// the pill can never be left on screen after a session ends.
     fn emit(&self, phase: Phase) {
         if let Err(e) = self.app.emit("dictation-phase", phase) {
             tracing::warn!(%e, "could not emit phase");
+        }
+
+        match phase {
+            Phase::Recording | Phase::Transcribing => crate::overlay::show(&self.app, phase),
+            // Leave the result on screen briefly, then dismiss.
+            Phase::Done | Phase::Error => {
+                let app = self.app.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(OVERLAY_LINGER).await;
+                    crate::overlay::hide(&app);
+                });
+            }
+            Phase::Idle => crate::overlay::hide(&self.app),
         }
     }
 

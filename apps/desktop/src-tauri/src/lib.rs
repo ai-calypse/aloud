@@ -1,4 +1,5 @@
 mod commands;
+mod overlay;
 mod pipeline;
 mod tray;
 
