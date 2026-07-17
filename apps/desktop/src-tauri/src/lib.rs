@@ -87,6 +87,20 @@ pub fn run() {
             tray::init(app)?;
             spawn_hotkey_listener(app.handle().clone(), settings, pipeline, meeting);
 
+            // Closing the window must hide it, not destroy it. This is a
+            // menu-bar app: the window is reopened from the tray, and a
+            // destroyed window makes `get_webview_window("main")` return None,
+            // so "Open Aloud" silently does nothing. Hide and prevent the close.
+            if let Some(main) = app.get_webview_window("main") {
+                let win = main.clone();
+                main.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = win.hide();
+                    }
+                });
+            }
+
             // Menu-bar app: no dock icon, no taskbar entry.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
