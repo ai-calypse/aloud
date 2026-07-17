@@ -1,0 +1,38 @@
+[package]
+name = "aloud-transcribe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Speech-to-text via local whisper or an OpenAI-compatible API"
+
+[dependencies]
+anyhow.workspace = true
+async-trait = "0.1"
+hound = "3.5"
+# rustls (not native-tls) so TLS behaves identically on macOS and Windows.
+reqwest = { version = "0.13", default-features = false, features = [
+  "json",
+  "multipart",
+  "rustls",
+  "stream",
+] }
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+tokio = { version = "1", features = ["fs", "sync"] }
+tracing.workspace = true
+whisper-rs = "0.16"
+
+# GPU acceleration where it is free: Metal on macOS. Windows stays CPU-only
+# for now (whisper-rs offers cuda/vulkan features, but both need a matching
+# SDK on the build machine).
+[target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = { version = "0.16", features = ["metal"] }
+
+futures-util = "0.3"
+aloud-notes = { path = "../notes" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tempfile = "3"
+tracing-subscriber = "0.3"

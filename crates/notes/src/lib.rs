@@ -37,11 +37,30 @@ pub struct SearchResult {
     pub snippet: String,
 }
 
+/// The app's data directory: `~/Library/Application Support/Aloud` on macOS,
+/// `%APPDATA%\Aloud` on Windows.
+///
+/// `ProjectDirs::data_dir()` is deliberately not used: on macOS it returns a
+/// reverse-DNS folder (`app.Aloud.Aloud`), but the Swift app writes to a plain
+/// `Aloud` folder, and migrating users' notes in place beats renaming them.
+pub fn data_dir() -> Result<PathBuf> {
+    let base = if cfg!(target_os = "macos") {
+        directories::UserDirs::new()
+            .context("no home directory available")?
+            .home_dir()
+            .join("Library/Application Support")
+    } else {
+        directories::BaseDirs::new()
+            .context("no home directory available")?
+            .data_dir()
+            .to_path_buf()
+    };
+    Ok(base.join("Aloud"))
+}
+
 /// `<app-data>/Aloud/Notes`, created on demand.
 pub fn directory() -> Result<PathBuf> {
-    let dirs = directories::ProjectDirs::from("app", "Aloud", "Aloud")
-        .context("no home directory available")?;
-    Ok(dirs.data_dir().join("Notes"))
+    Ok(data_dir()?.join("Notes"))
 }
 
 /// All notes on disk, newest first.
