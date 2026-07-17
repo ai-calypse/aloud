@@ -1,0 +1,16 @@
+[package]
+name = "aloud-notes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Markdown notes storage and search"
+
+[dependencies]
+anyhow.workspace = true
+chrono = "0.4"
+directories = "6"
+serde.workspace = true
+specta.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

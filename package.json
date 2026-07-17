@@ -1,0 +1,14 @@
+{
+  "name": "aloud",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.13.1",
+  "scripts": {
+    "dev": "pnpm --filter @aloud/desktop tauri dev",
+    "build": "pnpm --filter @aloud/desktop tauri build",
+    "lint": "pnpm --filter @aloud/desktop lint",
+    "typecheck": "pnpm --filter @aloud/desktop typecheck",
+    "fmt": "cargo fmt --all && pnpm --filter @aloud/desktop fmt",
+    "test": "cargo test --workspace"
+  }
+}
