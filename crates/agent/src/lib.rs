@@ -12,11 +12,14 @@
 
 pub mod connector;
 pub mod dispatch;
+pub mod github;
 pub mod parser;
 pub mod schema;
 
 pub use connector::{Connector, ExecutionResult, TokenStore};
 pub use dispatch::{dispatch_chain, Dispatcher};
+pub use github::GitHubConnector;
+pub use parser::parse_intent;
 pub use schema::{ParsedAction, ACTIONS};
 
 /// Whether a command is an agent request or plain dictation.

@@ -138,16 +138,19 @@ pub enum Role {
     Command,
     /// Start/stop a meeting-notes session.
     MeetingNotes,
+    /// Record while held, then execute the spoken command across apps.
+    Agent,
 }
 
 impl Role {
-    pub const ALL: [Role; 6] = [
+    pub const ALL: [Role; 7] = [
         Role::Hold,
         Role::Toggle,
         Role::CopyAgain,
         Role::Ask,
         Role::Command,
         Role::MeetingNotes,
+        Role::Agent,
     ];
 
     /// One-shots fire on the leading edge and emit no deactivation.
@@ -164,6 +167,7 @@ pub struct Config {
     pub ask: Option<Binding>,
     pub command: Option<Binding>,
     pub meeting_notes: Option<Binding>,
+    pub agent: Option<Binding>,
 }
 
 impl Config {
@@ -175,6 +179,7 @@ impl Config {
             Role::Ask => &self.ask,
             Role::Command => &self.command,
             Role::MeetingNotes => &self.meeting_notes,
+            Role::Agent => &self.agent,
         };
         slot.as_ref().unwrap_or(&Binding::Disabled)
     }

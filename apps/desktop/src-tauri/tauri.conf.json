@@ -48,6 +48,20 @@
         "resizable": false,
         "skipTaskbar": true,
         "center": true
+      },
+      {
+        "label": "agent",
+        "url": "agent.html",
+        "title": "Agent",
+        "width": 460,
+        "height": 300,
+        "visible": false,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "center": true
       }
     ],
     "macOSPrivateApi": true,

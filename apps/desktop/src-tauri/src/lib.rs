@@ -1,3 +1,4 @@
+mod agent;
 mod ask;
 mod commands;
 mod meeting;
@@ -38,6 +39,8 @@ pub fn run() {
         commands::hotkeys_permitted,
         commands::paste_again,
         ask::close_ask,
+        agent::confirm_agent,
+        agent::close_agent,
     ]);
 
     // Regenerate the TypeScript bindings on every debug run so the frontend
@@ -83,6 +86,7 @@ pub fn run() {
                 pipeline: pipeline.clone(),
                 meeting: meeting.clone(),
             });
+            app.manage(agent::PendingConfirmation::default());
 
             tray::init(app)?;
             spawn_hotkey_listener(app.handle().clone(), settings, pipeline, meeting);
@@ -180,6 +184,19 @@ fn handle_hotkey(
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = pipeline.stop_and_command().await {
                     tracing::error!(%e, "command mode failed");
+                }
+            });
+        }
+        Event::Activated(Role::Agent) => {
+            if let Err(e) = pipeline.start() {
+                tracing::error!(%e, "could not start recording");
+            }
+        }
+        Event::Deactivated(Role::Agent) => {
+            let pipeline = pipeline.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = pipeline.stop_and_agent().await {
+                    tracing::error!(%e, "agent mode failed");
                 }
             });
         }

@@ -416,6 +416,42 @@ impl Pipeline {
         crate::ask::answer(&self.app, question, &settings).await
     }
 
+    /// Stops capturing and runs the spoken command as an agent action,
+    /// rather than pasting it. Like ask, the whole utterance is the command,
+    /// so no spoken trigger phrase is needed.
+    pub async fn stop_and_agent(&self) -> Result<()> {
+        let recorder = self.session.lock().unwrap().recorder.take();
+        let Some(recorder) = recorder else {
+            return Ok(());
+        };
+
+        self.emit(Phase::Transcribing);
+        let result = self.transcribe_and_agent(recorder).await;
+        self.emit(if result.is_ok() {
+            Phase::Idle
+        } else {
+            Phase::Error
+        });
+        result
+    }
+
+    async fn transcribe_and_agent(&self, recorder: aloud_audio::Recorder) -> Result<()> {
+        let wav = temp_wav_path();
+        recorder.stop_to_wav(&wav)?;
+
+        let settings = self.settings();
+        let command = self.transcriber(&settings).await?.transcribe(&wav).await?;
+        let _ = std::fs::remove_file(&wav);
+
+        if command.trim().is_empty() {
+            return Ok(());
+        }
+        // Tolerate a trigger phrase said out of habit while holding the key.
+        let command =
+            aloud_agent::command_from_trigger(&command).unwrap_or(command);
+        crate::agent::run(&self.app, command, &settings).await
+    }
+
     /// Cancels an in-flight recording, discarding the audio.
     pub fn cancel(&self) {
         if let Ok(mut session) = self.session.lock() {

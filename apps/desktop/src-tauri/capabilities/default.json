@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the main window, recording overlay and ask panel",
+  "description": "Permissions for the main window, recording overlay, ask panel and agent panel",
   "windows": [
     "main",
     "overlay",
-    "ask"
+    "ask",
+    "agent"
   ],
   "permissions": [
     "core:default",

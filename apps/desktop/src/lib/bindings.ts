@@ -22,6 +22,10 @@ export const commands = {
 	pasteAgain: () => typedError<null, string>(__TAURI_INVOKE("paste_again")),
 	/**  Lets the panel dismiss itself on Escape or a click outside. */
 	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
+	/**  Resolves the pending confirmation. Called by the panel's Yes/No buttons. */
+	confirmAgent: (approved: boolean) => __TAURI_INVOKE<void>("confirm_agent", { approved }),
+	/**  Lets the panel dismiss itself on Escape or after showing a result. */
+	closeAgent: () => __TAURI_INVOKE<void>("close_agent"),
 };
 
 /* Types */
@@ -48,6 +52,7 @@ export type Config = {
 	ask: Binding | null,
 	command: Binding | null,
 	meeting_notes: Binding | null,
+	agent: Binding | null,
 };
 
 export type Engine = 

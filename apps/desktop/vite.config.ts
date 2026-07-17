@@ -17,6 +17,7 @@ export default defineConfig(async () => ({
         main: resolve(__dirname, "index.html"),
         overlay: resolve(__dirname, "overlay.html"),
         ask: resolve(__dirname, "ask.html"),
+        agent: resolve(__dirname, "agent.html"),
       },
     },
   },
