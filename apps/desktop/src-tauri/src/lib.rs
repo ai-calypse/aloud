@@ -151,6 +151,21 @@ fn handle_hotkey(pipeline: &Arc<pipeline::Pipeline>, event: aloud_hotkey::model:
                 }
             });
         }
+        Event::Activated(Role::Command) => {
+            // Read the selection now, before recording moves focus.
+            pipeline.capture_selection();
+            if let Err(e) = pipeline.start() {
+                tracing::error!(%e, "could not start recording");
+            }
+        }
+        Event::Deactivated(Role::Command) => {
+            let pipeline = pipeline.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = pipeline.stop_and_command().await {
+                    tracing::error!(%e, "command mode failed");
+                }
+            });
+        }
         Event::Activated(Role::CopyAgain) => {
             if let Err(e) = pipeline.paste_again() {
                 tracing::error!(%e, "could not paste again");

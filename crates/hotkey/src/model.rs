@@ -134,16 +134,19 @@ pub enum Role {
     CopyAgain,
     /// Record while held, then answer instead of pasting.
     Ask,
+    /// Record while held, then transform the current selection with it.
+    Command,
     /// Start/stop a meeting-notes session.
     MeetingNotes,
 }
 
 impl Role {
-    pub const ALL: [Role; 5] = [
+    pub const ALL: [Role; 6] = [
         Role::Hold,
         Role::Toggle,
         Role::CopyAgain,
         Role::Ask,
+        Role::Command,
         Role::MeetingNotes,
     ];
 
@@ -159,6 +162,7 @@ pub struct Config {
     pub toggle: Option<Binding>,
     pub copy_again: Option<Binding>,
     pub ask: Option<Binding>,
+    pub command: Option<Binding>,
     pub meeting_notes: Option<Binding>,
 }
 
@@ -169,6 +173,7 @@ impl Config {
             Role::Toggle => &self.toggle,
             Role::CopyAgain => &self.copy_again,
             Role::Ask => &self.ask,
+            Role::Command => &self.command,
             Role::MeetingNotes => &self.meeting_notes,
         };
         slot.as_ref().unwrap_or(&Binding::Disabled)

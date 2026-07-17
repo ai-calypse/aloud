@@ -47,6 +47,7 @@ dependencies = [
  "aloud-llm",
  "aloud-notes",
  "aloud-paste",
+ "aloud-selection",
  "aloud-store",
  "aloud-transcribe",
  "anyhow",
@@ -132,6 +133,16 @@ dependencies = [
  "enigo",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "aloud-selection"
+version = "0.1.0"
+dependencies = [
+ "aloud-paste",
+ "anyhow",
+ "core-foundation",
+ "tracing",
 ]
 
 [[package]]

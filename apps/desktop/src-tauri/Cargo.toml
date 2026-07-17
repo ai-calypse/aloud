@@ -20,6 +20,7 @@ aloud-hotkey = { path = "../../../crates/hotkey" }
 aloud-llm = { path = "../../../crates/llm" }
 aloud-notes = { path = "../../../crates/notes" }
 aloud-paste = { path = "../../../crates/paste" }
+aloud-selection = { path = "../../../crates/selection" }
 aloud-store = { path = "../../../crates/store" }
 aloud-transcribe = { path = "../../../crates/transcribe" }
 anyhow.workspace = true

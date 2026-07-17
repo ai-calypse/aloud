@@ -46,6 +46,7 @@ export type Config = {
 	toggle: Binding | null,
 	copy_again: Binding | null,
 	ask: Binding | null,
+	command: Binding | null,
 	meeting_notes: Binding | null,
 };
 

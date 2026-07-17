@@ -47,6 +47,8 @@ pub struct Session {
     recorder: Option<aloud_audio::Recorder>,
     /// The last transcript, for "paste again".
     last_transcript: Option<String>,
+    /// Text selected when a command-mode session began.
+    selection: Option<String>,
     started_at: Option<std::time::Instant>,
 }
 
@@ -301,6 +303,99 @@ impl Pipeline {
                 chrono::Local::now(),
             );
         }
+    }
+
+    /// Reads the current selection, so command mode can transform it.
+    ///
+    /// Called on the *leading* edge of the command hotkey, before recording:
+    /// starting dictation moves focus and loses the selection.
+    pub fn capture_selection(&self) {
+        match aloud_selection::selected_text() {
+            Ok(text) if !text.trim().is_empty() => {
+                if let Ok(mut session) = self.session.lock() {
+                    session.selection = Some(text);
+                }
+            }
+            Ok(_) => tracing::info!("command mode: nothing selected"),
+            Err(e) => tracing::warn!(%e, "could not read selection"),
+        }
+    }
+
+    /// Stops capturing, transforms the captured selection per the spoken
+    /// command, and pastes the result over it.
+    pub async fn stop_and_command(&self) -> Result<()> {
+        let (recorder, selection) = {
+            let mut session = self.session.lock().unwrap();
+            (session.recorder.take(), session.selection.take())
+        };
+        let Some(recorder) = recorder else {
+            return Ok(());
+        };
+        let Some(selection) = selection else {
+            // No selection was captured; treat the utterance as plain dictation
+            // rather than doing nothing.
+            recorder.stop_to_wav(&temp_wav_path()).ok();
+            self.emit(Phase::Idle);
+            return Ok(());
+        };
+
+        self.emit(Phase::Transcribing);
+        let result = self.transcribe_and_command(recorder, &selection).await;
+        self.emit(if result.is_ok() {
+            Phase::Done
+        } else {
+            Phase::Error
+        });
+        result
+    }
+
+    async fn transcribe_and_command(
+        &self,
+        recorder: aloud_audio::Recorder,
+        selection: &str,
+    ) -> Result<()> {
+        let wav = temp_wav_path();
+        recorder.stop_to_wav(&wav)?;
+
+        let settings = self.settings();
+        let command = self.transcriber(&settings).await?.transcribe(&wav).await?;
+        let _ = std::fs::remove_file(&wav);
+
+        if command.trim().is_empty() {
+            return Ok(()); // no command spoken; leave the selection alone
+        }
+
+        let transformed = self.transform(selection, &command, &settings).await?;
+        // Paste over the still-selected text, replacing it.
+        aloud_paste::paste_text(&transformed, false)?;
+        Ok(())
+    }
+
+    /// Runs the command-mode transform. Ported from `commandModeSystemPrompt`.
+    async fn transform(
+        &self,
+        selection: &str,
+        command: &str,
+        settings: &Settings,
+    ) -> Result<String> {
+        if settings.groq_api_key.trim().is_empty() {
+            bail!("Command mode needs an API key — add one in Settings");
+        }
+        let client = aloud_llm::LlmClient::new(&settings.groq_api_key, Some(&settings.base_url))?;
+        let messages = [
+            aloud_llm::Message::system(aloud_llm::prompts::COMMAND),
+            aloud_llm::Message::user(format!(
+                "SELECTED_TEXT:\n{selection}\n\nVOICE_COMMAND:\n{command}"
+            )),
+        ];
+        client
+            .complete_with_fallback(
+                &settings.post_processing_model,
+                Some(settings.fallback_model.as_str()).filter(|f| !f.trim().is_empty()),
+                &messages,
+                Some(0.2),
+            )
+            .await
     }
 
     /// Stops capturing and answers the question, rather than pasting it.
