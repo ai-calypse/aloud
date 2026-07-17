@@ -88,6 +88,14 @@ export type Key = "leftCommand" | "rightCommand" | "leftShift" | "rightShift" | 
 /**  macOS only; no Windows equivalent. */
 "fn" | "escape" | "space" | ({ char: string }) & { f?: never } | ({ f: number }) & { char?: never };
 
+/**  One shorthand → expansion pair. */
+export type Macro = {
+	/**  The spoken phrase that triggers expansion, e.g. "my address". */
+	trigger: string,
+	/**  The text it expands to. */
+	expansion: string,
+};
+
 export type Modifier = "command" | "control" | "option" | "shift" | "function";
 
 export type Note = {
@@ -131,6 +139,8 @@ export type Settings = {
 	customSystemPrompt?: string,
 	/**  Proper nouns and jargon fed to the model as a spelling reference. */
 	vocabulary?: string[],
+	/**  Spoken shorthand that expands to canned text after cleanup. */
+	macros?: Macro[],
 	hotkeys?: Config,
 	selectedMicrophone?: string | null,
 	playSounds?: boolean,

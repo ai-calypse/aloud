@@ -5,10 +5,12 @@
 //! `history.sqlite`, both in the app data directory.
 
 pub mod history;
+pub mod macros;
 pub mod migrate;
 pub mod settings;
 pub mod stats;
 
 pub use history::History;
+pub use macros::Macro;
 pub use settings::Settings;
 pub use stats::Stats;

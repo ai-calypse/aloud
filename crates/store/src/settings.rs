@@ -34,6 +34,8 @@ pub struct Settings {
     pub custom_system_prompt: String,
     /// Proper nouns and jargon fed to the model as a spelling reference.
     pub vocabulary: Vec<String>,
+    /// Spoken shorthand that expands to canned text after cleanup.
+    pub macros: Vec<crate::macros::Macro>,
 
     // Behaviour
     pub hotkeys: aloud_hotkey::model::Config,
@@ -59,6 +61,7 @@ impl Default for Settings {
             fallback_model: "llama-3.1-8b-instant".into(),
             custom_system_prompt: String::new(),
             vocabulary: Vec::new(),
+            macros: Vec::new(),
             hotkeys: aloud_hotkey::model::Config::defaults(),
             selected_microphone: None,
             play_sounds: true,
