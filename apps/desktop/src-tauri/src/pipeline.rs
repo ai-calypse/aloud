@@ -60,7 +60,7 @@ pub struct Pipeline {
     stats: Mutex<Stats>,
     /// Loaded lazily: the model costs ~200ms and memory, so only when the
     /// local engine is actually used.
-    local: Mutex<Option<Arc<LocalTranscriber>>>,
+    local: Mutex<Option<Arc<dyn Transcriber>>>,
 }
 
 impl Pipeline {
@@ -236,36 +236,18 @@ impl Pipeline {
 
     /// The configured engine. The local model is cached after first load.
     async fn transcriber(&self, settings: &Settings) -> Result<Arc<dyn Transcriber>> {
-        match settings.engine {
-            Engine::Cloud => {
-                if settings.groq_api_key.trim().is_empty() {
-                    bail!("cloud transcription needs an API key");
-                }
-                Ok(Arc::new(CloudTranscriber::new(
-                    &settings.groq_api_key,
-                    Some(&settings.base_url),
-                    Some(&settings.transcription_model),
-                    Some(&settings.language),
-                )?))
-            }
-            Engine::Local => {
-                if let Some(local) = self.local.lock().unwrap().clone() {
-                    return Ok(local);
-                }
-                let dir = aloud_transcribe::local::model_dir()?;
-                let model = aloud_transcribe::download::ensure_model(
-                    &dir,
-                    aloud_transcribe::local::DEFAULT_MODEL,
-                    |p| tracing::debug!(progress = p, "downloading model"),
-                )
-                .await?;
-
-                let language = Some(settings.language.as_str()).filter(|l| !l.is_empty());
-                let local = Arc::new(LocalTranscriber::new(&model, language)?);
-                *self.local.lock().unwrap() = Some(local.clone());
-                Ok(local)
+        // The local model is cached on self, since loading it costs ~200ms and
+        // memory. The cloud client is cheap, so it is never cached.
+        if settings.engine == Engine::Local {
+            if let Some(local) = self.local.lock().unwrap().clone() {
+                return Ok(local);
             }
         }
+        let transcriber = build_transcriber(settings).await?;
+        if settings.engine == Engine::Local {
+            *self.local.lock().unwrap() = Some(transcriber.clone());
+        }
+        Ok(transcriber)
     }
 
     /// Records the dictation for history and stats. Never fails the paste:
@@ -463,6 +445,35 @@ impl Pipeline {
 
     pub fn history(&self, limit: usize) -> Result<Vec<aloud_store::history::Entry>> {
         self.history.lock().unwrap().recent(limit)
+    }
+}
+
+/// Builds the configured transcription engine. Shared by the pipeline and
+/// meeting notes; the pipeline caches the local model, this does not.
+pub async fn build_transcriber(settings: &Settings) -> Result<Arc<dyn Transcriber>> {
+    match settings.engine {
+        Engine::Cloud => {
+            if settings.groq_api_key.trim().is_empty() {
+                bail!("cloud transcription needs an API key");
+            }
+            Ok(Arc::new(CloudTranscriber::new(
+                &settings.groq_api_key,
+                Some(&settings.base_url),
+                Some(&settings.transcription_model),
+                Some(&settings.language),
+            )?))
+        }
+        Engine::Local => {
+            let dir = aloud_transcribe::local::model_dir()?;
+            let model = aloud_transcribe::download::ensure_model(
+                &dir,
+                aloud_transcribe::local::DEFAULT_MODEL,
+                |p| tracing::debug!(progress = p, "downloading model"),
+            )
+            .await?;
+            let language = Some(settings.language.as_str()).filter(|l| !l.is_empty());
+            Ok(Arc::new(LocalTranscriber::new(&model, language)?))
+        }
     }
 }
 

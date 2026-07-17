@@ -11,6 +11,9 @@ pub const CLEANUP: &str = include_str!("prompts/cleanup.md");
 /// Transforms selected text per a spoken editing command.
 pub const COMMAND: &str = include_str!("prompts/command.md");
 
+/// Turns a meeting transcript into structured markdown notes.
+pub const MEETING: &str = include_str!("prompts/meeting.md");
+
 /// Removes `<think>...</think>` blocks that reasoning models emit before their
 /// answer. Ported from `ModelConfiguration.stripThinkTags`.
 pub fn strip_think_tags(text: &str) -> String {

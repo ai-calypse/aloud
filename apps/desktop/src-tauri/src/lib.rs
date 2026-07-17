@@ -1,5 +1,6 @@
 mod ask;
 mod commands;
+mod meeting;
 mod overlay;
 mod pipeline;
 mod tray;
@@ -13,6 +14,8 @@ use tauri_specta::{collect_commands, Builder};
 pub struct AppState {
     pub settings: Arc<Mutex<Settings>>,
     pub pipeline: Arc<pipeline::Pipeline>,
+    /// The running meeting session, if any. A one-shot hotkey toggles it.
+    pub meeting: Arc<Mutex<Option<meeting::Meeting>>>,
 }
 
 pub fn run() {
@@ -74,13 +77,15 @@ pub fn run() {
                 app.handle().clone(),
                 settings.clone(),
             )?);
+            let meeting: Arc<Mutex<Option<meeting::Meeting>>> = Arc::new(Mutex::new(None));
             app.manage(AppState {
                 settings: settings.clone(),
                 pipeline: pipeline.clone(),
+                meeting: meeting.clone(),
             });
 
             tray::init(app)?;
-            spawn_hotkey_listener(settings, pipeline);
+            spawn_hotkey_listener(app.handle().clone(), settings, pipeline, meeting);
 
             // Menu-bar app: no dock icon, no taskbar entry.
             #[cfg(target_os = "macos")]
@@ -94,7 +99,12 @@ pub fn run() {
 
 /// Runs the key hook on its own thread: both backends block forever (a run
 /// loop on macOS, a message pump on Windows).
-fn spawn_hotkey_listener(settings: Arc<Mutex<Settings>>, pipeline: Arc<pipeline::Pipeline>) {
+fn spawn_hotkey_listener(
+    app: tauri::AppHandle,
+    settings: Arc<Mutex<Settings>>,
+    pipeline: Arc<pipeline::Pipeline>,
+    meeting: Arc<Mutex<Option<meeting::Meeting>>>,
+) {
     if !aloud_hotkey::is_permitted() {
         tracing::warn!("accessibility permission not granted; hotkeys are disabled");
         return;
@@ -109,9 +119,10 @@ fn spawn_hotkey_listener(settings: Arc<Mutex<Settings>>, pipeline: Arc<pipeline:
             .unwrap_or_default(),
     ));
 
+    let settings = settings.clone();
     std::thread::spawn(move || {
         let result = aloud_hotkey::listen(config, move |event| {
-            handle_hotkey(&pipeline, event);
+            handle_hotkey(&app, &pipeline, &settings, &meeting, event);
         });
         if let Err(e) = result {
             tracing::error!(%e, "hotkey listener stopped");
@@ -119,7 +130,13 @@ fn spawn_hotkey_listener(settings: Arc<Mutex<Settings>>, pipeline: Arc<pipeline:
     });
 }
 
-fn handle_hotkey(pipeline: &Arc<pipeline::Pipeline>, event: aloud_hotkey::model::Event) {
+fn handle_hotkey(
+    app: &tauri::AppHandle,
+    pipeline: &Arc<pipeline::Pipeline>,
+    settings: &Arc<Mutex<Settings>>,
+    meeting: &Arc<Mutex<Option<meeting::Meeting>>>,
+    event: aloud_hotkey::model::Event,
+) {
     use aloud_hotkey::model::{Event, Role};
 
     match event {
@@ -171,7 +188,37 @@ fn handle_hotkey(pipeline: &Arc<pipeline::Pipeline>, event: aloud_hotkey::model:
                 tracing::error!(%e, "could not paste again");
             }
         }
+        // Meeting notes is a one-shot toggle: start a session, or stop and
+        // save the one in flight.
+        Event::Activated(Role::MeetingNotes) => toggle_meeting(app, settings, meeting),
         Event::Cancelled => pipeline.cancel(),
         other => tracing::debug!(?other, "unhandled hotkey event"),
+    }
+}
+
+/// Starts a meeting-notes session, or stops and saves the running one.
+fn toggle_meeting(
+    app: &tauri::AppHandle,
+    settings: &Arc<Mutex<Settings>>,
+    meeting: &Arc<Mutex<Option<meeting::Meeting>>>,
+) {
+    let running = meeting.lock().unwrap().take();
+    match running {
+        Some(session) => {
+            // Stop and save off-thread: summarizing is a network round-trip.
+            tauri::async_runtime::spawn(async move {
+                match session.stop().await {
+                    Ok(path) => tracing::info!(note = %path.display(), "meeting note saved"),
+                    Err(e) => tracing::error!(%e, "saving meeting note failed"),
+                }
+            });
+        }
+        None => {
+            let settings_snapshot = settings.lock().map(|s| s.clone()).unwrap_or_default();
+            match meeting::Meeting::start(app.clone(), settings_snapshot) {
+                Ok(session) => *meeting.lock().unwrap() = Some(session),
+                Err(e) => tracing::error!(%e, "starting meeting failed"),
+            }
+        }
     }
 }
