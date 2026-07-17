@@ -156,8 +156,25 @@ fn clean_gh_error(stderr: &str) -> String {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
-    use std::os::unix::process::ExitStatusExt;
     use std::process::{ExitStatus, Output};
+
+    /// Fabricates an `ExitStatus` with the given code, cross-platform.
+    ///
+    /// `ExitStatusExt::from_raw` differs by OS: Unix wants the raw wait status
+    /// (code in the high byte), Windows wants the exit code directly. The tests
+    /// only care about success vs. failure, so map `code` to each convention.
+    fn exit_status(code: i32) -> ExitStatus {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            ExitStatus::from_raw(code << 8)
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::ExitStatusExt;
+            ExitStatus::from_raw(code as u32)
+        }
+    }
 
     fn action_with(entities: &[(&str, &str)]) -> ParsedAction {
         ParsedAction {
@@ -174,7 +191,7 @@ mod tests {
 
     fn output(code: i32, stdout: &str, stderr: &str) -> Output {
         Output {
-            status: ExitStatus::from_raw(code << 8),
+            status: exit_status(code),
             stdout: stdout.into(),
             stderr: stderr.into(),
         }
