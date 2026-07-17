@@ -1,0 +1,19 @@
+[package]
+name = "aloud-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Agent mode: turn a spoken command into an executed action"
+
+[dependencies]
+aloud-llm = { path = "../llm" }
+anyhow.workspace = true
+async-trait = "0.1"
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+tracing.workspace = true
+tokio = { version = "1", features = ["time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "test-util"] }

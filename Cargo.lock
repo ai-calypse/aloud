@@ -68,6 +68,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aloud-agent"
+version = "0.1.0"
+dependencies = [
+ "aloud-llm",
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "specta",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "aloud-audio"
 version = "0.1.0"
 dependencies = [
