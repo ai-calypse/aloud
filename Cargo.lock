@@ -85,6 +85,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "aloud-llm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "specta",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "aloud-notes"
 version = "0.1.0"
 dependencies = [

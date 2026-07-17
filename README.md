@@ -1,0 +1,34 @@
+# Aloud
+
+Voice dictation for macOS and Windows. Hold a key, speak, and clean text lands
+in whatever app has focus.
+
+- **Local by default.** Transcription runs on-device via whisper.cpp. Audio
+  never leaves your machine unless you choose a cloud model.
+- **Bring your own AI.** Any OpenAI-compatible endpoint works — Groq, OpenAI,
+  or something self-hosted.
+- **Your notes are files.** Plain markdown on disk, greppable and syncable.
+
+Built with Tauri v2: Rust for the work, React for the interface.
+
+## Status
+
+Porting a macOS-only Swift app to run on both platforms. See
+[`PROGRESS.md`](PROGRESS.md) for what has landed and what has not.
+
+## Building
+
+Needs [Rust](https://rustup.rs), [pnpm](https://pnpm.io), and `cmake`
+(whisper.cpp builds from source).
+
+```sh
+pnpm install
+pnpm dev      # run
+pnpm build    # bundle
+```
+
+See [`CLAUDE.md`](CLAUDE.md) for architecture and conventions.
+
+## License
+
+MIT
