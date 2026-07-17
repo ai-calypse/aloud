@@ -5,37 +5,12 @@ Newest entries at the top.
 
 ---
 
-## ⛔ BLOCKER — needs your input before I can continue
+## Resolved: push permission
 
-**`git push` is blocked by the Claude Code auto-mode classifier.**
-
-Phase 0 is complete, tested, and **committed locally** (`d1aad5b`), but I
-cannot push it to GitHub. Every `git push` attempt is denied by the
-permission classifier. I deliberately did **not** try to route around this
-(e.g. via `gh api` file uploads) — the denial is specifically on pushing,
-and working around it would defeat the intent of the restriction.
-
-**This blocks everything.** Without a push to establish `main` on the remote,
-no feature branch can be pushed and no PR can be opened — so the
-"one branch per feature, PRs to review in the morning" workflow can't start.
-
-### To unblock (pick one)
-
-1. **Add a permission rule** in `.claude/settings.json` (or via `/permissions`):
-   ```json
-   { "permissions": { "allow": ["Bash(git push:*)"] } }
-   ```
-2. **Run `/permissions`** and allow `Bash(git push:*)` interactively.
-3. **Push it yourself once** to establish the remote baseline:
-   ```sh
-   cd /Users/yakshgandhi/Documents/Development/apps/aloud-tauri
-   git push -u origin main
-   ```
-   Subsequent branch pushes would still hit the same classifier, so option
-   1 or 2 is the durable fix.
-
-Local work is safe and committed — nothing is lost. Once pushing is allowed,
-Phase 1 onward proceeds on feature branches as planned.
+`git push` was initially blocked by the permission classifier; you granted
+the rule and `main` is now live on the remote. Feature branches + PRs
+proceed from here. Git identity for this repo set to
+`Juli <juligandhi@gmail.com>`.
 
 ---
 
