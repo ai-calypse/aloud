@@ -1,0 +1,19 @@
+[package]
+name = "aloud-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cross-platform microphone capture with PCM16 tap"
+
+[dev-dependencies]
+tempfile = "3"
+tracing-subscriber = "0.3"
+
+[dependencies]
+anyhow.workspace = true
+cpal = "0.18"
+hound = "3.5"
+rubato = "0.16"
+serde.workspace = true
+specta.workspace = true
+tracing.workspace = true
