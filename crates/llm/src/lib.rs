@@ -4,6 +4,7 @@
 //! Used for transcript cleanup, command mode, Ask, and meeting summaries —
 //! the Swift app hit the same Groq endpoint for all four.
 
+pub mod ask;
 pub mod cooldown;
 pub mod prompts;
 

@@ -34,6 +34,8 @@ pub enum Phase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Outcome {
     Pasted,
+    /// Answered in the Ask panel rather than pasted.
+    Asked,
     /// Silence or filler only — a normal result, not a failure.
     NoSpeech,
 }
@@ -133,7 +135,8 @@ impl Pipeline {
             // Silence is a normal outcome, but reporting "Pasted" when nothing
             // was pasted would be a lie: go back to Idle instead.
             Ok(Outcome::Pasted) => self.emit(Phase::Done),
-            Ok(Outcome::NoSpeech) => self.emit(Phase::Idle),
+            // The Ask panel is the feedback; the pill would just cover it.
+            Ok(Outcome::Asked) | Ok(Outcome::NoSpeech) => self.emit(Phase::Idle),
             Err(e) => {
                 tracing::error!(%e, "dictation failed");
                 self.emit(Phase::Error);
@@ -160,6 +163,13 @@ impl Pipeline {
         if raw.trim().is_empty() {
             tracing::info!("no speech detected");
             return Ok(Outcome::NoSpeech);
+        }
+
+        // "Hey flow, what does this mean?" is a question, not dictation.
+        if let Some(question) = aloud_llm::ask::question_from_trigger(&raw) {
+            tracing::info!(%question, "spoken ask trigger");
+            crate::ask::answer(&self.app, question, &settings).await?;
+            return Ok(Outcome::Asked);
         }
 
         let final_text = self.post_process(&raw, &settings).await;
@@ -291,6 +301,42 @@ impl Pipeline {
                 chrono::Local::now(),
             );
         }
+    }
+
+    /// Stops capturing and answers the question, rather than pasting it.
+    ///
+    /// The Ask hotkey means the whole utterance is a question, so no spoken
+    /// trigger phrase is needed.
+    pub async fn stop_and_ask(&self) -> Result<()> {
+        let recorder = self.session.lock().unwrap().recorder.take();
+        let Some(recorder) = recorder else {
+            return Ok(());
+        };
+
+        self.emit(Phase::Transcribing);
+        let result = self.transcribe_and_ask(recorder).await;
+        self.emit(if result.is_ok() {
+            Phase::Idle
+        } else {
+            Phase::Error
+        });
+        result
+    }
+
+    async fn transcribe_and_ask(&self, recorder: aloud_audio::Recorder) -> Result<()> {
+        let wav = temp_wav_path();
+        recorder.stop_to_wav(&wav)?;
+
+        let settings = self.settings();
+        let question = self.transcriber(&settings).await?.transcribe(&wav).await?;
+        let _ = std::fs::remove_file(&wav);
+
+        if question.trim().is_empty() {
+            return Ok(());
+        }
+        // Tolerate a trigger phrase said out of habit while holding the key.
+        let question = aloud_llm::ask::question_from_trigger(&question).unwrap_or(question);
+        crate::ask::answer(&self.app, question, &settings).await
     }
 
     /// Cancels an in-flight recording, discarding the audio.

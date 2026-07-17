@@ -24,6 +24,7 @@ aloud-store = { path = "../../../crates/store" }
 aloud-transcribe = { path = "../../../crates/transcribe" }
 anyhow.workspace = true
 chrono = "0.4"
+futures-util = "0.3"
 serde.workspace = true
 serde_json.workspace = true
 specta.workspace = true

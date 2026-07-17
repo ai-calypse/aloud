@@ -66,7 +66,7 @@ impl LocalTranscriber {
             }
         }
 
-        let text = text.trim().to_string();
+        let text = strip_non_speech_markers(&text);
         if hallucination::is_hallucination(&text, no_speech_prob) {
             tracing::info!(%text, "dropped hallucinated transcript");
             return Ok(String::new());
@@ -81,6 +81,35 @@ impl Transcriber for LocalTranscriber {
         let samples = read_wav_16k_mono(wav_path)?;
         self.transcribe_samples(&samples)
     }
+}
+
+/// Strips whisper.cpp's square-bracketed non-speech annotations:
+/// `[BLANK_AUDIO]`, `[MUSIC]`, `[SOUND]` and friends.
+///
+/// These are not transcription — pasting "[BLANK_AUDIO]" into a document is
+/// never right, and an all-marker result must come back as silence. The cloud
+/// API does not emit them, so this is local-only.
+///
+/// Only square brackets: whisper uses those for annotations, while parentheses
+/// appear in ordinary dictated speech.
+fn strip_non_speech_markers(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(start) = rest.find('[') {
+        match rest[start..].find(']') {
+            Some(end) => {
+                out.push_str(&rest[..start]);
+                rest = &rest[start + end + 1..];
+            }
+            // An unclosed bracket is not an annotation; keep the text.
+            None => break,
+        }
+    }
+    out.push_str(rest);
+
+    // Markers leave double spaces behind when they sat mid-sentence.
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Reads a PCM16 WAV as f32 samples. whisper.cpp requires 16 kHz mono, which
@@ -154,6 +183,38 @@ mod tests {
         let samples = read_wav_16k_mono(&path).unwrap();
         assert_eq!(samples.len(), 2);
         assert!((samples[0] - 1.0).abs() < 0.001);
+    }
+
+    /// whisper.cpp reports silence as a literal "[BLANK_AUDIO]" string, which
+    /// is not empty and would otherwise be pasted into the user's document.
+    #[test]
+    fn strips_blank_audio_marker() {
+        assert_eq!(strip_non_speech_markers("[BLANK_AUDIO]"), "");
+        assert_eq!(strip_non_speech_markers(" [BLANK_AUDIO] "), "");
+        assert_eq!(strip_non_speech_markers("[MUSIC][SOUND]"), "");
+    }
+
+    #[test]
+    fn keeps_speech_around_markers() {
+        assert_eq!(
+            strip_non_speech_markers("Hello [MUSIC] world"),
+            "Hello world",
+            "a marker mid-sentence must not leave a double space"
+        );
+    }
+
+    /// Parentheses are ordinary speech; only square brackets are annotations.
+    #[test]
+    fn leaves_parentheses_and_unclosed_brackets_alone() {
+        assert_eq!(
+            strip_non_speech_markers("call foo(bar) then baz"),
+            "call foo(bar) then baz"
+        );
+        assert_eq!(
+            strip_non_speech_markers("array[0] is unclosed ["),
+            "array is unclosed [",
+            "a closed pair is stripped; a dangling bracket is kept"
+        );
     }
 
     #[test]

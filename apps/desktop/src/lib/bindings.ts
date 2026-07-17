@@ -20,6 +20,8 @@ export const commands = {
 	 */
 	hotkeysPermitted: () => __TAURI_INVOKE<boolean>("hotkeys_permitted"),
 	pasteAgain: () => typedError<null, string>(__TAURI_INVOKE("paste_again")),
+	/**  Lets the panel dismiss itself on Escape or a click outside. */
+	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
 };
 
 /* Types */

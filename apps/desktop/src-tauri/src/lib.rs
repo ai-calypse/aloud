@@ -1,3 +1,4 @@
+mod ask;
 mod commands;
 mod overlay;
 mod pipeline;
@@ -33,6 +34,7 @@ pub fn run() {
         commands::input_devices,
         commands::hotkeys_permitted,
         commands::paste_again,
+        ask::close_ask,
     ]);
 
     // Regenerate the TypeScript bindings on every debug run so the frontend
@@ -133,6 +135,19 @@ fn handle_hotkey(pipeline: &Arc<pipeline::Pipeline>, event: aloud_hotkey::model:
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = pipeline.stop_and_paste().await {
                     tracing::error!(%e, "dictation failed");
+                }
+            });
+        }
+        Event::Activated(Role::Ask) => {
+            if let Err(e) = pipeline.start() {
+                tracing::error!(%e, "could not start recording");
+            }
+        }
+        Event::Deactivated(Role::Ask) => {
+            let pipeline = pipeline.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = pipeline.stop_and_ask().await {
+                    tracing::error!(%e, "ask failed");
                 }
             });
         }

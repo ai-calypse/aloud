@@ -51,6 +51,7 @@ dependencies = [
  "aloud-transcribe",
  "anyhow",
  "chrono",
+ "futures-util",
  "serde",
  "serde_json",
  "specta",
