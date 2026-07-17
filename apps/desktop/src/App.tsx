@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type Settings, type Stats } from "./lib/bindings";
 import { NotesView } from "./features/notes/NotesView";
+import { SettingsView } from "./features/settings/SettingsView";
 import "./App.css";
 
 /** Mirrors the Rust `pipeline::Phase`. */
@@ -15,7 +16,13 @@ const PHASE_LABEL: Record<Phase, string> = {
   error: "Something went wrong",
 };
 
-type Tab = "notes" | "status";
+type Tab = "notes" | "settings" | "status";
+
+const TAB_LABEL: Record<Tab, string> = {
+  notes: "Notes",
+  settings: "Settings",
+  status: "Status",
+};
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("notes");
@@ -44,13 +51,13 @@ export default function App() {
   return (
     <main className="app">
       <nav className="tabs">
-        {(["notes", "status"] as const).map((t) => (
+        {(["notes", "settings", "status"] as const).map((t) => (
           <button
             key={t}
             className={`tab ${tab === t ? "tab--active" : ""}`}
             onClick={() => setTab(t)}
           >
-            {t === "notes" ? "Notes" : "Status"}
+            {TAB_LABEL[t]}
           </button>
         ))}
       </nav>
@@ -62,9 +69,9 @@ export default function App() {
         </p>
       )}
 
-      {tab === "notes" ? (
-        <NotesView />
-      ) : (
+      {tab === "notes" && <NotesView />}
+      {tab === "settings" && <SettingsView />}
+      {tab === "status" && (
         <section>
           <p className={`phase phase--${phase}`}>{PHASE_LABEL[phase]}</p>
 
@@ -78,7 +85,7 @@ export default function App() {
           </dl>
 
           <p className="hint">
-            Engine: {settings.engine === "local" ? "on-device whisper" : "cloud"}
+            Engine: {settings.engine === "cloud" ? "cloud" : "on-device whisper"}
           </p>
         </section>
       )}
