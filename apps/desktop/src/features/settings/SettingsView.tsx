@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { commands, type AudioDevice, type Settings } from "../../lib/bindings";
 import { or } from "../../lib/result";
+import { HotkeyEditor } from "./HotkeyEditor";
+import { MacroEditor } from "./MacroEditor";
+import { AppRuleEditor } from "./AppRuleEditor";
 import "./settings.css";
 
 /**
@@ -26,6 +29,20 @@ export function SettingsView() {
   // scattering `??` through the markup.
   const engine = settings.engine ?? "local";
   const vocabulary = settings.vocabulary ?? [];
+  // A partial settings file may omit these; fall back to empty so the editors
+  // render. hotkeys is never null in practice (Config::defaults), but TS types
+  // it optional because the struct is #[serde(default)].
+  const hotkeys = settings.hotkeys ?? {
+    hold: null,
+    toggle: null,
+    copy_again: null,
+    ask: null,
+    command: null,
+    meeting_notes: null,
+    agent: null,
+  };
+  const macros = settings.macros ?? [];
+  const appRules = settings.appRules ?? [];
 
   /** Applies one field and persists immediately — no Save button to forget. */
   async function update(patch: Partial<Settings>) {
@@ -187,6 +204,27 @@ export function SettingsView() {
             }
           />
         </label>
+      </section>
+
+      <section>
+        <h3>Hotkeys</h3>
+        <HotkeyEditor
+          config={hotkeys}
+          onChange={(hotkeys) => update({ hotkeys })}
+        />
+      </section>
+
+      <section>
+        <h3>Voice macros</h3>
+        <MacroEditor macros={macros} onChange={(macros) => update({ macros })} />
+      </section>
+
+      <section>
+        <h3>App rules</h3>
+        <AppRuleEditor
+          rules={appRules}
+          onChange={(appRules) => update({ appRules })}
+        />
       </section>
 
       <p className={`settings__saved ${saved ? "settings__saved--on" : ""}`}>

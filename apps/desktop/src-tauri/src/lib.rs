@@ -17,6 +17,9 @@ pub struct AppState {
     pub pipeline: Arc<pipeline::Pipeline>,
     /// The running meeting session, if any. A one-shot hotkey toggles it.
     pub meeting: Arc<Mutex<Option<meeting::Meeting>>>,
+    /// The live hotkey config the listener reads. Shared with the listener
+    /// thread so a rebind from Settings applies without a restart.
+    pub hotkey_config: Arc<Mutex<aloud_hotkey::model::Config>>,
 }
 
 pub fn run() {
@@ -86,15 +89,27 @@ pub fn run() {
                 settings.clone(),
             )?);
             let meeting: Arc<Mutex<Option<meeting::Meeting>>> = Arc::new(Mutex::new(None));
+            // The live hotkey config, shared between AppState (written on a
+            // rebind) and the listener thread (which reads it every event).
+            let hotkey_config = Arc::new(Mutex::new(
+                settings.lock().map(|s| s.hotkeys.clone()).unwrap_or_default(),
+            ));
             app.manage(AppState {
                 settings: settings.clone(),
                 pipeline: pipeline.clone(),
                 meeting: meeting.clone(),
+                hotkey_config: hotkey_config.clone(),
             });
             app.manage(agent::PendingConfirmation::default());
 
             tray::init(app)?;
-            spawn_hotkey_listener(app.handle().clone(), settings, pipeline, meeting);
+            spawn_hotkey_listener(
+                app.handle().clone(),
+                settings,
+                pipeline,
+                meeting,
+                hotkey_config,
+            );
 
             // Menu-bar app: no dock icon, no taskbar entry.
             #[cfg(target_os = "macos")]
@@ -160,21 +175,15 @@ fn spawn_hotkey_listener(
     settings: Arc<Mutex<Settings>>,
     pipeline: Arc<pipeline::Pipeline>,
     meeting: Arc<Mutex<Option<meeting::Meeting>>>,
+    config: Arc<Mutex<aloud_hotkey::model::Config>>,
 ) {
     if !aloud_hotkey::is_permitted() {
         tracing::warn!("accessibility permission not granted; hotkeys are disabled");
         return;
     }
 
-    // The hotkey config is a slice of settings; keep them in sync so a
-    // settings change applies without restarting the hook.
-    let config = Arc::new(Mutex::new(
-        settings
-            .lock()
-            .map(|s| s.hotkeys.clone())
-            .unwrap_or_default(),
-    ));
-
+    // `config` is the same Arc AppState holds, so a rebind from Settings is
+    // seen here on the next key event — no restart needed.
     let settings = settings.clone();
     std::thread::spawn(move || {
         let result = aloud_hotkey::listen(config, move |event| {

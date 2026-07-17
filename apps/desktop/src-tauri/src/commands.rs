@@ -32,6 +32,13 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 #[specta::specta]
 pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> CmdResult<()> {
     to_string_err(settings.save())?;
+
+    // Push the hotkey slice into the live config the listener reads, so a
+    // rebind takes effect on the next key event rather than at next launch.
+    if let Ok(mut config) = state.hotkey_config.lock() {
+        *config = settings.hotkeys.clone();
+    }
+
     let mut current = state
         .settings
         .lock()
