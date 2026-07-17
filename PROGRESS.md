@@ -37,14 +37,19 @@ unaffected; cloud transcription and LLM cleanup need a new key in settings.
 | Dictation pipeline | ✅ **verified end-to-end** |
 | Migration from the Swift app | ✅ verified on real data |
 | Recording overlay | ✅ verified by screenshot |
+| Notes window | ✅ commands verified on real notes; UI unscreenshotted |
+| Settings UI | ✅ round-trip verified; UI unscreenshotted |
 
-87 tests · clippy clean · typecheck clean.
+88 tests · clippy clean · typecheck clean.
 
 ## Not done
 
-Ask panel · command mode · meeting notes · notes window · settings UI ·
-onboarding · realtime streaming · app context · Composio · voice macros ·
-app rules · updater · signing/notarization · Agent Mode (Phase 9).
+Ask panel · command mode · meeting notes · onboarding · realtime streaming ·
+app context · Composio · voice macros · app rules · updater ·
+signing/notarization · Agent Mode (Phase 9).
+
+macOS blocked `screencapture` behind a permission prompt, so the notes and
+settings windows are verified at the data layer but not visually.
 
 ---
 

@@ -44,7 +44,7 @@ Silver lining: the 401 proved the cloud error path handles failure cleanly.
 
 ---
 
-## Eight PRs to review
+## Eleven PRs to review
 
 Each is self-contained, tested, and states what was verified and what was not.
 Reviewing in order tells the story; each PR body has the detail.
@@ -59,8 +59,11 @@ Reviewing in order tells the story; each PR body has the detail.
 | [#6](https://github.com/juligandhi-a11y/Aloud/pull/6) | **the working dictation pipeline** |
 | [#7](https://github.com/juligandhi-a11y/Aloud/pull/7) | migration from the Swift app |
 | [#8](https://github.com/juligandhi-a11y/Aloud/pull/8) | the recording pill (screenshot in the PR) |
+| [#9](https://github.com/juligandhi-a11y/Aloud/pull/9) | this report |
+| [#10](https://github.com/juligandhi-a11y/Aloud/pull/10) | notes window — search, highlight, reader |
+| [#11](https://github.com/juligandhi-a11y/Aloud/pull/11) | settings UI — **where you replace the expired key** |
 
-87 tests · `cargo clippy --workspace` zero warnings · `tsc --noEmit` clean.
+88 tests · `cargo clippy --workspace` zero warnings · `tsc --noEmit` clean.
 
 ---
 
@@ -157,12 +160,14 @@ dependency order:
   AX/UIAutomation read and the transform flow are not wired.
 - **Meeting notes** — `crates/audio` already emits the rolling PCM chunks it
   needs; the chunking loop and summary step are not written.
-- **Notes window** — `search_notes` works end-to-end (it ranked your real
-  imported notes correctly); no UI yet.
-- **Settings UI** — the store and typed bindings are done; no forms.
 - **Onboarding, realtime streaming, app context, Composio, voice macros,
   app rules, updater, signing/notarization.**
 - **Agent Mode** — your mid-session request. Planned as Phase 9, after parity.
+
+One caveat on the two UI PRs (#10, #11): macOS blocked `screencapture` behind a
+screen-recording permission prompt I could not grant, so the rendered windows
+are unverified. The data paths behind them are verified against your real notes
+and settings, but the pixels are not — worth a look when you open them.
 
 ---
 
