@@ -1,0 +1,115 @@
+# CI workflow — NOT ACTIVE YET.
+#
+# This file cannot live at .github/workflows/ci.yml until it is pushed by a
+# token with the `workflow` scope; the OAuth token in use rejects workflow
+# files. To activate:
+#
+#     mkdir -p .github/workflows && git mv ci/ci.yml .github/workflows/ci.yml
+#     git commit -m "ci: build and test on macOS and Windows" && git push
+#
+# See PROGRESS.md. This matters more than a normal chore: every Windows code
+# path in this repo (WH_KEYBOARD_LL, WASAPI, Ctrl+V) has been written against
+# the docs and never executed, because the dev machine is a Mac. This is what
+# proves it.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push makes an in-flight run obsolete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Slimmer artifacts and faster links; we never read backtraces from CI.
+  CARGO_PROFILE_DEV_DEBUG: 0
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # whisper.cpp is a long C++ build; cache it per OS.
+          key: ${{ matrix.os }}
+
+      - name: Install cmake (whisper.cpp builds from source)
+        uses: lukka/get-cmake@latest
+
+      - name: Format
+        # Formatting is OS-independent; checking it twice proves nothing.
+        if: matrix.os == 'macos-latest'
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @aloud/desktop typecheck
+      - run: pnpm --filter @aloud/desktop build
+
+  bundle:
+    name: Bundle (${{ matrix.os }})
+    # Proves the app packages on both platforms. main only: a full Tauri
+    # bundle is slow, and PRs are already covered by build + test above.
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bundle-${{ matrix.os }}
+      - uses: lukka/get-cmake@latest
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Unsigned: signing needs secrets this repo does not have yet. Apple
+      # notarization and Authenticode are still outstanding — see PROGRESS.md.
+      - run: pnpm build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aloud-${{ matrix.os }}
+          path: |
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/nsis/*.exe
+          if-no-files-found: warn

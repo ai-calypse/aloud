@@ -5,6 +5,7 @@
 //! `history.sqlite`, both in the app data directory.
 
 pub mod history;
+pub mod migrate;
 pub mod settings;
 pub mod stats;
 

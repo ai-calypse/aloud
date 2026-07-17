@@ -49,6 +49,22 @@ pub fn run() {
         .setup(move |app| {
             builder.mount_events(app);
 
+            // Before loading settings: a first launch should find the Swift
+            // app's notes and keys already in place.
+            match aloud_store::migrate::run() {
+                Ok(report) if report.source.is_some() => {
+                    tracing::info!(
+                        notes = report.notes_copied,
+                        settings = report.settings_imported,
+                        "imported data from the Swift app"
+                    );
+                }
+                // Never block startup on a failed import: the user's data is
+                // untouched either way, and they can still use the app.
+                Err(e) => tracing::warn!(%e, "could not import legacy data"),
+                _ => {}
+            }
+
             let settings = Arc::new(Mutex::new(Settings::load()));
             let pipeline = Arc::new(pipeline::Pipeline::new(
                 app.handle().clone(),
