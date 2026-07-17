@@ -160,6 +160,8 @@ export type Settings = {
 	selectedMicrophone?: string | null,
 	playSounds?: boolean,
 	pressEnterCommand?: boolean,
+	/**  Whether the first-run wizard has been completed. False shows it. */
+	onboarded?: boolean,
 	historyRetention?: number,
 };
 

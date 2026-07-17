@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { commands, type Settings, type Stats } from "./lib/bindings";
 import { NotesView } from "./features/notes/NotesView";
 import { SettingsView } from "./features/settings/SettingsView";
+import { Onboarding } from "./features/onboarding/Onboarding";
 import "./App.css";
 
 /** Mirrors the Rust `pipeline::Phase`. */
@@ -47,6 +48,15 @@ export default function App() {
   }, []);
 
   if (!settings) return <main className="app">Loading…</main>;
+
+  // First run: the wizard replaces the tabs until it's completed.
+  if (!settings.onboarded) {
+    return (
+      <main className="app">
+        <Onboarding settings={settings} onDone={setSettings} />
+      </main>
+    );
+  }
 
   return (
     <main className="app">

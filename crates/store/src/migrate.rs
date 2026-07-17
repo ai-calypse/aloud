@@ -135,6 +135,8 @@ fn import_settings(source: &std::path::Path) -> Result<bool> {
     let mut settings = Settings {
         groq_api_key: legacy.groq_api_key,
         composio_api_key: legacy.composio_api_key,
+        // A Swift user is already set up; don't show them the first-run wizard.
+        onboarded: true,
         ..Default::default()
     };
 

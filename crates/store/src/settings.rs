@@ -44,6 +44,8 @@ pub struct Settings {
     pub selected_microphone: Option<String>,
     pub play_sounds: bool,
     pub press_enter_command: bool,
+    /// Whether the first-run wizard has been completed. False shows it.
+    pub onboarded: bool,
     #[specta(type = specta_typescript::Number)]
     pub history_retention: usize,
 }
@@ -70,6 +72,9 @@ impl Default for Settings {
             play_sounds: true,
             press_enter_command: true,
             history_retention: 50,
+            // A fresh install has not been through the wizard; a migrated one
+            // is handled below, since the Swift users are already set up.
+            onboarded: false,
         }
     }
 }

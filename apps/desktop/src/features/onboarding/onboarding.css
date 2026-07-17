@@ -1,0 +1,110 @@
+.ob {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+  box-sizing: border-box;
+}
+
+.ob__card {
+  width: 100%;
+  max-width: 440px;
+}
+
+.ob__dots {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 1.5rem;
+}
+
+.ob__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.18);
+}
+
+.ob__dot--on {
+  background: #0a84ff;
+}
+
+.ob__title {
+  margin: 0 0 0.75rem;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.ob__body {
+  min-height: 140px;
+}
+
+.ob__lead {
+  margin: 0 0 1rem;
+  color: #a1a1a6;
+  line-height: 1.55;
+}
+
+.ob__choice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  cursor: default;
+}
+
+.ob__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.55rem 0.7rem;
+  border: 0.5px solid rgb(255 255 255 / 0.16);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.06);
+  color: inherit;
+  font: inherit;
+}
+
+.ob__ok {
+  margin: 0;
+  color: #30d158;
+}
+
+.ob__warn {
+  margin: 0;
+  color: #ff9f0a;
+}
+
+.ob__nav {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+.ob__btn {
+  padding: 0.45rem 1rem;
+  border: 0.5px solid rgb(255 255 255 / 0.16);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.06);
+  color: inherit;
+  font: inherit;
+  cursor: default;
+}
+
+.ob__btn:hover {
+  background: rgb(255 255 255 / 0.12);
+}
+
+.ob__btn--go {
+  border-color: transparent;
+  background: #0a84ff;
+  font-weight: 600;
+}
+
+.ob__btn--go:hover {
+  background: #409cff;
+}
+
+.ob__btn:disabled {
+  opacity: 0.4;
+}
