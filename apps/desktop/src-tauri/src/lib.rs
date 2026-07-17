@@ -55,9 +55,14 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+
+            // Check for an update on launch, in the background. A no-op until a
+            // signing pubkey is configured — see `check_for_update`.
+            spawn_update_check(app.handle().clone());
 
             // Before loading settings: a first launch should find the Swift
             // app's notes and keys already in place.
@@ -99,6 +104,53 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Checks for an update on launch and installs one if the user agrees.
+///
+/// A no-op until a signing pubkey is configured in `tauri.conf.json`: without
+/// it the updater cannot verify a download, so there is nothing safe to do.
+/// The check itself is best-effort — a failure is logged, never surfaced, so a
+/// release server being down never blocks the app.
+fn spawn_update_check(app: tauri::AppHandle) {
+    // The pubkey is baked into the config at build time; an empty one means
+    // updates are not set up for this build, so skip the whole thing.
+    let configured = app
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|u| u.get("pubkey"))
+        .and_then(|k| k.as_str())
+        .is_some_and(|k| !k.trim().is_empty());
+    if !configured {
+        tracing::debug!("updater: no pubkey configured; skipping update check");
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        use tauri_plugin_updater::UpdaterExt;
+        let updater = match app.updater() {
+            Ok(u) => u,
+            Err(e) => {
+                tracing::warn!(%e, "updater unavailable");
+                return;
+            }
+        };
+        match updater.check().await {
+            Ok(Some(update)) => {
+                tracing::info!(version = %update.version, "update available; downloading");
+                // ponytail: silent download-and-install on next launch. A
+                // "restart now?" prompt is the upgrade path once there is a UI
+                // surface for it; for a menu-bar app, quiet is the right default.
+                if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
+                    tracing::warn!(%e, "update install failed");
+                }
+            }
+            Ok(None) => tracing::debug!("updater: already up to date"),
+            Err(e) => tracing::warn!(%e, "update check failed"),
+        }
+    });
 }
 
 /// Runs the key hook on its own thread: both backends block forever (a run

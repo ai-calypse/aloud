@@ -86,5 +86,13 @@
     "macOS": {
       "minimumSystemVersion": "13.0"
     }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://releases.aloud.app/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "pubkey": ""
+    }
   }
 }
