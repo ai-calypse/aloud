@@ -22,15 +22,16 @@ specta.workspace = true
 tokio = { version = "1", features = ["fs", "sync"] }
 tracing.workspace = true
 whisper-rs = "0.16"
+# Used unconditionally (model download stream, data_dir), so they must be
+# cross-platform deps — not macOS-only, or Windows fails to compile.
+futures-util = "0.3"
+aloud-notes = { path = "../notes" }
 
 # GPU acceleration where it is free: Metal on macOS. Windows stays CPU-only
 # for now (whisper-rs offers cuda/vulkan features, but both need a matching
 # SDK on the build machine).
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.16", features = ["metal"] }
-
-futures-util = "0.3"
-aloud-notes = { path = "../notes" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
