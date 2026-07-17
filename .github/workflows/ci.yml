@@ -1,17 +1,3 @@
-# CI workflow — NOT ACTIVE YET.
-#
-# This file cannot live at .github/workflows/ci.yml until it is pushed by a
-# token with the `workflow` scope; the OAuth token in use rejects workflow
-# files. To activate:
-#
-#     mkdir -p .github/workflows && git mv ci/ci.yml .github/workflows/ci.yml
-#     git commit -m "ci: build and test on macOS and Windows" && git push
-#
-# See PROGRESS.md. This matters more than a normal chore: every Windows code
-# path in this repo (WH_KEYBOARD_LL, WASAPI, Ctrl+V) has been written against
-# the docs and never executed, because the dev machine is a Mac. This is what
-# proves it.
-
 name: CI
 
 on:
