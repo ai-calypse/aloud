@@ -36,6 +36,8 @@ pub struct Settings {
     pub vocabulary: Vec<String>,
     /// Spoken shorthand that expands to canned text after cleanup.
     pub macros: Vec<crate::macros::Macro>,
+    /// Per-app behaviour overrides, applied by the focused app's name.
+    pub app_rules: Vec<crate::rules::AppRule>,
 
     // Behaviour
     pub hotkeys: aloud_hotkey::model::Config,
@@ -62,6 +64,7 @@ impl Default for Settings {
             custom_system_prompt: String::new(),
             vocabulary: Vec::new(),
             macros: Vec::new(),
+            app_rules: Vec::new(),
             hotkeys: aloud_hotkey::model::Config::defaults(),
             selected_microphone: None,
             play_sounds: true,

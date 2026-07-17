@@ -7,10 +7,12 @@
 pub mod history;
 pub mod macros;
 pub mod migrate;
+pub mod rules;
 pub mod settings;
 pub mod stats;
 
 pub use history::History;
 pub use macros::Macro;
+pub use rules::AppRule;
 pub use settings::Settings;
 pub use stats::Stats;

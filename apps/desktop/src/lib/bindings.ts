@@ -29,6 +29,19 @@ export const commands = {
 };
 
 /* Types */
+/**  One per-app override. */
+export type AppRule = {
+	/**
+	 *  Substring of the app's name to match, e.g. "slack", "code". Empty never
+	 *  matches.
+	 */
+	app_matches: string,
+	/**  Override cleanup on/off for this app. None leaves the global setting. */
+	post_processing_enabled: boolean | null,
+	/**  A prompt to use instead of the global one. Empty leaves the global. */
+	custom_prompt: string,
+};
+
 export type AudioDevice = {
 	/**  Stable id, safe to persist in settings. */
 	id: string,
@@ -141,6 +154,8 @@ export type Settings = {
 	vocabulary?: string[],
 	/**  Spoken shorthand that expands to canned text after cleanup. */
 	macros?: Macro[],
+	/**  Per-app behaviour overrides, applied by the focused app's name. */
+	appRules?: AppRule[],
 	hotkeys?: Config,
 	selectedMicrophone?: string | null,
 	playSounds?: boolean,

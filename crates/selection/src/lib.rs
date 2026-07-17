@@ -21,6 +21,24 @@ pub fn selected_text() -> Result<String> {
     aloud_paste::copy_selection()
 }
 
+/// The name of the app that currently has focus, e.g. "Slack", "Code".
+///
+/// Used by app rules to vary behaviour per app. Returns None when it can't be
+/// determined (no focus, permission denied, or the Windows path, which is not
+/// yet implemented). A None means "no app matched", so rules simply don't fire.
+pub fn frontmost_app() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::frontmost_app()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // ponytail: Windows returns None, so app rules are a no-op there until
+        // GetForegroundWindow + QueryFullProcessImageName is wired up.
+        None
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod macos {
     //! `AXUIElementCopyAttributeValue(kAXSelectedTextAttribute)` on the focused
@@ -92,6 +110,23 @@ mod macos {
             return None;
         }
         Some(value as AXUIElementRef)
+    }
+
+    /// The focused application's title, via the same system-wide AX element the
+    /// selection read uses. No new dependency: `AXFocusedApplication` →
+    /// `AXTitle` is the app's display name ("Slack", "Code").
+    pub fn frontmost_app() -> Option<String> {
+        let system = unsafe { AXUIElementCreateSystemWide() };
+        if system.is_null() {
+            return None;
+        }
+        let app = copy_element(system, "AXFocusedApplication");
+        unsafe { CFRelease(system as CFTypeRef) };
+        let app = app?;
+
+        let title = copy_string(app, "AXTitle");
+        unsafe { CFRelease(app as CFTypeRef) };
+        title.filter(|t| !t.is_empty())
     }
 }
 

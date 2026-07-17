@@ -174,7 +174,12 @@ impl Pipeline {
             return Ok(Outcome::Asked);
         }
 
-        let final_text = self.post_process(&raw, &settings).await;
+        // Apply the focused app's rule (if any) to a working copy, so every
+        // downstream step just reads the effective settings. History still
+        // records against the real config; only cleanup behaviour changes.
+        let effective = apply_app_rule(settings.clone());
+
+        let final_text = self.post_process(&raw, &effective).await;
         if final_text.trim().is_empty() {
             return Ok(Outcome::NoSpeech);
         }
@@ -522,6 +527,28 @@ pub async fn build_transcriber(settings: &Settings) -> Result<Arc<dyn Transcribe
             Ok(Arc::new(LocalTranscriber::new(&model, language)?))
         }
     }
+}
+
+/// Overrides `settings` with the rule for the currently focused app, if one
+/// matches. Reads the frontmost app once; a None app or no matching rule
+/// leaves the settings untouched.
+fn apply_app_rule(mut settings: Settings) -> Settings {
+    if settings.app_rules.is_empty() {
+        return settings;
+    }
+    let app = aloud_selection::frontmost_app();
+    let Some(rule) = aloud_store::rules::matching(&settings.app_rules, app.as_deref()) else {
+        return settings;
+    };
+    tracing::info!(app = ?app, matcher = %rule.app_matches, "applying app rule");
+
+    if let Some(enabled) = rule.post_processing_enabled {
+        settings.post_processing_enabled = enabled;
+    }
+    if !rule.custom_prompt.trim().is_empty() {
+        settings.custom_system_prompt = rule.custom_prompt.clone();
+    }
+    settings
 }
 
 /// A unique temp path per dictation, so overlapping sessions cannot collide.
