@@ -1,0 +1,109 @@
+.notes {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 1rem;
+}
+
+.notes__search {
+  padding: 0.6rem 0.9rem;
+  border: 1px solid rgb(128 128 128 / 0.3);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.notes__search:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.notes__empty {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.notes__list {
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notes__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.7rem 0.6rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.notes__item:hover {
+  background: rgb(128 128 128 / 0.12);
+}
+
+.notes__title {
+  font-weight: 550;
+}
+
+.notes__snippet {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  /* Snippets are one flattened line; never let one wrap the list open. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Matched query terms. */
+mark {
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+}
+
+.reader {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0.4rem;
+}
+
+.reader__back {
+  align-self: flex-start;
+  padding: 0.3rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: default;
+}
+
+.reader__title {
+  margin: 0.4rem 0 0;
+  font-size: 1.2rem;
+}
+
+.reader__date {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.reader__body {
+  overflow-y: auto;
+  margin: 0.8rem 0 0;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}

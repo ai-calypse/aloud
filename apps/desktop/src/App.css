@@ -27,15 +27,6 @@ body {
   color: var(--fg);
 }
 
-.app {
-  padding: 2rem;
-}
-
-h1 {
-  margin: 0 0 1.5rem;
-  font-size: 1.5rem;
-}
-
 .warning {
   padding: 0.75rem 1rem;
   border-radius: 8px;
@@ -79,4 +70,34 @@ h1 {
 .hint {
   color: var(--muted);
   font-size: 0.875rem;
+}
+
+.app {
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  box-sizing: border-box;
+  gap: 1rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.tab {
+  padding: 0.35rem 0.8rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: default;
+}
+
+.tab--active {
+  background: rgb(128 128 128 / 0.16);
+  color: var(--fg);
 }

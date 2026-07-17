@@ -29,6 +29,7 @@ pub fn run() {
         commands::get_stats,
         commands::get_history,
         commands::search_notes,
+        commands::recent_notes,
         commands::input_devices,
         commands::hotkeys_permitted,
         commands::paste_again,

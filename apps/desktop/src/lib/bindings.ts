@@ -11,6 +11,8 @@ export const commands = {
 	getStats: () => __TAURI_INVOKE<Stats>("get_stats"),
 	getHistory: (limit: number) => typedError<Entry[], string>(__TAURI_INVOKE("get_history", { limit })),
 	searchNotes: (query: string) => typedError<SearchResult[], string>(__TAURI_INVOKE("search_notes", { query })),
+	/**  Newest notes, for the empty-query state. */
+	recentNotes: (limit: number) => typedError<Note[], string>(__TAURI_INVOKE("recent_notes", { limit })),
 	inputDevices: () => typedError<AudioDevice[], string>(__TAURI_INVOKE("input_devices")),
 	/**
 	 *  Whether the OS lets us listen for keys. False on macOS until the user

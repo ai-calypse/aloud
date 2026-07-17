@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { commands, type Settings, type Stats } from "./lib/bindings";
+import { NotesView } from "./features/notes/NotesView";
 import "./App.css";
 
 /** Mirrors the Rust `pipeline::Phase`. */
@@ -14,7 +15,10 @@ const PHASE_LABEL: Record<Phase, string> = {
   error: "Something went wrong",
 };
 
+type Tab = "notes" | "status";
+
 export default function App() {
+  const [tab, setTab] = useState<Tab>("notes");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -39,7 +43,17 @@ export default function App() {
 
   return (
     <main className="app">
-      <h1>Aloud</h1>
+      <nav className="tabs">
+        {(["notes", "status"] as const).map((t) => (
+          <button
+            key={t}
+            className={`tab ${tab === t ? "tab--active" : ""}`}
+            onClick={() => setTab(t)}
+          >
+            {t === "notes" ? "Notes" : "Status"}
+          </button>
+        ))}
+      </nav>
 
       {!hotkeysReady && (
         <p className="warning">
@@ -48,20 +62,26 @@ export default function App() {
         </p>
       )}
 
-      <p className={`phase phase--${phase}`}>{PHASE_LABEL[phase]}</p>
+      {tab === "notes" ? (
+        <NotesView />
+      ) : (
+        <section>
+          <p className={`phase phase--${phase}`}>{PHASE_LABEL[phase]}</p>
 
-      <dl className="stats">
-        <dt>Words</dt>
-        <dd>{stats?.totalWords ?? 0}</dd>
-        <dt>Sessions</dt>
-        <dd>{stats?.totalSessions ?? 0}</dd>
-        <dt>Streak</dt>
-        <dd>{stats?.currentStreakDays ?? 0} days</dd>
-      </dl>
+          <dl className="stats">
+            <dt>Words</dt>
+            <dd>{stats?.totalWords ?? 0}</dd>
+            <dt>Sessions</dt>
+            <dd>{stats?.totalSessions ?? 0}</dd>
+            <dt>Streak</dt>
+            <dd>{stats?.currentStreakDays ?? 0} days</dd>
+          </dl>
 
-      <p className="hint">
-        Engine: {settings.engine === "local" ? "on-device whisper" : "cloud"}
-      </p>
+          <p className="hint">
+            Engine: {settings.engine === "local" ? "on-device whisper" : "cloud"}
+          </p>
+        </section>
+      )}
     </main>
   );
 }

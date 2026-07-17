@@ -59,6 +59,16 @@ pub fn search_notes(query: String) -> CmdResult<Vec<aloud_notes::SearchResult>> 
     Ok(aloud_notes::search(&query, &aloud_notes::all_notes(&dir)))
 }
 
+/// Newest notes, for the empty-query state.
+#[tauri::command]
+#[specta::specta]
+pub fn recent_notes(limit: u32) -> CmdResult<Vec<aloud_notes::Note>> {
+    let dir = to_string_err(aloud_notes::directory())?;
+    let mut notes = aloud_notes::all_notes(&dir);
+    notes.truncate(limit as usize);
+    Ok(notes)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn input_devices() -> CmdResult<Vec<aloud_audio::AudioDevice>> {

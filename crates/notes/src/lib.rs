@@ -307,6 +307,23 @@ mod tests {
         assert!(date_from_file_name("Untitled").is_none());
     }
 
+    /// Multi-byte characters must not panic the snippet slicer. Real notes
+    /// contain them: this is modelled on a Norwegian meeting note on disk.
+    #[test]
+    fn searches_non_ascii_notes() {
+        let notes = [note(
+            "M\u{00f8}te\u{00e5}pning",
+            "M\u{00f8}tet startet med en kort \u{00e5}pning hvor teamet diskuterte fremdrift.",
+        )];
+        let results = search("m\u{00f8}te", &notes);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].snippet.contains("M\u{00f8}tet"),
+            "got: {}",
+            results[0].snippet
+        );
+    }
+
     #[test]
     fn title_parsing() {
         assert_eq!(
