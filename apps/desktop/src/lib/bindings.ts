@@ -5,5 +5,155 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 /** Commands */
 export const commands = {
 	appVersion: () => __TAURI_INVOKE<string>("app_version"),
+	getSettings: () => __TAURI_INVOKE<Settings>("get_settings"),
+	/**  Persists settings and applies them to the running app. */
+	updateSettings: (settings: Settings) => typedError<null, string>(__TAURI_INVOKE("update_settings", { settings })),
+	getStats: () => __TAURI_INVOKE<Stats>("get_stats"),
+	getHistory: (limit: number) => typedError<Entry[], string>(__TAURI_INVOKE("get_history", { limit })),
+	searchNotes: (query: string) => typedError<SearchResult[], string>(__TAURI_INVOKE("search_notes", { query })),
+	inputDevices: () => typedError<AudioDevice[], string>(__TAURI_INVOKE("input_devices")),
+	/**
+	 *  Whether the OS lets us listen for keys. False on macOS until the user
+	 *  grants Accessibility permission.
+	 */
+	hotkeysPermitted: () => __TAURI_INVOKE<boolean>("hotkeys_permitted"),
+	pasteAgain: () => typedError<null, string>(__TAURI_INVOKE("paste_again")),
 };
+
+/* Types */
+export type AudioDevice = {
+	/**  Stable id, safe to persist in settings. */
+	id: string,
+	name: string,
+};
+
+/**  What triggers a binding. */
+export type Binding = { kind: "disabled" } | 
+/**  A regular key, optionally with modifiers held (e.g. Cmd+Shift+D). */
+{ kind: "key"; key: Key; modifiers: Modifier[] } | 
+/**
+ *  A modifier held on its own (e.g. hold Right Option) — the case Tauri's
+ *  global-shortcut plugin cannot express, and why this crate exists.
+ */
+{ kind: "modifierKey"; key: Key; modifiers: Modifier[] };
+
+export type Config = {
+	hold: Binding | null,
+	toggle: Binding | null,
+	copy_again: Binding | null,
+	ask: Binding | null,
+	meeting_notes: Binding | null,
+};
+
+export type Engine = 
+/**  On-device whisper.cpp. No network, no API key. */
+"local" | 
+/**  An OpenAI-compatible endpoint (Groq by default). */
+"cloud";
+
+/**
+ *  Specta forbids exporting i64 by default, since JS loses precision past
+ *  2^53. These are row ids, unix seconds and millisecond durations — all
+ *  many orders of magnitude below that — so `number` is exact here and
+ *  BigInt would only make the frontend painful.
+ */
+export type Entry = {
+	id: number,
+	/**  Unix seconds. */
+	createdAt: number,
+	/**  What the transcriber returned. */
+	rawTranscript: string,
+	/**  What was actually pasted, after cleanup. */
+	finalTranscript: string,
+	/**  Which app had focus, for per-app rules and debugging. */
+	appName: string | null,
+	durationMs: number,
+};
+
+/**
+ *  A physical key, side-specific where the distinction matters (the Swift app
+ *  let you bind Right Option specifically, which is a popular dictation key).
+ */
+export type Key = "leftCommand" | "rightCommand" | "leftShift" | "rightShift" | "leftOption" | "rightOption" | "leftControl" | "rightControl" | 
+/**  macOS only; no Windows equivalent. */
+"fn" | "escape" | "space" | ({ char: string }) & { f?: never } | ({ f: number }) & { char?: never };
+
+export type Modifier = "command" | "control" | "option" | "shift" | "function";
+
+export type Note = {
+	path: string,
+	title: string,
+	/**
+	 *  Unix seconds; parsed from the file name, falling back to file mtime.
+	 * 
+	 *  Exported as `number`: specta forbids i64 by default over JS precision
+	 *  loss past 2^53, which a unix-second timestamp is nowhere near.
+	 */
+	date: number,
+	content: string,
+};
+
+export type SearchResult = {
+	note: Note,
+	score: number,
+	/**  Text around the first body match, for the results list. */
+	snippet: string,
+};
+
+/**
+ *  Everything the app remembers between launches.
+ * 
+ *  One coarse struct rather than ~70 individual commands: the whole thing is
+ *  a few hundred bytes, and the frontend gets one `get`/`update` pair.
+ */
+export type Settings = {
+	groqApiKey?: string,
+	composioApiKey?: string,
+	engine?: Engine,
+	transcriptionModel?: string,
+	baseUrl?: string,
+	/**  BCP-47 code, or empty to auto-detect. */
+	language?: string,
+	postProcessingEnabled?: boolean,
+	postProcessingModel?: string,
+	fallbackModel?: string,
+	/**  Overrides the built-in cleanup prompt when non-empty. */
+	customSystemPrompt?: string,
+	/**  Proper nouns and jargon fed to the model as a spelling reference. */
+	vocabulary?: string[],
+	hotkeys?: Config,
+	selectedMicrophone?: string | null,
+	playSounds?: boolean,
+	pressEnterCommand?: boolean,
+	historyRetention?: number,
+};
+
+/**
+ *  See [`crate::history::Entry`] on why u64 exports as `number`: a lifetime
+ *  word count will not reach 2^53.
+ */
+export type Stats = {
+	totalWords?: number,
+	totalSessions?: number,
+	totalSpokenSeconds?: number | null,
+	currentStreakDays?: number,
+	bestStreakDays?: number,
+	/**
+	 *  Local calendar day of the last dictation, as `YYYY-MM-DD`.
+	 * 
+	 *  A string rather than a `NaiveDate` so it crosses the specta boundary
+	 *  as a plain TS string; [`Self::last_day`] parses it back.
+	 */
+	lastDictationDay?: string | null,
+};
+
+/* Tauri Specta runtime */
+async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
+    try {
+        return { status: "ok", data: await result };
+    } catch (e) {
+        if (e instanceof Error) throw e;
+        return { status: "error", error: e as any };
+    }
+}
 

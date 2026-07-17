@@ -1,0 +1,325 @@
+//! The dictation loop: hotkey → record → transcribe → clean up → paste.
+//!
+//! This is the app's core. It replaces the equivalent flow in the Swift
+//! `AppState`, but only orchestrates: every step lives in a crate that is
+//! testable without launching the app.
+
+use aloud_store::{History, Settings, Stats};
+use aloud_transcribe::{cloud::CloudTranscriber, local::LocalTranscriber, Engine, Transcriber};
+use anyhow::{bail, Context, Result};
+use serde::Serialize;
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
+use tauri::{AppHandle, Emitter};
+
+/// What the UI reflects. Mirrors the Swift overlay's phases.
+#[derive(Debug, Clone, Copy, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum Phase {
+    Idle,
+    Recording,
+    Transcribing,
+    /// Text was pasted.
+    Done,
+    Error,
+}
+
+/// Whether a dictation actually produced text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    Pasted,
+    /// Silence or filler only — a normal result, not a failure.
+    NoSpeech,
+}
+
+/// In-flight dictation state, owned by the app and shared with the hotkey
+/// thread.
+#[derive(Default)]
+pub struct Session {
+    recorder: Option<aloud_audio::Recorder>,
+    /// The last transcript, for "paste again".
+    last_transcript: Option<String>,
+    started_at: Option<std::time::Instant>,
+}
+
+pub struct Pipeline {
+    app: AppHandle,
+    session: Mutex<Session>,
+    settings: Arc<Mutex<Settings>>,
+    history: Mutex<History>,
+    stats: Mutex<Stats>,
+    /// Loaded lazily: the model costs ~200ms and memory, so only when the
+    /// local engine is actually used.
+    local: Mutex<Option<Arc<LocalTranscriber>>>,
+}
+
+impl Pipeline {
+    pub fn new(app: AppHandle, settings: Arc<Mutex<Settings>>) -> Result<Self> {
+        let history_path = aloud_notes::data_dir()?.join("history.sqlite");
+        Ok(Self {
+            app,
+            session: Mutex::new(Session::default()),
+            settings,
+            history: Mutex::new(History::open(&history_path)?),
+            stats: Mutex::new(Stats::default()),
+            local: Mutex::new(None),
+        })
+    }
+
+    fn emit(&self, phase: Phase) {
+        if let Err(e) = self.app.emit("dictation-phase", phase) {
+            tracing::warn!(%e, "could not emit phase");
+        }
+    }
+
+    fn settings(&self) -> Settings {
+        self.settings.lock().map(|s| s.clone()).unwrap_or_default()
+    }
+
+    /// Starts capturing. Idempotent: a second call while recording is a no-op.
+    pub fn start(&self) -> Result<()> {
+        let mut session = self.session.lock().unwrap();
+        if session.recorder.is_some() {
+            return Ok(());
+        }
+
+        let settings = self.settings();
+        let recorder = aloud_audio::Recorder::start(settings.selected_microphone.as_deref(), None)
+            .context("starting recorder")?;
+
+        session.recorder = Some(recorder);
+        session.started_at = Some(std::time::Instant::now());
+        drop(session);
+
+        self.emit(Phase::Recording);
+        Ok(())
+    }
+
+    /// Stops capturing, transcribes, cleans up and pastes.
+    pub async fn stop_and_paste(&self) -> Result<()> {
+        let (recorder, started_at) = {
+            let mut session = self.session.lock().unwrap();
+            (session.recorder.take(), session.started_at.take())
+        };
+        let Some(recorder) = recorder else {
+            return Ok(()); // not recording
+        };
+
+        self.emit(Phase::Transcribing);
+        let result = self.transcribe_and_paste(recorder, started_at).await;
+
+        match &result {
+            // Silence is a normal outcome, but reporting "Pasted" when nothing
+            // was pasted would be a lie: go back to Idle instead.
+            Ok(Outcome::Pasted) => self.emit(Phase::Done),
+            Ok(Outcome::NoSpeech) => self.emit(Phase::Idle),
+            Err(e) => {
+                tracing::error!(%e, "dictation failed");
+                self.emit(Phase::Error);
+            }
+        }
+        result.map(|_| ())
+    }
+
+    async fn transcribe_and_paste(
+        &self,
+        recorder: aloud_audio::Recorder,
+        started_at: Option<std::time::Instant>,
+    ) -> Result<Outcome> {
+        let wav = temp_wav_path();
+        recorder.stop_to_wav(&wav)?;
+
+        let settings = self.settings();
+        let transcriber = self.transcriber(&settings).await?;
+        let raw = transcriber.transcribe(&wav).await?;
+        let _ = std::fs::remove_file(&wav);
+
+        // Whisper returns nothing for silence, and the cleanup prompt maps
+        // filler-only speech to its EMPTY sentinel. Neither is an error.
+        if raw.trim().is_empty() {
+            tracing::info!("no speech detected");
+            return Ok(Outcome::NoSpeech);
+        }
+
+        let final_text = self.post_process(&raw, &settings).await;
+        if final_text.trim().is_empty() {
+            return Ok(Outcome::NoSpeech);
+        }
+
+        aloud_paste::paste_text(&final_text, false)?;
+        self.record(&raw, &final_text, started_at, &settings);
+        Ok(Outcome::Pasted)
+    }
+
+    /// Cleans up the transcript, falling back to the raw text if the LLM is
+    /// unavailable: pasting the unpolished words beats pasting nothing.
+    async fn post_process(&self, raw: &str, settings: &Settings) -> String {
+        if !settings.post_processing_enabled || settings.groq_api_key.trim().is_empty() {
+            return raw.to_string();
+        }
+
+        match self.clean_up(raw, settings).await {
+            Ok(text) => text,
+            Err(e) => {
+                tracing::warn!(%e, "post-processing failed; pasting raw transcript");
+                raw.to_string()
+            }
+        }
+    }
+
+    async fn clean_up(&self, raw: &str, settings: &Settings) -> Result<String> {
+        let client = aloud_llm::LlmClient::new(&settings.groq_api_key, Some(&settings.base_url))?;
+
+        let system = if settings.custom_system_prompt.trim().is_empty() {
+            aloud_llm::prompts::CLEANUP.to_string()
+        } else {
+            settings.custom_system_prompt.clone()
+        };
+
+        let mut user = raw.to_string();
+        if !settings.vocabulary.is_empty() {
+            user = format!("VOCABULARY: {}\n\n{user}", settings.vocabulary.join(", "));
+        }
+
+        let messages = [
+            aloud_llm::Message::system(system),
+            aloud_llm::Message::user(user),
+        ];
+        let cleaned = client
+            .complete_with_fallback(
+                &settings.post_processing_model,
+                Some(settings.fallback_model.as_str()).filter(|f| !f.trim().is_empty()),
+                &messages,
+                Some(0.0), // deterministic: this is cleanup, not writing
+            )
+            .await?;
+
+        // The prompt specifies this sentinel for filler-only input.
+        if cleaned.trim() == aloud_llm::EMPTY_SENTINEL {
+            return Ok(String::new());
+        }
+        Ok(cleaned)
+    }
+
+    /// The configured engine. The local model is cached after first load.
+    async fn transcriber(&self, settings: &Settings) -> Result<Arc<dyn Transcriber>> {
+        match settings.engine {
+            Engine::Cloud => {
+                if settings.groq_api_key.trim().is_empty() {
+                    bail!("cloud transcription needs an API key");
+                }
+                Ok(Arc::new(CloudTranscriber::new(
+                    &settings.groq_api_key,
+                    Some(&settings.base_url),
+                    Some(&settings.transcription_model),
+                    Some(&settings.language),
+                )?))
+            }
+            Engine::Local => {
+                if let Some(local) = self.local.lock().unwrap().clone() {
+                    return Ok(local);
+                }
+                let dir = aloud_transcribe::local::model_dir()?;
+                let model = aloud_transcribe::download::ensure_model(
+                    &dir,
+                    aloud_transcribe::local::DEFAULT_MODEL,
+                    |p| tracing::debug!(progress = p, "downloading model"),
+                )
+                .await?;
+
+                let language = Some(settings.language.as_str()).filter(|l| !l.is_empty());
+                let local = Arc::new(LocalTranscriber::new(&model, language)?);
+                *self.local.lock().unwrap() = Some(local.clone());
+                Ok(local)
+            }
+        }
+    }
+
+    /// Records the dictation for history and stats. Never fails the paste:
+    /// the text is already in the user's document.
+    fn record(
+        &self,
+        raw: &str,
+        final_text: &str,
+        started_at: Option<std::time::Instant>,
+        settings: &Settings,
+    ) {
+        let duration_ms = started_at.map_or(0, |s| s.elapsed().as_millis() as i64);
+
+        if let Ok(mut session) = self.session.lock() {
+            session.last_transcript = Some(final_text.to_string());
+        }
+        if let Ok(history) = self.history.lock() {
+            let now = chrono::Utc::now().timestamp();
+            if let Err(e) = history.insert(
+                now,
+                raw,
+                final_text,
+                None,
+                duration_ms,
+                settings.history_retention,
+            ) {
+                tracing::warn!(%e, "could not record history");
+            }
+        }
+        if let Ok(mut stats) = self.stats.lock() {
+            let words = Stats::word_count(final_text);
+            stats.record_session(
+                words,
+                Stats::estimated_spoken_seconds(words),
+                chrono::Local::now(),
+            );
+        }
+    }
+
+    /// Cancels an in-flight recording, discarding the audio.
+    pub fn cancel(&self) {
+        if let Ok(mut session) = self.session.lock() {
+            // Dropping the recorder stops capture; the samples go with it.
+            session.recorder = None;
+            session.started_at = None;
+        }
+        self.emit(Phase::Idle);
+    }
+
+    /// Re-pastes the last transcript.
+    pub fn paste_again(&self) -> Result<()> {
+        let last = self
+            .session
+            .lock()
+            .ok()
+            .and_then(|s| s.last_transcript.clone());
+        match last {
+            Some(text) => aloud_paste::paste_text(&text, false),
+            None => Ok(()),
+        }
+    }
+
+    pub fn stats(&self) -> Stats {
+        self.stats.lock().map(|s| s.clone()).unwrap_or_default()
+    }
+
+    pub fn history(&self, limit: usize) -> Result<Vec<aloud_store::history::Entry>> {
+        self.history.lock().unwrap().recent(limit)
+    }
+}
+
+/// A unique temp path per dictation, so overlapping sessions cannot collide.
+fn temp_wav_path() -> PathBuf {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    std::env::temp_dir().join(format!("aloud-{unique}.wav"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temp_paths_are_unique() {
+        assert_ne!(temp_wav_path(), temp_wav_path());
+    }
+}

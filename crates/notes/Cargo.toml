@@ -11,6 +11,7 @@ chrono = "0.4"
 directories = "6"
 serde.workspace = true
 specta.workspace = true
+specta-typescript = "0.0.12"
 
 [dev-dependencies]
 tempfile = "3"

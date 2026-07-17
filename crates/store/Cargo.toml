@@ -1,0 +1,22 @@
+[package]
+name = "aloud-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Settings and pipeline history persistence"
+
+[dependencies]
+aloud-hotkey = { path = "../hotkey" }
+aloud-notes = { path = "../notes" }
+aloud-transcribe = { path = "../transcribe" }
+anyhow.workspace = true
+rusqlite = { version = "0.40", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+specta-typescript = "0.0.12"
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

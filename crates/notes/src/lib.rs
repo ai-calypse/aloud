@@ -25,6 +25,10 @@ pub struct Note {
     pub path: PathBuf,
     pub title: String,
     /// Unix seconds; parsed from the file name, falling back to file mtime.
+    ///
+    /// Exported as `number`: specta forbids i64 by default over JS precision
+    /// loss past 2^53, which a unix-second timestamp is nowhere near.
+    #[specta(type = specta_typescript::Number)]
     pub date: i64,
     pub content: String,
 }
@@ -32,6 +36,7 @@ pub struct Note {
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SearchResult {
     pub note: Note,
+    #[specta(type = specta_typescript::Number)]
     pub score: usize,
     /// Text around the first body match, for the results list.
     pub snippet: String,
