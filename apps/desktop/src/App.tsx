@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { commands, type Settings, type Stats } from "./lib/bindings";
+import {
+  commands,
+  events,
+  type Phase,
+  type Settings,
+  type Stats,
+} from "./lib/bindings";
 import { NotesView } from "./features/notes/NotesView";
 import {
   SettingsView,
@@ -9,9 +14,6 @@ import {
 import { Onboarding } from "./features/onboarding/Onboarding";
 import { cn } from "@/lib/utils";
 import "./App.css";
-
-/** Mirrors the Rust `pipeline::Phase`. */
-type Phase = "idle" | "recording" | "transcribing" | "done" | "error";
 
 const PHASE_LABEL: Record<Phase, string> = {
   idle: "Ready",
@@ -53,13 +55,19 @@ export default function App() {
     commands.getStats().then(setStats);
     commands.hotkeysPermitted().then(setHotkeysReady);
 
-    const unlisten = listen<Phase>("dictation-phase", (event) => {
+    const unlistenPhase = events.dictationPhase.listen((event) => {
       setPhase(event.payload);
       // Stats only change once the text has actually landed.
       if (event.payload === "done") commands.getStats().then(setStats);
     });
+    // Rust waits for the Accessibility grant and announces it, so the banner
+    // clears the moment permission lands — no app restart needed.
+    const unlistenPermission = events.hotkeysPermitted.listen((event) =>
+      setHotkeysReady(event.payload),
+    );
     return () => {
-      unlisten.then((off) => off());
+      unlistenPhase.then((off) => off());
+      unlistenPermission.then((off) => off());
     };
   }, []);
 

@@ -7,20 +7,22 @@
 use aloud_store::{History, Settings, Stats};
 use aloud_transcribe::{cloud::CloudTranscriber, local::LocalTranscriber, Engine, Transcriber};
 use anyhow::{bail, Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
+use tauri_specta::Event;
 
 /// How long the pill stays up after a dictation finishes.
 const OVERLAY_LINGER: Duration = Duration::from_millis(900);
 
 /// What the UI reflects. Mirrors the Swift overlay's phases.
-#[derive(Debug, Clone, Copy, Serialize, specta::Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
 #[serde(rename_all = "camelCase")]
+#[tauri_specta(event_name = "dictation-phase")]
 pub enum Phase {
     Idle,
     Recording,
@@ -79,8 +81,20 @@ impl Pipeline {
     /// Publishes the phase and drives the overlay's visibility with it, so
     /// the pill can never be left on screen after a session ends.
     fn emit(&self, phase: Phase) {
-        if let Err(e) = self.app.emit("dictation-phase", phase) {
+        if let Err(e) = phase.emit(&self.app) {
             tracing::warn!(%e, "could not emit phase");
+        }
+
+        // Chime on the phase transitions voice-dict sounded: Tink on record,
+        // Pop when transcription begins, Basso on error. Done/Idle stay silent.
+        let chime = match phase {
+            Phase::Recording => Some(crate::sound::Chime::Start),
+            Phase::Transcribing => Some(crate::sound::Chime::Stop),
+            Phase::Error => Some(crate::sound::Chime::Error),
+            Phase::Done | Phase::Idle => None,
+        };
+        if let Some(chime) = chime {
+            crate::sound::play(chime, self.settings().play_sounds);
         }
 
         match phase {

@@ -7,13 +7,16 @@ use crate::{hallucination, Transcriber};
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 /// Default model: ~150 MB, good accuracy-to-speed for dictation on CPU.
 pub const DEFAULT_MODEL: &str = "ggml-base.en.bin";
 
 pub struct LocalTranscriber {
-    context: WhisperContext,
+    /// Shared so inference can move onto a blocking thread without borrowing
+    /// `self` across the await. `WhisperContext` is `Send + Sync`.
+    context: Arc<WhisperContext>,
     language: Option<String>,
 }
 
@@ -32,7 +35,7 @@ impl LocalTranscriber {
                 .with_context(|| format!("loading model {}", model_path.display()))?;
 
         Ok(Self {
-            context,
+            context: Arc::new(context),
             language: language
                 .map(str::trim)
                 .filter(|l| !l.is_empty())
@@ -40,46 +43,67 @@ impl LocalTranscriber {
         })
     }
 
-    /// Transcribes 16 kHz mono f32 samples.
+    /// Transcribes 16 kHz mono f32 samples. Blocking — callers on an async
+    /// runtime should go through [`Transcriber::transcribe`], which offloads it.
     pub fn transcribe_samples(&self, samples: &[f32]) -> Result<String> {
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(self.language.as_deref().or(Some("en")));
-        // The transcript is returned, not printed.
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
-
-        let mut state = self.context.create_state().context("creating state")?;
-        state.full(params, samples).context("running whisper")?;
-
-        let segments = state.full_n_segments();
-        let mut text = String::new();
-        let mut no_speech_prob = None;
-
-        for i in 0..segments {
-            let segment = state.get_segment(i).context("reading segment")?;
-            text.push_str(&segment.to_str_lossy().context("decoding segment")?);
-            // Match the cloud path: judge on the first segment only.
-            if i == 0 {
-                no_speech_prob = Some(f64::from(segment.no_speech_probability()));
-            }
-        }
-
-        let text = strip_non_speech_markers(&text);
-        if hallucination::is_hallucination(&text, no_speech_prob) {
-            tracing::info!(%text, "dropped hallucinated transcript");
-            return Ok(String::new());
-        }
-        Ok(text)
+        run_whisper(&self.context, self.language.as_deref(), samples)
     }
+}
+
+/// The blocking inference itself, free-standing so it can run on the blocking
+/// pool without borrowing the transcriber.
+fn run_whisper(
+    context: &WhisperContext,
+    language: Option<&str>,
+    samples: &[f32],
+) -> Result<String> {
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    params.set_language(language.or(Some("en")));
+    // The transcript is returned, not printed.
+    params.set_print_special(false);
+    params.set_print_progress(false);
+    params.set_print_realtime(false);
+    params.set_print_timestamps(false);
+
+    let mut state = context.create_state().context("creating state")?;
+    state.full(params, samples).context("running whisper")?;
+
+    let segments = state.full_n_segments();
+    let mut text = String::new();
+    let mut no_speech_prob = None;
+
+    for i in 0..segments {
+        let segment = state.get_segment(i).context("reading segment")?;
+        text.push_str(&segment.to_str_lossy().context("decoding segment")?);
+        // Match the cloud path: judge on the first segment only.
+        if i == 0 {
+            no_speech_prob = Some(f64::from(segment.no_speech_probability()));
+        }
+    }
+
+    let text = strip_non_speech_markers(&text);
+    if hallucination::is_hallucination(&text, no_speech_prob) {
+        tracing::info!(%text, "dropped hallucinated transcript");
+        return Ok(String::new());
+    }
+    Ok(text)
 }
 
 #[async_trait]
 impl Transcriber for LocalTranscriber {
     async fn transcribe(&self, wav_path: &Path) -> Result<String> {
         let samples = read_wav_16k_mono(wav_path)?;
-        self.transcribe_samples(&samples)
+
+        // whisper inference is seconds of blocking CPU. Running it directly on
+        // an async worker parks that thread for the whole call and starves the
+        // runtime — the dictation then hangs at "Transcribing" because the task
+        // that would publish the result never gets scheduled. Hand it to the
+        // blocking pool, which exists for exactly this.
+        let context = self.context.clone();
+        let language = self.language.clone();
+        tokio::task::spawn_blocking(move || run_whisper(&context, language.as_deref(), &samples))
+            .await
+            .context("whisper task panicked")?
     }
 }
 

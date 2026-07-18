@@ -75,8 +75,10 @@ name = "aloud-agent"
 version = "0.1.0"
 dependencies = [
  "aloud-llm",
+ "aloud-store",
  "anyhow",
  "async-trait",
+ "reqwest",
  "serde",
  "serde_json",
  "specta",

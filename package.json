@@ -12,6 +12,13 @@
     "test": "cargo test --workspace"
   },
   "dependencies": {
-    "@ag-ui/core": "^0.0.57"
+    "@ag-ui/core": "^0.0.57",
+    "@ai-sdk/anthropic": "^4.0.15",
+    "@composio/core": "^0.14.0",
+    "@composio/vercel": "^0.11.1",
+    "ai": "^7.0.30"
+  },
+  "devDependencies": {
+    "shadcn": "^4.13.0"
   }
 }

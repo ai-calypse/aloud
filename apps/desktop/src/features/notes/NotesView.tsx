@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { commands, type Note, type SearchResult } from "../../lib/bindings";
+import { commands, events, type Note, type SearchResult } from "../../lib/bindings";
 import { Highlight } from "./Highlight";
 import { or } from "../../lib/result";
 import "./notes.css";
@@ -20,8 +20,21 @@ export function NotesView() {
   // exactly what scored.
   const terms = useMemo(() => query.split(/\s+/).filter(Boolean), [query]);
 
+  // Fetched on mount, then again on window focus and whenever a meeting
+  // finishes saving — the list went stale when a note landed while this view
+  // was already open.
   useEffect(() => {
-    or(commands.recentNotes(20), [], "loading notes").then(setRecent);
+    const refresh = () =>
+      or(commands.recentNotes(20), [], "loading notes").then(setRecent);
+    refresh();
+    window.addEventListener("focus", refresh);
+    const unlisten = events.meetingPhase.listen(({ payload }) => {
+      if (payload === "idle") refresh();
+    });
+    return () => {
+      window.removeEventListener("focus", refresh);
+      unlisten.then((off) => off());
+    };
   }, []);
 
   useEffect(() => {

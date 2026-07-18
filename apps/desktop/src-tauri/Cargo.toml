@@ -26,7 +26,6 @@ aloud-store = { path = "../../../crates/store" }
 aloud-transcribe = { path = "../../../crates/transcribe" }
 anyhow.workspace = true
 chrono = "0.4"
-hound = "3.5"
 futures-util = "0.3"
 serde.workspace = true
 serde_json.workspace = true
@@ -44,3 +43,6 @@ tauri-plugin-updater = "2"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+hound = "3.5"

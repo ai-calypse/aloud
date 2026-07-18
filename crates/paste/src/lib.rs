@@ -13,6 +13,68 @@ use anyhow::{Context, Result};
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use std::{thread::sleep, time::Duration};
 
+/// How long to wait for the main thread to service a dispatched key chord.
+/// Generous — the main thread only has to reach its run loop once — but
+/// bounded, so a process without a main run loop (tests, examples) gets an
+/// error instead of a hang.
+#[cfg(target_os = "macos")]
+const MAIN_THREAD_WAIT: Duration = Duration::from_secs(2);
+
+/// Runs `f` on the main thread and waits for its result.
+///
+/// enigo's layout-dependent keycode lookup calls TIS/TSM
+/// (`TISCopyCurrentKeyboardInputSource`), and modern macOS aborts the whole
+/// process (`dispatch_assert_queue` → SIGTRAP) when those run off the main
+/// queue. The pipeline pastes from a tokio worker and command mode copies from
+/// the event-tap thread, so every synthetic key chord must hop here first.
+#[cfg(target_os = "macos")]
+fn on_main_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    struct DispatchQueue {
+        _private: [u8; 0],
+    }
+    extern "C" {
+        // `dispatch_get_main_queue()` is a C macro over this static.
+        static _dispatch_main_q: DispatchQueue;
+        fn dispatch_async_f(
+            queue: *const DispatchQueue,
+            context: *mut c_void,
+            work: extern "C" fn(*mut c_void),
+        );
+        fn pthread_main_np() -> i32;
+    }
+
+    extern "C" fn trampoline(context: *mut c_void) {
+        // SAFETY: `context` is the Box leaked below; this runs exactly once.
+        let f = unsafe { Box::from_raw(context.cast::<Box<dyn FnOnce() + Send>>()) };
+        f();
+    }
+
+    if unsafe { pthread_main_np() } != 0 {
+        return Ok(f());
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    // If the wait below times out and the block still runs later, the send
+    // just fails on a closed channel — nothing dangles.
+    let block: Box<dyn FnOnce() + Send> = Box::new(move || {
+        let _ = tx.send(f());
+    });
+    let context = Box::into_raw(Box::new(block));
+    unsafe {
+        dispatch_async_f(&_dispatch_main_q, context.cast::<c_void>(), trampoline);
+    }
+    rx.recv_timeout(MAIN_THREAD_WAIT)
+        .context("main thread did not run the key chord (no run loop?)")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn on_main_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+    Ok(f())
+}
+
 /// Time for the target app to service the paste before the clipboard is
 /// restored. Restoring too early pastes the *old* clipboard.
 const PASTE_SETTLE: Duration = Duration::from_millis(150);
@@ -102,21 +164,23 @@ pub fn paste_text(text: &str, press_enter: bool) -> Result<()> {
 
 /// Sends the paste chord (Cmd+V / Ctrl+V), optionally followed by Return.
 fn send_paste(press_enter: bool) -> Result<()> {
-    let mut enigo = Enigo::new(&Settings::default()).context("creating input simulator")?;
+    on_main_thread(move || -> Result<()> {
+        let mut enigo = Enigo::new(&Settings::default()).context("creating input simulator")?;
 
-    enigo.key(PASTE_MODIFIER, Direction::Press)?;
-    let pressed = enigo.key(Key::Unicode('v'), Direction::Click);
-    // Always release the modifier: leaving Cmd stuck down would wedge the
-    // user's keyboard.
-    enigo.key(PASTE_MODIFIER, Direction::Release)?;
-    pressed.context("sending paste")?;
+        enigo.key(PASTE_MODIFIER, Direction::Press)?;
+        let pressed = enigo.key(Key::Unicode('v'), Direction::Click);
+        // Always release the modifier: leaving Cmd stuck down would wedge the
+        // user's keyboard.
+        enigo.key(PASTE_MODIFIER, Direction::Release)?;
+        pressed.context("sending paste")?;
 
-    if press_enter {
-        enigo
-            .key(Key::Return, Direction::Click)
-            .context("sending return")?;
-    }
-    Ok(())
+        if press_enter {
+            enigo
+                .key(Key::Return, Direction::Click)
+                .context("sending return")?;
+        }
+        Ok(())
+    })?
 }
 
 /// Copies the current selection and returns it, restoring the clipboard.
@@ -133,11 +197,13 @@ pub fn copy_selection() -> Result<String> {
     let sentinel = "\u{0}aloud-selection-probe";
     clipboard.set_text(sentinel).ok();
 
-    let mut enigo = Enigo::new(&Settings::default()).context("creating input simulator")?;
-    enigo.key(PASTE_MODIFIER, Direction::Press)?;
-    let copied = enigo.key(Key::Unicode('c'), Direction::Click);
-    enigo.key(PASTE_MODIFIER, Direction::Release)?;
-    copied.context("sending copy")?;
+    on_main_thread(|| -> Result<()> {
+        let mut enigo = Enigo::new(&Settings::default()).context("creating input simulator")?;
+        enigo.key(PASTE_MODIFIER, Direction::Press)?;
+        let copied = enigo.key(Key::Unicode('c'), Direction::Click);
+        enigo.key(PASTE_MODIFIER, Direction::Release)?;
+        copied.context("sending copy")
+    })??;
 
     sleep(PASTE_SETTLE);
     let selection = clipboard.get_text().unwrap_or_default();

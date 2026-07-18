@@ -6,14 +6,16 @@
 use aloud_store::Settings;
 use anyhow::{bail, Result};
 use futures_util::StreamExt;
-use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager};
+use tauri_specta::Event;
 
 const LABEL: &str = "ask";
 
 /// Streamed to the panel as the answer arrives.
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "value")]
+#[tauri_specta(event_name = "ask")]
 pub enum AskEvent {
     /// The question, echoed so the panel can show what it heard.
     Question(String),
@@ -24,7 +26,7 @@ pub enum AskEvent {
 }
 
 fn emit(app: &AppHandle, event: AskEvent) {
-    if let Err(e) = app.emit_to(LABEL, "ask", event) {
+    if let Err(e) = event.emit_to(app, LABEL) {
         tracing::warn!(%e, "could not send to ask panel");
     }
 }
@@ -67,11 +69,18 @@ async fn stream_answer(app: &AppHandle, question: &str, settings: &Settings) -> 
     Ok(())
 }
 
+/// Gap between the screen top and the panel, per the Swift answer panel.
+const TOP_GAP: f64 = 12.0;
+
 fn show(app: &AppHandle) {
     let Some(window) = app.get_webview_window(LABEL) else {
         tracing::warn!("ask window missing");
         return;
     };
+    // Anchor the top edge; the frontend grows the window downward to fit.
+    if let Err(e) = crate::overlay::position_top_center(&window, TOP_GAP) {
+        tracing::warn!(%e, "could not position ask panel");
+    }
     let _ = window.show();
     // Unlike the pill, this window is read and scrolled, so it takes focus.
     let _ = window.set_focus();

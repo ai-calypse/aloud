@@ -1,0 +1,32 @@
+/* Panel windows (ask/agent) don't load App.css and have no vibrancy: the
+   card IS the window. Pin the Swift AskAnswerPanel's always-dark palette
+   here so the shadcn tokens in index.css resolve, and keep the backdrop
+   opaque — the native window shadow hugs the rounded card. */
+
+:root {
+  --bg: #1e1e20;
+  --fg: #ffffff;
+  --muted: #a1a1a6;
+  --accent: #64d2ff;
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+/* Opaque stand-in for the Swift panel's blur-under-black-tint material. */
+.panel {
+  background: linear-gradient(180deg, #19191b, #232325);
+}
+
+/* Hugs its content; past the screen-derived cap it scrolls. The cap is set
+   on the root by the autosize hook (55% of the screen minus chrome). */
+.panel__answer {
+  max-height: var(--answer-cap, 400px);
+  overflow-y: auto;
+}

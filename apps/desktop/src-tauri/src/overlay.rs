@@ -5,7 +5,8 @@
 //! CSS backdrop blur — a visual downgrade, not a functional one.
 
 use crate::pipeline::Phase;
-use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri_specta::Event;
 
 const LABEL: &str = "overlay";
 /// Distance from the top of the screen, in logical pixels. Clears the menu bar.
@@ -27,7 +28,7 @@ pub fn show(app: &AppHandle, phase: Phase) {
         return;
     };
 
-    if let Err(e) = position(&window) {
+    if let Err(e) = position_top_center(&window, TOP_MARGIN) {
         tracing::warn!(%e, "could not position overlay");
     }
 
@@ -39,7 +40,7 @@ pub fn show(app: &AppHandle, phase: Phase) {
     // Re-send the phase to this window specifically. A hidden window's webview
     // is created lazily, so it can miss the app-wide event that triggered the
     // show and stay stuck rendering its initial idle state — invisible.
-    if let Err(e) = window.emit("dictation-phase", phase) {
+    if let Err(e) = phase.emit_to(app, LABEL) {
         tracing::warn!(%e, "could not send phase to overlay");
     }
 }
@@ -50,8 +51,10 @@ pub fn hide(app: &AppHandle) {
     }
 }
 
-/// Centres the pill near the bottom of whichever monitor holds the cursor.
-fn position(window: &WebviewWindow) -> tauri::Result<()> {
+/// Top-centres `window` on whichever monitor holds the cursor. Shared with
+/// the ask/agent panels, which drop from the top the way the Swift app's
+/// answer panel does.
+pub fn position_top_center(window: &WebviewWindow, top_margin: f64) -> tauri::Result<()> {
     // The cursor's monitor, not the primary one: on a multi-monitor desk the
     // user is looking at the screen they are working on.
     let monitor = match window.cursor_position() {
@@ -69,7 +72,7 @@ fn position(window: &WebviewWindow) -> tauri::Result<()> {
 
     window.set_position(tauri::LogicalPosition::new(
         origin.x + (screen.width - size.width) / 2.0,
-        origin.y + TOP_MARGIN,
+        origin.y + top_margin,
     ))?;
     Ok(())
 }
