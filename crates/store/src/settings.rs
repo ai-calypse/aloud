@@ -8,6 +8,11 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
+/// Cleanup model defaults, matching voice-dict's current ones
+/// (`AppState.defaultPostProcessingModel` / `…FallbackModel`).
+const DEFAULT_CLEANUP_MODEL: &str = "openai/gpt-oss-20b";
+const DEFAULT_FALLBACK_MODEL: &str = "qwen/qwen3.6-27b";
+
 /// Everything the app remembers between launches.
 ///
 /// One coarse struct rather than ~70 individual commands: the whole thing is
@@ -65,8 +70,8 @@ impl Default for Settings {
             base_url: aloud_transcribe::cloud::DEFAULT_BASE_URL.into(),
             language: String::new(),
             post_processing_enabled: true,
-            post_processing_model: "llama-3.3-70b-versatile".into(),
-            fallback_model: "llama-3.1-8b-instant".into(),
+            post_processing_model: DEFAULT_CLEANUP_MODEL.into(),
+            fallback_model: DEFAULT_FALLBACK_MODEL.into(),
             custom_system_prompt: String::new(),
             vocabulary: Vec::new(),
             macros: Vec::new(),
@@ -95,8 +100,23 @@ impl Settings {
     /// whatever fields do parse.
     pub fn load() -> Self {
         let mut settings = Self::load_file();
+        settings.migrate_deprecated_models();
         settings.fill_keys_from_env();
         settings
+    }
+
+    /// Moves a stored *old default* model to the current default, ported from
+    /// voice-dict's deprecated-default handling. A value the user typed
+    /// themselves is untouched; only the exact former defaults migrate (which
+    /// also catches a user who deliberately chose the old default — accepted,
+    /// as in the Swift app).
+    fn migrate_deprecated_models(&mut self) {
+        if self.post_processing_model == "llama-3.3-70b-versatile" {
+            self.post_processing_model = DEFAULT_CLEANUP_MODEL.into();
+        }
+        if self.fallback_model == "llama-3.1-8b-instant" {
+            self.fallback_model = DEFAULT_FALLBACK_MODEL.into();
+        }
     }
 
     fn load_file() -> Self {
@@ -255,6 +275,27 @@ mod tests {
         // Empty value and absent key both yield None.
         assert_eq!(parse_dotenv_value(env, "COMPOSIO_API_KEY"), None);
         assert_eq!(parse_dotenv_value(env, "MISSING"), None);
+    }
+
+    #[test]
+    fn deprecated_default_models_migrate_but_custom_ones_do_not() {
+        let mut old = Settings {
+            post_processing_model: "llama-3.3-70b-versatile".into(),
+            fallback_model: "llama-3.1-8b-instant".into(),
+            ..Default::default()
+        };
+        old.migrate_deprecated_models();
+        assert_eq!(old.post_processing_model, DEFAULT_CLEANUP_MODEL);
+        assert_eq!(old.fallback_model, DEFAULT_FALLBACK_MODEL);
+
+        let mut custom = Settings {
+            post_processing_model: "my-fine-tune".into(),
+            fallback_model: "llama-3.1-70b".into(),
+            ..Default::default()
+        };
+        custom.migrate_deprecated_models();
+        assert_eq!(custom.post_processing_model, "my-fine-tune");
+        assert_eq!(custom.fallback_model, "llama-3.1-70b");
     }
 
     #[test]

@@ -40,6 +40,21 @@ const NAV: { id: Nav; title: string; icon: string; group: "app" | "settings" }[]
 
 const SETTINGS_IDS: SettingsSection[] = ["general", "hotkeys", "macros", "rules"];
 
+/**
+ * Mirrors `Stats::time_saved_seconds` (crates/store/src/stats.rs): typing at
+ * 40 wpm minus time actually spent speaking, clamped at zero. Formatted as in
+ * voice-dict's MenuBarView: minutes under an hour, tenths of hours above.
+ */
+function timeSavedText(stats: Stats): string {
+  const seconds = Math.max(
+    ((stats.totalWords ?? 0) / 40) * 60 - (stats.totalSpokenSeconds ?? 0),
+    0,
+  );
+  const minutes = seconds / 60;
+  if (minutes < 60) return `~${Math.round(minutes)} min`;
+  return `~${(minutes / 60).toFixed(1)} h`;
+}
+
 const isSettings = (n: Nav): n is SettingsSection =>
   (SETTINGS_IDS as string[]).includes(n);
 
@@ -55,10 +70,17 @@ export default function App() {
     commands.getStats().then(setStats);
     commands.hotkeysPermitted().then(setHotkeysReady);
 
+    // Dictation happens while this window is unfocused, and macOS suspends a
+    // hidden webview (App Nap) — "done" events can land on a frozen runtime
+    // and vanish, and the streak can roll at midnight with no event at all.
+    // Refetching on focus catches both.
+    const refreshStats = () => commands.getStats().then(setStats);
+    window.addEventListener("focus", refreshStats);
+
     const unlistenPhase = events.dictationPhase.listen((event) => {
       setPhase(event.payload);
       // Stats only change once the text has actually landed.
-      if (event.payload === "done") commands.getStats().then(setStats);
+      if (event.payload === "done") refreshStats();
     });
     // Rust waits for the Accessibility grant and announces it, so the banner
     // clears the moment permission lands — no app restart needed.
@@ -66,6 +88,7 @@ export default function App() {
       setHotkeysReady(event.payload),
     );
     return () => {
+      window.removeEventListener("focus", refreshStats);
       unlistenPhase.then((off) => off());
       unlistenPermission.then((off) => off());
     };
@@ -165,6 +188,10 @@ export default function App() {
               <dt className="text-sm text-muted-foreground">Streak</dt>
               <dd className="m-0 tabular-nums">
                 {stats?.currentStreakDays ?? 0} days
+              </dd>
+              <dt className="text-sm text-muted-foreground">Time saved</dt>
+              <dd className="m-0 tabular-nums">
+                {stats ? timeSavedText(stats) : "~0 min"}
               </dd>
             </dl>
 
