@@ -73,7 +73,9 @@ impl Pipeline {
             session: Mutex::new(Session::default()),
             settings,
             history: Mutex::new(History::open(&history_path)?),
-            stats: Mutex::new(Stats::default()),
+            // Lifetime stats outlive the process; a fresh Stats here silently
+            // zeroed the user's words, sessions, and streak on every launch.
+            stats: Mutex::new(Stats::load()),
             local: Mutex::new(None),
         })
     }
@@ -113,6 +115,15 @@ impl Pipeline {
 
     fn settings(&self) -> Settings {
         self.settings.lock().map(|s| s.clone()).unwrap_or_default()
+    }
+
+    /// Whether a capture session is in flight. Drives the tap-to-toggle
+    /// hotkey, which has no release edge to tell start from stop.
+    pub fn is_recording(&self) -> bool {
+        self.session
+            .lock()
+            .map(|s| s.recorder.is_some())
+            .unwrap_or(false)
     }
 
     /// Starts capturing. Idempotent: a second call while recording is a no-op.
@@ -191,7 +202,7 @@ impl Pipeline {
         // Apply the focused app's rule (if any) to a working copy, so every
         // downstream step just reads the effective settings. History still
         // records against the real config; only cleanup behaviour changes.
-        let effective = apply_app_rule(settings.clone());
+        let (effective, app_name) = apply_app_rule(settings.clone());
 
         let final_text = self.post_process(&raw, &effective).await;
         if final_text.trim().is_empty() {
@@ -199,7 +210,13 @@ impl Pipeline {
         }
 
         aloud_paste::paste_text(&final_text, false)?;
-        self.record(&raw, &final_text, started_at, &settings);
+        self.record(
+            &raw,
+            &final_text,
+            started_at,
+            &settings,
+            app_name.as_deref(),
+        );
         Ok(Outcome::Pasted)
     }
 
@@ -288,6 +305,7 @@ impl Pipeline {
         final_text: &str,
         started_at: Option<std::time::Instant>,
         settings: &Settings,
+        app_name: Option<&str>,
     ) {
         let duration_ms = started_at.map_or(0, |s| s.elapsed().as_millis() as i64);
 
@@ -300,7 +318,7 @@ impl Pipeline {
                 now,
                 raw,
                 final_text,
-                None,
+                app_name,
                 duration_ms,
                 settings.history_retention,
             ) {
@@ -314,6 +332,11 @@ impl Pipeline {
                 Stats::estimated_spoken_seconds(words),
                 chrono::Local::now(),
             );
+            // Persist immediately: dictation is the only writer, and the app is
+            // routinely quit without a clean shutdown hook.
+            if let Err(e) = stats.save() {
+                tracing::warn!(%e, "could not save stats");
+            }
         }
     }
 
@@ -545,23 +568,41 @@ pub async fn build_transcriber(settings: &Settings) -> Result<Arc<dyn Transcribe
 /// Overrides `settings` with the rule for the currently focused app, if one
 /// matches. Reads the frontmost app once; a None app or no matching rule
 /// leaves the settings untouched.
-fn apply_app_rule(mut settings: Settings) -> Settings {
-    if settings.app_rules.is_empty() {
-        return settings;
-    }
+fn apply_app_rule(mut settings: Settings) -> (Settings, Option<String>) {
+    // Read once and hand the name back: history records it too, and this is an
+    // Accessibility round-trip we do not want to pay for twice per dictation.
     let app = aloud_selection::frontmost_app();
+    if settings.app_rules.is_empty() {
+        return (settings, app);
+    }
     let Some(rule) = aloud_store::rules::matching(&settings.app_rules, app.as_deref()) else {
-        return settings;
+        return (settings, app);
     };
     tracing::info!(app = ?app, matcher = %rule.app_matches, "applying app rule");
 
     if let Some(enabled) = rule.post_processing_enabled {
         settings.post_processing_enabled = enabled;
     }
+    // The rule's prompt is a *style hint*, appended to whichever base prompt is
+    // in play — as in the Swift app. Replacing the base (what this used to do)
+    // silently discarded every cleanup instruction, so a "keep it casual" rule
+    // turned off punctuation repair too.
     if !rule.custom_prompt.trim().is_empty() {
-        settings.custom_system_prompt = rule.custom_prompt.clone();
+        settings.custom_system_prompt =
+            prompt_with_hint(&settings.custom_system_prompt, &rule.custom_prompt);
     }
-    settings
+    (settings, app)
+}
+
+/// The effective cleanup prompt for an app rule: the rule's text is a style
+/// hint *appended* to whichever base prompt is in play, never a replacement.
+fn prompt_with_hint(custom: &str, hint: &str) -> String {
+    let base = if custom.trim().is_empty() {
+        aloud_llm::prompts::CLEANUP
+    } else {
+        custom
+    };
+    format!("{}\n\n{}", base.trim_end(), hint.trim())
 }
 
 /// A unique temp path per dictation, so overlapping sessions cannot collide.
@@ -579,5 +620,24 @@ mod tests {
     #[test]
     fn temp_paths_are_unique() {
         assert_ne!(temp_wav_path(), temp_wav_path());
+    }
+
+    /// An app rule's prompt is a style hint, not a replacement. Replacing the
+    /// base prompt made a "keep it casual" Slack rule silently discard every
+    /// cleanup instruction (punctuation, filler removal, the EMPTY sentinel).
+    #[test]
+    fn app_rule_prompt_appends_to_the_base_instead_of_replacing_it() {
+        let hint = "Keep it casual, no punctuation.";
+
+        let on_default = prompt_with_hint("", hint);
+        assert!(
+            on_default.starts_with(aloud_llm::prompts::CLEANUP.trim_end()),
+            "the built-in cleanup prompt must survive"
+        );
+        assert!(on_default.ends_with(hint));
+
+        let on_custom = prompt_with_hint("MY CUSTOM PROMPT", hint);
+        assert!(on_custom.starts_with("MY CUSTOM PROMPT"));
+        assert!(on_custom.ends_with(hint));
     }
 }

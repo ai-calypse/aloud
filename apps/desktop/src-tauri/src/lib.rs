@@ -277,6 +277,21 @@ fn handle_hotkey(
                 }
             });
         }
+        // Tap to start, tap again to stop — the same flow as Hold, but with two
+        // presses instead of a press and a release, so there is no Deactivated
+        // edge to hang the stop on.
+        Event::Activated(Role::Toggle) => {
+            if pipeline.is_recording() {
+                let pipeline = pipeline.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = pipeline.stop_and_paste().await {
+                        tracing::error!(%e, "dictation failed");
+                    }
+                });
+            } else if let Err(e) = pipeline.start() {
+                tracing::error!(%e, "could not start recording");
+            }
+        }
         Event::Activated(Role::Ask) => {
             if let Err(e) = pipeline.start() {
                 tracing::error!(%e, "could not start recording");

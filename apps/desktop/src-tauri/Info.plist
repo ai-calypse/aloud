@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the bundle's Info.plist by Tauri, which picks up any Info.plist
+  sitting next to tauri.conf.json.
+
+  NSMicrophoneUsageDescription is not optional: macOS terminates a process that
+  touches the microphone without one, so its absence is a crash on first
+  dictation rather than a missing prompt.
+-->
+<plist version="1.0">
+  <dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Aloud records your voice so it can transcribe what you say and paste the text into the app you are using.</string>
+  </dict>
+</plist>
