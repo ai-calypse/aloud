@@ -355,7 +355,7 @@ fn handle_hotkey(
 }
 
 /// Starts a meeting-notes session, or stops and saves the running one.
-fn toggle_meeting(
+pub(crate) fn toggle_meeting(
     app: &tauri::AppHandle,
     settings: &Arc<Mutex<Settings>>,
     meeting: &Arc<Mutex<Option<meeting::Meeting>>>,
