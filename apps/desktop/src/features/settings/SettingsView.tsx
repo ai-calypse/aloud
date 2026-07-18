@@ -6,6 +6,8 @@ import { MacroEditor } from "./MacroEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -15,7 +17,13 @@ import {
 } from "@/components/ui/select";
 
 /** One settings pane, selected from the app-level sidebar. */
-export type SettingsSection = "general" | "hotkeys" | "macros" | "rules";
+export type SettingsSection =
+  | "general"
+  | "hotkeys"
+  | "macros"
+  | "rules"
+  | "prompts"
+  | "integrations";
 
 /** Glass card grouping related fields (mirrors the Swift SettingsCard). */
 function Card({ title, children }: { title?: string; children: ReactNode }) {
@@ -61,10 +69,14 @@ export function SettingsView({ section }: { section: SettingsSection }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [saved, setSaved] = useState(false);
+  // Owned by the OS (a login item / registry key), not settings.json, so it is
+  // read from the autostart plugin rather than from `settings`.
+  const [atLogin, setAtLogin] = useState(false);
 
   useEffect(() => {
     commands.getSettings().then(setSettings);
     or(commands.inputDevices(), [], "listing microphones").then(setDevices);
+    or(commands.launchAtLogin(), false, "reading launch-at-login").then(setAtLogin);
   }, []);
 
   if (!settings) return <p className="text-muted-foreground">Loading…</p>;
@@ -235,11 +247,66 @@ export function SettingsView({ section }: { section: SettingsSection }) {
           <Card title="Behaviour">
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
+                checked={atLogin}
+                onCheckedChange={async (c) => {
+                  const enabled = c === true;
+                  setAtLogin(enabled);
+                  const result = await commands.setLaunchAtLogin(enabled);
+                  // The OS is the source of truth: if it refused, snap back
+                  // rather than showing a checkbox that lies.
+                  if (result.status === "error") {
+                    console.error(`launch at login: ${result.error}`);
+                    setAtLogin(!enabled);
+                  }
+                }}
+              />
+              Launch Aloud at login
+            </label>
+
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={settings.pressEnterCommand ?? true}
+                onCheckedChange={(c) =>
+                  update({ pressEnterCommand: c === true })
+                }
+              />
+              Say “press enter” at the end to submit
+            </label>
+
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
                 checked={settings.playSounds ?? true}
                 onCheckedChange={(c) => update({ playSounds: c === true })}
               />
               Play sounds
             </label>
+
+            {(settings.playSounds ?? true) && (
+              <Field label="Volume">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    className="flex-1 accent-primary"
+                    value={settings.soundVolume ?? 0.5}
+                    onChange={(e) =>
+                      update({ soundVolume: Number(e.target.value) })
+                    }
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() =>
+                      commands.previewSound(settings.soundVolume ?? 0.5)
+                    }
+                  >
+                    Preview
+                  </Button>
+                </div>
+              </Field>
+            )}
 
             <Field label="History kept">
               <Input
@@ -250,6 +317,70 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                 onChange={(e) =>
                   update({ historyRetention: Number(e.target.value) || 0 })
                 }
+              />
+            </Field>
+          </Card>
+        </>
+      )}
+
+      {section === "prompts" && (
+        <Card title="Cleanup prompt">
+          <p className="m-0 text-xs text-muted-foreground">
+            Replaces the built-in prompt that tidies every transcript. Leave it
+            empty to use the default. An App Rule’s style hint is appended to
+            whichever prompt is in play here.
+          </p>
+          <Textarea
+            rows={14}
+            className="font-mono text-xs"
+            placeholder="Leave empty to use the built-in cleanup prompt."
+            value={settings.customSystemPrompt ?? ""}
+            onChange={(e) => update({ customSystemPrompt: e.target.value })}
+          />
+          {(settings.customSystemPrompt ?? "").trim() !== "" && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="self-start"
+              onClick={() => update({ customSystemPrompt: "" })}
+            >
+              Reset to default
+            </Button>
+          )}
+        </Card>
+      )}
+
+      {section === "integrations" && (
+        <>
+          <Card title="Agent mode">
+            <p className="m-0 text-xs text-muted-foreground">
+              Agent mode runs spoken commands against Gmail and GitHub. It needs
+              a Cerebras key to understand the command and a Composio key to
+              reach the connected accounts. Connect the accounts themselves at{" "}
+              <a
+                className="underline"
+                href="https://app.composio.dev"
+                target="_blank"
+                rel="noreferrer"
+              >
+                app.composio.dev
+              </a>
+              .
+            </p>
+            <Field label="Cerebras key">
+              <Input
+                type="password"
+                placeholder="csk-…"
+                value={settings.cerebrasApiKey ?? ""}
+                onChange={(e) => update({ cerebrasApiKey: e.target.value })}
+              />
+            </Field>
+            <Field label="Composio key">
+              <Input
+                type="password"
+                placeholder="ak_…"
+                value={settings.composioApiKey ?? ""}
+                onChange={(e) => update({ composioApiKey: e.target.value })}
               />
             </Field>
           </Card>

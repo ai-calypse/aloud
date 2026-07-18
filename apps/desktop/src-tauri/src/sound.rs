@@ -25,19 +25,19 @@ pub enum Chime {
     Error,
 }
 
-/// Plays `chime` if `enabled`. Spawns a detached process and returns at once;
-/// the pipeline never waits on audio.
-pub fn play(chime: Chime, enabled: bool) {
+/// Plays `chime` if `enabled`, at `volume` (0.0–1.0). Spawns a detached
+/// process and returns at once; the pipeline never waits on audio.
+pub fn play(chime: Chime, enabled: bool, volume: f32) {
     if !enabled {
         return;
     }
-    if let Err(e) = play_impl(chime) {
+    if let Err(e) = play_impl(chime, volume.clamp(0.0, 1.0)) {
         tracing::debug!(%e, ?chime, "could not play alert sound");
     }
 }
 
 #[cfg(target_os = "macos")]
-fn play_impl(chime: Chime) -> std::io::Result<()> {
+fn play_impl(chime: Chime, volume: f32) -> std::io::Result<()> {
     // The names voice-dict used; these files ship with every macOS.
     let name = match chime {
         Chime::Start => "Tink",
@@ -45,15 +45,18 @@ fn play_impl(chime: Chime) -> std::io::Result<()> {
         Chime::Error => "Basso",
     };
     std::process::Command::new("afplay")
+        .arg("-v")
+        .arg(volume.to_string())
         .arg(format!("/System/Library/Sounds/{name}.aiff"))
         .spawn()
         .map(|_| ())
 }
 
 #[cfg(target_os = "windows")]
-fn play_impl(chime: Chime) -> std::io::Result<()> {
+fn play_impl(chime: Chime, _volume: f32) -> std::io::Result<()> {
     // SystemSounds has no distinct "start" tone; Asterisk/Hand are the nearest
-    // informational/error pair, with Beep standing in for the stop tick.
+    // informational/error pair, with Beep standing in for the stop tick. There
+    // is no per-sound volume here, so the setting does not apply.
     let sound = match chime {
         Chime::Start => "Asterisk",
         Chime::Stop => "Beep",
@@ -70,6 +73,6 @@ fn play_impl(chime: Chime) -> std::io::Result<()> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn play_impl(_chime: Chime) -> std::io::Result<()> {
+fn play_impl(_chime: Chime, _volume: f32) -> std::io::Result<()> {
     Ok(())
 }

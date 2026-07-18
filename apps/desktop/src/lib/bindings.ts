@@ -26,6 +26,18 @@ export const commands = {
 	 */
 	hotkeysPermitted: () => __TAURI_INVOKE<boolean>("hotkeys_permitted"),
 	pasteAgain: () => typedError<null, string>(__TAURI_INVOKE("paste_again")),
+	/**
+	 *  Plays the start chime, so the volume slider can be judged by ear rather
+	 *  than by guessing at a number.
+	 */
+	previewSound: (volume: number | null) => __TAURI_INVOKE<void>("preview_sound", { volume }),
+	/**
+	 *  Whether the OS launches Aloud at login. The autostart plugin owns this
+	 *  state (a login item / registry key), not settings.json — storing a copy
+	 *  would drift the moment the user changed it outside the app.
+	 */
+	launchAtLogin: () => typedError<boolean, string>(__TAURI_INVOKE("launch_at_login")),
+	setLaunchAtLogin: (enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("set_launch_at_login", { enabled })),
 	/**  Lets the panel dismiss itself on Escape or a click outside. */
 	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
 	/**  Resolves the pending confirmation. Called by the panel's Yes/No buttons. */
@@ -241,6 +253,11 @@ export type Settings = {
 	hotkeys?: Config,
 	selectedMicrophone?: string | null,
 	playSounds?: boolean,
+	/**
+	 *  Alert-chime volume, 0.0–1.0. Honoured on macOS (`afplay -v`); Windows
+	 *  system sounds have no per-sound volume, so it is ignored there.
+	 */
+	soundVolume?: number | null,
 	pressEnterCommand?: boolean,
 	/**  Whether the first-run wizard has been completed. False shows it. */
 	onboarded?: boolean,

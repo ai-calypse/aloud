@@ -51,6 +51,9 @@ pub struct Settings {
     pub hotkeys: aloud_hotkey::model::Config,
     pub selected_microphone: Option<String>,
     pub play_sounds: bool,
+    /// Alert-chime volume, 0.0–1.0. Honoured on macOS (`afplay -v`); Windows
+    /// system sounds have no per-sound volume, so it is ignored there.
+    pub sound_volume: f32,
     pub press_enter_command: bool,
     /// Whether the first-run wizard has been completed. False shows it.
     pub onboarded: bool,
@@ -79,6 +82,7 @@ impl Default for Settings {
             hotkeys: aloud_hotkey::model::Config::defaults(),
             selected_microphone: None,
             play_sounds: true,
+            sound_volume: 0.5,
             press_enter_command: true,
             history_retention: 50,
             // A fresh install has not been through the wizard; a migrated one

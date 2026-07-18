@@ -20,6 +20,7 @@ import {
 /** The roles a user binds, and the Config key each writes to. */
 const ROLES: { key: keyof Config; label: string; hint: string }[] = [
   { key: "hold", label: "Dictate (hold)", hint: "Hold to talk, release to paste" },
+  { key: "toggle", label: "Dictate (toggle)", hint: "Tap to start, tap again to stop" },
   { key: "ask", label: "Ask (hold)", hint: "Hold, ask a question, read the answer" },
   { key: "command", label: "Command (hold)", hint: "Hold to transform the selection" },
   { key: "agent", label: "Agent (hold)", hint: "Hold to run a command across apps" },

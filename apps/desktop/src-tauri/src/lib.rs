@@ -54,6 +54,9 @@ pub fn run() {
             commands::installed_apps,
             commands::hotkeys_permitted,
             commands::paste_again,
+            commands::preview_sound,
+            commands::launch_at_login,
+            commands::set_launch_at_login,
             ask::close_ask,
             agent::confirm_agent,
             agent::close_agent,
@@ -78,6 +81,11 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // MacosLauncher is ignored off macOS; no launch args are needed.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {

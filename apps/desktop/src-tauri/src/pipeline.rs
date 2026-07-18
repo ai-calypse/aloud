@@ -96,7 +96,8 @@ impl Pipeline {
             Phase::Done | Phase::Idle => None,
         };
         if let Some(chime) = chime {
-            crate::sound::play(chime, self.settings().play_sounds);
+            let settings = self.settings();
+            crate::sound::play(chime, settings.play_sounds, settings.sound_volume);
         }
 
         match phase {
