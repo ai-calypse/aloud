@@ -38,6 +38,18 @@ export const commands = {
 	 */
 	launchAtLogin: () => typedError<boolean, string>(__TAURI_INVOKE("launch_at_login")),
 	setLaunchAtLogin: (enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("set_launch_at_login", { enabled })),
+	/**  Connected toolkits, each with the tools the agent will actually offer. */
+	listConnectors: () => typedError<Connector[], string>(__TAURI_INVOKE("list_connectors")),
+	/**  Toolkits matching `query`, for the add-a-connector search. */
+	searchConnectors: (query: string) => typedError<Connector[], string>(__TAURI_INVOKE("search_connectors", { query })),
+	/**
+	 *  Starts an OAuth connection and opens the consent page in the browser.
+	 * 
+	 *  Composio hosts the callback, so there is nothing to catch here — the user
+	 *  finishes in the browser and the pane picks the new account up on refresh.
+	 */
+	connectConnector: (toolkit: string) => typedError<null, string>(__TAURI_INVOKE("connect_connector", { toolkit })),
+	disconnectConnector: (connectionId: string) => typedError<null, string>(__TAURI_INVOKE("disconnect_connector", { connectionId })),
 	/**  Lets the panel dismiss itself on Escape or a click outside. */
 	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
 	/**  Resolves the pending confirmation. Called by the panel's Yes/No buttons. */
@@ -141,6 +153,32 @@ export type Config = {
 	command: Binding | null,
 	meeting_notes: Binding | null,
 	agent: Binding | null,
+};
+
+/**  One connectable service, for the Connectors pane. */
+export type Connector = {
+	slug: string,
+	name: string,
+	logo: string,
+	description: string,
+	toolsCount: number,
+	connected: boolean,
+	connectionId: string | null,
+	/**
+	 *  The tools the agent can actually call. Only filled for connected
+	 *  toolkits — a search result would need a request per row.
+	 */
+	tools: ConnectorTool[],
+};
+
+export type ConnectorTool = {
+	name: string,
+	description: string,
+	/**
+	 *  Drives the "asks first" badge: anything not read-only is confirmed
+	 *  before it runs.
+	 */
+	readOnly: boolean,
 };
 
 export type Engine = 

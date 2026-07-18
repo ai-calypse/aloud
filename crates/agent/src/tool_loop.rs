@@ -7,7 +7,7 @@
 //! rather than loop forever. Write tools (send email, create issue) pause for an
 //! explicit confirmation before they run; that is the one non-negotiable gate.
 
-use crate::composio::{is_write_tool, ComposioClient, ToolDef};
+use crate::composio::{ComposioClient, ToolDef};
 use aloud_llm::{LlmClient, LlmError, Message};
 use anyhow::Result;
 use std::future::Future;
@@ -130,29 +130,44 @@ where
             // A write waits for an explicit yes. A rejected write is reported to
             // the model as a normal result so it can respond ("Okay, cancelled")
             // rather than erroring the whole command.
-            let result = if is_write_tool(&name) && !confirm(name.clone(), arg_lines.clone()).await
-            {
-                on_event(LoopEvent::ToolCallResult {
-                    name: name.clone(),
-                    success: false,
-                });
-                r#"{"error":"user declined this action"}"#.to_string()
-            } else {
-                let result = composio.execute(&name, &args).await;
-                let success = tool_succeeded(&result);
-                any_failed |= !success;
-                on_event(LoopEvent::ToolCallResult {
-                    name: name.clone(),
-                    success,
-                });
-                result
-            };
+            let result =
+                if is_write(&name, tools) && !confirm(name.clone(), arg_lines.clone()).await {
+                    on_event(LoopEvent::ToolCallResult {
+                        name: name.clone(),
+                        success: false,
+                    });
+                    r#"{"error":"user declined this action"}"#.to_string()
+                } else {
+                    let result = composio.execute(&name, &args).await;
+                    let success = tool_succeeded(&result);
+                    any_failed |= !success;
+                    on_event(LoopEvent::ToolCallResult {
+                        name: name.clone(),
+                        success,
+                    });
+                    result
+                };
 
             messages.push(Message::tool_result(&call.id, result));
         }
     }
 
     anyhow::bail!("reached the tool-round limit without an answer")
+}
+
+/// Whether a tool needs confirmation before it runs.
+///
+/// Fail-safe by construction: only a tool Composio explicitly marks
+/// `readOnlyHint` skips the gate. A create, an update, a delete, an
+/// unannotated tool, or a name that is not in the offered set at all is
+/// treated as a write. This replaced a hardcoded list of two slugs, which
+/// silently let every tool of a newly connected toolkit run unconfirmed.
+fn is_write(name: &str, tools: &[ToolDef]) -> bool {
+    !tools
+        .iter()
+        .find(|t| t.name == name)
+        .map(|t| t.read_only)
+        .unwrap_or(false)
 }
 
 /// Whether a compacted tool result reports success. The execute path returns
@@ -201,6 +216,32 @@ fn arg_display_lines(args: &serde_json::Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tool(name: &str, read_only: bool) -> ToolDef {
+        ToolDef {
+            name: name.into(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            read_only,
+        }
+    }
+
+    /// The confirmation gate is the one non-negotiable safety property, so it
+    /// must fail closed: anything not proven read-only asks first.
+    #[test]
+    fn only_explicitly_read_only_tools_skip_confirmation() {
+        let tools = [
+            tool("GMAIL_FETCH_EMAILS", true),
+            tool("GMAIL_SEND_EMAIL", false),
+        ];
+
+        assert!(!is_write("GMAIL_FETCH_EMAILS", &tools));
+        assert!(is_write("GMAIL_SEND_EMAIL", &tools));
+        // A hallucinated or newly added name we were never offered must not
+        // slip through as a read.
+        assert!(is_write("SLACK_DELETE_EVERYTHING", &tools));
+        assert!(is_write("anything", &[]));
+    }
 
     #[test]
     fn success_trusts_the_successful_flag_not_a_null_error() {
