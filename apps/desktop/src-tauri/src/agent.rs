@@ -95,13 +95,20 @@ pub async fn run(app: &AppHandle, transcript: String, settings: &Settings) -> Re
     Ok(())
 }
 
+// Agent intent parsing runs on Cerebras, not Groq: the tool-call parse is a
+// heavier request and Groq's tokens-per-minute limit throttles it. Cerebras is
+// OpenAI-compatible, so the same LlmClient works against its endpoint.
+const CEREBRAS_BASE_URL: &str = "https://api.cerebras.ai/v1";
+const CEREBRAS_MODEL: &str = "gpt-oss-120b";
+
 async fn execute(app: &AppHandle, transcript: &str, settings: &Settings) -> Result<String> {
-    if settings.groq_api_key.trim().is_empty() {
-        bail!("Agent mode needs an API key to understand commands — add one in Settings");
+    if settings.cerebras_api_key.trim().is_empty() {
+        bail!("Agent mode needs a Cerebras API key to understand commands — add one in Settings");
     }
 
-    let client = aloud_llm::LlmClient::new(&settings.groq_api_key, Some(&settings.base_url))?;
-    let action = aloud_agent::parse_intent(&client, &settings.post_processing_model, transcript)
+    let client =
+        aloud_llm::LlmClient::new(&settings.cerebras_api_key, Some(CEREBRAS_BASE_URL))?;
+    let action = aloud_agent::parse_intent(&client, CEREBRAS_MODEL, transcript)
         .await?
         .ok_or_else(|| anyhow::anyhow!("I didn't recognize that as a command I can run"))?;
 

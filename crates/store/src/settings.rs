@@ -18,6 +18,9 @@ pub struct Settings {
     // Keys. In the same file as the rest, matching the Swift app.
     pub groq_api_key: String,
     pub composio_api_key: String,
+    /// Cerebras key. Agent tool-call parsing runs here (gpt-oss-120b) because
+    /// Groq's tokens-per-minute limit is too low for the agent's heavier calls.
+    pub cerebras_api_key: String,
 
     // Transcription
     pub engine: aloud_transcribe::Engine,
@@ -55,6 +58,7 @@ impl Default for Settings {
         Self {
             groq_api_key: String::new(),
             composio_api_key: String::new(),
+            cerebras_api_key: String::new(),
             // Local by default: works with no key and no network.
             engine: aloud_transcribe::Engine::Local,
             transcription_model: aloud_transcribe::cloud::DEFAULT_MODEL.into(),
@@ -90,6 +94,12 @@ impl Settings {
     /// still start, and `#[serde(default)]` means a partial file keeps
     /// whatever fields do parse.
     pub fn load() -> Self {
+        let mut settings = Self::load_file();
+        settings.fill_keys_from_env();
+        settings
+    }
+
+    fn load_file() -> Self {
         let Ok(path) = Self::path() else {
             return Self::default();
         };
@@ -100,6 +110,26 @@ impl Settings {
             tracing::warn!(%e, path = %path.display(), "settings unreadable; using defaults");
             Self::default()
         })
+    }
+
+    /// Fills any *empty* key from the environment, so a `.env` at the repo root
+    /// (or an exported var) configures a dev build without touching the UI. A
+    /// key already set in the settings file always wins — this is a fallback,
+    /// never an override. Each var is checked in the process environment first,
+    /// then in a `.env` found by walking up from the working directory.
+    fn fill_keys_from_env(&mut self) {
+        for (var, field) in [
+            ("GROQ_API_KEY", &mut self.groq_api_key),
+            ("COMPOSIO_API_KEY", &mut self.composio_api_key),
+            ("CEREBRAS_API_KEY", &mut self.cerebras_api_key),
+        ] {
+            if !field.trim().is_empty() {
+                continue;
+            }
+            if let Some(value) = env_or_dotenv(var) {
+                *field = value;
+            }
+        }
     }
 
     pub fn save(&self) -> Result<()> {
@@ -124,6 +154,52 @@ impl Settings {
             aloud_transcribe::Engine::Cloud => !self.groq_api_key.trim().is_empty(),
         }
     }
+}
+
+/// A var from the process environment, or from the first `.env` found walking
+/// up from the working directory. Returns None if unset/empty in both.
+///
+/// No dotenv crate: the file is a handful of `KEY=value` lines and we only read
+/// three keys. Values may be quoted; surrounding quotes and spaces are trimmed.
+fn env_or_dotenv(var: &str) -> Option<String> {
+    if let Ok(value) = std::env::var(var) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        let candidate = dir.join(".env");
+        if let Ok(contents) = fs::read_to_string(&candidate) {
+            if let Some(value) = parse_dotenv_value(&contents, var) {
+                return Some(value);
+            }
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+/// Pulls `var`'s value out of `.env` contents, or None. Skips blank/comment
+/// lines; trims surrounding quotes and whitespace from the value.
+fn parse_dotenv_value(contents: &str, var: &str) -> Option<String> {
+    let prefix = format!("{var}=");
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix(&prefix) {
+            let value = rest.trim().trim_matches(['"', '\'']).trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Owner-only (0600) on Unix. On Windows the per-user profile directory is
@@ -163,6 +239,16 @@ mod tests {
 
         settings.groq_api_key = "gsk_real".into();
         assert!(settings.is_configured());
+    }
+
+    #[test]
+    fn dotenv_value_is_parsed_and_unquoted() {
+        let env = "# a comment\nGROQ_API_KEY=gsk_plain\nCEREBRAS_API_KEY=\"csk_quoted\"\nCOMPOSIO_API_KEY=  \n";
+        assert_eq!(parse_dotenv_value(env, "GROQ_API_KEY").as_deref(), Some("gsk_plain"));
+        assert_eq!(parse_dotenv_value(env, "CEREBRAS_API_KEY").as_deref(), Some("csk_quoted"));
+        // Empty value and absent key both yield None.
+        assert_eq!(parse_dotenv_value(env, "COMPOSIO_API_KEY"), None);
+        assert_eq!(parse_dotenv_value(env, "MISSING"), None);
     }
 
     #[test]

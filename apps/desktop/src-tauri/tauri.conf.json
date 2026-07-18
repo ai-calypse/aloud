@@ -18,13 +18,15 @@
         "width": 900,
         "height": 640,
         "visible": false,
-        "resizable": true
+        "resizable": true,
+        "transparent": true,
+        "titleBarStyle": "Overlay"
       },
       {
         "label": "overlay",
         "url": "overlay.html",
-        "width": 220,
-        "height": 64,
+        "width": 320,
+        "height": 96,
         "visible": false,
         "transparent": true,
         "decorations": false,

@@ -39,6 +39,7 @@ pub fn run() {
         commands::search_notes,
         commands::recent_notes,
         commands::input_devices,
+        commands::installed_apps,
         commands::hotkeys_permitted,
         commands::paste_again,
         ask::close_ask,
@@ -119,6 +120,20 @@ pub fn run() {
             // destroyed window makes `get_webview_window("main")` return None,
             // so "Open Aloud" silently does nothing. Hide and prevent the close.
             if let Some(main) = app.get_webview_window("main") {
+                // Native macOS Liquid Glass: a sidebar-material NSVisualEffectView
+                // behind the transparent webview. The frontend paints the sidebar
+                // and cards with translucent fills so the vibrancy shows through.
+                #[cfg(target_os = "macos")]
+                {
+                    use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+                    let _ = apply_vibrancy(
+                        &main,
+                        NSVisualEffectMaterial::Sidebar,
+                        None,
+                        None,
+                    );
+                }
+
                 let win = main.clone();
                 main.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {

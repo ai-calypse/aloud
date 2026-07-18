@@ -1,4 +1,11 @@
 import { type Binding, type Config, type Key } from "../../lib/bindings";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 /**
  * A compact hotkey binder, one row per role. A full keystroke recorder is the
@@ -63,28 +70,40 @@ export function HotkeyEditor({
   }
 
   return (
-    <div className="hotkeys">
+    <div className="flex flex-col gap-3">
       {ROLES.map((role) => {
         const current = choiceId(config[role.key]);
         return (
-          <label key={role.key} className="field">
+          <div
+            key={role.key}
+            className="grid grid-cols-[9rem_1fr] items-center gap-x-4 gap-y-1 text-sm"
+          >
             <span>{role.label}</span>
-            <select
-              value={current === "custom" ? "disabled" : current}
-              onChange={(e) => setRole(role.key, e.target.value)}
+            <Select
+              value={current === "custom" ? "custom" : current}
+              onValueChange={(v) => setRole(role.key, v)}
             >
-              {current === "custom" && <option value="custom">Custom (edit file)</option>}
-              {CHOICES.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-            <small>{role.hint}</small>
-          </label>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {current === "custom" && (
+                  <SelectItem value="custom">Custom (edit file)</SelectItem>
+                )}
+                {CHOICES.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <small className="col-start-2 text-xs text-muted-foreground">
+              {role.hint}
+            </small>
+          </div>
         );
       })}
-      <p className="hotkeys__note">
+      <p className="text-xs text-muted-foreground">
         Two roles on the same key will clash — give each its own.
       </p>
     </div>
