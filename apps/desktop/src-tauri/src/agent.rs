@@ -19,6 +19,8 @@ use tauri_specta::Event;
 use tokio::sync::oneshot;
 
 const LABEL: &str = "agent";
+/// How long a write waits for a yes before giving up and declining.
+const CONFIRM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Holds the pending confirmation's reply channel, so the frontend's
 /// approve/reject command can wake the awaiting dispatch. Only one confirmation
@@ -193,6 +195,11 @@ fn tool_app(slug: &str) -> String {
 
 /// Blocks until the panel approves or rejects. A dropped sender (panel closed,
 /// new command started) reads as a rejection — the safe default for a write.
+///
+/// Times out rather than waiting forever. A gate that can hang is a gate that
+/// wedges the whole agent: a panel bug once left a second write blocked on a
+/// button that was never drawn, with no way out but quitting the app. Expiring
+/// as "declined" fails in the safe direction.
 async fn await_confirmation(app: &AppHandle) -> bool {
     let (tx, rx) = oneshot::channel();
     if let Some(state) = app.try_state::<PendingConfirmation>() {
@@ -201,7 +208,13 @@ async fn await_confirmation(app: &AppHandle) -> bool {
         tracing::error!("PendingConfirmation state missing");
         return false;
     }
-    rx.await.unwrap_or(false)
+    match tokio::time::timeout(CONFIRM_TIMEOUT, rx).await {
+        Ok(answer) => answer.unwrap_or(false),
+        Err(_) => {
+            tracing::warn!("confirmation timed out; treating as declined");
+            false
+        }
+    }
 }
 
 /// Resolves the pending confirmation. Called by the panel's Yes/No buttons.

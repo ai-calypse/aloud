@@ -35,7 +35,11 @@ the command asks for such an action or needs that data; otherwise just answer. \
 The command is a transcription of speech and may contain minor errors; act on \
 the intent. After acting, confirm what you did in one short plain sentence. \
 If a tool result was not successful or contains an error, say the action \
-failed and why — never claim it worked.";
+failed and why — never claim it worked. \
+Fill every argument you send with real content. If the user asks you to write \
+or draft something, compose the actual text — never send an empty body, an \
+empty subject, or a placeholder. If the same content is needed by two calls, \
+repeat it in full rather than leaving the second one blank.";
 
 /// Runs the loop for `command`. Returns the model's final answer.
 ///
