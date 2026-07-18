@@ -54,6 +54,7 @@ export const events = {
 	dictationPhase: makeEvent<Phase>("dictation-phase"),
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
+	modelDownload: makeEvent<ModelDownload>("model-download"),
 	overlayError: makeEvent<OverlayError>("overlay-error"),
 };
 
@@ -201,6 +202,13 @@ export type Macro = {
 };
 
 export type MeetingPhase = "recording" | "saving" | "idle";
+
+/**
+ *  Model download progress, 0.0–1.0. First use of the local engine fetches
+ *  ~150MB; without this the pill sits on "Transcribing…" for minutes and the
+ *  app looks hung.
+ */
+export type ModelDownload = number | null;
 
 export type Modifier = "command" | "control" | "option" | "shift" | "function";
 

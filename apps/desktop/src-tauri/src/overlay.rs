@@ -16,6 +16,13 @@ use tauri_specta::Event;
 #[tauri_specta(event_name = "audio-level")]
 pub struct AudioLevel(pub f32);
 
+/// Model download progress, 0.0–1.0. First use of the local engine fetches
+/// ~150MB; without this the pill sits on "Transcribing…" for minutes and the
+/// app looks hung.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
+#[tauri_specta(event_name = "model-download")]
+pub struct ModelDownload(pub f32);
+
 /// Why a dictation failed, in words the user can act on. `Phase::Error` says
 /// only that something broke, which the pill used to render as "Failed".
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
@@ -101,4 +108,9 @@ pub fn send_error(app: &AppHandle, message: &str) {
     if let Err(e) = OverlayError(message.to_string()).emit_to(app, LABEL) {
         tracing::warn!(%e, "could not send error to overlay");
     }
+}
+
+/// Sends model-download progress to the pill.
+pub fn send_download(app: &AppHandle, fraction: f32) {
+    let _ = ModelDownload(fraction).emit_to(app, LABEL);
 }

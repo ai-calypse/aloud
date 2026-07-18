@@ -95,6 +95,10 @@ export default function App() {
     // The tray's "Settings…" item opens the window on the settings pane; the
     // menu cannot navigate the webview itself.
     const unlistenSettings = listen("open-settings", () => setNav("general"));
+    // "Re-run Setup…" clears `onboarded` in Rust; refetch so the wizard shows.
+    const unlistenSetup = listen("rerun-setup", () =>
+      commands.getSettings().then(setSettings),
+    );
 
     // Rust waits for the Accessibility grant and announces it, so the banner
     // clears the moment permission lands — no app restart needed.
@@ -106,6 +110,7 @@ export default function App() {
       unlistenPhase.then((off) => off());
       unlistenPermission.then((off) => off());
       unlistenSettings.then((off) => off());
+      unlistenSetup.then((off) => off());
     };
   }, []);
 

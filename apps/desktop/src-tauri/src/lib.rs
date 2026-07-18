@@ -68,6 +68,7 @@ pub fn run() {
             agent::AgentEvent,
             overlay::AudioLevel,
             overlay::OverlayError,
+            overlay::ModelDownload,
             HotkeysPermitted,
         ]);
 

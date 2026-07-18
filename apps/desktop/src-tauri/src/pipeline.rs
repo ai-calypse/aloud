@@ -339,7 +339,7 @@ impl Pipeline {
                 return Ok(local);
             }
         }
-        let transcriber = build_transcriber(settings).await?;
+        let transcriber = build_transcriber(&self.app, settings).await?;
         if settings.engine == Engine::Local {
             *self.local.lock().unwrap() = Some(transcriber.clone());
         }
@@ -588,7 +588,12 @@ impl Pipeline {
 
 /// Builds the configured transcription engine. Shared by the pipeline and
 /// meeting notes; the pipeline caches the local model, this does not.
-pub async fn build_transcriber(settings: &Settings) -> Result<Arc<dyn Transcriber>> {
+/// `app` is only used to report model-download progress; the transcriber
+/// itself has no Tauri dependency.
+pub async fn build_transcriber(
+    app: &AppHandle,
+    settings: &Settings,
+) -> Result<Arc<dyn Transcriber>> {
     match settings.engine {
         Engine::Cloud => {
             if settings.groq_api_key.trim().is_empty() {
@@ -606,7 +611,7 @@ pub async fn build_transcriber(settings: &Settings) -> Result<Arc<dyn Transcribe
             let model = aloud_transcribe::download::ensure_model(
                 &dir,
                 aloud_transcribe::local::DEFAULT_MODEL,
-                |p| tracing::debug!(progress = p, "downloading model"),
+                |p| crate::overlay::send_download(app, p),
             )
             .await?;
             let language = Some(settings.language.as_str()).filter(|l| !l.is_empty());
