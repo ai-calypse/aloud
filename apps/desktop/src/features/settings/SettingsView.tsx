@@ -1,18 +1,63 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { commands, type AudioDevice, type Settings } from "../../lib/bindings";
 import { or } from "../../lib/result";
 import { HotkeyEditor } from "./HotkeyEditor";
 import { MacroEditor } from "./MacroEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
-import "./settings.css";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+/** One settings pane, selected from the app-level sidebar. */
+export type SettingsSection = "general" | "hotkeys" | "macros" | "rules";
+
+/** Glass card grouping related fields (mirrors the Swift SettingsCard). */
+function Card({ title, children }: { title?: string; children: ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-border bg-card p-[18px] backdrop-blur-2xl">
+      {title && <h3 className="mb-3.5 text-[0.95rem] font-semibold">{title}</h3>}
+      <div className="flex flex-col gap-3">{children}</div>
+    </section>
+  );
+}
+
+/** A labelled field row: label on the left, control on the right. */
+function Field({
+  label,
+  children,
+  hint,
+}: {
+  label: string;
+  children: ReactNode;
+  hint?: string;
+}) {
+  return (
+    <label className="grid grid-cols-[9rem_1fr] items-center gap-x-4 gap-y-1 text-sm">
+      <span>{label}</span>
+      {children}
+      {hint && (
+        <small className="col-start-2 text-xs text-muted-foreground">
+          {hint}
+        </small>
+      )}
+    </label>
+  );
+}
 
 /**
  * Settings forms bound to the Rust `Settings` struct.
  *
  * The Swift app had seven tabs over ~70 UserDefaults keys. This is the subset
- * that exists so far; the rest arrive with the features they configure.
+ * that exists so far; the rest arrive with the features they configure. Which
+ * pane shows is driven by the app-level sidebar via the `section` prop.
  */
-export function SettingsView() {
+export function SettingsView({ section }: { section: SettingsSection }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [saved, setSaved] = useState(false);
@@ -22,7 +67,7 @@ export function SettingsView() {
     or(commands.inputDevices(), [], "listing microphones").then(setDevices);
   }, []);
 
-  if (!settings) return <p>Loading…</p>;
+  if (!settings) return <p className="text-muted-foreground">Loading…</p>;
 
   // Every field is optional in TS because the Rust struct is #[serde(default)]
   // — a partial settings file is valid. Read through these rather than
@@ -59,175 +104,190 @@ export function SettingsView() {
   }
 
   return (
-    <div className="settings">
-      <section>
-        <h3>Transcription</h3>
+    <div className="flex flex-col gap-5">
+      {section === "general" && (
+        <>
+          <Card title="Transcription">
+            <Field label="Engine">
+              <Select
+                value={engine}
+                onValueChange={(v) =>
+                  update({ engine: v as Settings["engine"] })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="local">
+                    On-device (no key needed)
+                  </SelectItem>
+                  <SelectItem value="cloud">Cloud</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
 
-        <label className="field">
-          <span>Engine</span>
-          <select
-            value={engine}
-            onChange={(e) => update({ engine: e.target.value as Settings["engine"] })}
-          >
-            <option value="local">On-device (no key needed)</option>
-            <option value="cloud">Cloud</option>
-          </select>
-        </label>
+            {engine === "cloud" && (
+              <>
+                <Field label="API key">
+                  <Input
+                    type="password"
+                    value={settings.groqApiKey ?? ""}
+                    placeholder="gsk_…"
+                    onChange={(e) => update({ groqApiKey: e.target.value })}
+                  />
+                </Field>
+                <Field label="Model">
+                  <Input
+                    value={settings.transcriptionModel ?? ""}
+                    onChange={(e) =>
+                      update({ transcriptionModel: e.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Base URL">
+                  <Input
+                    value={settings.baseUrl ?? ""}
+                    onChange={(e) => update({ baseUrl: e.target.value })}
+                  />
+                </Field>
+              </>
+            )}
 
-        {engine === "cloud" && (
-          <>
-            <label className="field">
-              <span>API key</span>
-              <input
-                type="password"
-                value={settings.groqApiKey ?? ""}
-                placeholder="gsk_…"
-                onChange={(e) => update({ groqApiKey: e.target.value })}
+            <Field label="Microphone">
+              <Select
+                value={settings.selectedMicrophone ?? "default"}
+                onValueChange={(v) =>
+                  update({ selectedMicrophone: v === "default" ? null : v })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">System default</SelectItem>
+                  {devices.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+
+            <Field label="Language">
+              <Input
+                value={settings.language ?? ""}
+                placeholder="Auto-detect"
+                onChange={(e) => update({ language: e.target.value })}
               />
-            </label>
-            <label className="field">
-              <span>Model</span>
-              <input
-                value={settings.transcriptionModel ?? ""}
-                onChange={(e) => update({ transcriptionModel: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>Base URL</span>
-              <input
-                value={settings.baseUrl ?? ""}
-                onChange={(e) => update({ baseUrl: e.target.value })}
-              />
-            </label>
-          </>
-        )}
+            </Field>
+          </Card>
 
-        <label className="field">
-          <span>Microphone</span>
-          <select
-            value={settings.selectedMicrophone ?? ""}
-            onChange={(e) =>
-              update({ selectedMicrophone: e.target.value || null })
-            }
-          >
-            <option value="">System default</option>
-            {devices.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="field">
-          <span>Language</span>
-          <input
-            value={settings.language ?? ""}
-            placeholder="Auto-detect"
-            onChange={(e) => update({ language: e.target.value })}
-          />
-        </label>
-      </section>
-
-      <section>
-        <h3>Cleanup</h3>
-
-        <label className="field field--check">
-          <input
-            type="checkbox"
-            checked={settings.postProcessingEnabled ?? true}
-            onChange={(e) => update({ postProcessingEnabled: e.target.checked })}
-          />
-          <span>Tidy transcripts with an LLM</span>
-        </label>
-
-        {(settings.postProcessingEnabled ?? true) && (
-          <>
-            <label className="field">
-              <span>Model</span>
-              <input
-                value={settings.postProcessingModel ?? ""}
-                onChange={(e) => update({ postProcessingModel: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>Fallback model</span>
-              <input
-                value={settings.fallbackModel ?? ""}
-                onChange={(e) => update({ fallbackModel: e.target.value })}
-              />
-            </label>
-            <label className="field field--wide">
-              <span>Vocabulary</span>
-              <input
-                value={vocabulary.join(", ")}
-                placeholder="Kubernetes, Tauri, Aloud"
-                onChange={(e) =>
-                  update({
-                    vocabulary: e.target.value
-                      .split(",")
-                      .map((v) => v.trim())
-                      .filter(Boolean),
-                  })
+          <Card title="Cleanup">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={settings.postProcessingEnabled ?? true}
+                onCheckedChange={(c) =>
+                  update({ postProcessingEnabled: c === true })
                 }
               />
-              <small>
-                Names and jargon the model should spell correctly, comma
-                separated.
-              </small>
+              Tidy transcripts with an LLM
             </label>
-          </>
-        )}
-      </section>
 
-      <section>
-        <h3>Behaviour</h3>
+            {(settings.postProcessingEnabled ?? true) && (
+              <>
+                <Field label="Model">
+                  <Input
+                    value={settings.postProcessingModel ?? ""}
+                    onChange={(e) =>
+                      update({ postProcessingModel: e.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="Fallback model">
+                  <Input
+                    value={settings.fallbackModel ?? ""}
+                    onChange={(e) => update({ fallbackModel: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label="Vocabulary"
+                  hint="Names and jargon the model should spell correctly, comma separated."
+                >
+                  <Input
+                    value={vocabulary.join(", ")}
+                    placeholder="Kubernetes, Tauri, Aloud"
+                    onChange={(e) =>
+                      update({
+                        vocabulary: e.target.value
+                          .split(",")
+                          .map((v) => v.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                  />
+                </Field>
+              </>
+            )}
+          </Card>
 
-        <label className="field field--check">
-          <input
-            type="checkbox"
-            checked={settings.playSounds ?? true}
-            onChange={(e) => update({ playSounds: e.target.checked })}
+          <Card title="Behaviour">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={settings.playSounds ?? true}
+                onCheckedChange={(c) => update({ playSounds: c === true })}
+              />
+              Play sounds
+            </label>
+
+            <Field label="History kept">
+              <Input
+                type="number"
+                min={0}
+                max={1000}
+                value={settings.historyRetention ?? 50}
+                onChange={(e) =>
+                  update({ historyRetention: Number(e.target.value) || 0 })
+                }
+              />
+            </Field>
+          </Card>
+        </>
+      )}
+
+      {section === "hotkeys" && (
+        <Card>
+          <HotkeyEditor
+            config={hotkeys}
+            onChange={(hotkeys) => update({ hotkeys })}
           />
-          <span>Play sounds</span>
-        </label>
+        </Card>
+      )}
 
-        <label className="field">
-          <span>History kept</span>
-          <input
-            type="number"
-            min={0}
-            max={1000}
-            value={settings.historyRetention ?? 50}
-            onChange={(e) =>
-              update({ historyRetention: Number(e.target.value) || 0 })
-            }
+      {section === "macros" && (
+        <Card>
+          <MacroEditor
+            macros={macros}
+            onChange={(macros) => update({ macros })}
           />
-        </label>
-      </section>
+        </Card>
+      )}
 
-      <section>
-        <h3>Hotkeys</h3>
-        <HotkeyEditor
-          config={hotkeys}
-          onChange={(hotkeys) => update({ hotkeys })}
-        />
-      </section>
+      {section === "rules" && (
+        <Card>
+          <AppRuleEditor
+            rules={appRules}
+            onChange={(appRules) => update({ appRules })}
+          />
+        </Card>
+      )}
 
-      <section>
-        <h3>Voice macros</h3>
-        <MacroEditor macros={macros} onChange={(macros) => update({ macros })} />
-      </section>
-
-      <section>
-        <h3>App rules</h3>
-        <AppRuleEditor
-          rules={appRules}
-          onChange={(appRules) => update({ appRules })}
-        />
-      </section>
-
-      <p className={`settings__saved ${saved ? "settings__saved--on" : ""}`}>
+      <p
+        className={`text-xs text-muted-foreground transition-opacity duration-150 ${
+          saved ? "opacity-100" : "opacity-0"
+        }`}
+      >
         Saved
       </p>
     </div>

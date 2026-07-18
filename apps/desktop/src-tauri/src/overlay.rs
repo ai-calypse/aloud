@@ -8,18 +8,18 @@ use crate::pipeline::Phase;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 const LABEL: &str = "overlay";
-/// Distance from the bottom of the work area, in logical pixels.
-const BOTTOM_MARGIN: f64 = 96.0;
+/// Distance from the top of the screen, in logical pixels. Clears the menu bar.
+const TOP_MARGIN: f64 = 48.0;
 
 fn window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(LABEL)
 }
 
-/// Shows the pill for `phase`, positioned bottom-centre of the focused monitor.
+/// Shows the pill for `phase`, positioned top-centre of the focused monitor.
 ///
 /// The Swift app tucked this into the notch; there is no cross-platform way to
 /// find one, and Windows has no notch at all.
-/// ponytail: fixed bottom-centre placement — notch awareness is a macOS-only
+/// ponytail: fixed top-centre placement — notch awareness is a macOS-only
 /// enhancement if it is ever missed.
 pub fn show(app: &AppHandle, phase: Phase) {
     let Some(window) = window(app) else {
@@ -69,7 +69,7 @@ fn position(window: &WebviewWindow) -> tauri::Result<()> {
 
     window.set_position(tauri::LogicalPosition::new(
         origin.x + (screen.width - size.width) / 2.0,
-        origin.y + screen.height - size.height - BOTTOM_MARGIN,
+        origin.y + TOP_MARGIN,
     ))?;
     Ok(())
 }

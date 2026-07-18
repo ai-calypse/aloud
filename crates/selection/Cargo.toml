@@ -8,7 +8,11 @@ description = "Reads the focused app's selected text"
 [dependencies]
 aloud-paste = { path = "../paste" }
 anyhow.workspace = true
+serde.workspace = true
+specta.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
+# App-icon extraction: base64-encode the PNG that `sips` writes into a data URI.
+base64 = "0.22"

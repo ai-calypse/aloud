@@ -82,6 +82,14 @@ pub fn input_devices() -> CmdResult<Vec<aloud_audio::AudioDevice>> {
     to_string_err(aloud_audio::input_devices())
 }
 
+/// Installed apps, to fill the App Rules picker. Empty on Windows (no scan
+/// there yet); the custom-match field still works everywhere.
+#[tauri::command]
+#[specta::specta]
+pub fn installed_apps() -> Vec<aloud_selection::InstalledApp> {
+    aloud_selection::installed_apps()
+}
+
 /// Whether the OS lets us listen for keys. False on macOS until the user
 /// grants Accessibility permission.
 #[tauri::command]

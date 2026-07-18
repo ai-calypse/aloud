@@ -15,6 +15,11 @@ export const commands = {
 	recentNotes: (limit: number) => typedError<Note[], string>(__TAURI_INVOKE("recent_notes", { limit })),
 	inputDevices: () => typedError<AudioDevice[], string>(__TAURI_INVOKE("input_devices")),
 	/**
+	 *  Installed apps, to fill the App Rules picker. Empty on Windows (no scan
+	 *  there yet); the custom-match field still works everywhere.
+	 */
+	installedApps: () => __TAURI_INVOKE<InstalledApp[]>("installed_apps"),
+	/**
 	 *  Whether the OS lets us listen for keys. False on macOS until the user
 	 *  grants Accessibility permission.
 	 */
@@ -93,6 +98,17 @@ export type Entry = {
 	durationMs: number,
 };
 
+/**  An installed application, for the App Rules picker. */
+export type InstalledApp = {
+	/**  Display name, e.g. "Slack". This is what app rules match against. */
+	name: string,
+	/**
+	 *  A `data:image/png;base64,…` URI for the app icon, or None if it could
+	 *  not be read. Lets the picker show icons without a second round-trip.
+	 */
+	icon: string | null,
+};
+
 /**
  *  A physical key, side-specific where the distinction matters (the Swift app
  *  let you bind Right Option specifically, which is a popular dictation key).
@@ -140,6 +156,11 @@ export type SearchResult = {
 export type Settings = {
 	groqApiKey?: string,
 	composioApiKey?: string,
+	/**
+	 *  Cerebras key. Agent tool-call parsing runs here (gpt-oss-120b) because
+	 *  Groq's tokens-per-minute limit is too low for the agent's heavier calls.
+	 */
+	cerebrasApiKey?: string,
 	engine?: Engine,
 	transcriptionModel?: string,
 	baseUrl?: string,

@@ -1,4 +1,7 @@
 import { type Macro } from "../../lib/bindings";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 /**
  * Edits the voice-macro list: a trigger phrase and the text it expands to.
@@ -22,35 +25,40 @@ export function MacroEditor({
   }
 
   return (
-    <div className="listedit">
+    <div className="flex flex-col gap-2.5">
       {macros.length === 0 && (
-        <p className="listedit__empty">
+        <p className="text-sm text-muted-foreground">
           No macros. Add one and say its trigger while dictating to expand it.
         </p>
       )}
       {macros.map((m, i) => (
-        <div key={i} className="listedit__row">
-          <input
-            className="listedit__key"
+        <div key={i} className="flex items-start gap-2">
+          <Input
+            className="basis-2/5"
             placeholder="trigger (e.g. my email)"
             value={m.trigger}
             onChange={(e) => set(i, { trigger: e.target.value })}
           />
-          <textarea
-            className="listedit__val"
+          <Textarea
+            className="flex-1 min-h-9"
             placeholder="expands to…"
             rows={1}
             value={m.expansion}
             onChange={(e) => set(i, { expansion: e.target.value })}
           />
-          <button className="listedit__del" onClick={() => remove(i)} title="Remove">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => remove(i)}
+            title="Remove"
+          >
             ✕
-          </button>
+          </Button>
         </div>
       ))}
-      <button className="listedit__add" onClick={add}>
+      <Button variant="outline" size="sm" className="self-start" onClick={add}>
         + Add macro
-      </button>
+      </Button>
     </div>
   );
 }

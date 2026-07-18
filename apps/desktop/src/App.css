@@ -1,3 +1,6 @@
+/* The source-of-truth palette. index.css maps shadcn's tokens onto these vars,
+   so light/dark still flows from the prefers-color-scheme block below. Layout
+   and component styling now live in Tailwind classes / shadcn components. */
 :root {
   --bg: #ffffff;
   --fg: #1a1a1a;
@@ -23,81 +26,8 @@
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-}
-
-.warning {
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
-  background: var(--warning-bg);
-  color: var(--warning);
-  font-size: 0.875rem;
-  line-height: 1.5;
-}
-
-.phase {
-  font-size: 1.125rem;
-  color: var(--muted);
-}
-
-.phase--recording,
-.phase--transcribing {
-  color: var(--accent);
-}
-
-.phase--error {
-  color: var(--warning);
-}
-
-.stats {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.5rem 1.5rem;
-  margin: 2rem 0;
-}
-
-.stats dt {
-  color: var(--muted);
-  font-size: 0.875rem;
-}
-
-.stats dd {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.hint {
-  color: var(--muted);
-  font-size: 0.875rem;
-}
-
-.app {
-  padding: 2rem;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  box-sizing: border-box;
-  gap: 1rem;
-}
-
-.tabs {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.tab {
-  padding: 0.35rem 0.8rem;
-  border: 0;
-  border-radius: 6px;
+  /* Transparent so the native macOS vibrancy (window-vibrancy Sidebar material,
+     applied in lib.rs) shows through the whole window. */
   background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.875rem;
-  cursor: default;
-}
-
-.tab--active {
-  background: rgb(128 128 128 / 0.16);
   color: var(--fg);
 }

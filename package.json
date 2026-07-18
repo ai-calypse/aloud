@@ -10,5 +10,8 @@
     "typecheck": "pnpm --filter @aloud/desktop typecheck",
     "fmt": "cargo fmt --all && pnpm --filter @aloud/desktop fmt",
     "test": "cargo test --workspace"
+  },
+  "dependencies": {
+    "@ag-ui/core": "^0.0.57"
   }
 }

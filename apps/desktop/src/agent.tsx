@@ -2,6 +2,10 @@ import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { listen } from "@tauri-apps/api/event";
 import { commands } from "./lib/bindings";
+import { Button } from "@/components/ui/button";
+import { Loader } from "@/components/ai-elements/loader";
+import { GlassRefraction } from "./features/glass/GlassRefraction";
+import "./index.css";
 import "./agent.css";
 
 /** Mirrors the Rust `agent::ActionSummary`. */
@@ -72,6 +76,7 @@ function Agent() {
 
   return (
     <div className="agent">
+      <GlassRefraction />
       <header className="agent__header">
         <p className="agent__heard">{heard}</p>
         <button className="agent__close" onClick={() => commands.closeAgent()}>
@@ -79,53 +84,61 @@ function Agent() {
         </button>
       </header>
 
-      <div className="agent__body">
+      <div className="flex-1 overflow-y-auto p-4">
         {phase.name === "thinking" && (
-          <p className="agent__status">Understanding…</p>
+          <div className="flex items-center gap-2 text-[#a1a1a6]">
+            <Loader />
+            Understanding…
+          </div>
         )}
 
         {phase.name === "confirm" && (
-          <div className="agent__confirm">
-            <p className="agent__action">{phase.action.action}</p>
-            <dl className="agent__details">
+          <div className="flex flex-col gap-3">
+            <p className="text-[15px] font-semibold">{phase.action.action}</p>
+            <dl className="flex flex-col gap-1.5 rounded-lg bg-white/5 p-3 text-[12.5px]">
               {phase.action.details.map((line) => {
                 const [key, ...rest] = line.split(": ");
                 return (
-                  <div key={line} className="agent__detail">
-                    <dt>{key}</dt>
-                    <dd>{rest.join(": ")}</dd>
+                  <div key={line} className="grid grid-cols-[6rem_1fr] gap-2">
+                    <dt className="text-[#a1a1a6]">{key}</dt>
+                    <dd className="m-0">{rest.join(": ")}</dd>
                   </div>
                 );
               })}
             </dl>
-            <div className="agent__actions">
-              <button
-                className="agent__btn agent__btn--cancel"
+            {/* The confirm gate: nothing fires until "Do it" is pressed. */}
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => commands.confirmAgent(false)}
               >
                 Cancel
-              </button>
-              <button
-                className="agent__btn agent__btn--go"
+              </Button>
+              <Button
+                size="sm"
                 onClick={() => commands.confirmAgent(true)}
                 autoFocus
               >
                 Do it
-              </button>
+              </Button>
             </div>
           </div>
         )}
 
         {phase.name === "status" && (
-          <p className="agent__status">{phase.message}</p>
+          <div className="flex items-center gap-2 text-[#a1a1a6]">
+            <Loader />
+            {phase.message}
+          </div>
         )}
 
         {phase.name === "done" && (
-          <p className="agent__done">{phase.message}</p>
+          <p className="text-[#30d158]">{phase.message}</p>
         )}
 
         {phase.name === "failed" && (
-          <p className="agent__error">{phase.message}</p>
+          <p className="text-[#ff9f0a]">{phase.message}</p>
         )}
       </div>
     </div>

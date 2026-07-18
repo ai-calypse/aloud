@@ -1,8 +1,15 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { listen } from "@tauri-apps/api/event";
-import Markdown from "react-markdown";
 import { commands } from "./lib/bindings";
+import {
+  Conversation,
+  ConversationContent,
+} from "@/components/ai-elements/conversation";
+import { MessageResponse } from "@/components/ai-elements/message";
+import { Loader } from "@/components/ai-elements/loader";
+import { GlassRefraction } from "./features/glass/GlassRefraction";
+import "./index.css";
 import "./ask.css";
 
 /** Mirrors the Rust `ask::AskEvent`. */
@@ -21,7 +28,6 @@ function Ask() {
   const [answer, setAnswer] = useState("");
   const [state, setState] = useState<"streaming" | "done" | "failed">("streaming");
   const [error, setError] = useState("");
-  const body = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const unlisten = listen<AskEvent>("ask", ({ payload }) => {
@@ -58,16 +64,9 @@ function Ask() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Follow the answer as it streams, unless the user has scrolled up to read.
-  useEffect(() => {
-    const el = body.current;
-    if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    if (atBottom) el.scrollTop = el.scrollHeight;
-  }, [answer]);
-
   return (
     <div className="ask">
+      <GlassRefraction />
       <header className="ask__header">
         <p className="ask__question">{question}</p>
         <button className="ask__close" onClick={() => commands.closeAsk()}>
@@ -75,14 +74,20 @@ function Ask() {
         </button>
       </header>
 
-      <div className="ask__body" ref={body}>
-        {state === "failed" ? (
-          <p className="ask__error">{error}</p>
-        ) : (
-          <Markdown>{answer}</Markdown>
-        )}
-        {state === "streaming" && <span className="ask__caret" />}
-      </div>
+      {/* Conversation auto-sticks to the bottom as tokens stream in.
+          MessageResponse (Streamdown) renders streaming markdown safely. */}
+      <Conversation className="flex-1">
+        <ConversationContent className="p-4">
+          {state === "failed" ? (
+            <p className="text-[#ff9f0a]">{error}</p>
+          ) : (
+            <>
+              <MessageResponse>{answer}</MessageResponse>
+              {state === "streaming" && !answer && <Loader />}
+            </>
+          )}
+        </ConversationContent>
+      </Conversation>
     </div>
   );
 }

@@ -10,31 +10,78 @@ body {
   cursor: default;
 }
 
-.pill {
+/* Centre the pill in the (transparent) window; the pill sizes to its content
+   rather than filling the frame, so its height is set here, not by the window. */
+.overlay-root {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  box-sizing: border-box;
   height: 100%;
-  margin: 8px;
-  padding: 0 18px;
+}
+
+.pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  box-sizing: border-box;
+  height: 52px;
+  padding: 0 22px;
   border: 0.5px solid rgb(255 255 255 / 0.14);
   border-radius: 999px;
+  overflow: hidden; /* clip the refraction layer to the capsule */
 
-  /* The Swift app used a Metal "water glass" shader. backdrop-filter is the
-     closest the web gets: real blur of what is behind, no refraction. */
-  background: rgb(28 28 30 / 0.72);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  box-shadow: 0 8px 32px rgb(0 0 0 / 0.36);
+  /* backdrop-filter blurs the real desktop behind the transparent window
+     (WebKit supports this). Refraction/distortion is faked on the highlight
+     layer below, since Safari cannot displace the backdrop itself.
+     Two independent knobs:
+       - fill opacity  → the /0.68 below (lower = more transparent)
+       - blur strength → the blur(24px) below (higher px = blurrier backdrop) */
+  background: rgb(28 28 30 / 0.01);
+  backdrop-filter: blur(4px) saturate(180%);
+  -webkit-backdrop-filter: blur(4px) saturate(180%);
+  box-shadow:
+    0 8px 32px rgb(0 0 0 / 0.36),
+    /* inner rim light — the refractive edge of glass */
+    inset 0 1px 1px rgb(255 255 255 / 0.6),
+    inset 0 -1px 2px rgb(0 0 0 / 0.6);
 
   color: #f5f5f7;
   font-family: system-ui, -apple-system, sans-serif;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
+  letter-spacing: 0.01em;
 
   animation: rise 180ms ease-out;
+}
+
+/* A glass sheen (top-lit gradient + a diagonal chromatic streak) warped by the
+   SVG displacement filter, so the highlight ripples like liquid glass. Sits
+   under the content; the pill's own content stays crisp above it. */
+.pill__refraction {
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    linear-gradient(
+      160deg,
+      rgb(255 255 255 / 0.38) 0%,
+      rgb(255 255 255 / 0.1) 24%,
+      transparent 48%
+    ),
+    /* chromatic edges: a cool and a warm streak the displacement bends */
+    linear-gradient(120deg, transparent 38%, rgb(120 180 255 / 0.22) 52%, transparent 62%),
+    linear-gradient(300deg, transparent 38%, rgb(255 140 170 / 0.18) 52%, transparent 62%);
+  filter: url(#pill-refraction);
+}
+
+/* Keep the bars/label above the warped sheen. */
+.bars,
+.label,
+.dot {
+  position: relative;
+  z-index: 1;
 }
 
 @keyframes rise {
@@ -48,29 +95,33 @@ body {
   white-space: nowrap;
 }
 
-/* Recording: a small waveform. */
+/* Recording: a white waveform, tallest in the middle. */
 .bars {
   display: flex;
   align-items: center;
-  gap: 2px;
-  height: 16px;
+  gap: 3px;
+  height: 22px;
 }
 
 .bars i {
-  width: 3px;
+  width: 4px;
   height: 100%;
-  border-radius: 2px;
-  background: #ff453a;
+  border-radius: 999px;
+  background: #f5f5f7;
+  /* Scale the whole animation by this bar's peak (set per-bar in the TSX) so
+     the edges stay shorter than the centre — a waveform envelope. The floor is
+     high enough (0.55) that bars always read as bars, never collapse to dots. */
+  transform: scaleY(calc(0.55 * var(--peak, 1)));
   animation: pulse 0.9s ease-in-out infinite;
 }
 
 @keyframes pulse {
   0%,
   100% {
-    transform: scaleY(0.3);
+    transform: scaleY(calc(0.55 * var(--peak, 1)));
   }
   50% {
-    transform: scaleY(1);
+    transform: scaleY(var(--peak, 1));
   }
 }
 

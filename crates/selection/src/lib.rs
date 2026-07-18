@@ -39,6 +39,33 @@ pub fn frontmost_app() -> Option<String> {
     }
 }
 
+/// An installed application, for the App Rules picker.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct InstalledApp {
+    /// Display name, e.g. "Slack". This is what app rules match against.
+    pub name: String,
+    /// A `data:image/png;base64,…` URI for the app icon, or None if it could
+    /// not be read. Lets the picker show icons without a second round-trip.
+    pub icon: Option<String>,
+}
+
+/// Every installed app, sorted by name. Fills the App Rules picker's search.
+///
+/// The names are the same display names `frontmost_app()` reports, so a name
+/// picked here matches at dictation time. Empty if the list can't be read.
+pub fn installed_apps() -> Vec<InstalledApp> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::installed_apps()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // ponytail: Windows scans Start Menu .lnk shortcuts — TODO. Until then
+        // the picker's search is empty there; the custom-match field still works.
+        Vec::new()
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod macos {
     //! `AXUIElementCopyAttributeValue(kAXSelectedTextAttribute)` on the focused
@@ -127,6 +154,128 @@ mod macos {
         let title = copy_string(app, "AXTitle");
         unsafe { CFRelease(app as CFTypeRef) };
         title.filter(|t| !t.is_empty())
+    }
+
+    use super::InstalledApp;
+    use std::path::{Path, PathBuf};
+
+    /// Every `.app` under the standard application folders, sorted by name.
+    ///
+    /// Scanning the folders is the AppKit-free way to enumerate installed apps:
+    /// each `.app` bundle's folder name (minus the extension) is its display
+    /// name. Icons are extracted best-effort so a slow or missing icon never
+    /// drops an app from the list.
+    pub fn installed_apps() -> Vec<InstalledApp> {
+        let mut roots = vec![
+            PathBuf::from("/Applications"),
+            PathBuf::from("/Applications/Utilities"),
+            PathBuf::from("/System/Applications"),
+            PathBuf::from("/System/Applications/Utilities"),
+        ];
+        if let Some(home) = std::env::var_os("HOME") {
+            roots.push(Path::new(&home).join("Applications"));
+        }
+
+        // Collect (name, bundle path) first, de-duped by name.
+        let mut bundles: Vec<(String, PathBuf)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for root in roots {
+            let Ok(entries) = std::fs::read_dir(&root) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("app") {
+                    continue;
+                }
+                let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                if seen.insert(name.to_string()) {
+                    bundles.push((name.to_string(), path));
+                }
+            }
+        }
+
+        // Icon extraction shells out to `sips` once per app; doing ~100 of them
+        // in parallel keeps the picker snappy instead of a slow serial crawl.
+        let mut apps: Vec<InstalledApp> = std::thread::scope(|s| {
+            let handles: Vec<_> = bundles
+                .iter()
+                .map(|(name, path)| s.spawn(move || InstalledApp {
+                    name: name.clone(),
+                    icon: icon_data_uri(path),
+                }))
+                .collect();
+            handles.into_iter().filter_map(|h| h.join().ok()).collect()
+        });
+        apps.sort_by_key(|a| a.name.to_lowercase());
+        apps
+    }
+
+    /// Extracts a small PNG icon for an `.app` as a data URI, or None.
+    ///
+    /// `sips` is the system image tool — it reads the multi-resolution `.icns`
+    /// and writes a fixed-size PNG, so we avoid parsing ICNS ourselves. Cheap
+    /// enough run once when the picker opens; a failure just yields no icon.
+    fn icon_data_uri(app: &Path) -> Option<String> {
+        use base64::Engine;
+        use std::io::Read;
+
+        let icns = find_icns(app)?;
+        // sips can only write to a file, so use a temp path unique to this app.
+        let out = std::env::temp_dir().join(format!(
+            "aloud-icon-{}.png",
+            app.file_stem()?.to_str()?.replace(['/', ' '], "_")
+        ));
+        let ok = std::process::Command::new("sips")
+            .args(["-s", "format", "png", "-Z", "48"])
+            .arg(&icns)
+            .arg("--out")
+            .arg(&out)
+            .output()
+            .ok()
+            .is_some_and(|o| o.status.success());
+        if !ok {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(&out).ok()?.read_to_end(&mut bytes).ok()?;
+        let _ = std::fs::remove_file(&out);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Some(format!("data:image/png;base64,{b64}"))
+    }
+
+    /// The bundle's icon file: `CFBundleIconFile` from Info.plist if set,
+    /// otherwise the first `.icns` in Resources. Falls back gracefully because
+    /// plist parsing is not worth a dependency here.
+    fn find_icns(app: &Path) -> Option<PathBuf> {
+        let resources = app.join("Contents/Resources");
+        // The declared icon, if the plist names one (may lack the extension).
+        if let Ok(plist) = std::fs::read_to_string(app.join("Contents/Info.plist")) {
+            if let Some(name) = plist
+                .split("<key>CFBundleIconFile</key>")
+                .nth(1)
+                .and_then(|s| s.split("<string>").nth(1))
+                .and_then(|s| s.split("</string>").next())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+            {
+                let named = resources.join(name);
+                if named.exists() {
+                    return Some(named);
+                }
+                let with_ext = resources.join(format!("{name}.icns"));
+                if with_ext.exists() {
+                    return Some(with_ext);
+                }
+            }
+        }
+        // Otherwise the first .icns we find.
+        std::fs::read_dir(&resources).ok()?.flatten().find_map(|e| {
+            let p = e.path();
+            (p.extension().and_then(|x| x.to_str()) == Some("icns")).then_some(p)
+        })
     }
 }
 

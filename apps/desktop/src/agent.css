@@ -7,6 +7,7 @@ body {
 }
 
 .agent {
+  position: relative;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -14,17 +15,48 @@ body {
   margin: 8px;
   border: 0.5px solid rgb(255 255 255 / 0.14);
   border-radius: 14px;
+  overflow: hidden; /* clip the refraction layer to the panel */
 
-  /* Same glass treatment as the ask panel and recording pill. */
-  background: rgb(28 28 30 / 0.86);
-  backdrop-filter: blur(30px) saturate(180%);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-  box-shadow: 0 12px 40px rgb(0 0 0 / 0.4);
+  /* Same liquid-glass treatment as the ask panel and recording pill. */
+  background: rgb(28 28 30 / 0.01);
+  backdrop-filter: blur(4px) saturate(180%);
+  -webkit-backdrop-filter: blur(4px) saturate(180%);
+  box-shadow:
+    0 12px 40px rgb(0 0 0 / 0.4),
+    inset 0 1px 1px rgb(255 255 255 / 0.6),
+    inset 0 -1px 2px rgb(0 0 0 / 0.6);
 
   color: #f5f5f7;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 13.5px;
   line-height: 1.55;
+}
+
+/* Warped glass sheen (same technique as the pill/ask panel). */
+.glass-refraction {
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 0;
+  background:
+    linear-gradient(
+      160deg,
+      rgb(255 255 255 / 0.38) 0%,
+      rgb(255 255 255 / 0.1) 24%,
+      transparent 48%
+    ),
+    linear-gradient(120deg, transparent 38%, rgb(120 180 255 / 0.22) 52%, transparent 62%),
+    linear-gradient(300deg, transparent 38%, rgb(255 140 170 / 0.18) 52%, transparent 62%);
+  filter: url(#glass-refraction);
+}
+
+/* Keep the header + body above the warped sheen. The body is the flex child
+   after the header (Tailwind-classed div), so target direct children. */
+.agent > .agent__header,
+.agent > div {
+  position: relative;
+  z-index: 1;
 }
 
 .agent__header {
