@@ -1,4 +1,5 @@
 import type { ToolCall, ToolResult } from "./bindings";
+import type { ToolArgs } from "./tool-views";
 
 /**
  * One tool call in a run, with everything the panel shows about it.
@@ -13,8 +14,8 @@ import type { ToolCall, ToolResult } from "./bindings";
 export type Step = {
   name: string;
   app: string;
-  /** "field: value" lines, shown only in the confirmation prompt. */
-  args: string[];
+  /** The tool's own argument object; views pick the fields worth showing. */
+  args: ToolArgs;
   requiresConfirmation: boolean;
   /** Set by Confirm/Cancel; undefined while this step's gate is open. */
   confirmed?: boolean;
@@ -30,6 +31,13 @@ export type Run = {
   status?: string;
 };
 
+/** Tool arguments cross as free-form JSON; anything but an object is empty. */
+function asArgs(value: unknown): ToolArgs {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as ToolArgs)
+    : {};
+}
+
 /**
  * Folds a tool-call event into the step list.
  *
@@ -44,7 +52,7 @@ export function withCall(steps: Step[], call: ToolCall): Step[] {
       ...steps.slice(0, -1),
       {
         ...open,
-        args: call.args,
+        args: asArgs(call.args),
         requiresConfirmation: open.requiresConfirmation || call.requiresConfirmation,
       },
     ];
@@ -54,7 +62,7 @@ export function withCall(steps: Step[], call: ToolCall): Step[] {
     {
       name: call.name,
       app: call.app,
-      args: call.args,
+      args: asArgs(call.args),
       requiresConfirmation: call.requiresConfirmation,
     },
   ];

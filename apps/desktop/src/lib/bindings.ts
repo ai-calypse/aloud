@@ -354,8 +354,19 @@ export type ToolCall = {
 	name: string,
 	/**  The target app, e.g. "github". */
 	app: string,
-	/**  Parsed args as ordered "field: value" lines, e.g. ["repo: o/r", "title: Bug"]. */
-	args: string[],
+	/**
+	 *  The arguments the model chose, field by field.
+	 * 
+	 *  A map rather than pre-formatted lines so the panel can decide what a
+	 *  given tool is worth showing — a draft's body as prose, an inbox fetch as
+	 *  nothing at all — instead of dumping every field including `user_id`.
+	 * 
+	 *  Values are strings because the panel only ever renders text, and because
+	 *  `serde_json::Value` cannot cross specta: its number type is i64-backed,
+	 *  which specta forbids exporting rather than silently lose precision.
+	 *  Non-string values are JSON-encoded, so a nested object still displays.
+	 */
+	args: { [key in string]: string },
 	/**  Whether this call pauses for confirmation before it runs (every write). */
 	requiresConfirmation: boolean,
 };

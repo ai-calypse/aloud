@@ -5,7 +5,7 @@ import type { ToolCall, ToolResult } from "./bindings";
 const call = (name: string, requiresConfirmation: boolean): ToolCall => ({
   name,
   app: "gmail",
-  args: [`subject: ${name}`],
+  args: { subject: name, body: "hello", user_id: "me" },
   requiresConfirmation,
 });
 const ok: ToolResult = { success: true, message: "done" };

@@ -9,6 +9,7 @@ import {
   type Run,
   type Step,
 } from "./lib/agent-steps";
+import { bodyFor, labelFor } from "./lib/tool-views";
 import { usePanelAutosize } from "./lib/autosize";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,14 +25,6 @@ import {
 } from "@/components/ai-elements/confirmation";
 import "./index.css";
 import "./panel.css";
-
-/** "GMAIL_SEND_EMAIL" reads as "Gmail: send email". */
-function toolLabel(slug: string): string {
-  const [toolkit, ...rest] = slug.split("_");
-  const action = rest.join(" ").toLowerCase();
-  const app = toolkit.charAt(0) + toolkit.slice(1).toLowerCase();
-  return action ? `${app}: ${action}` : slug;
-}
 
 function stepStatus(step: Step, pending: boolean): string {
   if (step.result) return step.result.success ? "done" : "failed";
@@ -155,17 +148,21 @@ function Agent() {
         {run.steps.length > 0 && (
           <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
             {run.steps.map((step, i) => (
-              <li
-                key={`${step.name}-${i}`}
-                className="flex items-center gap-2 text-[13px]"
-              >
-                <StepIcon step={step} pending={step === pending} />
-                <span className="min-w-0 flex-1 truncate">
-                  {toolLabel(step.name)}
-                </span>
-                <span className="shrink-0 text-[11px] text-muted-foreground">
-                  {stepStatus(step, step === pending)}
-                </span>
+              <li key={`${step.name}-${i}`} className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2 text-[13px]">
+                  <StepIcon step={step} pending={step === pending} />
+                  <span className="min-w-0 flex-1 truncate">
+                    {labelFor(step.name, step.args)}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                    {stepStatus(step, step === pending)}
+                  </span>
+                </div>
+                {/* Only what this tool is worth showing. A step with no
+                    registered view renders its label and nothing else. */}
+                {step !== pending && (
+                  <div className="pl-[22px]">{bodyFor(step.name, step.args)}</div>
+                )}
               </li>
             ))}
           </ul>
@@ -174,18 +171,14 @@ function Agent() {
         {pending && (
           <Confirmation approval={{ id: pending.name }} state="approval-requested">
             <ConfirmationTitle>
-              {toolLabel(pending.name)} — this writes to {pending.app}.
+              {labelFor(pending.name, pending.args)} — this writes to{" "}
+              {pending.app}.
             </ConfirmationTitle>
             <ConfirmationRequest>
-              {/* The one place arguments belong: approving a write without
-                  seeing what it will do is not a gate. */}
-              <ul className="m-0 mb-3 flex list-none flex-col gap-0.5 p-0 text-[12px] text-muted-foreground">
-                {pending.args.map((line) => (
-                  <li key={line} className="truncate" title={line}>
-                    {line}
-                  </li>
-                ))}
-              </ul>
+              {/* Approving a write without seeing what it will do is not a
+                  gate, so the body shows here even though the step list is
+                  otherwise quiet. */}
+              <div className="mb-3">{bodyFor(pending.name, pending.args)}</div>
               <ConfirmationActions>
                 <ConfirmationAction variant="outline" onClick={() => confirm(false)}>
                   Cancel
@@ -214,7 +207,10 @@ function Agent() {
       <CardFooter className="gap-2.5 px-4">
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground/70">
           {run.steps.length > 0
-            ? `· ${toolLabel(run.steps[run.steps.length - 1].name)}`
+            ? `· ${labelFor(
+                run.steps[run.steps.length - 1].name,
+                run.steps[run.steps.length - 1].args,
+              )}`
             : ""}
         </span>
         {copyText && (

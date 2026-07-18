@@ -19,8 +19,15 @@ const MAX_ROUNDS: usize = 5;
 /// maps these onto its own UI events.
 #[derive(Debug, Clone)]
 pub enum LoopEvent {
-    /// The model asked to run a tool (with its parsed args as display lines).
-    ToolCallStart { name: String, args: Vec<String> },
+    /// The model asked to run a tool, with the arguments it chose.
+    ///
+    /// The whole JSON object, not a flattened list: the panel renders a draft's
+    /// body as text and ignores `user_id`, which it can only do if it still has
+    /// the fields to choose between.
+    ToolCallStart {
+        name: String,
+        args: serde_json::Value,
+    },
     /// That tool finished (success carries no payload; the model gets the JSON).
     ToolCallResult { name: String, success: bool },
     /// The chat API throttled us; the loop is waiting this long to retry once.
@@ -53,7 +60,7 @@ pub async fn run<F>(
     command: &str,
     tools: &[ToolDef],
     mut on_event: impl FnMut(LoopEvent),
-    confirm: impl Fn(String, Vec<String>) -> F,
+    confirm: impl Fn(String, serde_json::Value) -> F,
 ) -> Result<String>
 where
     F: Future<Output = bool>,
@@ -124,33 +131,31 @@ where
             let name = call.function.name.clone();
             let args: serde_json::Value = serde_json::from_str(&call.function.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
-            let arg_lines = arg_display_lines(&args);
 
             on_event(LoopEvent::ToolCallStart {
                 name: name.clone(),
-                args: arg_lines.clone(),
+                args: args.clone(),
             });
 
             // A write waits for an explicit yes. A rejected write is reported to
             // the model as a normal result so it can respond ("Okay, cancelled")
             // rather than erroring the whole command.
-            let result =
-                if is_write(&name, tools) && !confirm(name.clone(), arg_lines.clone()).await {
-                    on_event(LoopEvent::ToolCallResult {
-                        name: name.clone(),
-                        success: false,
-                    });
-                    r#"{"error":"user declined this action"}"#.to_string()
-                } else {
-                    let result = composio.execute(&name, &args).await;
-                    let success = tool_succeeded(&result);
-                    any_failed |= !success;
-                    on_event(LoopEvent::ToolCallResult {
-                        name: name.clone(),
-                        success,
-                    });
-                    result
-                };
+            let result = if is_write(&name, tools) && !confirm(name.clone(), args.clone()).await {
+                on_event(LoopEvent::ToolCallResult {
+                    name: name.clone(),
+                    success: false,
+                });
+                r#"{"error":"user declined this action"}"#.to_string()
+            } else {
+                let result = composio.execute(&name, &args).await;
+                let success = tool_succeeded(&result);
+                any_failed |= !success;
+                on_event(LoopEvent::ToolCallResult {
+                    name: name.clone(),
+                    success,
+                });
+                result
+            };
 
             messages.push(Message::tool_result(&call.id, result));
         }
@@ -197,24 +202,6 @@ fn tool_succeeded(result: &str) -> bool {
         return ok;
     }
     !matches!(json.get("error"), Some(e) if !e.is_null())
-}
-
-/// Turns a JSON args object into "field: value" display lines for the panel and
-/// the confirmation prompt. Non-objects render as a single line.
-fn arg_display_lines(args: &serde_json::Value) -> Vec<String> {
-    match args.as_object() {
-        Some(map) => map
-            .iter()
-            .map(|(k, v)| {
-                let value = match v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                format!("{k}: {value}")
-            })
-            .collect(),
-        None => vec![args.to_string()],
-    }
 }
 
 #[cfg(test)]
@@ -268,13 +255,5 @@ mod tests {
         assert!(tool_succeeded(
             r#"{"successful":true,"data":{"status_code":201,"number":7}}"#
         ));
-    }
-
-    #[test]
-    fn arg_lines_render_strings_without_quotes() {
-        let args = serde_json::json!({ "to": "a@b.com", "max_results": 4 });
-        let lines = arg_display_lines(&args);
-        assert!(lines.contains(&"to: a@b.com".to_string()));
-        assert!(lines.contains(&"max_results: 4".to_string()));
     }
 }

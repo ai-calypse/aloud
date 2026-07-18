@@ -1,0 +1,144 @@
+import type { ReactNode } from "react";
+
+/**
+ * What the agent panel draws for each tool.
+ *
+ * The panel does not hide fields — it chooses what to draw. `user_id: "me"`
+ * and `is_html: false` never appear because nothing here references them.
+ * Presentation belongs to the app, not to Composio, which only supplies
+ * schemas and executes calls.
+ *
+ * A registry rather than a switch: aloud can now connect any of Composio's
+ * 800+ toolkits, so adding a service's custom UI should be registering one
+ * entry, not extending a growing conditional. Everything unregistered falls
+ * back to a humanised label and no body, which is the honest default for a
+ * tool we know nothing about.
+ */
+
+/** A tool call's arguments. Unknown shape — every read must be defensive. */
+export type ToolArgs = Record<string, unknown>;
+
+export type ToolView = {
+  /** Present tense, what is happening: "Drafting an email to Ana". */
+  label: (args: ToolArgs) => string;
+  /** The one thing worth showing. Omitted means the label says it all. */
+  body?: (args: ToolArgs) => ReactNode;
+};
+
+/** A string field, or "" when absent or not a string. */
+function text(args: ToolArgs, key: string): string {
+  const value = args[key];
+  return typeof value === "string" ? value : "";
+}
+
+/** "someone@example.com" → "someone", for a label that fits one line. */
+function who(address: string): string {
+  return address.split("@")[0] || address;
+}
+
+/** The email body, which is the whole point of a draft. */
+function emailBody(args: ToolArgs): ReactNode {
+  const body = text(args, "body");
+  const subject = text(args, "subject");
+  if (!body && !subject) return null;
+
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
+      {subject && <p className="m-0 text-[13px] font-medium">{subject}</p>}
+      {body ? (
+        <p className="m-0 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+          {body}
+        </p>
+      ) : (
+        // Surfaced rather than silently sent: an empty body reaching the
+        // confirmation is the model having dropped the content.
+        <p className="m-0 text-[13px] italic text-[var(--warning)]">
+          No message body — cancel and ask again.
+        </p>
+      )}
+    </div>
+  );
+}
+
+const VIEWS: Record<string, ToolView> = {
+  GMAIL_SEND_EMAIL: {
+    label: (a) => {
+      const to = text(a, "recipient_email");
+      return to ? `Sending an email to ${who(to)}` : "Sending an email";
+    },
+    body: emailBody,
+  },
+  GMAIL_CREATE_EMAIL_DRAFT: {
+    label: (a) => {
+      const to = text(a, "recipient_email");
+      return to ? `Drafting an email to ${who(to)}` : "Drafting an email";
+    },
+    body: emailBody,
+  },
+  GMAIL_FETCH_EMAILS: { label: () => "Reading your inbox" },
+  GMAIL_LIST_DRAFTS: { label: () => "Looking through your drafts" },
+
+  GITHUB_CREATE_AN_ISSUE: {
+    label: (a) => {
+      const repo = text(a, "repo");
+      return repo ? `Opening an issue on ${repo}` : "Opening an issue";
+    },
+    body: (a) => {
+      const title = text(a, "title");
+      const body = text(a, "body");
+      if (!title) return null;
+      return (
+        <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
+          <p className="m-0 text-[13px] font-medium">{title}</p>
+          {body && (
+            <p className="m-0 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+              {body}
+            </p>
+          )}
+        </div>
+      );
+    },
+  },
+  GITHUB_LIST_REPOSITORY_ISSUES: {
+    label: (a) => {
+      const repo = text(a, "repo");
+      return repo ? `Reading issues on ${repo}` : "Reading issues";
+    },
+  },
+  GITHUB_GET_THE_AUTHENTICATED_USER: { label: () => "Checking your GitHub account" },
+};
+
+/**
+ * "SLACK_SEND_MESSAGE" → "Slack: send message".
+ *
+ * The fallback for the toolkits nobody has written a view for, which after
+ * the Connectors work is most of them.
+ */
+export function humanise(slug: string): string {
+  const [toolkit, ...rest] = slug.split("_");
+  if (rest.length === 0) return slug;
+  const app = toolkit.charAt(0) + toolkit.slice(1).toLowerCase();
+  return `${app}: ${rest.join(" ").toLowerCase()}`;
+}
+
+export function viewFor(name: string): ToolView {
+  return VIEWS[name] ?? { label: () => humanise(name) };
+}
+
+/** What the panel prints for a call — the registered label, or the fallback. */
+export function labelFor(name: string, args: ToolArgs): string {
+  try {
+    return viewFor(name).label(args);
+  } catch {
+    // A malformed argument object must never blank the panel.
+    return humanise(name);
+  }
+}
+
+export function bodyFor(name: string, args: ToolArgs): ReactNode {
+  try {
+    return viewFor(name).body?.(args) ?? null;
+  } catch {
+    return null;
+  }
+}

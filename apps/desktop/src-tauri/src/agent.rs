@@ -67,8 +67,17 @@ pub struct ToolCall {
     pub name: String,
     /// The target app, e.g. "github".
     pub app: String,
-    /// Parsed args as ordered "field: value" lines, e.g. ["repo: o/r", "title: Bug"].
-    pub args: Vec<String>,
+    /// The arguments the model chose, field by field.
+    ///
+    /// A map rather than pre-formatted lines so the panel can decide what a
+    /// given tool is worth showing — a draft's body as prose, an inbox fetch as
+    /// nothing at all — instead of dumping every field including `user_id`.
+    ///
+    /// Values are strings because the panel only ever renders text, and because
+    /// `serde_json::Value` cannot cross specta: its number type is i64-backed,
+    /// which specta forbids exporting rather than silently lose precision.
+    /// Non-string values are JSON-encoded, so a nested object still displays.
+    pub args: std::collections::BTreeMap<String, String>,
     /// Whether this call pauses for confirmation before it runs (every write).
     pub requires_confirmation: bool,
 }
@@ -145,7 +154,8 @@ async fn execute(app: &AppHandle, transcript: &str, settings: &Settings) -> Resu
 
 /// Surfaces a write tool for confirmation and awaits the panel's decision. Takes
 /// owned args so the returned future doesn't borrow the loop's transient data.
-async fn confirm_write(app: &AppHandle, name: String, args: Vec<String>) -> bool {
+async fn confirm_write(app: &AppHandle, name: String, args: serde_json::Value) -> bool {
+    let args = display_args(&args);
     emit(
         app,
         AgentEvent::ToolCall(ToolCall {
@@ -158,13 +168,33 @@ async fn confirm_write(app: &AppHandle, name: String, args: Vec<String>) -> bool
     await_confirmation(app).await
 }
 
+/// Flattens a tool's argument object into displayable string fields.
+///
+/// Strings pass through unquoted; anything else keeps its JSON form so a
+/// number or nested object is still readable.
+fn display_args(args: &serde_json::Value) -> std::collections::BTreeMap<String, String> {
+    args.as_object()
+        .map(|map| {
+            map.iter()
+                .map(|(key, value)| {
+                    let text = match value {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    };
+                    (key.clone(), text)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Maps a loop event to the panel's AG-UI event vocabulary.
 fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
     match event {
         aloud_agent::LoopEvent::ToolCallStart { name, args } => AgentEvent::ToolCall(ToolCall {
             app: tool_app(&name),
             name,
-            args,
+            args: display_args(&args),
             // The gate is enforced in the loop; the panel just shows the call.
             requires_confirmation: false,
         }),
