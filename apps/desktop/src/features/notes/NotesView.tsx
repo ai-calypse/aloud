@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { commands, events, type Note, type SearchResult } from "../../lib/bindings";
 import { Highlight } from "./Highlight";
 import { or } from "../../lib/result";
+import { MessageResponse } from "@/components/ai-elements/message";
 import "./notes.css";
 
 /**
@@ -94,16 +95,37 @@ export function NotesView() {
 }
 
 function Reader({ note, onBack }: { note: Note; onBack: () => void }) {
+  // Reading is the common case; the source is there for copying a section out
+  // or checking what the summarizer actually wrote.
+  const [source, setSource] = useState(false);
+
   return (
     <div className="reader">
-      <button className="reader__back" onClick={onBack}>
-        ← Search
-      </button>
+      <div className="reader__bar">
+        <button className="reader__back" onClick={onBack}>
+          ← Search
+        </button>
+        <button
+          className="reader__toggle"
+          onClick={() => setSource((s) => !s)}
+          aria-pressed={source}
+        >
+          {source ? "Preview" : "Markdown"}
+        </button>
+      </div>
       <h2 className="reader__title">{note.title}</h2>
       <time className="reader__date">{formatDate(note.date)}</time>
-      {/* Rendered as text, not HTML: a note is untrusted input, and dangerously
-          setting innerHTML from it would be an XSS vector. */}
-      <pre className="reader__body">{note.content}</pre>
+
+      {source ? (
+        <pre className="reader__body">{note.content}</pre>
+      ) : (
+        /* Streamdown parses the markdown to React elements — no innerHTML, so
+           a note staying untrusted input costs nothing. Same renderer the ask
+           and agent panels use. */
+        <MessageResponse className="reader__rendered">
+          {note.content}
+        </MessageResponse>
+      )}
     </div>
   );
 }

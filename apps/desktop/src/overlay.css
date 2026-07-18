@@ -95,12 +95,21 @@ body {
   white-space: nowrap;
 }
 
-/* Recording: a white waveform, tallest in the middle. */
+/* Recording: a white waveform, tallest in the middle.
+
+   Voice scales the whole row; the per-bar animation is the one that shipped
+   before levels existed. Driving the bars *directly* from the level replaced
+   the motion instead of adding to it, so a quiet moment parked every bar at
+   its floor — a row of 4px squares that never moved. The row never scales
+   below 0.6, so the pill always reads as a waveform. */
 .bars {
   display: flex;
   align-items: center;
   gap: 3px;
   height: 22px;
+  transform-origin: center;
+  transform: scaleY(calc(0.6 + 0.4 * var(--level, 0.5)));
+  transition: transform 120ms ease-out;
 }
 
 .bars i {
@@ -108,18 +117,9 @@ body {
   height: 100%;
   border-radius: 999px;
   background: #f5f5f7;
-  /* Driven by the real input level: --level comes from the mic (0–1) and
-     --peak is this bar's share of the envelope, so the edges stay shorter than
-     the centre. The 0.18 floor keeps silent bars reading as bars rather than
-     collapsing to invisible slivers. The transition smooths the 20 Hz steps
-     into continuous motion. */
-  transform: scaleY(calc(0.18 + 0.82 * var(--level, 0) * var(--peak, 1)));
-  transition: transform 90ms ease-out;
-}
-
-/* No level source (the browser preview, or the event channel gone quiet):
-   fall back to the old canned animation so the pill never looks frozen. */
-.bars--idle i {
+  /* Scale the whole animation by this bar's peak (set per-bar in the TSX) so
+     the edges stay shorter than the centre — a waveform envelope. */
+  transform: scaleY(calc(0.55 * var(--peak, 1)));
   animation: pulse 0.9s ease-in-out infinite;
 }
 
