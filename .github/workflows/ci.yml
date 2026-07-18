@@ -3,7 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
+  # Build installers on demand without cutting a tag.
+  workflow_dispatch:
 
 # A new push makes an in-flight run obsolete.
 concurrency:
@@ -65,9 +68,12 @@ jobs:
 
   bundle:
     name: Bundle (${{ matrix.os }})
-    # Proves the app packages on both platforms. main only: a full Tauri
-    # bundle is slow, and PRs are already covered by build + test above.
-    if: github.ref == 'refs/heads/main'
+    # Proves the app packages on both platforms — but a full Tauri bundle is
+    # slow (recompiles everything in release), so it only runs when it's worth
+    # it: a version tag, or a manual dispatch. Every push/PR is already gated
+    # by the fast Rust + Frontend jobs above; bundling on each one just doubled
+    # the whisper.cpp compile per OS for no signal.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
