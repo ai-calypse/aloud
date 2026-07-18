@@ -41,29 +41,27 @@
         "label": "ask",
         "url": "ask.html",
         "title": "Ask",
-        "width": 460,
-        "height": 380,
+        "width": 500,
+        "height": 120,
         "visible": false,
         "transparent": true,
         "decorations": false,
         "alwaysOnTop": true,
         "resizable": false,
-        "skipTaskbar": true,
-        "center": true
+        "skipTaskbar": true
       },
       {
         "label": "agent",
         "url": "agent.html",
         "title": "Agent",
-        "width": 460,
-        "height": 300,
+        "width": 500,
+        "height": 120,
         "visible": false,
         "transparent": true,
         "decorations": false,
         "alwaysOnTop": true,
         "resizable": false,
-        "skipTaskbar": true,
-        "center": true
+        "skipTaskbar": true
       }
     ],
     "macOSPrivateApi": true,
@@ -86,7 +84,8 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": "-"
     }
   },
   "plugins": {

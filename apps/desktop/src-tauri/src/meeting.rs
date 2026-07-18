@@ -11,7 +11,8 @@
 use aloud_store::Settings;
 use anyhow::{Context, Result};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
+use tauri_specta::Event;
 
 /// One rolling chunk, at the 24 kHz PCM16 the realtime tap emits.
 const CHUNK_SECONDS: usize = 60;
@@ -38,8 +39,9 @@ struct State {
     pending_chunks: Vec<Vec<u8>>,
 }
 
-#[derive(Clone, Copy, serde::Serialize, specta::Type)]
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize, specta::Type, Event)]
 #[serde(rename_all = "camelCase")]
+#[tauri_specta(event_name = "meeting-phase")]
 pub enum MeetingPhase {
     Recording,
     Saving,
@@ -191,20 +193,20 @@ async fn transcribe_chunk(
     }
 }
 
-/// Writes raw 24 kHz mono PCM16 bytes as a WAV.
+/// Writes the tap's raw 24 kHz mono PCM16 bytes as a 16 kHz WAV — the
+/// transcriber contract is 16 kHz mono (local whisper hard-rejects anything
+/// else; the cloud API merely tolerated 24 kHz).
 fn write_pcm16_wav(path: &std::path::Path, pcm16: &[u8]) -> Result<()> {
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate: aloud_audio::REALTIME_RATE,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
-    let mut writer = hound::WavWriter::create(path, spec)?;
-    for pair in pcm16.chunks_exact(2) {
-        writer.write_sample(i16::from_le_bytes([pair[0], pair[1]]))?;
-    }
-    writer.finalize()?;
-    Ok(())
+    let samples: Vec<f32> = pcm16
+        .chunks_exact(2)
+        .map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / f32::from(i16::MAX))
+        .collect();
+    let samples = aloud_audio::resample::resample_mono(
+        &samples,
+        aloud_audio::REALTIME_RATE,
+        aloud_audio::TRANSCRIBE_RATE,
+    )?;
+    aloud_audio::write_wav(path, &samples, aloud_audio::TRANSCRIBE_RATE)
 }
 
 /// Joins finished segments in order, stamping each with its `[hh:mm]` offset.
@@ -227,7 +229,7 @@ fn assemble(segments: &[Option<String>]) -> String {
 }
 
 fn emit(app: &AppHandle, phase: MeetingPhase) {
-    if let Err(e) = app.emit("meeting-phase", phase) {
+    if let Err(e) = phase.emit(app) {
         tracing::warn!(%e, "could not emit meeting phase");
     }
 }
@@ -258,5 +260,29 @@ mod tests {
     fn empty_session_produces_a_note_not_a_crash() {
         assert_eq!(assemble(&[]), "");
         assert_eq!(assemble(&[None, None]), "");
+    }
+
+    /// The staged chunk WAV must be 16 kHz mono — local whisper hard-rejects
+    /// the tap's native 24 kHz, which silently dropped every meeting chunk.
+    #[test]
+    fn chunk_wav_is_16k_mono_and_not_silent() {
+        let samples: Vec<f32> = (0..SAMPLE_RATE) // 1s of 440 Hz at 24 kHz
+            .map(|i| (i as f32 * 440.0 * 2.0 * std::f32::consts::PI / SAMPLE_RATE as f32).sin())
+            .collect();
+        let pcm16 = aloud_audio::resample::to_pcm16_bytes(&samples);
+
+        let path = std::env::temp_dir().join("aloud-test-meeting-chunk.wav");
+        write_pcm16_wav(&path, &pcm16).unwrap();
+
+        let mut reader = hound::WavReader::open(&path).unwrap();
+        let spec = reader.spec();
+        assert_eq!((spec.sample_rate, spec.channels), (16_000, 1));
+        let peak = reader
+            .samples::<i16>()
+            .map(|s| s.unwrap().unsigned_abs())
+            .max()
+            .unwrap();
+        assert!(peak > 8000, "resampled audio must not be near-silence");
+        let _ = std::fs::remove_file(&path);
     }
 }

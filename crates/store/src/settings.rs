@@ -244,8 +244,14 @@ mod tests {
     #[test]
     fn dotenv_value_is_parsed_and_unquoted() {
         let env = "# a comment\nGROQ_API_KEY=gsk_plain\nCEREBRAS_API_KEY=\"csk_quoted\"\nCOMPOSIO_API_KEY=  \n";
-        assert_eq!(parse_dotenv_value(env, "GROQ_API_KEY").as_deref(), Some("gsk_plain"));
-        assert_eq!(parse_dotenv_value(env, "CEREBRAS_API_KEY").as_deref(), Some("csk_quoted"));
+        assert_eq!(
+            parse_dotenv_value(env, "GROQ_API_KEY").as_deref(),
+            Some("gsk_plain")
+        );
+        assert_eq!(
+            parse_dotenv_value(env, "CEREBRAS_API_KEY").as_deref(),
+            Some("csk_quoted")
+        );
         // Empty value and absent key both yield None.
         assert_eq!(parse_dotenv_value(env, "COMPOSIO_API_KEY"), None);
         assert_eq!(parse_dotenv_value(env, "MISSING"), None);

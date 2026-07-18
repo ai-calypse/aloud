@@ -202,10 +202,12 @@ mod macos {
         let mut apps: Vec<InstalledApp> = std::thread::scope(|s| {
             let handles: Vec<_> = bundles
                 .iter()
-                .map(|(name, path)| s.spawn(move || InstalledApp {
-                    name: name.clone(),
-                    icon: icon_data_uri(path),
-                }))
+                .map(|(name, path)| {
+                    s.spawn(move || InstalledApp {
+                        name: name.clone(),
+                        icon: icon_data_uri(path),
+                    })
+                })
                 .collect();
             handles.into_iter().filter_map(|h| h.join().ok()).collect()
         });
@@ -240,7 +242,10 @@ mod macos {
             return None;
         }
         let mut bytes = Vec::new();
-        std::fs::File::open(&out).ok()?.read_to_end(&mut bytes).ok()?;
+        std::fs::File::open(&out)
+            .ok()?
+            .read_to_end(&mut bytes)
+            .ok()?;
         let _ = std::fs::remove_file(&out);
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
         Some(format!("data:image/png;base64,{b64}"))

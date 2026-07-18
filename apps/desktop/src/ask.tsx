@@ -1,36 +1,33 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { listen } from "@tauri-apps/api/event";
-import { commands } from "./lib/bindings";
-import {
-  Conversation,
-  ConversationContent,
-} from "@/components/ai-elements/conversation";
+import { CheckIcon, CopyIcon, XIcon } from "lucide-react";
+import { commands, events } from "./lib/bindings";
+import { usePanelAutosize } from "./lib/autosize";
+import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Loader } from "@/components/ai-elements/loader";
-import { GlassRefraction } from "./features/glass/GlassRefraction";
 import "./index.css";
-import "./ask.css";
-
-/** Mirrors the Rust `ask::AskEvent`. */
-type AskEvent =
-  | { kind: "question"; value: string }
-  | { kind: "delta"; value: string }
-  | { kind: "done" }
-  | { kind: "failed"; value: string };
+import "./panel.css";
 
 /**
- * The Ask answer panel. Rust streams tokens in; this renders them as markdown
- * as they arrive.
+ * The Ask answer panel, mirroring the Swift app's AskAnswerPanel: question,
+ * divider, streaming markdown answer, and a footer with Copy + close.
  */
 function Ask() {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [state, setState] = useState<"streaming" | "done" | "failed">("streaming");
   const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const answerRef = useRef<HTMLDivElement>(null);
+
+  usePanelAutosize(cardRef);
 
   useEffect(() => {
-    const unlisten = listen<AskEvent>("ask", ({ payload }) => {
+    const unlisten = events.ask.listen(({ payload }) => {
       switch (payload.kind) {
         case "question":
           // A new question resets the panel; it is reused, not recreated.
@@ -64,31 +61,60 @@ function Ask() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  return (
-    <div className="ask">
-      <GlassRefraction />
-      <header className="ask__header">
-        <p className="ask__question">{question}</p>
-        <button className="ask__close" onClick={() => commands.closeAsk()}>
-          ✕
-        </button>
-      </header>
+  // Follow the stream to the bottom, and stop once it finishes — the same
+  // simpler-than-tracking-manual-scroll choice the Swift panel made.
+  useEffect(() => {
+    setCopied(false);
+    const el = answerRef.current;
+    if (el && state === "streaming") el.scrollTop = el.scrollHeight;
+  }, [answer, state]);
 
-      {/* Conversation auto-sticks to the bottom as tokens stream in.
-          MessageResponse (Streamdown) renders streaming markdown safely. */}
-      <Conversation className="flex-1">
-        <ConversationContent className="p-4">
-          {state === "failed" ? (
-            <p className="text-[#ff9f0a]">{error}</p>
-          ) : (
-            <>
-              <MessageResponse>{answer}</MessageResponse>
-              {state === "streaming" && !answer && <Loader />}
-            </>
-          )}
-        </ConversationContent>
-      </Conversation>
-    </div>
+  return (
+    <Card ref={cardRef} className="panel gap-3 rounded-2xl border-white/10 py-4 shadow-none">
+      <CardHeader className="px-4">
+        <p
+          className="m-0 line-clamp-2 text-[13px] font-medium text-muted-foreground"
+          data-tauri-drag-region
+        >
+          {question}
+        </p>
+      </CardHeader>
+      <Separator className="bg-white/10" />
+
+      <CardContent className="panel__answer px-4 text-[15px] leading-normal" ref={answerRef}>
+        {state === "failed" ? (
+          <p className="m-0 text-destructive">{error}</p>
+        ) : answer ? (
+          <MessageResponse>{answer}</MessageResponse>
+        ) : (
+          <Loader />
+        )}
+      </CardContent>
+
+      <CardFooter className="gap-2.5 px-4">
+        <span className="flex-1" />
+        <Button
+          variant="secondary"
+          size="sm"
+          className="rounded-full"
+          onClick={() =>
+            navigator.clipboard.writeText(answer).then(() => setCopied(true))
+          }
+        >
+          {copied ? <CheckIcon /> : <CopyIcon />}
+          {copied ? "Copied" : "Copy"}
+        </Button>
+        <Button
+          variant="secondary"
+          size="icon-sm"
+          className="rounded-full"
+          aria-label="Close"
+          onClick={() => commands.closeAsk()}
+        >
+          <XIcon />
+        </Button>
+      </CardFooter>
+    </Card>
   );
 }
 

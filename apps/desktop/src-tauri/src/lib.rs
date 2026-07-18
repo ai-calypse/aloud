@@ -4,12 +4,23 @@ mod commands;
 mod meeting;
 mod overlay;
 mod pipeline;
+mod sound;
 mod tray;
 
 use aloud_store::Settings;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
-use tauri_specta::{collect_commands, Builder};
+use tauri_specta::{collect_commands, collect_events, Builder, Event};
+
+/// How often to re-check for Accessibility permission while waiting for the
+/// user to grant it. macOS offers no notification, so polling is the only way.
+const PERMISSION_POLL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Emitted once hotkeys are live, so the UI can clear its permission banner
+/// without the user restarting the app.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type, Event)]
+#[tauri_specta(event_name = "hotkeys-permitted")]
+pub struct HotkeysPermitted(pub bool);
 
 /// Shared app state, injected into commands via `tauri::State`.
 pub struct AppState {
@@ -30,22 +41,30 @@ pub fn run() {
         )
         .init();
 
-    let builder = Builder::<tauri::Wry>::new().commands(collect_commands![
-        commands::app_version,
-        commands::get_settings,
-        commands::update_settings,
-        commands::get_stats,
-        commands::get_history,
-        commands::search_notes,
-        commands::recent_notes,
-        commands::input_devices,
-        commands::installed_apps,
-        commands::hotkeys_permitted,
-        commands::paste_again,
-        ask::close_ask,
-        agent::confirm_agent,
-        agent::close_agent,
-    ]);
+    let builder = Builder::<tauri::Wry>::new()
+        .commands(collect_commands![
+            commands::app_version,
+            commands::get_settings,
+            commands::update_settings,
+            commands::get_stats,
+            commands::get_history,
+            commands::search_notes,
+            commands::recent_notes,
+            commands::input_devices,
+            commands::installed_apps,
+            commands::hotkeys_permitted,
+            commands::paste_again,
+            ask::close_ask,
+            agent::confirm_agent,
+            agent::close_agent,
+        ])
+        .events(collect_events![
+            pipeline::Phase,
+            meeting::MeetingPhase,
+            ask::AskEvent,
+            agent::AgentEvent,
+            HotkeysPermitted,
+        ]);
 
     // Regenerate the TypeScript bindings on every debug run so the frontend
     // never drifts from the Rust command surface.
@@ -126,12 +145,7 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 {
                     use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
-                    let _ = apply_vibrancy(
-                        &main,
-                        NSVisualEffectMaterial::Sidebar,
-                        None,
-                        None,
-                    );
+                    let _ = apply_vibrancy(&main, NSVisualEffectMaterial::Sidebar, None, None);
                 }
 
                 let win = main.clone();
@@ -209,15 +223,26 @@ fn spawn_hotkey_listener(
     meeting: Arc<Mutex<Option<meeting::Meeting>>>,
     config: Arc<Mutex<aloud_hotkey::model::Config>>,
 ) {
-    if !aloud_hotkey::is_permitted() {
-        tracing::warn!("accessibility permission not granted; hotkeys are disabled");
-        return;
-    }
-
     // `config` is the same Arc AppState holds, so a rebind from Settings is
     // seen here on the next key event — no restart needed.
     let settings = settings.clone();
     std::thread::spawn(move || {
+        // Granting Accessibility does not restart the app, and macOS gives no
+        // signal when it happens, so wait for the grant rather than giving up
+        // at launch. Without this the user grants permission, sees nothing
+        // change, and has to quit and reopen to get working hotkeys.
+        if !aloud_hotkey::is_permitted() {
+            tracing::warn!("accessibility permission not granted; waiting for it");
+            while !aloud_hotkey::is_permitted() {
+                std::thread::sleep(PERMISSION_POLL);
+            }
+            tracing::info!("accessibility permission granted; starting hotkeys");
+        }
+        // Tell the UI so the banner can clear itself without a restart.
+        if let Err(e) = HotkeysPermitted(true).emit(&app) {
+            tracing::warn!(%e, "could not publish hotkey permission");
+        }
+
         let result = aloud_hotkey::listen(config, move |event| {
             handle_hotkey(&app, &pipeline, &settings, &meeting, event);
         });

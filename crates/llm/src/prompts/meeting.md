@@ -22,3 +22,4 @@ The full transcript, cleaned up: fix punctuation, capitalization, and obvious tr
 Rules:
 - Return only the markdown. No preamble, no explanations, no code fences.
 - Do not invent facts, attendees, decisions, or action items that are not in the transcript.
+- Keep every concrete detail verbatim: ticket/issue numbers, names, dates, times, amounts, and deadlines. "Assign ticket four to Julie" must stay "ticket 4", never "a ticket". A generalized bullet that drops the specifics is wrong.

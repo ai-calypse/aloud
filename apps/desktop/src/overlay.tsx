@@ -1,10 +1,7 @@
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { listen } from "@tauri-apps/api/event";
+import { events, type Phase } from "./lib/bindings";
 import "./overlay.css";
-
-/** Mirrors the Rust `pipeline::Phase`. */
-type Phase = "idle" | "recording" | "transcribing" | "done" | "error";
 
 const LABEL: Record<Phase, string> = {
   idle: "",
@@ -30,7 +27,7 @@ function Overlay() {
   const [phase, setPhase] = useState<Phase>(preview ?? "idle");
 
   useEffect(() => {
-    const unlisten = listen<Phase>("dictation-phase", (e) => setPhase(e.payload));
+    const unlisten = events.dictationPhase.listen((e) => setPhase(e.payload));
     return () => {
       unlisten.then((off) => off());
     };

@@ -81,6 +81,11 @@ thin OS backends.
   migration reads from it. Use `aloud_notes::data_dir()`.
 - **Tauri's `global-shortcut` plugin is unusable here.** No modifier-only
   bindings, no hold-vs-tap, cannot swallow events. Hence `crates/hotkey`.
+- **TIS/TSM keyboard-layout APIs abort the process off the main thread** on
+  modern macOS (`dispatch_assert_queue` → SIGTRAP), and enigo's
+  `Key::Unicode` lookup calls them. Every synthetic key chord must go through
+  `aloud_paste`'s `on_main_thread`; calling enigo from a tokio worker or the
+  event-tap thread kills the app with no Rust panic message.
 - **AppleScript-synthesized keys arrive with keycode 0.** `osascript` cannot
   test the hotkey path; post a real `CGEvent` instead.
 - **`specta`/`tauri-specta` are exact-pinned RCs** that move in lockstep. Do

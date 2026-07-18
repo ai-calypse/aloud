@@ -21,10 +21,40 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 /// return exactly this sentinel, which callers treat as "paste nothing".
 pub const EMPTY_SENTINEL: &str = "EMPTY";
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
-    pub content: String,
+    /// A tool-role message carries only a result string; an assistant message
+    /// that only calls tools has no content, hence the option.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    /// Present on an assistant message that decided to call tools. Passed back
+    /// verbatim in the next request so the model sees its own call history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    /// Present on a tool-role message: which call this result answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+/// One tool call the model requested, in OpenAI's function-calling shape.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type", default = "default_tool_type")]
+    pub kind: String,
+    pub function: FunctionCall,
+}
+
+fn default_tool_type() -> String {
+    "function".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionCall {
+    pub name: String,
+    /// Raw JSON string of arguments, exactly as the model emitted it.
+    pub arguments: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
@@ -33,19 +63,33 @@ pub enum Role {
     System,
     User,
     Assistant,
+    Tool,
 }
 
 impl Message {
     pub fn system(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::System,
-            content: content.into(),
-        }
+        Self::text(Role::System, content)
     }
     pub fn user(content: impl Into<String>) -> Self {
+        Self::text(Role::User, content)
+    }
+
+    fn text(role: Role, content: impl Into<String>) -> Self {
         Self {
-            role: Role::User,
-            content: content.into(),
+            role,
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: None,
+        }
+    }
+
+    /// A tool result fed back to the model, keyed to the call it answers.
+    pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: Role::Tool,
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id.into()),
         }
     }
 }
@@ -77,6 +121,11 @@ struct ChatRequest<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     stream: bool,
+    /// Tool schemas (OpenAI function format). Omitted on the plain chat path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<&'a [serde_json::Value]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -91,7 +140,18 @@ struct Choice {
 
 #[derive(Deserialize)]
 struct ResponseMessage {
+    #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<ToolCall>>,
+}
+
+/// The model's reply to a tool-enabled turn: either final content, or a set of
+/// tool calls to run and feed back.
+#[derive(Debug, Clone)]
+pub struct ToolTurn {
+    pub content: Option<String>,
+    pub tool_calls: Vec<ToolCall>,
 }
 
 impl LlmClient {
@@ -135,6 +195,8 @@ impl LlmClient {
                 messages,
                 temperature,
                 stream: false,
+                tools: None,
+                tool_choice: None,
             })
             .send()
             .await
@@ -198,6 +260,71 @@ impl LlmClient {
         self.complete(fallback, messages, temperature).await
     }
 
+    /// One tool-enabled chat turn. Sends the tool schemas with `tool_choice`
+    /// "auto"; the model either answers (`content`) or asks to call tools
+    /// (`tool_calls`). Pass `tools = None` on the final round to force an answer.
+    ///
+    /// A 429 surfaces as `LlmError::RateLimited` immediately — the tool loop
+    /// owns the retry, because it has the event channel to tell the UI about
+    /// the wait. Sleeping here made the panel look hung for 30s.
+    pub async fn chat_with_tools(
+        &self,
+        model: &str,
+        messages: &[Message],
+        tools: Option<&[serde_json::Value]>,
+        temperature: Option<f32>,
+    ) -> Result<ToolTurn> {
+        let response = self
+            .client
+            .post(format!("{}/chat/completions", self.base_url))
+            .bearer_auth(&self.api_key)
+            .json(&ChatRequest {
+                model,
+                messages,
+                temperature,
+                stream: false,
+                tools,
+                tool_choice: tools.map(|_| "auto"),
+            })
+            .send()
+            .await
+            .context("tool chat request failed")?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let cooldown = cooldown::from_headers(response.headers());
+            self.cooldowns.set(model, cooldown);
+            return Err(LlmError::RateLimited {
+                model: model.to_string(),
+                retry_after: cooldown.duration,
+            }
+            .into());
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(LlmError::Failed {
+                status: status.as_u16(),
+                body,
+            }
+            .into());
+        }
+
+        let parsed: ChatResponse = response.json().await.context("decoding tool response")?;
+        let message = parsed
+            .choices
+            .into_iter()
+            .next()
+            .map(|c| c.message)
+            .ok_or_else(|| anyhow!("missing choices[0].message"))?;
+
+        Ok(ToolTurn {
+            content: message
+                .content
+                .map(|c| prompts::strip_think_tags(&c).trim().to_string()),
+            tool_calls: message.tool_calls.unwrap_or_default(),
+        })
+    }
+
     /// Streams a completion, yielding incremental text deltas.
     ///
     /// Used by Ask mode, where the answer renders as it arrives.
@@ -216,6 +343,8 @@ impl LlmClient {
                 messages,
                 temperature,
                 stream: true,
+                tools: None,
+                tool_choice: None,
             })
             .send()
             .await

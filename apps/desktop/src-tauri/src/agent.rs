@@ -10,24 +10,15 @@
 //! Escape dismisses. The difference is it collects a decision, so it holds a
 //! one-shot channel that the approve/reject commands resolve.
 
-use aloud_agent::{Dispatcher, GitHubConnector, ParsedAction};
 use aloud_store::Settings;
 use anyhow::{bail, Result};
-use serde::Serialize;
-use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, Manager};
+use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager};
+use tauri_specta::Event;
 use tokio::sync::oneshot;
 
 const LABEL: &str = "agent";
-
-/// The one connector that ships today. A registry is overkill for one entry;
-/// when the second connector lands this becomes a builder that reads settings
-/// to decide which to register.
-fn dispatcher() -> Dispatcher {
-    let mut d = Dispatcher::new();
-    d.register(Arc::new(GitHubConnector::new()));
-    d
-}
 
 /// Holds the pending confirmation's reply channel, so the frontend's
 /// approve/reject command can wake the awaiting dispatch. Only one confirmation
@@ -36,46 +27,62 @@ fn dispatcher() -> Dispatcher {
 pub struct PendingConfirmation(Mutex<Option<oneshot::Sender<bool>>>);
 
 /// Streamed to the agent panel.
-#[derive(Debug, Clone, Serialize, specta::Type)]
+///
+/// The event vocabulary follows the AG-UI protocol's tool-call lifecycle
+/// (https://docs.ag-ui.com) — a parsed action *is* a tool call, so `run` /
+/// `tool-call` / `tool-result` map its shape onto AI Elements' tool renderer.
+/// It is the AG-UI *vocabulary*, not the wire protocol: these stay
+/// tauri-specta-typed Tauri events, not an SSE stream, because there is one
+/// in-process client. Args are sent whole (not streamed as deltas) since the
+/// parse returns the whole action at once.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "value")]
+#[tauri_specta(event_name = "agent")]
 pub enum AgentEvent {
-    /// The transcript, echoed so the panel shows what it heard.
-    Heard(String),
-    /// A parsed write action awaiting confirmation.
-    Confirm(ActionSummary),
-    /// Plain-language progress ("Working…", "Opened issue: …").
+    /// AG-UI RUN_STARTED — the transcript, echoed so the panel shows what it heard.
+    RunStarted(String),
+    /// AG-UI TOOL_CALL_START + ARGS — a parsed action, with its args, awaiting
+    /// dispatch. A write pauses here for confirmation (AG-UI human-in-the-loop).
+    ToolCall(ToolCall),
+    /// AG-UI TOOL_CALL_RESULT — the dispatcher's outcome for the pending call.
+    ToolResult(ToolResult),
+    /// A transient status line (e.g. "rate limited, retrying in 30s") shown
+    /// while the run is otherwise silent; cleared by the next event.
     Status(String),
-    Done(String),
-    Failed(String),
+    /// AG-UI RUN_FINISHED — the run's closing message.
+    RunFinished(String),
+    /// AG-UI RUN_ERROR — the run failed before producing a result.
+    RunError(String),
 }
 
-/// The parts of a [`ParsedAction`] the confirmation panel shows. Kept separate
-/// from `ParsedAction` so the UI contract does not leak parser internals.
-#[derive(Debug, Clone, Serialize, specta::Type)]
+/// An AG-UI tool call: the action name, the app it targets, and the parsed
+/// args. Kept separate from `ParsedAction` so the UI contract does not leak
+/// parser internals.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct ActionSummary {
-    pub action: String,
+pub struct ToolCall {
+    /// The tool name, AG-UI's `toolCallName`, e.g. "github.create_issue".
+    pub name: String,
+    /// The target app, e.g. "github".
     pub app: String,
-    /// Human-ordered "field: value" lines, e.g. ["repo: o/r", "title: Bug"].
-    pub details: Vec<String>,
+    /// Parsed args as ordered "field: value" lines, e.g. ["repo: o/r", "title: Bug"].
+    pub args: Vec<String>,
+    /// Whether this call pauses for confirmation before it runs (every write).
+    pub requires_confirmation: bool,
 }
 
-impl ActionSummary {
-    fn of(action: &ParsedAction) -> Self {
-        Self {
-            action: action.action.clone(),
-            app: action.app.clone(),
-            details: action
-                .entities
-                .iter()
-                .map(|(k, v)| format!("{k}: {v}"))
-                .collect(),
-        }
-    }
+/// An AG-UI tool result: whether the call succeeded and its message.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolResult {
+    pub success: bool,
+    pub message: String,
 }
 
 fn emit(app: &AppHandle, event: AgentEvent) {
-    if let Err(e) = app.emit_to(LABEL, "agent", event) {
+    // Typed emit from the tauri-specta `Event` derive: the payload type and the
+    // "agent" event name are the same ones the generated bindings listen on.
+    if let Err(e) = event.emit_to(app, LABEL) {
         tracing::warn!(%e, "could not send to agent panel");
     }
 }
@@ -83,21 +90,22 @@ fn emit(app: &AppHandle, event: AgentEvent) {
 /// Runs the full agent flow for a transcript. Called by the pipeline.
 pub async fn run(app: &AppHandle, transcript: String, settings: &Settings) -> Result<()> {
     show(app);
-    emit(app, AgentEvent::Heard(transcript.clone()));
+    emit(app, AgentEvent::RunStarted(transcript.clone()));
 
     match execute(app, &transcript, settings).await {
-        Ok(message) => emit(app, AgentEvent::Done(message)),
+        Ok(message) => emit(app, AgentEvent::RunFinished(message)),
         Err(e) => {
             tracing::error!(%e, "agent failed");
-            emit(app, AgentEvent::Failed(format!("{e:#}")));
+            emit(app, AgentEvent::RunError(format!("{e:#}")));
         }
     }
     Ok(())
 }
 
-// Agent intent parsing runs on Cerebras, not Groq: the tool-call parse is a
-// heavier request and Groq's tokens-per-minute limit throttles it. Cerebras is
-// OpenAI-compatible, so the same LlmClient works against its endpoint.
+// The tool loop runs on Cerebras, not Groq: a multi-round tool loop makes
+// several chat calls in a row and Groq's tokens-per-minute limit throttles it.
+// Cerebras is OpenAI-compatible, so the same LlmClient works against its
+// endpoint, and gpt-oss-120b supports function calling.
 const CEREBRAS_BASE_URL: &str = "https://api.cerebras.ai/v1";
 const CEREBRAS_MODEL: &str = "gpt-oss-120b";
 
@@ -105,28 +113,81 @@ async fn execute(app: &AppHandle, transcript: &str, settings: &Settings) -> Resu
     if settings.cerebras_api_key.trim().is_empty() {
         bail!("Agent mode needs a Cerebras API key to understand commands — add one in Settings");
     }
-
-    let client =
-        aloud_llm::LlmClient::new(&settings.cerebras_api_key, Some(CEREBRAS_BASE_URL))?;
-    let action = aloud_agent::parse_intent(&client, CEREBRAS_MODEL, transcript)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("I didn't recognize that as a command I can run"))?;
-
-    // A write waits for an explicit yes; a read runs straight through. This is
-    // the one non-negotiable safety gate — never dispatch a write unconfirmed.
-    if action.requires_confirmation {
-        emit(app, AgentEvent::Confirm(ActionSummary::of(&action)));
-        if !await_confirmation(app).await {
-            return Ok("Cancelled.".to_string());
-        }
+    if settings.composio_api_key.trim().is_empty() {
+        bail!("Agent mode needs a Composio API key to reach Gmail/GitHub — add one in Settings");
     }
 
-    emit(app, AgentEvent::Status("Working…".to_string()));
-    let result = dispatcher().dispatch(&action).await;
-    if result.success {
-        Ok(result.message)
+    let llm = aloud_llm::LlmClient::new(&settings.cerebras_api_key, Some(CEREBRAS_BASE_URL))?;
+    let composio = aloud_agent::ComposioClient::new(&settings.composio_api_key)?;
+
+    // Discover the Gmail/GitHub tools the user actually has connected. Empty
+    // means nothing is connected — say so rather than letting the model flail.
+    let tools = composio.available_tools().await?;
+    if tools.is_empty() {
+        bail!("No Gmail or GitHub account is connected in Composio yet");
+    }
+
+    aloud_agent::run_tool_loop(
+        &llm,
+        CEREBRAS_MODEL,
+        &composio,
+        transcript,
+        &tools,
+        // Each tool call surfaces on the panel as it happens (AG-UI lifecycle).
+        |event| emit(app, event_of(event)),
+        // A write tool waits for an explicit yes; this is the safety gate.
+        |name, args| confirm_write(app, name, args),
+    )
+    .await
+}
+
+/// Surfaces a write tool for confirmation and awaits the panel's decision. Takes
+/// owned args so the returned future doesn't borrow the loop's transient data.
+async fn confirm_write(app: &AppHandle, name: String, args: Vec<String>) -> bool {
+    emit(
+        app,
+        AgentEvent::ToolCall(ToolCall {
+            app: tool_app(&name),
+            name,
+            args,
+            requires_confirmation: true,
+        }),
+    );
+    await_confirmation(app).await
+}
+
+/// Maps a loop event to the panel's AG-UI event vocabulary.
+fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
+    match event {
+        aloud_agent::LoopEvent::ToolCallStart { name, args } => AgentEvent::ToolCall(ToolCall {
+            app: tool_app(&name),
+            name,
+            args,
+            // The gate is enforced in the loop; the panel just shows the call.
+            requires_confirmation: false,
+        }),
+        aloud_agent::LoopEvent::ToolCallResult { name, success } => {
+            AgentEvent::ToolResult(ToolResult {
+                success,
+                message: if success {
+                    format!("{name} done")
+                } else {
+                    format!("{name} failed")
+                },
+            })
+        }
+        aloud_agent::LoopEvent::RateLimited { seconds } => {
+            AgentEvent::Status(format!("Rate limited — retrying in {seconds}s…"))
+        }
+    }
+}
+
+/// The toolkit a Composio tool slug belongs to, for display.
+fn tool_app(slug: &str) -> String {
+    if slug.starts_with("GMAIL_") {
+        "gmail".to_string()
     } else {
-        bail!("{}", result.message)
+        "github".to_string()
     }
 }
 
@@ -164,6 +225,10 @@ fn show(app: &AppHandle) {
         tracing::warn!("agent window missing");
         return;
     };
+    // Same top-centre drop as the ask panel; the frontend grows it downward.
+    if let Err(e) = crate::overlay::position_top_center(&window, 12.0) {
+        tracing::warn!(%e, "could not position agent panel");
+    }
     let _ = window.show();
     let _ = window.set_focus();
 }
