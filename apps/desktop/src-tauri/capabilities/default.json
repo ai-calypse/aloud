@@ -10,7 +10,6 @@
   ],
   "permissions": [
     "core:default",
-    "opener:default",
     "updater:default",
     "core:window:allow-set-size",
     "autostart:default"
