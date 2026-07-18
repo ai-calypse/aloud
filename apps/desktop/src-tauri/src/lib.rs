@@ -66,6 +66,8 @@ pub fn run() {
             meeting::MeetingPhase,
             ask::AskEvent,
             agent::AgentEvent,
+            overlay::AudioLevel,
+            overlay::OverlayError,
             HotkeysPermitted,
         ]);
 

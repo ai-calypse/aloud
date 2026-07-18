@@ -16,7 +16,10 @@ use cpal::{SampleFormat, Stream, StreamConfig};
 use serde::Serialize;
 use std::{
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, Mutex,
+    },
 };
 
 pub const TRANSCRIBE_RATE: u32 = 16_000;
@@ -69,6 +72,9 @@ pub struct Recorder {
     _stream: Stream,
     captured: Arc<Mutex<Vec<f32>>>,
     source_rate: u32,
+    /// Most recent input level, as f32 bits in an atomic — the audio callback
+    /// thread must never block, so this cannot be a mutex.
+    level: Arc<AtomicU32>,
 }
 
 impl Recorder {
@@ -99,10 +105,13 @@ impl Recorder {
 
         let captured = Arc::new(Mutex::new(Vec::<f32>::new()));
         let sink = captured.clone();
+        let level = Arc::new(AtomicU32::new(0));
+        let level_sink = level.clone();
         let mut tap = on_pcm16;
 
         let mut on_samples = move |samples: &[f32]| {
             let mono = resample::to_mono(samples, channels);
+            level_sink.store(loudness(&mono).to_bits(), Ordering::Relaxed);
             if let Some(tap) = tap.as_mut() {
                 match resample::resample_mono(&mono, source_rate, REALTIME_RATE) {
                     Ok(chunk) => tap(resample::to_pcm16_bytes(&chunk)),
@@ -156,10 +165,19 @@ impl Recorder {
             _stream: stream,
             captured,
             source_rate,
+            level,
         })
     }
 
     /// Stops capture and writes a 16 kHz mono PCM16 WAV to `path`.
+    /// The current input level, 0.0–1.0, for the recording overlay's waveform.
+    ///
+    /// Shared with the audio callback: the returned handle stays live only as
+    /// long as this `Recorder`, which is how the meter task knows to stop.
+    pub fn level_handle(&self) -> Arc<AtomicU32> {
+        self.level.clone()
+    }
+
     pub fn stop_to_wav(self, path: &Path) -> Result<()> {
         let samples = self.take_samples()?;
         if samples.is_empty() {
@@ -190,6 +208,20 @@ impl Recorder {
     }
 }
 
+/// Perceived loudness of a block, 0.0–1.0.
+///
+/// RMS rather than peak: peak jumps on a single click and reads as a spike,
+/// where RMS tracks how loud speech actually sounds. Scaled because normal
+/// speech sits near RMS 0.1 — unscaled, the bars would barely move.
+pub fn loudness(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum_squares: f32 = samples.iter().map(|s| s * s).sum();
+    let rms = (sum_squares / samples.len() as f32).sqrt();
+    (rms * 4.0).clamp(0.0, 1.0)
+}
+
 /// Writes mono f32 samples as a PCM16 WAV.
 pub fn write_wav(path: &Path, samples: &[f32], rate: u32) -> Result<()> {
     let spec = hound::WavSpec {
@@ -210,6 +242,21 @@ pub fn write_wav(path: &Path, samples: &[f32], rate: u32) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The overlay's waveform is only honest if this tracks real input:
+    /// silence must read near zero and speech must not peg the meter.
+    #[test]
+    fn loudness_separates_silence_from_speech() {
+        assert_eq!(loudness(&[]), 0.0);
+        assert_eq!(loudness(&[0.0; 512]), 0.0);
+
+        // Speech sits around RMS 0.1, which should be clearly visible but not
+        // maxed out; a loud clip clamps rather than overflowing the bar.
+        let speech = loudness(&[0.1; 512]);
+        assert!(speech > 0.2 && speech < 0.6, "got {speech}");
+        assert_eq!(loudness(&[1.0; 512]), 1.0);
+        assert!(loudness(&[-0.5; 512]) > 0.0, "sign must not matter");
+    }
 
     #[test]
     fn wav_roundtrips_at_declared_rate() {

@@ -5,8 +5,22 @@
 //! CSS backdrop blur — a visual downgrade, not a functional one.
 
 use crate::pipeline::Phase;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_specta::Event;
+
+/// Live input level, 0.0–1.0, driving the pill's waveform. Sent only to the
+/// overlay window and only while recording; the bars were previously a fixed
+/// CSS animation that looked identical in silence.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
+#[tauri_specta(event_name = "audio-level")]
+pub struct AudioLevel(pub f32);
+
+/// Why a dictation failed, in words the user can act on. `Phase::Error` says
+/// only that something broke, which the pill used to render as "Failed".
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
+#[tauri_specta(event_name = "overlay-error")]
+pub struct OverlayError(pub String);
 
 const LABEL: &str = "overlay";
 /// Distance from the top of the screen, in logical pixels. Clears the menu bar.
@@ -75,4 +89,16 @@ pub fn position_top_center(window: &WebviewWindow, top_margin: f64) -> tauri::Re
         origin.y + top_margin,
     ))?;
     Ok(())
+}
+
+/// Sends the live input level to the pill.
+pub fn send_level(app: &AppHandle, level: f32) {
+    let _ = AudioLevel(level).emit_to(app, LABEL);
+}
+
+/// Sends the message the pill shows instead of a bare "Failed".
+pub fn send_error(app: &AppHandle, message: &str) {
+    if let Err(e) = OverlayError(message.to_string()).emit_to(app, LABEL) {
+        tracing::warn!(%e, "could not send error to overlay");
+    }
 }

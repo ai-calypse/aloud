@@ -18,6 +18,9 @@ use tauri_specta::Event;
 
 /// How long the pill stays up after a dictation finishes.
 const OVERLAY_LINGER: Duration = Duration::from_millis(900);
+/// How often the input level is pushed to the overlay. 20 Hz is smooth to the
+/// eye without flooding the event channel.
+const LEVEL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// What the UI reflects. Mirrors the Swift overlay's phases.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
@@ -125,6 +128,13 @@ impl Pipeline {
         }
     }
 
+    /// Reports a failure to the user, not just to the log. The pill showed a
+    /// bare "Failed" for every error while the real cause went to stderr.
+    fn emit_error(&self, error: &anyhow::Error) {
+        crate::overlay::send_error(&self.app, &format!("{error:#}"));
+        self.emit(Phase::Error);
+    }
+
     fn settings(&self) -> Settings {
         self.settings.lock().map(|s| s.clone()).unwrap_or_default()
     }
@@ -163,6 +173,19 @@ impl Pipeline {
         let recorder = aloud_audio::Recorder::start(settings.selected_microphone.as_deref(), None)
             .context("starting recorder")?;
 
+        // Feed the overlay's waveform. The handle stays alive only as long as
+        // the recorder, so the task ends by itself when recording stops —
+        // no stop flag to keep in sync with five different stop paths.
+        let level = recorder.level_handle();
+        let app = self.app.clone();
+        tauri::async_runtime::spawn(async move {
+            while Arc::strong_count(&level) > 1 {
+                let value = f32::from_bits(level.load(std::sync::atomic::Ordering::Relaxed));
+                crate::overlay::send_level(&app, value);
+                tokio::time::sleep(LEVEL_INTERVAL).await;
+            }
+        });
+
         session.recorder = Some(recorder);
         session.started_at = Some(std::time::Instant::now());
         drop(session);
@@ -192,7 +215,7 @@ impl Pipeline {
             Ok(Outcome::Asked) | Ok(Outcome::NoSpeech) => self.emit(Phase::Idle),
             Err(e) => {
                 tracing::error!(%e, "dictation failed");
-                self.emit(Phase::Error);
+                self.emit_error(e);
             }
         }
         result.map(|_| ())
@@ -402,11 +425,10 @@ impl Pipeline {
 
         self.emit(Phase::Transcribing);
         let result = self.transcribe_and_command(recorder, &selection).await;
-        self.emit(if result.is_ok() {
-            Phase::Done
-        } else {
-            Phase::Error
-        });
+        match &result {
+            Ok(()) => self.emit(Phase::Done),
+            Err(e) => self.emit_error(e),
+        }
         result
     }
 
@@ -471,11 +493,12 @@ impl Pipeline {
 
         self.emit(Phase::Transcribing);
         let result = self.transcribe_and_ask(recorder).await;
-        self.emit(if result.is_ok() {
-            Phase::Idle
-        } else {
-            Phase::Error
-        });
+        match &result {
+            // Ask and Agent show their own panel; the pill just gets out of
+            // the way unless there is an error worth reading.
+            Ok(()) => self.emit(Phase::Idle),
+            Err(e) => self.emit_error(e),
+        }
         result
     }
 
@@ -506,11 +529,12 @@ impl Pipeline {
 
         self.emit(Phase::Transcribing);
         let result = self.transcribe_and_agent(recorder).await;
-        self.emit(if result.is_ok() {
-            Phase::Idle
-        } else {
-            Phase::Error
-        });
+        match &result {
+            // Ask and Agent show their own panel; the pill just gets out of
+            // the way unless there is an error worth reading.
+            Ok(()) => self.emit(Phase::Idle),
+            Err(e) => self.emit_error(e),
+        }
         result
     }
 
