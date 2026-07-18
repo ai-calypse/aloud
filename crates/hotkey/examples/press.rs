@@ -1,9 +1,15 @@
 // Posts a real Right Option hold, as hardware does. Arg: hold duration in ms.
-use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType};
-use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use std::{thread::sleep, time::Duration};
+//
+// macOS only: it synthesizes a CGEvent, the one tool that actually drives the
+// hotkey path (osascript-synthesized keys arrive with keycode 0 — see
+// CLAUDE.md). Gated so the crate still builds under `--all-targets` on Windows.
 
+#[cfg(target_os = "macos")]
 fn main() {
+    use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use std::{thread::sleep, time::Duration};
+
     let ms: u64 = std::env::args()
         .nth(1)
         .and_then(|a| a.parse().ok())
@@ -20,4 +26,9 @@ fn main() {
     sleep(Duration::from_millis(ms));
     post(false, CGEventFlags::empty());
     println!("released");
+}
+
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("press: macOS only (synthesizes a CGEvent)");
 }
