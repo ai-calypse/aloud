@@ -34,6 +34,7 @@ function Overlay() {
   // null means "no level has arrived yet", which is what the canned-animation
   // fallback keys off — distinct from a real level of 0 during silence.
   const [level, setLevel] = useState<number | null>(null);
+  const [download, setDownload] = useState<number | null>(null);
 
   useEffect(() => {
     const unlistenPhase = events.dictationPhase.listen((e) => {
@@ -47,15 +48,25 @@ function Overlay() {
     });
     const unlistenLevel = events.audioLevel.listen((e) => setLevel(e.payload ?? 0));
     const unlistenError = events.overlayError.listen((e) => setError(e.payload));
+    // First use of the local engine fetches ~150MB; without this the pill sits
+    // on "Transcribing…" for minutes and the app looks hung.
+    const unlistenDownload = events.modelDownload.listen((e) =>
+      setDownload(e.payload === null || e.payload >= 1 ? null : e.payload),
+    );
     return () => {
       unlistenPhase.then((off) => off());
       unlistenLevel.then((off) => off());
       unlistenError.then((off) => off());
+      unlistenDownload.then((off) => off());
     };
   }, []);
 
   const label =
-    phase === "error" && error ? truncate(error, ERROR_CHARS) : LABEL[phase];
+    phase === "error" && error
+      ? truncate(error, ERROR_CHARS)
+      : download !== null
+        ? `Downloading model… ${Math.round(download * 100)}%`
+        : LABEL[phase];
 
   return (
     <div className="overlay-root">

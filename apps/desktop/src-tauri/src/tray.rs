@@ -124,6 +124,13 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         None::<&str>,
     )?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "setup",
+        "Re-run Setup…",
+        true,
+        None::<&str>,
+    )?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(
         app,
@@ -222,6 +229,24 @@ fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             // the settings pane.
             if let Err(e) = app.emit("open-settings", ()) {
                 tracing::warn!(%e, "could not ask the window to open settings");
+            }
+        }
+        // Clearing `onboarded` is all it takes: the window shows the wizard
+        // whenever that flag is false.
+        "setup" => {
+            let state = app.state::<AppState>();
+            let mut settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
+            settings.onboarded = false;
+            if let Err(e) = settings.save() {
+                tracing::warn!(%e, "could not reset onboarding");
+                return;
+            }
+            if let Ok(mut current) = state.settings.lock() {
+                *current = settings;
+            }
+            show_main(app);
+            if let Err(e) = app.emit("rerun-setup", ()) {
+                tracing::warn!(%e, "could not ask the window to show setup");
             }
         }
         "quit" => app.exit(0),

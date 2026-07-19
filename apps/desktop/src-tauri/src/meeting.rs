@@ -13,6 +13,7 @@ use anyhow::{Context, Result};
 use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
 use tauri_specta::Event;
+use tokio::sync::mpsc;
 
 /// One rolling chunk, at the 24 kHz PCM16 the realtime tap emits.
 const CHUNK_SECONDS: usize = 60;
@@ -28,15 +29,20 @@ pub struct Meeting {
     recorder: aloud_audio::Recorder,
     state: Arc<Mutex<State>>,
     settings: Settings,
+    /// Chunks go to the worker as they fill. Dropping this closes the channel,
+    /// which is how the worker learns the meeting is over.
+    tx: Option<mpsc::UnboundedSender<(usize, Vec<u8>)>>,
+    /// The background transcriber, joined on stop.
+    worker: tauri::async_runtime::JoinHandle<Vec<(usize, String)>>,
 }
 
 #[derive(Default)]
 struct State {
     /// Audio not yet cut into a chunk.
     pending: Vec<u8>,
-    /// Full 60s chunks awaiting transcription. Staged on the tap thread (which
-    /// must never block) and drained on stop.
-    pending_chunks: Vec<Vec<u8>>,
+    /// Position of the next chunk, so segments can be reassembled in order
+    /// even though they finish out of order.
+    next_index: usize,
 }
 
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize, specta::Type, Event)]
@@ -49,23 +55,31 @@ pub enum MeetingPhase {
 }
 
 impl Meeting {
-    /// Starts capturing. Chunks transcribe in the background as they fill.
+    /// Starts capturing. Chunks transcribe in the background as they fill, so
+    /// stopping a long meeting does not stall while an hour of audio is sent
+    /// off one minute at a time.
     pub fn start(app: AppHandle, settings: Settings) -> Result<Self> {
         let state = Arc::new(Mutex::new(State::default()));
+        let (tx, rx) = mpsc::unbounded_channel();
+        let worker =
+            tauri::async_runtime::spawn(transcribe_chunks(app.clone(), settings.clone(), rx));
 
         // The realtime tap hands us 24 kHz PCM16 as it arrives; accumulate it
-        // and cut a chunk every 60 seconds.
+        // and hand off a chunk every 60 seconds.
         let tap_state = state.clone();
+        let tap_tx = tx.clone();
         let recorder = aloud_audio::Recorder::start(
             settings.selected_microphone.as_deref(),
             Some(Box::new(move |bytes: Vec<u8>| {
                 if let Ok(mut state) = tap_state.lock() {
                     state.pending.extend_from_slice(&bytes);
-                    // Stage full chunks only; transcription happens on stop.
-                    // The tap thread must never block.
+                    // Send, never transcribe, on this thread: the tap thread
+                    // must never block. An unbounded channel cannot back up.
                     while state.pending.len() >= CHUNK_BYTES {
-                        let chunk = state.pending.drain(..CHUNK_BYTES).collect();
-                        state.pending_chunks.push(chunk);
+                        let chunk: Vec<u8> = state.pending.drain(..CHUNK_BYTES).collect();
+                        let index = state.next_index;
+                        state.next_index += 1;
+                        let _ = tap_tx.send((index, chunk));
                     }
                 }
             })),
@@ -78,6 +92,8 @@ impl Meeting {
             recorder,
             state,
             settings,
+            tx: Some(tx),
+            worker,
         })
     }
 
@@ -89,29 +105,38 @@ impl Meeting {
             recorder,
             state,
             settings,
+            tx,
+            worker,
         } = self;
         emit(&app, MeetingPhase::Saving);
 
-        // Flush remaining audio into a final chunk if it is long enough to be
-        // worth transcribing.
-        let (chunks, tail) = {
-            let mut state = state.lock().unwrap();
-            let chunks = std::mem::take(&mut state.pending_chunks);
-            let tail = std::mem::take(&mut state.pending);
-            (chunks, tail)
-        };
+        // Stop capture first, so no further chunks can be queued behind us.
         let _ = recorder.stop();
 
-        let transcriber = crate::pipeline::build_transcriber(&settings).await?;
-
-        // Transcribe every staged chunk in order, plus the tail. Full chunks
-        // are all CHUNK_BYTES, so index the temp file by position, not length.
-        let mut segments = Vec::new();
-        for (i, chunk) in chunks.iter().enumerate() {
-            segments.push(transcribe_chunk(&*transcriber, chunk, i).await);
+        // Send the trailing audio as a final chunk if it is long enough to be
+        // worth transcribing, then close the channel: that is the worker's
+        // signal to finish what it has and return.
+        let (tail, tail_index) = {
+            let mut state = state.lock().unwrap();
+            (std::mem::take(&mut state.pending), state.next_index)
+        };
+        if let Some(tx) = &tx {
+            if tail.len() >= MIN_FINAL_CHUNK_BYTES {
+                let _ = tx.send((tail_index, tail));
+            }
         }
-        if tail.len() >= MIN_FINAL_CHUNK_BYTES {
-            segments.push(transcribe_chunk(&*transcriber, &tail, segments.len()).await);
+        drop(tx);
+
+        // Most chunks are already transcribed; this waits only on whatever was
+        // still in flight, rather than on the whole meeting.
+        let mut done = worker.await.unwrap_or_default();
+        done.sort_by_key(|(index, _)| *index);
+
+        // Reassemble by position: a dropped or silent chunk must still occupy
+        // its slot, or every later timestamp shifts.
+        let mut segments = vec![None; done.last().map_or(0, |(i, _)| i + 1)];
+        for (index, text) in done {
+            segments[index] = Some(text);
         }
 
         let transcript = assemble(&segments);
@@ -168,6 +193,42 @@ async fn summarize(settings: &Settings, transcript: &str) -> Result<String> {
             Some(0.2),
         )
         .await
+}
+
+/// Transcribes chunks as they arrive, returning what it got, indexed.
+///
+/// Runs for the life of the meeting and ends when the channel closes. A failed
+/// chunk is reported in place rather than dropped: a gap in the middle of a
+/// transcript should be visible, not silently closed up.
+async fn transcribe_chunks(
+    app: AppHandle,
+    settings: Settings,
+    mut rx: mpsc::UnboundedReceiver<(usize, Vec<u8>)>,
+) -> Vec<(usize, String)> {
+    let mut segments = Vec::new();
+    // Built on the first chunk, not at start: the local model costs ~200ms and
+    // a meeting with no audio should never pay for it.
+    let mut transcriber = None;
+
+    while let Some((index, chunk)) = rx.recv().await {
+        if transcriber.is_none() {
+            match crate::pipeline::build_transcriber(&app, &settings).await {
+                Ok(t) => transcriber = Some(t),
+                Err(e) => {
+                    tracing::error!(%e, "meeting transcriber unavailable");
+                    continue;
+                }
+            }
+        }
+        let Some(t) = transcriber.as_deref() else {
+            continue;
+        };
+        match transcribe_chunk(t, &chunk, index).await {
+            Some(text) => segments.push((index, text)),
+            None => segments.push((index, "[inaudible]".to_string())),
+        }
+    }
+    segments
 }
 
 /// Transcribes one PCM16 chunk by wrapping it in a WAV the transcriber reads.
@@ -254,6 +315,32 @@ mod tests {
         let mut segments = vec![None; 61];
         segments[60] = Some("past the hour".to_string());
         assert!(assemble(&segments).starts_with("[01:00]"));
+    }
+
+    /// Chunks now finish out of order (they transcribe concurrently), so the
+    /// reassembly must key on the chunk's index. Sorting by completion order
+    /// would silently shuffle a meeting's timeline.
+    #[test]
+    fn out_of_order_chunks_reassemble_by_position() {
+        let mut done = vec![
+            (2, "third minute".to_string()),
+            (0, "first minute".to_string()),
+        ];
+        done.sort_by_key(|(index, _)| *index);
+
+        let mut segments = vec![None; done.last().map_or(0, |(i, _)| i + 1)];
+        for (index, text) in done {
+            segments[index] = Some(text);
+        }
+
+        // Index 1 never arrived, so it must stay an empty slot rather than
+        // letting "third minute" slide up to the 1-minute mark.
+        assert_eq!(segments.len(), 3);
+        assert_eq!(segments[1], None);
+        assert_eq!(
+            assemble(&segments),
+            "[00:00] first minute\n\n[00:02] third minute"
+        );
     }
 
     #[test]
