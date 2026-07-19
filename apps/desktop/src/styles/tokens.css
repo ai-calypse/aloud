@@ -1,0 +1,153 @@
+/* The palette. Every colour in the app resolves here — if a value is not in
+ * this file, it should not exist in a component.
+ *
+ * Loaded by all four windows (main, overlay, ask, agent). Before this file the
+ * palette lived in App.css, which only the main window imported, so panel and
+ * overlay code re-hardcoded the same hexes and `var(--warning)` silently
+ * resolved to nothing in the agent panel.
+ *
+ * Two tiers, and the distinction matters when adding a colour:
+ *   - RAW values (this file) are the macOS system palette.
+ *   - SEMANTIC names say what a colour is *for*. Components use only these,
+ *     so a re-theme is an edit here rather than a sweep through the tree.
+ */
+
+:root {
+  /* --- macOS system colours, light ------------------------------------- */
+  --sys-blue: #007aff;
+  --sys-green: #34c759;
+  --sys-red: #ff3b30;
+  --sys-orange: #ff9f0a;
+  --sys-pink: #ff375f;
+  --sys-indigo: #5856d6;
+  --sys-teal: #64d2ff;
+  --sys-grey: #8e8e93;
+
+  /* --- Surfaces --------------------------------------------------------- */
+  /* Window canvas. Grouped lists sit on it, so it is never pure white. */
+  --bg: #ececee;
+  /* Cards are deliberately SOLID: the window vibrancy showing through a
+     grouped list washes out the hairlines the design is made of. */
+  --card-solid: #ffffff;
+  --card-border: rgb(0 0 0 / 0.05);
+  /* Hairline between rows inside a card. */
+  --sep: rgb(60 60 67 / 0.13);
+  /* Filled input wells, inactive toggle tracks, secondary buttons. */
+  --field: rgb(0 0 0 / 0.05);
+  /* Row hover tint. Accent-derived so it reads as selection, not grey. */
+  --hover: rgb(0 122 255 / 0.05);
+
+  /* --- Text ------------------------------------------------------------- */
+  --fg: #1c1c1e;
+  --text2: #8a8a8e; /* secondary: hints, captions, values */
+  --text3: #aeaeb2; /* tertiary: mode chips, disabled */
+  --chev: #c4c4c8; /* disclosure chevrons */
+  --search-icon: #a0a0a4;
+
+  /* --- Accent and state -------------------------------------------------- */
+  --accent: var(--sys-blue);
+  --accent-fg: #ffffff;
+  --danger: var(--sys-red);
+  --success: var(--sys-green);
+  --warning: #b45309;
+  --warning-bg: #fef3c7;
+
+  /* --- Component-specific ------------------------------------------------ */
+  --keycap: #f2f2f4;
+  --keycap-border: rgb(0 0 0 / 0.1);
+  --toggle-on: var(--sys-green);
+  --toggle-off: #e9e9ea;
+  /* Sidebar glass. Translucent so macOS vibrancy shows through, opaque
+     enough that Windows — which has no vibrancy — still gets a surface. */
+  --sidebar: rgb(246 246 248 / 0.82);
+
+  /* --- Radii ------------------------------------------------------------- */
+  /* Named for what they wrap, because macOS radii are not a linear scale. */
+  --radius-card: 11px;
+  --radius-field: 9px;
+  --radius-row: 7px;
+  --radius-chip: 5px;
+  --radius-pill: 999px;
+
+  /* --- Elevation --------------------------------------------------------- */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.05);
+  --shadow-field: 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-accent: 0 1px 2px rgb(0 60 160 / 0.3);
+  --shadow-knob: 0 1px 3px rgb(0 0 0 / 0.28);
+
+  /* --- Type -------------------------------------------------------------- */
+  /* The design's sizes sit between Tailwind's steps, hence the odd halves. */
+  --text-row: 13.5px; /* row labels */
+  --text-ui: 13px; /* buttons, values, most controls */
+  --text-hint: 12.5px; /* row hints */
+
+  color-scheme: light dark;
+  font-family: -apple-system, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sys-blue: #0a84ff;
+    --sys-green: #30d158;
+    --sys-red: #ff453a;
+    --sys-teal: #64d2ff;
+
+    --bg: #1c1c1e;
+    --card-solid: #2c2c2e;
+    --card-border: rgb(255 255 255 / 0.06);
+    --sep: rgb(255 255 255 / 0.09);
+    --field: rgb(255 255 255 / 0.08);
+    --hover: rgb(10 132 255 / 0.14);
+
+    --fg: #f5f5f7;
+    --text2: #98989e;
+    --text3: #7c7c82;
+    --chev: #5a5a5e;
+    --search-icon: #7c7c82;
+
+    --warning: #fbbf24;
+    --warning-bg: #422006;
+
+    --keycap: #3a3a3c;
+    --keycap-border: rgb(255 255 255 / 0.14);
+    --toggle-off: #39393d;
+    --sidebar: rgb(44 44 46 / 0.82);
+  }
+}
+
+/* Panel and overlay windows are always dark: they float over the user's
+   desktop rather than sitting in the app's own window, so they cannot follow
+   the app appearance without looking like a hole in the screen. Scoped by
+   attribute rather than a second file, so the token list stays in one place. */
+:root[data-surface="floating"] {
+  color-scheme: dark;
+
+  --bg: #1e1e20;
+  --fg: #ffffff;
+  --text2: #a1a1a6;
+  --accent: var(--sys-teal);
+
+  --card-solid: #232325;
+  --card-border: rgb(255 255 255 / 0.1);
+  --sep: rgb(255 255 255 / 0.1);
+  --field: rgb(255 255 255 / 0.06);
+
+  /* Always dark, so it needs the dark warning even when the OS is in light
+     mode — the light amber (#b45309) is near-invisible on this backdrop. */
+  --sys-blue: #0a84ff;
+  --sys-green: #30d158;
+  --sys-red: #ff453a;
+  --warning: #fbbf24;
+  --warning-bg: #422006;
+
+  /* The recording pill is glass over the live desktop, so its colours are a
+     material rather than a surface: they answer to what is behind them, not
+     to the app palette. Kept here anyway so no hex hides in a stylesheet. */
+  --pill-ink: #f5f5f7;
+  --pill-fill: rgb(28 28 30 / 0.01);
+  --pill-rim: rgb(255 255 255 / 0.14);
+  --pill-shadow: 0 8px 32px rgb(0 0 0 / 0.36);
+  --pill-rim-light: inset 0 1px 1px rgb(255 255 255 / 0.6);
+  --pill-rim-shade: inset 0 -1px 2px rgb(0 0 0 / 0.6);
+}

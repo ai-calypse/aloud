@@ -1,0 +1,61 @@
+/* Motion tokens.
+ *
+ * Durations and curves live here so the app moves with one voice. A component
+ * that invents its own `240ms cubic-bezier(...)` is a component that will drift
+ * out of step with everything around it.
+ *
+ * The curves are the ones Apple's interfaces use, and they are not
+ * interchangeable:
+ *   --ease-out    entrances. Fast start, long settle. Content arriving should
+ *                 decelerate into place, never coast at constant speed.
+ *   --ease-glide  travel between two known points (a pill sliding to the row
+ *                 you clicked). Almost no overshoot, but a very long tail, so
+ *                 it reads as weight rather than as a linear slide.
+ *   --ease-in     exits. Slow start, fast finish — the mirror of an entrance.
+ *   --ease-spring Slight overshoot, for things that should feel physical when
+ *                 they pop into existence.
+ */
+
+:root {
+  /* Snappy enough to feel instant, slow enough to be seen. Under ~120ms an
+     animation reads as a jump-cut; over ~450ms it reads as waiting. */
+  --dur-instant: 90ms;
+  --dur-fast: 160ms;
+  --dur-base: 240ms;
+  --dur-slow: 400ms;
+  --dur-slower: 560ms;
+
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-glide: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
+}
+
+/* One global switch. Every animation in the app is expected to be covered by
+ * this — if a new one is not, it is a bug, not a style choice. Vestibular
+ * disorders make large motion genuinely unpleasant, and the OS setting is the
+ * user telling us so.
+ *
+ * Not `animation: none`: killing an animation outright can leave an element
+ * stuck at its `from` state (invisible, offset, mid-blur). Collapsing the
+ * duration instead runs it to completion in a single frame, so the end state
+ * is always correct.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 1ms;
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+    --dur-slow: 1ms;
+    --dur-slower: 1ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

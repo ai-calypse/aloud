@@ -9,7 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Loader } from "@/components/ai-elements/loader";
 import "./index.css";
-import "./panel.css";
+import "./styles/panel.css";
 
 /**
  * The Ask answer panel, mirroring the Swift app's AskAnswerPanel: question,
@@ -73,7 +73,7 @@ function Ask() {
     <Card ref={cardRef} className="panel gap-3 rounded-2xl border-white/10 py-4 shadow-none">
       <CardHeader className="px-4">
         <p
-          className="m-0 line-clamp-2 text-[13px] font-medium text-muted-foreground"
+          className="m-0 line-clamp-2 text-ui font-medium text-muted-foreground"
           data-tauri-drag-region
         >
           {question}

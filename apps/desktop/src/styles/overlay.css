@@ -1,15 +1,14 @@
-/* The window itself is transparent; only the pill paints. */
-html,
-body {
-  margin: 0;
-  height: 100%;
-  background: transparent;
-  overflow: hidden;
-  /* The window is click-through, so nothing here should look selectable. */
-  user-select: none;
-  cursor: default;
-}
+@import "./tokens.css";
+@import "./base.css";
+@import "./motion.css";
 
+/* The recording pill. The window itself is transparent; only the pill paints.
+ *
+ * This window deliberately does not load Tailwind: it renders one component
+ * onto an always-on-top surface, so the whole utility layer would be dead
+ * weight. It does load the shared tokens, which is why no colour below is a
+ * literal — before, this file carried its own private copy of the palette.
+ */
 /* Centre the pill in the (transparent) window; the pill sizes to its content
    rather than filling the frame, so its height is set here, not by the window. */
 .overlay-root {
@@ -27,8 +26,8 @@ body {
   box-sizing: border-box;
   height: 52px;
   padding: 0 22px;
-  border: 0.5px solid rgb(255 255 255 / 0.14);
-  border-radius: 999px;
+  border: 0.5px solid var(--pill-rim);
+  border-radius: var(--radius-pill);
   overflow: hidden; /* clip the refraction layer to the capsule */
 
   /* backdrop-filter blurs the real desktop behind the transparent window
@@ -37,22 +36,21 @@ body {
      Two independent knobs:
        - fill opacity  → the /0.68 below (lower = more transparent)
        - blur strength → the blur(24px) below (higher px = blurrier backdrop) */
-  background: rgb(28 28 30 / 0.01);
+  background: var(--pill-fill);
   backdrop-filter: blur(4px) saturate(180%);
   -webkit-backdrop-filter: blur(4px) saturate(180%);
   box-shadow:
-    0 8px 32px rgb(0 0 0 / 0.36),
-    /* inner rim light — the refractive edge of glass */
-    inset 0 1px 1px rgb(255 255 255 / 0.6),
-    inset 0 -1px 2px rgb(0 0 0 / 0.6);
+    var(--pill-shadow),
+    /* inner rim light — the refractive edge of glass */ var(--pill-rim-light),
+    var(--pill-rim-shade);
 
-  color: #f5f5f7;
+  color: var(--pill-ink);
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 14px;
   font-weight: 500;
   letter-spacing: 0.01em;
 
-  animation: rise 180ms ease-out;
+  animation: rise var(--dur-fast) var(--ease-out);
 }
 
 /* A glass sheen (top-lit gradient + a diagonal chromatic streak) warped by the
@@ -109,14 +107,14 @@ body {
   height: 22px;
   transform-origin: center;
   transform: scaleY(calc(0.6 + 0.4 * var(--level, 0.5)));
-  transition: transform 120ms ease-out;
+  transition: transform var(--dur-instant) var(--ease-out);
 }
 
 .bars i {
   width: 4px;
   height: 100%;
-  border-radius: 999px;
-  background: #f5f5f7;
+  border-radius: var(--radius-pill);
+  background: var(--pill-ink);
   /* Scale the whole animation by this bar's peak (set per-bar in the TSX) so
      the edges stay shorter than the centre — a waveform envelope. */
   transform: scaleY(calc(0.55 * var(--peak, 1)));
@@ -138,20 +136,20 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #8e8e93;
+  background: var(--sys-grey);
 }
 
 .dot--transcribing {
-  background: #0a84ff;
+  background: var(--sys-blue);
   animation: breathe 1.1s ease-in-out infinite;
 }
 
 .dot--done {
-  background: #32d74b;
+  background: var(--sys-green);
 }
 
 .dot--error {
-  background: #ff9f0a;
+  background: var(--sys-orange);
 }
 
 @keyframes breathe {
@@ -163,12 +161,4 @@ body {
 /* Nothing to show when idle; Rust hides the window anyway. */
 .pill--idle {
   display: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pill,
-  .bars i,
-  .dot {
-    animation: none;
-  }
 }

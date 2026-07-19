@@ -96,13 +96,13 @@ export function AppRuleEditor({
             App Rules
           </h1>
           <button
-            className="shrink-0 whitespace-nowrap rounded-lg bg-[var(--accent)] px-[15px] py-[7px] text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(0,60,160,.3)] active:scale-[0.97]"
+            className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-[15px] py-[7px] text-ui font-medium text-white shadow-accent active:scale-[0.97]"
             onClick={() => setEditing(-1)}
           >
             Add Rule
           </button>
         </div>
-        <p className="mt-1.5 max-w-[520px] text-[13px] text-[var(--text2)]">
+        <p className="mt-1.5 max-w-[520px] text-ui text-ink-2">
           Adjust dictation cleanup per app: paste verbatim in terminals, or steer
           the tone in chat and email apps.
         </p>
@@ -110,7 +110,7 @@ export function AppRuleEditor({
 
       <Group>
         {rules.length === 0 ? (
-          <div className="py-8 text-center text-[13px] text-[var(--text2)]">
+          <div className="py-8 text-center text-ui text-ink-2">
             <p className="mb-1 text-[15px] font-semibold text-foreground">
               No App Rules Yet
             </p>
@@ -120,23 +120,23 @@ export function AppRuleEditor({
           rules.map((r, i) => (
             <div
               key={i}
-              className="grid grid-cols-[130px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-[var(--sep)] py-[13px] last:border-b-0"
+              className="grid grid-cols-[130px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-separator py-[13px] last:border-b-0"
             >
-              <span className="truncate text-[13.5px] font-semibold">
+              <span className="truncate text-row font-semibold">
                 {r.app_matches}
               </span>
-              <span className="truncate text-[12.5px] text-[var(--text2)]">
+              <span className="truncate text-hint text-ink-2">
                 {summary(r)}
               </span>
-              <div className="flex gap-4 text-[13px] font-medium">
+              <div className="flex gap-4 text-ui font-medium">
                 <button
-                  className="text-[var(--accent)] active:scale-95"
+                  className="text-brand active:scale-95"
                   onClick={() => setEditing(i)}
                 >
                   Edit
                 </button>
                 <button
-                  className="text-[var(--danger)] active:scale-95"
+                  className="text-danger active:scale-95"
                   onClick={() => remove(i)}
                 >
                   Delete
@@ -152,16 +152,16 @@ export function AppRuleEditor({
           {suggestions.map((s) => (
             <div
               key={s.app_matches}
-              className="grid grid-cols-[130px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-[var(--sep)] py-3 last:border-b-0"
+              className="grid grid-cols-[130px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-separator py-3 last:border-b-0"
             >
-              <span className="truncate text-[13.5px] font-medium">
+              <span className="truncate text-row font-medium">
                 {s.app_matches}
               </span>
-              <span className="truncate text-[12.5px] text-[var(--text2)]">
+              <span className="truncate text-hint text-ink-2">
                 {summary(s)}
               </span>
               <button
-                className="text-[13px] font-medium text-[var(--accent)] active:scale-95"
+                className="text-ui font-medium text-brand active:scale-95"
                 onClick={() => onChange([...rules, s])}
               >
                 Add

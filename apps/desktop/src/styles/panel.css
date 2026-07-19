@@ -1,0 +1,21 @@
+/* Ask/agent panel windows: a single floating card over the user's desktop.
+ *
+ * The palette comes from styles/tokens.css via the `data-surface="floating"`
+ * scope declared on <html> in ask.html/agent.html — these windows are always
+ * dark, because following the app appearance would punch a bright hole in
+ * whatever the user is looking at. Before, this file carried its own private
+ * copy of four palette vars and the document reset.
+ */
+
+/* Opaque stand-in for the Swift panel's blur-under-black-tint material. The
+   native window shadow hugs the rounded card, so the backdrop stays opaque. */
+.panel {
+  background: linear-gradient(180deg, #19191b, #232325);
+}
+
+/* Hugs its content; past the screen-derived cap it scrolls. The cap is set on
+   the root by the autosize hook (55% of the screen minus chrome). */
+.panel__answer {
+  max-height: var(--answer-cap, 400px);
+  overflow-y: auto;
+}

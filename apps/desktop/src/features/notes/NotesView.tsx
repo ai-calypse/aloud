@@ -59,10 +59,10 @@ export function NotesView() {
   return (
     <div className="flex min-h-0 flex-col gap-3.5">
       <div className="flex items-center gap-3">
-        <div className="flex flex-1 items-center gap-[7px] rounded-[9px] border-[0.5px] border-[var(--card-border)] bg-[var(--card-solid)] px-3 py-2 shadow-[0_1px_2px_rgba(0,0,0,.04)] focus-within:border-[var(--accent)]">
+        <div className="flex flex-1 items-center gap-[7px] rounded-field border-[0.5px] border-surface-border bg-surface px-3 py-2 shadow-field focus-within:border-brand">
           <svg
             viewBox="0 0 16 16"
-            className="size-[13px] shrink-0 text-[var(--search-icon)]"
+            className="size-[13px] shrink-0 text-search-icon"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.6"
@@ -72,20 +72,20 @@ export function NotesView() {
           </svg>
           <input
             type="search"
-            className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--text2)]"
+            className="w-full bg-transparent text-ui outline-none placeholder:text-ink-2"
             placeholder="Search notes"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
           />
         </div>
-        <span className="shrink-0 text-xs text-[var(--text2)]">
+        <span className="shrink-0 text-xs text-ink-2">
           {notes.length} {notes.length === 1 ? "note" : "notes"}
         </span>
       </div>
 
       {notes.length === 0 ? (
-        <p className="text-[13px] text-[var(--text2)]">
+        <p className="text-ui text-ink-2">
           {showing ? `No notes match “${query}”` : "No notes yet."}
         </p>
       ) : (
@@ -94,16 +94,16 @@ export function NotesView() {
             <button
               key={note.path}
               onClick={() => setOpen(note)}
-              className="grid w-full grid-cols-[1fr_auto] items-center gap-3.5 border-b-[0.5px] border-[var(--sep)] py-3 text-left last:border-b-0 hover:bg-[var(--hover)]"
+              className="grid w-full grid-cols-[1fr_auto] items-center gap-3.5 border-b-[0.5px] border-separator py-3 text-left last:border-b-0 hover:bg-hover"
             >
               <span className="truncate text-sm font-medium">
                 <Highlight text={note.title} terms={terms} />
               </span>
-              <span className="shrink-0 whitespace-nowrap text-xs text-[var(--text2)]">
+              <span className="shrink-0 whitespace-nowrap text-xs text-ink-2">
                 {formatDate(note.date)}
               </span>
               {showing && (
-                <span className="col-span-2 truncate text-xs text-[var(--text2)]">
+                <span className="col-span-2 truncate text-xs text-ink-2">
                   <Highlight text={results[i].snippet} terms={terms} />
                 </span>
               )}

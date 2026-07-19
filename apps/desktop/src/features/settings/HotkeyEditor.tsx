@@ -78,15 +78,15 @@ export function HotkeyEditor({
         return (
           <div
             key={role.key}
-            className="grid grid-cols-[150px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-[var(--sep)] py-3 last:border-b-0"
+            className="grid grid-cols-[150px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-separator py-3 last:border-b-0"
           >
-            <div className="whitespace-nowrap text-[13.5px] font-medium">
+            <div className="whitespace-nowrap text-row font-medium">
               {role.label}
-              <span className="ml-[7px] text-[10px] uppercase tracking-[0.06em] text-[var(--text3)]">
+              <span className="ml-[7px] text-[10px] uppercase tracking-[0.06em] text-ink-3">
                 {role.mode}
               </span>
             </div>
-            <span className="text-[12.5px] text-[var(--text2)]">
+            <span className="text-hint text-ink-2">
               {role.hint}
             </span>
             {/* The trigger is styled as a keycap — the binding is the value of
@@ -95,7 +95,7 @@ export function HotkeyEditor({
               value={current === "custom" ? "custom" : current}
               onValueChange={(v) => setRole(role.key, v)}
             >
-              <SelectTrigger className="h-auto gap-1.5 rounded-[7px] border-[0.5px] border-[var(--keycap-border)] bg-[var(--keycap)] px-3 py-[5px] font-mono text-xs shadow-none data-[size=default]:h-auto [&_svg]:text-[var(--chev)]">
+              <SelectTrigger className="h-auto gap-1.5 rounded-row border-[0.5px] border-keycap-border bg-keycap px-3 py-[5px] font-mono text-xs shadow-none data-[size=default]:h-auto [&_svg]:text-chevron">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
