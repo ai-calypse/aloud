@@ -162,6 +162,18 @@ pub fn paste_text(text: &str, press_enter: bool) -> Result<()> {
     result
 }
 
+/// Puts `text` on the clipboard and leaves it there — no paste, no restore.
+///
+/// This is for the tray's history menu: a menu closes by moving focus, so
+/// synthesising a paste chord would land in whatever happened to be in front.
+/// Copying and letting the user paste is both safer and what the Swift menu did.
+pub fn set_clipboard(text: &str) -> Result<()> {
+    arboard::Clipboard::new()
+        .context("opening clipboard")?
+        .set_text(text)
+        .context("writing to clipboard")
+}
+
 /// Sends the paste chord (Cmd+V / Ctrl+V), optionally followed by Return.
 fn send_paste(press_enter: bool) -> Result<()> {
     on_main_thread(move || -> Result<()> {

@@ -60,6 +60,9 @@ pub struct Pipeline {
     settings: Arc<Mutex<Settings>>,
     history: Mutex<History>,
     stats: Mutex<Stats>,
+    /// The last phase emitted, so the tray menu can show what the app is doing
+    /// without the frontend having to be awake to tell it.
+    phase: Mutex<Phase>,
     /// Loaded lazily: the model costs ~200ms and memory, so only when the
     /// local engine is actually used.
     local: Mutex<Option<Arc<dyn Transcriber>>>,
@@ -76,6 +79,7 @@ impl Pipeline {
             // Lifetime stats outlive the process; a fresh Stats here silently
             // zeroed the user's words, sessions, and streak on every launch.
             stats: Mutex::new(Stats::load()),
+            phase: Mutex::new(Phase::Idle),
             local: Mutex::new(None),
         })
     }
@@ -83,6 +87,13 @@ impl Pipeline {
     /// Publishes the phase and drives the overlay's visibility with it, so
     /// the pill can never be left on screen after a session ends.
     fn emit(&self, phase: Phase) {
+        if let Ok(mut current) = self.phase.lock() {
+            *current = phase;
+        }
+        // The tray shows the phase and the running totals, and it is visible
+        // when the main window is not.
+        crate::tray::refresh(&self.app);
+
         if let Err(e) = phase.emit(&self.app) {
             tracing::warn!(%e, "could not emit phase");
         }
@@ -116,6 +127,20 @@ impl Pipeline {
 
     fn settings(&self) -> Settings {
         self.settings.lock().map(|s| s.clone()).unwrap_or_default()
+    }
+
+    /// The last phase emitted, for the tray menu's status line.
+    pub fn phase(&self) -> Phase {
+        self.phase.lock().map(|p| *p).unwrap_or(Phase::Idle)
+    }
+
+    /// The last transcript, if any — the tray greys out "Paste Again" without
+    /// one and shows a preview with it.
+    pub fn last_transcript(&self) -> Option<String> {
+        self.session
+            .lock()
+            .ok()
+            .and_then(|s| s.last_transcript.clone())
     }
 
     /// Whether a capture session is in flight. Drives the tap-to-toggle

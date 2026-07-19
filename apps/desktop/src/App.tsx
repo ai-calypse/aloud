@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   commands,
   events,
@@ -91,6 +92,10 @@ export default function App() {
       // Stats only change once the text has actually landed.
       if (event.payload === "done") refreshStats();
     });
+    // The tray's "Settings…" item opens the window on the settings pane; the
+    // menu cannot navigate the webview itself.
+    const unlistenSettings = listen("open-settings", () => setNav("general"));
+
     // Rust waits for the Accessibility grant and announces it, so the banner
     // clears the moment permission lands — no app restart needed.
     const unlistenPermission = events.hotkeysPermitted.listen((event) =>
@@ -100,6 +105,7 @@ export default function App() {
       window.removeEventListener("focus", refreshStats);
       unlistenPhase.then((off) => off());
       unlistenPermission.then((off) => off());
+      unlistenSettings.then((off) => off());
     };
   }, []);
 
