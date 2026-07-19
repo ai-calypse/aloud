@@ -26,6 +26,19 @@ use tracing_subscriber::Layer;
 /// day alone runs past a couple of hundred. Rows are a few hundred bytes.
 const RETAIN_UTTERANCES: i64 = 5000;
 
+/// Hands out utterance ids. Seeded from the database on open, because the
+/// rows outlive the process: a fresh in-process counter restarted at 0 every
+/// launch and reissued ids the previous session had already used, which
+/// merged unrelated runs into one waterfall and left the prune query
+/// comparing against a maximum that never grew.
+static NEXT_UTTERANCE: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// The next unused utterance id. Monotonic within a process and, thanks to
+/// the seed, across restarts too.
+pub fn next_utterance_id() -> i64 {
+    NEXT_UTTERANCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// One closed span.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -57,13 +70,29 @@ impl Timings {
         }
         let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
         Self::migrate(&conn)?;
-        Ok(Self { conn })
+        let db = Self { conn };
+        db.seed_utterance_ids()?;
+        Ok(db)
     }
 
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         Self::migrate(&conn)?;
         Ok(Self { conn })
+    }
+
+    /// Resumes the id sequence past whatever is already on disk.
+    ///
+    /// Only ever moves the counter forward: an id must never be reissued, and
+    /// a second `open` (tests, a future second store) must not walk it back.
+    fn seed_utterance_ids(&self) -> Result<()> {
+        let next: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(utterance_id), -1) + 1 FROM timings",
+            [],
+            |row| row.get(0),
+        )?;
+        NEXT_UTTERANCE.fetch_max(next, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
     }
 
     fn migrate(conn: &Connection) -> Result<()> {
@@ -256,6 +285,36 @@ impl tracing::field::Visit for JsonVisitor<'_> {
 mod tests {
     use super::*;
     use tracing_subscriber::prelude::*;
+
+    /// The bug this is named for: the id counter lived in the process while
+    /// the rows lived on disk, so a restart reissued ids the previous session
+    /// had already used and two unrelated runs became one waterfall.
+    #[test]
+    fn utterance_ids_do_not_restart_with_the_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("timings.sqlite");
+
+        {
+            let db = Timings::open(&path).unwrap();
+            let subscriber = tracing_subscriber::registry().with(TimingLayer::new(Arc::new(
+                Mutex::new(Timings::open(&path).unwrap()),
+            )));
+            tracing::subscriber::with_default(subscriber, || {
+                for id in 0..4i64 {
+                    let _s = tracing::info_span!("utterance", utterance_id = id).entered();
+                }
+            });
+            assert_eq!(db.recent(20).unwrap().len(), 4);
+        }
+
+        // "Restart": a fresh open against the same file.
+        let reopened = Timings::open(&path).unwrap();
+        assert!(
+            next_utterance_id() >= 4,
+            "id reissued over an existing run — waterfalls would merge"
+        );
+        assert_eq!(reopened.recent(20).unwrap().len(), 4, "data must survive");
+    }
 
     /// Drives real spans through a real subscriber: the correlation and the
     /// nesting are the whole point, and neither is visible from unit-testing

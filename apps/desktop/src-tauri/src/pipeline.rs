@@ -26,12 +26,10 @@ const ERROR_LINGER: Duration = Duration::from_secs(4);
 /// utterance correctly on its own, and the prompt costs far more than the
 /// words it is fixing.
 const CLEANUP_MIN_WORDS: usize = 3;
-/// Correlates every stage of one dictation. A counter rather than a UUID:
-/// it is only ever read back on this machine, and it sorts by time for free.
-fn next_utterance_id() -> i64 {
-    static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
-    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-}
+/// Correlates every stage of one dictation. A counter rather than a UUID: it
+/// is only ever read back on this machine, and it sorts by time for free —
+/// which is only true because the store seeds it from disk on open.
+use aloud_store::timings::next_utterance_id;
 
 /// How often the input level is pushed to the overlay. 20 Hz is smooth to the
 /// eye without flooding the event channel.
