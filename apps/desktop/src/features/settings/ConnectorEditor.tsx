@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { commands, events, type Connector } from "../../lib/bindings";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
@@ -35,6 +43,16 @@ export function ConnectorEditor() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  /** The connector awaiting a disconnect confirmation, if any. */
+  const [confirming, setConfirming] = useState<Connector | null>(null);
+  /**
+   * Slugs the user has disconnected, held until Composio agrees.
+   *
+   * A DELETE followed straight away by a GET can still report the account as
+   * ACTIVE, which would flip the row back to connected a second after the user
+   * disconnected it — the same confusion the optimistic update exists to avoid.
+   */
+  const [disconnected, setDisconnected] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(async () => {
     const result = await commands.listConnectors();
@@ -45,6 +63,14 @@ export function ConnectorEditor() {
     }
     setError(null);
     setConnected(result.data);
+    // Drop the override once the server stops claiming a connection.
+    setDisconnected((prev) => {
+      if (prev.size === 0) return prev;
+      const claimed = new Set(
+        result.data.filter((c) => c.connected).map((c) => c.slug),
+      );
+      return new Set([...prev].filter((slug) => claimed.has(slug)));
+    });
   }, []);
 
   useEffect(() => {
@@ -83,10 +109,20 @@ export function ConnectorEditor() {
 
   async function disconnect(connector: Connector) {
     if (!connector.connectionId) return;
+    setConfirming(null);
     setBusy(connector.slug);
     const result = await commands.disconnectConnector(connector.connectionId);
-    if (result.status === "error") setError(result.error);
     setBusy(null);
+    if (result.status === "error") {
+      setError(result.error);
+      return;
+    }
+
+    // Flip the row here rather than waiting for the refetch below. Disconnect
+    // clears the backend cache, so that refetch is the cold path — a full
+    // Composio round-trip during which the row would otherwise keep its tick
+    // and read as "nothing happened".
+    setDisconnected((prev) => new Set(prev).add(connector.slug));
     refresh();
   }
 
@@ -94,21 +130,30 @@ export function ConnectorEditor() {
   // connected copy wins on slug, since only it carries the connectionId needed
   // to disconnect.
   const rows = useMemo(() => {
-    const slugs = new Set((connected ?? []).map((c) => c.slug));
-    const merged = [
-      ...(connected ?? []),
-      ...results.filter((r) => !slugs.has(r.slug)),
-    ];
+    const mine = (connected ?? []).map((c) =>
+      disconnected.has(c.slug)
+        ? { ...c, connected: false, connectionId: null }
+        : c,
+    );
+    const slugs = new Set(mine.map((c) => c.slug));
+    const merged = [...mine, ...results.filter((r) => !slugs.has(r.slug))];
     if (filter === "connected") return merged.filter((c) => c.connected);
     if (filter === "available") return merged.filter((c) => !c.connected);
     return merged;
-  }, [connected, results, filter]);
+  }, [connected, results, filter, disconnected]);
 
   // Only while browsing: once the user types, they want the table, not a
   // shortlist chosen for them. Hidden under "Connected" for the same reason.
+  //
+  // Drawn from the catalogue, never from the user's own list: promoting a
+  // just-disconnected service into a "Popular" card would yank the row the
+  // user was looking at out of the table and into a promo strip.
+  const mineSlugs = new Set((connected ?? []).map((c) => c.slug));
   const browsing = !query.trim() && filter !== "connected";
   const popular = browsing
-    ? rows.filter((c) => !c.connected).slice(0, POPULAR_COUNT)
+    ? results
+        .filter((c) => !c.connected && !mineSlugs.has(c.slug))
+        .slice(0, POPULAR_COUNT)
     : [];
   // Promoted into cards, so listing them again below is noise.
   const promoted = new Set(popular.map((c) => c.slug));
@@ -243,7 +288,7 @@ export function ConnectorEditor() {
                   <button
                     className="text-[13px] font-medium text-[var(--danger)] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50"
                     disabled={busy === c.slug}
-                    onClick={() => disconnect(c)}
+                    onClick={() => setConfirming(c)}
                   >
                     Disconnect
                   </button>
@@ -263,6 +308,36 @@ export function ConnectorEditor() {
         Connecting opens Composio's consent page in your browser. Come back to
         this window when you are done and the connector appears here.
       </p>
+
+      {/* Disconnecting revokes the account and cannot be undone from here —
+          reconnecting means going through OAuth again. */}
+      <Dialog
+        open={confirming !== null}
+        onOpenChange={(open) => !open && setConfirming(null)}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Disconnect {confirming?.name}?</DialogTitle>
+          </DialogHeader>
+          <p className="m-0 text-sm text-muted-foreground">
+            The agent will no longer be able to act through{" "}
+            {confirming?.name ?? "this service"}. You can reconnect later, but
+            you will have to sign in again.
+          </p>
+          <DialogFooter className="justify-between sm:justify-between">
+            <Button variant="secondary" onClick={() => setConfirming(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={busy === confirming?.slug}
+              onClick={() => confirming && disconnect(confirming)}
+            >
+              Disconnect
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
