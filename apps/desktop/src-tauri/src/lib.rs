@@ -306,6 +306,9 @@ fn handle_hotkey(
 
     match event {
         Event::Activated(Role::Hold) => {
+            // Note anything selected before recording begins: with a selection
+            // the utterance rewrites it, without one it is dictated.
+            pipeline.note_selection_if_any();
             if let Err(e) = pipeline.start() {
                 tracing::error!(%e, "could not start recording");
             }
@@ -315,7 +318,7 @@ fn handle_hotkey(
             // stalled hook stops delivering key events system-wide.
             let pipeline = pipeline.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = pipeline.stop_and_paste().await {
+                if let Err(e) = pipeline.stop_and_dictate().await {
                     tracing::error!(%e, "dictation failed");
                 }
             });
@@ -348,18 +351,20 @@ fn handle_hotkey(
                 }
             });
         }
-        Event::Activated(Role::Command) => {
-            // Read the selection now, before recording moves focus.
+        Event::Activated(Role::Rewrite) => {
+            // Read the selection now, before recording moves focus. The
+            // thorough read: this key means the user asked for a rewrite, so
+            // the clipboard fallback is worth its cost.
             pipeline.capture_selection();
             if let Err(e) = pipeline.start() {
                 tracing::error!(%e, "could not start recording");
             }
         }
-        Event::Deactivated(Role::Command) => {
+        Event::Deactivated(Role::Rewrite) => {
             let pipeline = pipeline.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = pipeline.stop_and_command().await {
-                    tracing::error!(%e, "command mode failed");
+                if let Err(e) = pipeline.stop_and_dictate().await {
+                    tracing::error!(%e, "rewrite failed");
                 }
             });
         }

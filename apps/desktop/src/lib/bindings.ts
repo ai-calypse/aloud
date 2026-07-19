@@ -172,7 +172,13 @@ export type Config = {
 	toggle: Binding | null,
 	copy_again: Binding | null,
 	ask: Binding | null,
-	command: Binding | null,
+	/**
+	 *  Rewrite the selected text by voice. Called `command` in settings files
+	 *  written before the rename; `Settings::load` moves those across, rather
+	 *  than a serde alias — an alias makes specta emit a union type, and
+	 *  `keyof Config` on a union is `never`, which breaks the settings UI.
+	 */
+	rewrite: Binding | null,
 	meeting_notes: Binding | null,
 	agent: Binding | null,
 };

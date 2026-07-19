@@ -1,4 +1,5 @@
-//! Reads the selected text in whatever app has focus, for command mode.
+//! Reads the selected text in whatever app has focus, so an utterance can
+//! rewrite it instead of being typed.
 //!
 //! macOS has a proper answer — the Accessibility API's `AXSelectedText`,
 //! ported from `AppContextService.swift`. Windows UI Automation is unreliable
@@ -8,9 +9,37 @@
 
 use anyhow::Result;
 
+/// The current selection without touching the clipboard, or None when the OS
+/// cannot say.
+///
+/// The Accessibility read only — no Cmd+C fallback. Dictation calls this on
+/// every utterance to decide whether to rewrite the selection or type fresh
+/// text, and paying a clipboard round-trip for that would mean synthesising a
+/// copy into the user's app every time they dictate: slow, and destructive in
+/// any app where Cmd+C does something of its own.
+///
+/// None means "no selection, as far as we can tell". That is the safe way to
+/// be wrong — the caller falls back to plain dictation, which is what would
+/// have happened anyway.
+pub fn selected_text_quietly() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::selected_text().filter(|t| !t.trim().is_empty())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // ponytail: Windows has no equivalent read yet, so dictation there is
+        // never selection-aware. UI Automation's TextPattern is the upgrade.
+        None
+    }
+}
+
 /// The current selection, or an empty string when nothing is selected.
 ///
 /// Tries the native path first where there is one, then the clipboard trick.
+/// Costs a synthesised Cmd+C wherever Accessibility cannot answer, so this is
+/// for the explicit rewrite hotkey; see [`selected_text_quietly`] for the read
+/// dictation does on every utterance.
 pub fn selected_text() -> Result<String> {
     #[cfg(target_os = "macos")]
     if let Some(text) = macos::selected_text() {

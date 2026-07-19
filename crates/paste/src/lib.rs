@@ -25,7 +25,7 @@ const MAIN_THREAD_WAIT: Duration = Duration::from_secs(2);
 /// enigo's layout-dependent keycode lookup calls TIS/TSM
 /// (`TISCopyCurrentKeyboardInputSource`), and modern macOS aborts the whole
 /// process (`dispatch_assert_queue` → SIGTRAP) when those run off the main
-/// queue. The pipeline pastes from a tokio worker and command mode copies from
+/// queue. The pipeline pastes from a tokio worker and the rewrite read copies from
 /// the event-tap thread, so every synthetic key chord must hop here first.
 #[cfg(target_os = "macos")]
 fn on_main_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {

@@ -1,6 +1,6 @@
 // Posts a real modifier hold, as hardware does.
 // Args: hold duration in ms, then an optional macOS keycode (default 61,
-// Right Option; 58 is Left Option, which command mode binds by default).
+// Right Option; 58 is Left Option, which rewrite binds by default).
 //
 // macOS only: it synthesizes a CGEvent, the one tool that actually drives the
 // hotkey path (osascript-synthesized keys arrive with keycode 0 — see
