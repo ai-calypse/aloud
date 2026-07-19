@@ -44,6 +44,13 @@ pub struct ToolCall {
     #[serde(rename = "type", default = "default_tool_type")]
     pub kind: String,
     pub function: FunctionCall,
+    /// Provider-specific data that must be echoed back verbatim on the next
+    /// turn. Gemini 3 puts a `thought_signature` here and rejects the whole
+    /// request without it — "Function call is missing a thought_signature",
+    /// HTTP 400, on the second round of every tool loop. Opaque on purpose:
+    /// this crate does not interpret it, it just carries it back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_content: Option<serde_json::Value>,
 }
 
 fn default_tool_type() -> String {
@@ -257,6 +264,17 @@ impl LlmClient {
 
         let fallback = fallback
             .ok_or_else(|| anyhow!("{model} is rate-limited and no fallback model is set"))?;
+
+        // Spending a request to rediscover a limit we already recorded costs
+        // the caller a full timeout — up to 30s on top of the 30s the primary
+        // just burned, with the pill up and uncancellable the whole time.
+        if let Some(wait) = self.cooldowns.remaining(fallback) {
+            return Err(LlmError::RateLimited {
+                model: fallback.to_string(),
+                retry_after: wait,
+            }
+            .into());
+        }
         self.complete(fallback, messages, temperature).await
     }
 

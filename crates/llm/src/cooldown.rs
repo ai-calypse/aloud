@@ -148,16 +148,24 @@ impl CooldownTracker {
 
     /// Whether `model` is still cooling down. Expired entries are dropped.
     pub fn is_limited(&self, model: &str) -> bool {
+        self.remaining(model).is_some()
+    }
+
+    /// How long `model` stays limited, or `None` if it is usable. Expired
+    /// entries are dropped. The remaining time is what makes a rate-limit
+    /// message actionable — "try again in 40s" rather than "try again".
+    pub fn remaining(&self, model: &str) -> Option<Duration> {
         let Ok(mut map) = self.until.lock() else {
-            return false; // a poisoned lock must not block all requests
+            return None; // a poisoned lock must not block all requests
         };
+        let now = Instant::now();
         match map.get(model) {
-            Some(expires) if *expires > Instant::now() => true,
+            Some(expires) if *expires > now => Some(*expires - now),
             Some(_) => {
                 map.remove(model);
-                false
+                None
             }
-            None => false,
+            None => None,
         }
     }
 }

@@ -1,7 +1,7 @@
 //! The Composio tool loop: model ↔ tools until the model produces a final
 //! answer. A direct port of voice-dict's `AskService.answerUsingTools`.
 //!
-//! The model is told which Gmail/GitHub tools it has; it either answers or asks
+//! The model is told which tools its connected apps offer; it either answers or asks
 //! to call tools; each call executes through Composio and the result is fed
 //! back. Bounded rounds — the last round forbids tools so the model must answer
 //! rather than loop forever. Write tools (send email, create issue) pause for an
@@ -36,17 +36,43 @@ pub enum LoopEvent {
 
 const TOOL_SYSTEM_PROMPT: &str = "\
 You are a concise assistant acting on a spoken command. You can call tools to \
-act on the user's Gmail and GitHub (send email, create drafts, fetch emails, \
-create issues, list issues, get the authenticated user). Only call a tool when \
-the command asks for such an action or needs that data; otherwise just answer. \
+act on the user's connected apps (email, calendar, GitHub, and whatever else \
+the tool list offers). Only call a tool when the command asks for such an \
+action or needs that data; otherwise just answer. \
 The command is a transcription of speech and may contain minor errors; act on \
 the intent. After acting, confirm what you did in one short plain sentence. \
 If a tool result was not successful or contains an error, say the action \
-failed and why — never claim it worked. \
+failed and why — never claim it worked. But if it failed because an argument \
+was invalid, fix that argument and retry once before reporting failure. \
 Fill every argument you send with real content. If the user asks you to write \
 or draft something, compose the actual text — never send an empty body, an \
 empty subject, or a placeholder. If the same content is needed by two calls, \
-repeat it in full rather than leaving the second one blank.";
+repeat it in full rather than leaving the second one blank. Omit optional \
+arguments you have no real value for — use the schema's default rather than \
+inventing identifiers.";
+
+/// The model has no clock, so "tomorrow at 4pm" resolves against its training
+/// data: a "4 to 6pm" event landed on 2023-07-20T09:00-07:00 — right time of
+/// day, wrong year, and stamped UTC instead of the user's zone. Every relative
+/// date and every timezone argument depends on this line.
+///
+/// Naming the zone is not enough on its own. Told only "(Asia/Calcutta)", the
+/// model still searched `2026-07-18T17:00:00Z` for a 5pm event — 10:30pm local
+/// — found an empty window, and burned four lookups widening it. Spelling the
+/// offset out, in the exact format the arguments want, is what stops that.
+fn now_line() -> String {
+    let now = chrono::Local::now();
+    let zone = iana_time_zone::get_timezone().unwrap_or_else(|_| now.offset().to_string());
+    format!(
+        "The current date and time is {} ({zone}), which in ISO-8601 is {}. \
+         Resolve every relative date (\"today\", \"tomorrow\", \"next Friday\") \
+         against it. Every timestamp you send must carry this same {} offset — \
+         never a \"Z\" suffix, never UTC, unless the user names another zone.",
+        now.format("%A %-d %B %Y, %H:%M"),
+        now.format("%Y-%m-%dT%H:%M:%S%:z"),
+        now.format("%:z"),
+    )
+}
 
 /// Runs the loop for `command`. Returns the model's final answer.
 ///
@@ -66,7 +92,10 @@ where
     F: Future<Output = bool>,
 {
     let schemas: Vec<serde_json::Value> = tools.iter().map(ToolDef::to_openai).collect();
-    let mut messages = vec![Message::system(TOOL_SYSTEM_PROMPT), Message::user(command)];
+    let mut messages = vec![
+        Message::system(format!("{TOOL_SYSTEM_PROMPT} {}", now_line())),
+        Message::user(command),
+    ];
 
     // Whether any tool call in the run failed — the empty-answer fallback must
     // not say "Done." over a failure.
@@ -211,6 +240,7 @@ mod tests {
     fn tool(name: &str, read_only: bool) -> ToolDef {
         ToolDef {
             name: name.into(),
+            toolkit: crate::composio::toolkit_of_slug(name),
             description: String::new(),
             parameters: serde_json::json!({}),
             read_only,
@@ -219,6 +249,26 @@ mod tests {
 
     /// The confirmation gate is the one non-negotiable safety property, so it
     /// must fail closed: anything not proven read-only asks first.
+    #[test]
+    fn the_prompt_carries_a_current_year_not_the_models_training_year() {
+        let line = now_line();
+        let year = chrono::Local::now().format("%Y").to_string();
+        assert!(line.contains(&year), "got: {line}");
+    }
+
+    /// Naming the zone alone left the model sending `...T17:00:00Z` for 5pm
+    /// local. The literal offset is the part that stops it.
+    #[test]
+    fn the_prompt_spells_out_the_utc_offset() {
+        let line = now_line();
+        let offset = chrono::Local::now().format("%:z").to_string();
+        assert!(
+            line.contains(&offset),
+            "offset {offset} missing from: {line}"
+        );
+        assert!(line.contains("never a \"Z\" suffix"), "got: {line}");
+    }
+
     #[test]
     fn only_explicitly_read_only_tools_skip_confirmation() {
         let tools = [

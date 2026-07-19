@@ -41,7 +41,15 @@ pub fn is_permitted() -> bool {
 /// (a run loop on macOS, a message pump on Windows), so run this on its own.
 ///
 /// `config` is shared so settings changes apply without restarting the hook.
-pub fn listen<F>(config: Arc<Mutex<Config>>, mut on_event: F) -> Result<()>
+///
+/// `busy` is set by the app while a session is still running after its key was
+/// released. Escape only cancels — and is only swallowed — while a role is held
+/// or `busy` is set, so Escape keeps working everywhere else.
+pub fn listen<F>(
+    config: Arc<Mutex<Config>>,
+    busy: Arc<std::sync::atomic::AtomicBool>,
+    mut on_event: F,
+) -> Result<()>
 where
     F: FnMut(Event) + Send + 'static,
 {
@@ -53,6 +61,8 @@ where
         } else {
             Input::KeyUp(raw.key)
         };
+
+        state.set_busy(busy.load(std::sync::atomic::Ordering::Relaxed));
 
         // A poisoned lock must not wedge the keyboard: pass the event through.
         let Ok(config) = config.lock() else {

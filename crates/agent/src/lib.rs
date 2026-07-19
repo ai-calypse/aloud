@@ -15,7 +15,7 @@
 pub mod composio;
 pub mod tool_loop;
 
-pub use composio::{ComposioClient, ToolDef, Toolkit, TOOLS_PER_TOOLKIT};
+pub use composio::{toolkit_of_slug, ComposioClient, ToolDef, Toolkit, TOOLS_PER_TOOLKIT};
 pub use tool_loop::{run as run_tool_loop, LoopEvent};
 
 /// Whether a command is an agent request or plain dictation.

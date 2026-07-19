@@ -190,10 +190,11 @@ pub async fn list_connectors(state: State<'_, AppState>) -> CmdResult<Vec<Connec
 
     let mut out = Vec::new();
     for toolkit in toolkits {
-        // Show exactly what the agent gets, so the pane cannot claim a tool
-        // the model was never offered.
+        // The agent now picks tools per command, so there is no single set to
+        // show. An empty command yields the pins plus a stable head of the
+        // toolkit — representative of a typical request, not a promise.
         let tools = composio
-            .toolkit_tools(&toolkit.slug, aloud_agent::TOOLS_PER_TOOLKIT)
+            .toolkit_tools(&toolkit.slug, "", aloud_agent::TOOLS_PER_TOOLKIT)
             .await
             .unwrap_or_default();
         out.push(to_connector(toolkit, tools));
