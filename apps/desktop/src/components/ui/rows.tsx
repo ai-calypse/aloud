@@ -20,15 +20,84 @@ export function Group({
 }) {
   return (
     <section className={className}>
-      {title && (
-        <h3 className="mb-[7px] ml-1 text-xs font-semibold uppercase tracking-[0.03em] text-ink-2">
-          {title}
-        </h3>
-      )}
-      <div className="rounded-card border-[0.5px] border-surface-border bg-surface px-[15px] shadow-card">
-        {children}
-      </div>
+      {title && <Caption>{title}</Caption>}
+      <Surface className="px-[15px]">{children}</Surface>
     </section>
+  );
+}
+
+/**
+ * The app's card: a solid panel with a hairline border.
+ *
+ * Solid on purpose — letting the window vibrancy through a grouped list washes
+ * out the separators the design is made of.
+ */
+export function Surface({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-card border-[0.5px] border-surface-border bg-surface shadow-card",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** The uppercase label above a group. */
+export function Caption({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <h3
+      className={cn(
+        "mb-[7px] ml-1 text-xs font-semibold uppercase tracking-[0.03em] text-ink-2",
+        className,
+      )}
+    >
+      {children}
+    </h3>
+  );
+}
+
+/**
+ * A row whose columns are fixed rather than label-left/control-right.
+ *
+ * Five places grew their own copy of this grid — hotkeys, macros, app rules,
+ * app-rule suggestions, connectors — each repeating the same hairline and
+ * last-child rule with a different column template.
+ */
+export function GridRow({
+  columns,
+  children,
+  className,
+}: {
+  /** A grid-template-columns value, e.g. "150px 1fr auto". */
+  columns: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "grid items-center gap-3.5 border-b-[0.5px] border-separator py-3 last:border-b-0",
+        className,
+      )}
+      style={{ gridTemplateColumns: columns }}
+    >
+      {children}
+    </div>
   );
 }
 

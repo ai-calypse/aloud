@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { CheckIcon, CopyIcon, TriangleAlertIcon, XIcon } from "lucide-react";
+import { CheckIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { commands, events } from "./lib/bindings";
 import {
   pendingStep,
@@ -11,9 +11,7 @@ import {
 } from "./lib/agent-steps";
 import { bodyFor, labelFor } from "./lib/tool-views";
 import { usePanelAutosize } from "./lib/autosize";
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { PanelShell } from "@/components/ui/panel-shell";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Loader } from "@/components/ai-elements/loader";
 import { Shimmer } from "@/components/ai-elements/shimmer";
@@ -55,7 +53,6 @@ function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
  */
 function Agent() {
   const [run, setRun] = useState<Run>({ heard: "", steps: [] });
-  const [copied, setCopied] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
   usePanelAutosize(cardRef);
@@ -66,7 +63,6 @@ function Agent() {
         case "runStarted":
           // A new run resets the panel; it is reused, not recreated.
           setRun({ heard: payload.value, steps: [] });
-          setCopied(false);
           break;
         case "toolCall":
           setRun((r) => ({
@@ -123,18 +119,25 @@ function Agent() {
   const copyText = run.finished || "";
 
   return (
-    <Card ref={cardRef} className="panel gap-3 rounded-2xl border-white/10 py-4 shadow-none">
-      <CardHeader className="px-4">
-        <p
-          className="m-0 line-clamp-2 text-ui font-medium text-muted-foreground"
-          data-tauri-drag-region
-        >
-          {run.heard}
-        </p>
-      </CardHeader>
-      <Separator className="bg-white/10" />
-
-      <CardContent className="panel__answer flex flex-col gap-3 px-4 text-[15px] leading-normal">
+    <PanelShell
+      // Keyed on the run so a new one resets the copied state.
+      key={run.heard}
+      title={run.heard}
+      cardRef={cardRef}
+      copyText={copyText || undefined}
+      onClose={() => commands.closeAgent()}
+      footer={
+        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground/70">
+          {run.steps.length > 0
+            ? `· ${labelFor(
+                run.steps[run.steps.length - 1].name,
+                run.steps[run.steps.length - 1].args,
+              )}`
+            : ""}
+        </span>
+      }
+    >
+      <div className="flex flex-col gap-3">
         {/* Before any tool call resolves, we're still parsing the transcript. */}
         {run.steps.length === 0 && !run.error && !run.status && (
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -203,41 +206,8 @@ function Agent() {
         {run.finished && <MessageResponse>{run.finished}</MessageResponse>}
 
         {run.error && <p className="m-0 text-destructive">{run.error}</p>}
-      </CardContent>
-
-      <CardFooter className="gap-2.5 px-4">
-        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground/70">
-          {run.steps.length > 0
-            ? `· ${labelFor(
-                run.steps[run.steps.length - 1].name,
-                run.steps[run.steps.length - 1].args,
-              )}`
-            : ""}
-        </span>
-        {copyText && (
-          <Button
-            variant="secondary"
-            size="sm"
-            className="rounded-full"
-            onClick={() =>
-              navigator.clipboard.writeText(copyText).then(() => setCopied(true))
-            }
-          >
-            {copied ? <CheckIcon /> : <CopyIcon />}
-            {copied ? "Copied" : "Copy"}
-          </Button>
-        )}
-        <Button
-          variant="secondary"
-          size="icon-sm"
-          className="rounded-full"
-          aria-label="Close"
-          onClick={() => commands.closeAgent()}
-        >
-          <XIcon />
-        </Button>
-      </CardFooter>
-    </Card>
+      </div>
+    </PanelShell>
   );
 }
 

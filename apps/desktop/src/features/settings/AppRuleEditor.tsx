@@ -19,7 +19,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Group } from "@/components/ui/rows";
+import { GridRow, Group } from "@/components/ui/rows";
 
 /**
  * Per-app rules, modelled on the Swift app. A rule pins how dictation behaves
@@ -95,12 +95,14 @@ export function AppRuleEditor({
           <h1 className="text-2xl font-bold leading-[1.1] tracking-[-0.02em]">
             App Rules
           </h1>
-          <button
-            className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-[15px] py-[7px] text-ui font-medium text-white shadow-accent active:scale-[0.97]"
+          <Button
+            variant="accent"
+            size="row"
+            className="shrink-0 whitespace-nowrap"
             onClick={() => setEditing(-1)}
           >
             Add Rule
-          </button>
+          </Button>
         </div>
         <p className="mt-1.5 max-w-[520px] text-ui text-ink-2">
           Adjust dictation cleanup per app: paste verbatim in terminals, or steer
@@ -118,31 +120,30 @@ export function AppRuleEditor({
           </div>
         ) : (
           rules.map((r, i) => (
-            <div
-              key={i}
-              className="grid grid-cols-[130px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-separator py-[13px] last:border-b-0"
-            >
+            <GridRow key={i} columns="130px 1fr auto" className="py-[13px]">
               <span className="truncate text-row font-semibold">
                 {r.app_matches}
               </span>
               <span className="truncate text-hint text-ink-2">
                 {summary(r)}
               </span>
-              <div className="flex gap-4 text-ui font-medium">
-                <button
-                  className="text-brand active:scale-95"
+              <div className="flex gap-4">
+                <Button
+                  variant="plain"
+                  size="text"
                   onClick={() => setEditing(i)}
                 >
                   Edit
-                </button>
-                <button
-                  className="text-danger active:scale-95"
+                </Button>
+                <Button
+                  variant="plain-danger"
+                  size="text"
                   onClick={() => remove(i)}
                 >
                   Delete
-                </button>
+                </Button>
               </div>
-            </div>
+            </GridRow>
           ))
         )}
       </Group>
@@ -150,23 +151,21 @@ export function AppRuleEditor({
       {suggestions.length > 0 && (
         <Group title="Suggestions">
           {suggestions.map((s) => (
-            <div
-              key={s.app_matches}
-              className="grid grid-cols-[130px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-separator py-3 last:border-b-0"
-            >
+            <GridRow key={s.app_matches} columns="130px 1fr auto">
               <span className="truncate text-row font-medium">
                 {s.app_matches}
               </span>
               <span className="truncate text-hint text-ink-2">
                 {summary(s)}
               </span>
-              <button
-                className="text-ui font-medium text-brand active:scale-95"
+              <Button
+                variant="plain"
+                size="text"
                 onClick={() => onChange([...rules, s])}
               >
                 Add
-              </button>
-            </div>
+              </Button>
+            </GridRow>
           ))}
         </Group>
       )}

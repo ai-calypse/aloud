@@ -1,76 +1,9 @@
-/* Matched query terms. */
-mark {
-  background: transparent;
-  color: inherit;
-  font-weight: 700;
-}
-
-.reader {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  gap: 0.4rem;
-}
-
-.reader__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.reader__toggle {
-  padding: 0.25rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text2);
-  font: inherit;
-  font-size: 0.78rem;
-}
-
-.reader__toggle:hover {
-  color: inherit;
-}
-
-.reader__back {
-  padding: 0.3rem 0;
-  border: 0;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-}
-
-.reader__title {
-  margin: 0.4rem 0 0;
-  font-size: 1.2rem;
-}
-
-.reader__date {
-  color: var(--text2);
-  font-size: 0.8125rem;
-}
-
-/* Source view: the raw markdown, monospaced so the syntax lines up. */
-.reader__body {
-  overflow-y: auto;
-  margin: 0.8rem 0 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.82rem;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-}
-
 /* Rendered view. Meeting notes are headings, bullets, and task lists, so the
-   defaults need spacing rules rather than a full prose stylesheet. */
-.reader__rendered {
-  overflow-y: auto;
-  margin: 0.8rem 0 0;
-  font-size: 0.9rem;
-  line-height: 1.6;
-}
+   defaults need spacing rules rather than a full prose stylesheet.
 
+   These are the only rules left here: Streamdown builds this markup at runtime,
+   so there is no JSX element to hang a Tailwind class on. Everything the Reader
+   renders itself lives as utilities in NotesView.tsx. */
 .reader__rendered h1,
 .reader__rendered h2,
 .reader__rendered h3 {

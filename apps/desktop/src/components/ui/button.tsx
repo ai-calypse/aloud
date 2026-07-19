@@ -19,6 +19,22 @@ const buttonVariants = cva(
         ghost:
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-primary underline-offset-4 hover:underline",
+
+        /* --- Aloud's macOS variants ---------------------------------------
+         * The app's own buttons, previously hand-rolled as raw <button> class
+         * strings duplicated across MacroEditor, AppRuleEditor, SettingsView,
+         * ConnectorEditor and App.tsx. Kept here so there is one button in the
+         * app rather than shadcn's plus a parallel set.
+         */
+        /** Filled action: "Add Rule", "Add Macro", "Connect". */
+        accent:
+          "bg-brand text-brand-fg shadow-accent hover:bg-brand/90 active:scale-[0.97]",
+        /** Text-only action inside a row: "Edit", "Add", "Preview". */
+        plain: "text-brand hover:text-brand/80 active:scale-95",
+        /** Its destructive twin: "Delete", "Disconnect". */
+        "plain-danger": "text-danger hover:text-danger/80 active:scale-95",
+        /** Filled but quiet: the Connect button in a Connectors row. */
+        field: "bg-field hover:bg-brand hover:text-brand-fg",
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",
@@ -29,6 +45,10 @@ const buttonVariants = cva(
         "icon-xs": "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-8",
         "icon-lg": "size-10",
+        /** The design's row-height control: 13px text in a 15/7 box. */
+        row: "rounded-lg px-[15px] py-[7px] text-ui font-medium",
+        /** Text-only actions carry no box, so they get no padding either. */
+        text: "text-ui font-medium",
       },
     },
     defaultVariants: {
