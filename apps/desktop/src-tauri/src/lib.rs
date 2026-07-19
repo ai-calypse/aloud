@@ -142,6 +142,14 @@ pub fn run() {
             app.manage(agent::PendingConfirmation::default());
 
             tray::init(app)?;
+
+            // Warm the installed-apps cache off the critical path: the App
+            // Rules picker then opens against a populated cache instead of
+            // paying for ~70 `sips` spawns on first click.
+            std::thread::spawn(|| {
+                let _ = aloud_selection::installed_apps();
+            });
+
             spawn_hotkey_listener(
                 app.handle().clone(),
                 settings,

@@ -18,6 +18,11 @@ export const commands = {
 	/**
 	 *  Installed apps, to fill the App Rules picker. Empty on Windows (no scan
 	 *  there yet); the custom-match field still works everywhere.
+	 * 
+	 *  `async` is load-bearing: Tauri runs a non-async command on the main thread,
+	 *  so the scan froze the whole webview rather than merely showing a spinner.
+	 *  The work is blocking (process spawns), hence `spawn_blocking` rather than
+	 *  parking an async worker on it.
 	 */
 	installedApps: () => __TAURI_INVOKE<InstalledApp[]>("installed_apps"),
 	/**

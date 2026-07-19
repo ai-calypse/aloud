@@ -369,26 +369,31 @@ impl ComposioClient {
     ///
     /// Asked for by slug rather than searched, so a connected toolkit always
     /// shows even if it would fall outside a search page.
+    /// The per-slug lookups run concurrently: they are independent round-trips
+    /// to the same API, so awaiting them in a loop made the Connectors pane
+    /// cost one full latency per connected service.
     pub async fn connected_toolkits(&self) -> Result<Vec<Toolkit>> {
         let connected = self.connected_by_slug().await?;
-        let mut out = Vec::new();
-        for (slug, connection_id) in connected {
-            let json = self.get(&format!("/toolkits/{slug}")).await?;
-            out.push(Toolkit {
-                name: json["name"].as_str().unwrap_or(&slug).to_string(),
-                logo: json["meta"]["logo"].as_str().unwrap_or("").to_string(),
-                description: json["meta"]["description"]
-                    .as_str()
-                    .unwrap_or("")
-                    .chars()
-                    .take(160)
-                    .collect(),
-                tools_count: json["meta"]["tools_count"].as_u64().unwrap_or(0) as u32,
-                connected: true,
-                connection_id: Some(connection_id),
-                slug,
-            });
-        }
+        let mut out: Vec<Toolkit> = futures_util::future::try_join_all(connected.into_iter().map(
+            |(slug, connection_id)| async move {
+                let json = self.get(&format!("/toolkits/{slug}")).await?;
+                Ok::<_, anyhow::Error>(Toolkit {
+                    name: json["name"].as_str().unwrap_or(&slug).to_string(),
+                    logo: json["meta"]["logo"].as_str().unwrap_or("").to_string(),
+                    description: json["meta"]["description"]
+                        .as_str()
+                        .unwrap_or("")
+                        .chars()
+                        .take(160)
+                        .collect(),
+                    tools_count: json["meta"]["tools_count"].as_u64().unwrap_or(0) as u32,
+                    connected: true,
+                    connection_id: Some(connection_id),
+                    slug,
+                })
+            },
+        ))
+        .await?;
         out.sort_by_key(|t| t.name.to_lowercase());
         Ok(out)
     }

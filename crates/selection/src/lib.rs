@@ -165,7 +165,18 @@ mod macos {
     /// each `.app` bundle's folder name (minus the extension) is its display
     /// name. Icons are extracted best-effort so a slow or missing icon never
     /// drops an app from the list.
+    ///
+    /// Scanned once per run and cached: the walk costs ~0.3s for 70 apps and
+    /// scales with `/Applications`, almost all of it `sips` process spawns.
+    /// Apps are not installed while a picker is open, so a session-lifetime
+    /// cache is the right staleness — `run()` warms it in the background at
+    /// startup so even the first open is instant.
     pub fn installed_apps() -> Vec<InstalledApp> {
+        static CACHE: std::sync::OnceLock<Vec<InstalledApp>> = std::sync::OnceLock::new();
+        CACHE.get_or_init(scan).clone()
+    }
+
+    fn scan() -> Vec<InstalledApp> {
         let mut roots = vec![
             PathBuf::from("/Applications"),
             PathBuf::from("/Applications/Utilities"),

@@ -80,6 +80,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "futures-util",
  "iana-time-zone",
  "reqwest",
  "serde",

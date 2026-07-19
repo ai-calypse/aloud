@@ -84,10 +84,17 @@ pub fn input_devices() -> CmdResult<Vec<aloud_audio::AudioDevice>> {
 
 /// Installed apps, to fill the App Rules picker. Empty on Windows (no scan
 /// there yet); the custom-match field still works everywhere.
+///
+/// `async` is load-bearing: Tauri runs a non-async command on the main thread,
+/// so the scan froze the whole webview rather than merely showing a spinner.
+/// The work is blocking (process spawns), hence `spawn_blocking` rather than
+/// parking an async worker on it.
 #[tauri::command]
 #[specta::specta]
-pub fn installed_apps() -> Vec<aloud_selection::InstalledApp> {
-    aloud_selection::installed_apps()
+pub async fn installed_apps() -> Vec<aloud_selection::InstalledApp> {
+    tauri::async_runtime::spawn_blocking(aloud_selection::installed_apps)
+        .await
+        .unwrap_or_default()
 }
 
 /// Whether the OS lets us listen for keys. False on macOS until the user
@@ -188,18 +195,25 @@ pub async fn list_connectors(state: State<'_, AppState>) -> CmdResult<Vec<Connec
     let composio = client(&state)?;
     let toolkits = to_string_err(composio.connected_toolkits().await)?;
 
-    let mut out = Vec::new();
-    for toolkit in toolkits {
-        // The agent now picks tools per command, so there is no single set to
-        // show. An empty command yields the pins plus a stable head of the
-        // toolkit — representative of a typical request, not a promise.
-        let tools = composio
-            .toolkit_tools(&toolkit.slug, "", aloud_agent::TOOLS_PER_TOOLKIT)
-            .await
-            .unwrap_or_default();
-        out.push(to_connector(toolkit, tools));
-    }
-    Ok(out)
+    // One concurrent wave rather than a serial await per toolkit — the calls
+    // are independent, so serially this pane cost one round-trip per connected
+    // service on top of the per-service lookup inside connected_toolkits.
+    Ok(
+        futures_util::future::join_all(toolkits.into_iter().map(|toolkit| {
+            let composio = &composio;
+            async move {
+                // The agent now picks tools per command, so there is no single set
+                // to show. An empty command yields the pins plus a stable head of
+                // the toolkit — representative of a typical request, not a promise.
+                let tools = composio
+                    .toolkit_tools(&toolkit.slug, "", aloud_agent::TOOLS_PER_TOOLKIT)
+                    .await
+                    .unwrap_or_default();
+                to_connector(toolkit, tools)
+            }
+        }))
+        .await,
+    )
 }
 
 /// Toolkits matching `query`, for the add-a-connector search.
