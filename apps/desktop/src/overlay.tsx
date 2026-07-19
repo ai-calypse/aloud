@@ -8,8 +8,13 @@ const LABEL: Record<Phase, string> = {
   recording: "Listening…",
   transcribing: "Transcribing…",
   done: "Pasted",
+  // Replaced by the real reason as soon as Rust sends one; this is only what
+  // shows if an error somehow arrives without a message.
   error: "Failed",
 };
+
+/** A long error still has to fit one line on a small pill. */
+const ERROR_CHARS = 90;
 
 // A waveform envelope: shorter at the edges, tallest in the middle, so the
 // bars read as a voice level rather than an even row. Values are peak scaleY.
@@ -25,13 +30,32 @@ function Overlay() {
   // real app there is no query string, so this is idle until Rust drives it.
   const preview = new URLSearchParams(location.search).get("phase") as Phase | null;
   const [phase, setPhase] = useState<Phase>(preview ?? "idle");
+  const [error, setError] = useState<string | null>(null);
+  // null means "no level has arrived yet", which is what the canned-animation
+  // fallback keys off — distinct from a real level of 0 during silence.
+  const [level, setLevel] = useState<number | null>(null);
 
   useEffect(() => {
-    const unlisten = events.dictationPhase.listen((e) => setPhase(e.payload));
+    const unlistenPhase = events.dictationPhase.listen((e) => {
+      setPhase(e.payload);
+      // A new run clears the last run's message and stale level.
+      if (e.payload === "recording") {
+        setError(null);
+      } else if (e.payload !== "error") {
+        setLevel(null);
+      }
+    });
+    const unlistenLevel = events.audioLevel.listen((e) => setLevel(e.payload ?? 0));
+    const unlistenError = events.overlayError.listen((e) => setError(e.payload));
     return () => {
-      unlisten.then((off) => off());
+      unlistenPhase.then((off) => off());
+      unlistenLevel.then((off) => off());
+      unlistenError.then((off) => off());
     };
   }, []);
+
+  const label =
+    phase === "error" && error ? truncate(error, ERROR_CHARS) : LABEL[phase];
 
   return (
     <div className="overlay-root">
@@ -62,7 +86,11 @@ function Overlay() {
       {/* Warped glass highlight sitting over the real backdrop blur. */}
       <span className="pill__refraction" aria-hidden />
       {phase === "recording" ? (
-        <span className="bars" aria-hidden>
+        <span
+          className={`bars${level === null ? " bars--idle" : ""}`}
+          style={{ "--level": level ?? 0 } as React.CSSProperties}
+          aria-hidden
+        >
           {/* Staggered + a per-bar peak so the row reads as a waveform. */}
           {BAR_PEAKS.map((peak, i) => (
             <i
@@ -79,10 +107,18 @@ function Overlay() {
       ) : (
         <span className={`dot dot--${phase}`} aria-hidden />
       )}
-      <span className="label">{LABEL[phase]}</span>
+      <span className="label" title={error ?? undefined}>
+        {label}
+      </span>
     </div>
     </div>
   );
+}
+
+/** Cuts on a char boundary so a multi-byte character is never split. */
+function truncate(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return [...flat].length <= max ? flat : `${[...flat].slice(0, max).join("")}…`;
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

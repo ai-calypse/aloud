@@ -50,9 +50,11 @@ export const commands = {
 export const events = {
 	agent: makeEvent<AgentEvent>("agent"),
 	ask: makeEvent<AskEvent>("ask"),
+	audioLevel: makeEvent<AudioLevel>("audio-level"),
 	dictationPhase: makeEvent<Phase>("dictation-phase"),
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
+	overlayError: makeEvent<OverlayError>("overlay-error"),
 };
 
 /* Types */
@@ -112,6 +114,13 @@ export type AudioDevice = {
 	id: string,
 	name: string,
 };
+
+/**
+ *  Live input level, 0.0–1.0, driving the pill's waveform. Sent only to the
+ *  overlay window and only while recording; the bars were previously a fixed
+ *  CSS animation that looked identical in silence.
+ */
+export type AudioLevel = number | null;
 
 /**  What triggers a binding. */
 export type Binding = { kind: "disabled" } | 
@@ -207,6 +216,12 @@ export type Note = {
 	date: number,
 	content: string,
 };
+
+/**
+ *  Why a dictation failed, in words the user can act on. `Phase::Error` says
+ *  only that something broke, which the pill used to render as "Failed".
+ */
+export type OverlayError = string;
 
 /**  What the UI reflects. Mirrors the Swift overlay's phases. */
 export type Phase = "idle" | "recording" | "transcribing" | 
