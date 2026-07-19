@@ -1,178 +1,137 @@
-# Morning Report — 17 July 2026
+# Morning Report — 19 July 2026
 
-**The app works.** Hold a key, speak, release, and clean text lands in whatever
-app has focus — cross-platform Rust and TypeScript, no Swift.
+Overnight: the frontend was reorganised into a design system, and the motion
+you asked for is in. Four PRs (#40–#43), all merged to `main`.
 
-Verified on real hardware, not just in tests. Straight out of the history
-table after a genuine key-hold with speech into the real microphone:
-
-> `"Fox jumps over the lazy dog, testing a loud transcription."`
-
-Hotkey → mic → local whisper → paste → history in **~620 ms**, fully offline.
-
-Repo: <https://github.com/juligandhi-a11y/Aloud> · working clone at
-`~/Documents/Development/apps/aloud-tauri`. Your Swift app is untouched.
+The UI looks the same where it should and different only where you asked.
+Every claim below was checked by driving the interface, not by reading the
+diff — the exceptions are listed at the bottom.
 
 ---
 
-## Two things need you
+## What you asked for, and where it is
 
-### 1. CI cannot be pushed — this is the important one
+### Animations
 
-`ci/ci.yml` holds the full macOS + Windows CI matrix, but GitHub rejected the
-push: the `gh` token lacks the `workflow` scope. I did not work around it.
+**Sidebar pill** — one chip behind the rows, sliding on `transform` with
+`cubic-bezier(.32,.72,0,1)` over 400ms. JS sets a target value; the compositor
+runs every frame, so it does not stutter while React renders the pane arriving
+beside it.
 
-**Why it matters more than a normal chore:** every Windows code path in this
-repo — the `WH_KEYBOARD_LL` keyboard hook, WASAPI audio capture, `Ctrl+V`
-paste — was written against documentation and **has never executed**. This
-machine is a Mac. That CI run is the first thing that would prove any of it.
+One deliberate change from your spec, and it matters: you described
+`translateY(row × 36px)`. The sidebar has a **divider between the app and
+settings groups**, so the rows are not evenly pitched. Connectors sits at
+`303px`; the constant would have placed it at `252px`, drifting by the
+divider's height for every row below it. It measures the active row instead.
+
+**Pane materialize** — content enters blurred and displaced, then focuses and
+settles, as you described:
+
+```css
+from { opacity:.4; filter:blur(4px); transform:translateY(var(--materialize-from,7px)) }
+to   { opacity:1;  filter:blur(0);   transform:none }
+```
+
+`--materialize-from` is signed by the direction you moved through the list, so
+the pane agrees with where your eye just travelled. Restarted with the
+`animation:none` → force reflow → reassign trick.
+
+**The listening bars.** You were right that they looked unpolished, and the
+reason is worth knowing: they were **not listening**. Each bar ran a canned
+0.9s sine loop, and the measured level only squashed the whole row — so the
+motion was identical whether you spoke or sat in silence.
+
+They are now a real scrolling meter: fourteen thin bars, each one a 50ms
+sample of what the mic actually heard, newest on the right, with fast attack
+and slow release so peaks fall away over ~300ms instead of strobing between
+syllables. You can see the shape of a word in it.
+
+**The pill entrance** — it is a glass surface, so it now materialises rather
+than sliding in: blurred and slightly small, coming into focus at size with a
+touch of spring overshoot. The bars stagger up behind it.
+
+**Reduced motion** is one global switch. It collapses durations to `1ms`
+rather than setting `animation: none`, because killing an animation outright
+can strand an element on its opening frame — invisible, offset, or mid-blur.
+Verified: content still settles at full opacity and zero blur.
+
+### Architecture
+
+`src/styles/` is the single source of truth now: `tokens.css` (every colour,
+radius, shadow and type size), `base.css`, `motion.css` (durations and curves),
+plus one file per window. Components use semantic names — `bg-surface`,
+`text-ink-2`, `rounded-card` — instead of the 40 repeated arbitrary values they
+had.
+
+Shared primitives replaced the copy-paste: `SearchField`, `PanelShell`,
+`Surface`, `Caption`, `GridRow`, and the app's button styles folded into the
+one `Button` as variants. Loose CSS went from 596 lines across six files to
+only what genuinely has to be CSS.
+
+The architecture is written up in `CLAUDE.md` under **Frontend architecture**,
+so the next change lands in the right place.
+
+---
+
+## Four bugs this turned up
+
+All four were live in `main` before last night.
+
+**1. `var(--warning)` was undefined in the agent panel.** Only the main window
+imported the palette, but `agent.tsx` and `lib/tool-views.tsx` both use it.
+Those warnings rendered in whatever colour they happened to inherit.
+
+**2. Onboarding was invisible in light mode.** Its stylesheet assumed a
+permanently dark backdrop — near-white translucent fills — while rendering
+inside a window that follows the OS appearance.
+
+**3. Every Edit/Delete/Add link silently lost its colour.** `tailwind-merge`
+groups classes by parsing the name, and our custom `text-ui` (13px) and
+`text-brand` (accent) both look like `text-<unknown>` to it, so it filed them
+in one group and kept only the last. This typechecked, linted and built clean —
+I caught it by reading computed styles off the rendered buttons. `cn()` now
+declares the custom groups, and that list has to stay in step with the
+`@theme inline` block in `index.css`.
+
+**4. The sliding pill never positioned on first paint.** Its effect keyed on
+the active id, but the target element arrives from a callback ref one render
+later.
+
+---
+
+## Needs you
+
+**GitHub Actions is blocked on billing.** Every job fails within seconds:
+*"recent account payments have failed or your spending limit needs to be
+increased."* Nothing has run server-side for any PR this week. Local checks
+(`cargo test --workspace`, `clippy`, `tsc`, `oxlint`, `vitest`, `vite build`)
+are all clean, but that is not the same thing.
+
+The consequence worth naming: **the Windows path has never been executed.**
+`WH_KEYBOARD_LL`, WASAPI capture and `Ctrl+V` paste are written and unproven,
+and the CI matrix is what would prove them. `ci/ci.yml` is also still outside
+`.github/workflows/`; moving it needs a token with the `workflow` scope:
 
 ```sh
-gh auth refresh -s workflow                      # grant the scope
+gh auth refresh -s workflow
 mkdir -p .github/workflows && git mv ci/ci.yml .github/workflows/ci.yml
-git commit -m "ci: build and test on macOS and Windows" && git push
 ```
 
-### 2. Your Groq API key is expired
-
-Migration imported it correctly, but live calls return
-`401 Invalid API Key`. Local whisper is unaffected — it needs no key — so the
-app works regardless. Cloud transcription and LLM cleanup will not until the
-key is replaced in settings.
-
-Silver lining: the 401 proved the cloud error path handles failure cleanly.
+**No Composio key on this machine.** The connector caching, the
+stale-while-revalidate push and the disconnect flow are unit-tested and driven
+against stubs, never against the live API.
 
 ---
 
-## Eleven PRs to review
+## What I could not verify
 
-Each is self-contained, tested, and states what was verified and what was not.
-Reviewing in order tells the story; each PR body has the detail.
+- **The listening meter with a real microphone.** I drove it with synthesised
+  level values in a browser. The audio path is unchanged, but I have not held
+  the hotkey and spoken into it.
+- **Anything in the real app window.** The dev instance had no window open to
+  drive, so every visual check ran against components in a headless browser
+  with a stubbed Tauri IPC.
+- **Windows.** As above — and note #37 touched `installed_apps`, which is a
+  no-op stub there.
 
-| PR | What |
-|----|------|
-| [#1](https://github.com/juligandhi-a11y/Aloud/pull/1) | `audio` — mic capture, dual-rate output |
-| [#2](https://github.com/juligandhi-a11y/Aloud/pull/2) | `hotkey` — hold/toggle/modifier-only bindings |
-| [#3](https://github.com/juligandhi-a11y/Aloud/pull/3) | `paste` — clipboard snapshot/restore, synthetic paste |
-| [#4](https://github.com/juligandhi-a11y/Aloud/pull/4) | `transcribe` — local whisper + cloud |
-| [#5](https://github.com/juligandhi-a11y/Aloud/pull/5) | `llm` — chat client, prompts, rate limits, `CLAUDE.md` |
-| [#6](https://github.com/juligandhi-a11y/Aloud/pull/6) | **the working dictation pipeline** |
-| [#7](https://github.com/juligandhi-a11y/Aloud/pull/7) | migration from the Swift app |
-| [#8](https://github.com/juligandhi-a11y/Aloud/pull/8) | the recording pill (screenshot in the PR) |
-| [#9](https://github.com/juligandhi-a11y/Aloud/pull/9) | this report |
-| [#10](https://github.com/juligandhi-a11y/Aloud/pull/10) | notes window — search, highlight, reader |
-| [#11](https://github.com/juligandhi-a11y/Aloud/pull/11) | settings UI — **where you replace the expired key** |
-
-88 tests · `cargo clippy --workspace` zero warnings · `tsc --noEmit` clean.
-
----
-
-## What shipped
-
-```
-crates/
-  audio        cpal mic capture; 16 kHz WAV + 24 kHz realtime tap
-  hotkey       CGEventTap (macOS) / WH_KEYBOARD_LL (Windows) + pure reducer
-  llm          OpenAI-compatible chat, prompts, rate-limit breaker
-  notes        markdown notes + search; app data paths
-  paste        clipboard snapshot/restore, synthetic paste
-  store        settings, history (SQLite), stats, migration
-  transcribe   local whisper.cpp + cloud whisper
-apps/desktop   Tauri v2 shell, React UI, recording overlay
-```
-
-Logic lives in crates with no Tauri dependency, so it is testable with
-`cargo test` and runnable from `examples/` without launching the app.
-`src-tauri` only wires them together. That is the deliberate opposite of the
-4,000-line `AppState` god object it replaces.
-
----
-
-## Bugs found — and why they matter
-
-Every one of these **passed its unit tests** and was caught only by driving
-real hardware. That is the pattern worth keeping.
-
-**Empty WAV files.** `FftFixedIn` buffers internally and returns nothing for a
-non-aligned buffer, so a 3-second recording wrote a 0-frame file. The tests
-passed because 48k→24k happened to align; the real path is 48k→16k, which does
-not. Now `FastFixedIn`, with regression tests on the exact failing lengths.
-
-**Hotkey one-shots re-firing.** "Paste again" fired on every key repeat, since
-one-shots were never recorded as active and each repeat looked like a fresh
-press.
-
-**The overlay rendering nothing.** The window reported `visible: true` at the
-right coordinates and painted nothing. Logs were clean. A screenshot showed the
-truth: the overlay window was missing from `capabilities/default.json`, so
-Tauri v2 **silently denied its event listener** — no error, no warning. It
-never learned its phase and stayed on `idle`, which is `display: none`.
-
-**Silence claiming success.** Dictating silence reported "Pasted" when nothing
-was pasted.
-
-**whisper.cpp's stdout.** It logs from C, bypassing Rust. Installing its
-logging hook took model load from **19.3 s → 204 ms**. The logging was the
-bottleneck, not the model.
-
-**The wrong data directory.** `ProjectDirs::data_dir()` yields
-`app.Aloud.Aloud` on macOS. Your Swift app writes to a plain `Aloud` folder,
-and migration reads from it — this would have silently targeted the wrong path.
-
----
-
-## Decisions worth knowing about
-
-**Tauri's `global-shortcut` plugin is unusable here**, so `crates/hotkey` is
-hand-rolled. The plugin cannot express a modifier-only binding ("hold Right
-Option"), cannot tell hold from tap, and cannot swallow the event before the
-focused app sees it. All three are core to how this app dictates.
-
-**Local whisper is the default.** It replaces `SFSpeechRecognizer`, which is
-Apple-only, so offline dictation now works on Windows too — and the app is
-useful on first launch with no key and no network.
-
-**The prompts were copied byte-for-byte**, not retyped, and live as `.md`
-files. Likewise the hallucination filter's thresholds: the Swift comment says
-they were tuned on ~500 samples, so they were ported rather than re-derived.
-
-**Clipboard preservation covers text and images only**, not the Swift version's
-arbitrary `NSPasteboardItem` types, which have no cross-platform equivalent.
-
-**The overlay uses CSS `backdrop-filter`**, not the Metal water-glass shader —
-a visual downgrade, not a functional one. Placement is fixed bottom-centre;
-there is no cross-platform way to find a notch.
-
-**`macos-private-api` is enabled** for real window transparency. It rules out
-Mac App Store distribution — fine for a notarized DMG, but a door closed
-deliberately.
-
----
-
-## Not done
-
-Full parity was the goal and this is not it yet. What remains, roughly in
-dependency order:
-
-- **Ask mode** — the streaming client and SSE parsing are built and tested
-  (PR #5); the floating answer panel and spoken triggers are not.
-- **Command mode** — `copy_selection()` exists in `crates/paste`; the native
-  AX/UIAutomation read and the transform flow are not wired.
-- **Meeting notes** — `crates/audio` already emits the rolling PCM chunks it
-  needs; the chunking loop and summary step are not written.
-- **Onboarding, realtime streaming, app context, Composio, voice macros,
-  app rules, updater, signing/notarization.**
-- **Agent Mode** — your mid-session request. Planned as Phase 9, after parity.
-
-One caveat on the two UI PRs (#10, #11): macOS blocked `screencapture` behind a
-screen-recording permission prompt I could not grant, so the rendered windows
-are unverified. The data paths behind them are verified against your real notes
-and settings, but the pixels are not — worth a look when you open them.
-
----
-
-## If you only do three things
-
-1. Grant the `workflow` scope and land CI. Windows is unproven until it runs.
-2. Replace the Groq key.
-3. Read PR #6 — that is the app actually working.
+`PROGRESS.md` has the detail.
