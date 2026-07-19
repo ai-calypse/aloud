@@ -186,21 +186,6 @@ export type Connector = {
 	toolsCount: number,
 	connected: boolean,
 	connectionId: string | null,
-	/**
-	 *  The tools the agent can actually call. Only filled for connected
-	 *  toolkits — a search result would need a request per row.
-	 */
-	tools: ConnectorTool[],
-};
-
-export type ConnectorTool = {
-	name: string,
-	description: string,
-	/**
-	 *  Drives the "asks first" badge: anything not read-only is confirmed
-	 *  before it runs.
-	 */
-	readOnly: boolean,
 };
 
 /**

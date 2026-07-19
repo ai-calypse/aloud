@@ -145,19 +145,6 @@ pub struct Connector {
     pub tools_count: u32,
     pub connected: bool,
     pub connection_id: Option<String>,
-    /// The tools the agent can actually call. Only filled for connected
-    /// toolkits — a search result would need a request per row.
-    pub tools: Vec<ConnectorTool>,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ConnectorTool {
-    pub name: String,
-    pub description: String,
-    /// Drives the "asks first" badge: anything not read-only is confirmed
-    /// before it runs.
-    pub read_only: bool,
 }
 
 /// Composio responses held between opens of the Connectors pane. The policy
@@ -184,7 +171,7 @@ fn client(key: &str) -> CmdResult<aloud_agent::ComposioClient> {
     to_string_err(aloud_agent::ComposioClient::new(key))
 }
 
-fn to_connector(toolkit: aloud_agent::Toolkit, tools: Vec<aloud_agent::ToolDef>) -> Connector {
+fn to_connector(toolkit: aloud_agent::Toolkit) -> Connector {
     Connector {
         slug: toolkit.slug,
         name: toolkit.name,
@@ -193,24 +180,19 @@ fn to_connector(toolkit: aloud_agent::Toolkit, tools: Vec<aloud_agent::ToolDef>)
         tools_count: toolkit.tools_count,
         connected: toolkit.connected,
         connection_id: toolkit.connection_id,
-        tools: tools
-            .into_iter()
-            .map(|t| ConnectorTool {
-                name: t.name,
-                description: t.description,
-                read_only: t.read_only,
-            })
-            .collect(),
     }
 }
 
 /// Fetches the connected toolkits and maps them to the pane's shape.
+///
+/// The pane lists services, not tool names, so this stops at the toolkit
+/// metadata — which is one request, not one per connected service.
 async fn fetch_connected(composio: &aloud_agent::ComposioClient) -> anyhow::Result<Vec<Connector>> {
     Ok(composio
-        .connected_with_tools(aloud_agent::TOOLS_PER_TOOLKIT)
+        .connected_toolkits()
         .await?
         .into_iter()
-        .map(|(toolkit, tools)| to_connector(toolkit, tools))
+        .map(to_connector)
         .collect())
 }
 
@@ -308,10 +290,7 @@ pub async fn search_connectors(
     }
 
     let toolkits = to_string_err(client(&key)?.toolkits(&query).await)?;
-    let results: Vec<Connector> = toolkits
-        .into_iter()
-        .map(|t| to_connector(t, Vec::new()))
-        .collect();
+    let results: Vec<Connector> = toolkits.into_iter().map(to_connector).collect();
     cache.store_search(&key, query, results.clone());
     Ok(results)
 }
