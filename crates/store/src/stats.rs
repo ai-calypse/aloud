@@ -1,7 +1,12 @@
 //! Lifetime dictation stats, ported from `DictationStats.swift`.
 
+use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 /// Typing speed used to estimate time saved.
 const TYPING_WPM: f64 = 40.0;
@@ -29,6 +34,49 @@ pub struct Stats {
 }
 
 impl Stats {
+    /// `<app-data>/Aloud/stats.json`. A file of its own rather than a corner of
+    /// settings.json: this is rewritten after every dictation, and a torn write
+    /// must not be able to take the user's API keys with it.
+    pub fn path() -> Result<PathBuf> {
+        Ok(aloud_notes::data_dir()?.join("stats.json"))
+    }
+
+    /// Lifetime stats from disk, or zeroes when the file is absent or corrupt.
+    /// Losing a streak must never stop the app from starting.
+    pub fn load() -> Self {
+        Self::path()
+            .map(|p| Self::load_from(&p))
+            .unwrap_or_default()
+    }
+
+    /// Temp file + rename, as for settings: this is written after every
+    /// dictation, so a crash mid-write would otherwise zero a lifetime streak.
+    pub fn save(&self) -> Result<()> {
+        self.save_to(&Self::path()?)
+    }
+
+    // Path-injectable halves, so tests never touch the real stats.json.
+
+    fn load_from(path: &Path) -> Self {
+        let Ok(text) = fs::read_to_string(path) else {
+            return Self::default();
+        };
+        serde_json::from_str(&text).unwrap_or_else(|e| {
+            tracing::warn!(%e, "stats unreadable; starting from zero");
+            Self::default()
+        })
+    }
+
+    fn save_to(&self, path: &Path) -> Result<()> {
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        let temp = path.with_extension("tmp");
+        fs::write(&temp, serde_json::to_string_pretty(self)?)?;
+        fs::rename(&temp, path)?;
+        Ok(())
+    }
+
     /// Time saved versus typing at 40 wpm, minus time actually spent speaking.
     /// Clamped so a slow talker never "loses" time.
     pub fn time_saved_seconds(&self) -> f64 {
@@ -156,6 +204,38 @@ mod tests {
         let mut stats = Stats::default();
         stats.record_session(0, 5.0, day(2026, 3, 1));
         assert_eq!(stats, Stats::default(), "silence must not count");
+    }
+
+    /// The whole point of persisting: a relaunch must not zero a lifetime
+    /// streak. This is the regression for stats being rebuilt as `default()`
+    /// on every launch.
+    #[test]
+    fn stats_survive_a_round_trip_to_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stats.json");
+
+        let mut stats = Stats::default();
+        stats.record_session(120, 48.0, day(2026, 3, 1));
+        stats.record_session(80, 32.0, day(2026, 3, 2));
+        stats.save_to(&path).unwrap();
+
+        let reloaded = Stats::load_from(&path);
+        assert_eq!(reloaded, stats);
+        assert_eq!(reloaded.total_words, 200);
+        assert_eq!(reloaded.current_streak_days, 2);
+    }
+
+    #[test]
+    fn missing_or_corrupt_stats_file_reads_as_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            Stats::load_from(&dir.path().join("absent.json")),
+            Stats::default()
+        );
+
+        let corrupt = dir.path().join("corrupt.json");
+        fs::write(&corrupt, "{not json").unwrap();
+        assert_eq!(Stats::load_from(&corrupt), Stats::default());
     }
 
     #[test]

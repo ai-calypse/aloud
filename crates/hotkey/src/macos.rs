@@ -5,12 +5,21 @@
 
 use crate::model::Key;
 use anyhow::{anyhow, Result};
+use core_foundation::base::TCFType;
 use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
 use core_graphics::event::{
     CGEvent, CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
     CGEventType, EventField,
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
+extern "C" {
+    /// Re-arms a tap the system switched off. `core-graphics` wraps this as
+    /// `CGEventTap::enable`, but the tap cannot be borrowed inside its own
+    /// callback, so we call it on the raw port instead.
+    fn CGEventTapEnable(tap: *const std::ffi::c_void, enable: bool);
+}
 
 /// macOS virtual keycodes for keys that report as flagsChanged, not keyDown.
 const KEY_LEFT_COMMAND: i64 = 55;
@@ -131,6 +140,14 @@ where
     // must be `FnMut`. The run loop calls it on one thread, serially.
     let on_event = RefCell::new(on_event);
 
+    // Filled in after the tap exists. macOS disables a tap that takes too long
+    // to answer (or that the user interrupts) and tells us by sending
+    // TapDisabledBy*; without re-arming it here, every hotkey in the app stays
+    // dead until relaunch. The tap outlives this closure, so the raw port
+    // pointer stays valid for the life of the process.
+    let port: Rc<Cell<*const std::ffi::c_void>> = Rc::new(Cell::new(std::ptr::null()));
+    let port_cb = port.clone();
+
     let tap = CGEventTap::new(
         CGEventTapLocation::Session,
         CGEventTapPlacement::HeadInsertEventTap,
@@ -141,6 +158,18 @@ where
             CGEventType::FlagsChanged,
         ],
         move |_proxy, event_type, event| {
+            if matches!(
+                event_type,
+                CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput
+            ) {
+                let port = port_cb.get();
+                if !port.is_null() {
+                    tracing::warn!(?event_type, "event tap disabled by the system; re-enabling");
+                    unsafe { CGEventTapEnable(port, true) };
+                }
+                return Some(event.to_owned());
+            }
+
             let swallow = decode(event_type, event).is_some_and(|raw| (on_event.borrow_mut())(raw));
             // Returning None swallows the event.
             if swallow {
@@ -151,6 +180,8 @@ where
         },
     )
     .map_err(|_| anyhow!("failed to create event tap — is Accessibility permission granted?"))?;
+
+    port.set(tap.mach_port.as_concrete_TypeRef() as *const std::ffi::c_void);
 
     let loop_source = tap
         .mach_port

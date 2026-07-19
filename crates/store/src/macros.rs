@@ -6,9 +6,12 @@
 //! already fixed spacing and casing before a trigger is matched.
 //!
 //! Matching is whole-phrase and case-insensitive, anchored on word boundaries
-//! so "my email" does not fire inside "customsummary email". The Swift app had
-//! no equivalent — this is a Rust-native addition, kept as pure data + one
-//! function so it is trivially testable.
+//! so "my email" does not fire inside "customsummary email".
+//!
+//! The Swift app's macros are a *different* feature with the same name: there,
+//! a macro matched the whole raw utterance and bypassed the LLM entirely. Here
+//! a trigger expands inline, after cleanup, so one dictation can contain
+//! several. Kept as pure data + one function so it is trivially testable.
 
 use serde::{Deserialize, Serialize};
 

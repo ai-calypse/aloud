@@ -40,13 +40,23 @@ unaffected; cloud transcription and LLM cleanup need a new key in settings.
 | Notes window | ✅ commands verified on real notes; UI unscreenshotted |
 | Settings UI | ✅ round-trip verified; UI unscreenshotted |
 
-88 tests · clippy clean · typecheck clean.
+| Ask panel | ✅ |
+| Command mode | ✅ core flow; no enable toggle or invocation style |
+| Meeting notes | ✅ chunks transcribe serially on stop, not in the background |
+| Onboarding | ✅ 4 steps, vs the Swift wizard's 14; no way to re-run it |
+| Voice macros | ✅ inline expansion (the Swift feature matched whole utterances) |
+| App rules | ✅ matched on app name, where Swift keyed on bundle ID |
+| Agent Mode + Composio | ✅ tool loop lands; **no settings UI for the API keys** |
+
+clippy clean · typecheck clean.
 
 ## Not done
 
-Ask panel · command mode · meeting notes · onboarding · realtime streaming ·
-app context · Composio · voice macros · app rules · updater ·
-signing/notarization · Agent Mode (Phase 9).
+Realtime streaming · app context/screenshot · updater (registered but inert —
+no signing pubkey) · signing/notarization · launch at login · audio level
+metering (the overlay waveform is decorative) · network monitoring and the
+offline fallback · typed ask · menu bar beyond Open/Quit · the Prompts, Run
+Log, and Integrations settings panes.
 
 macOS blocked `screencapture` behind a permission prompt, so the notes and
 settings windows are verified at the data layer but not visually.
