@@ -40,8 +40,8 @@ pub struct AppState {
     /// thread so a rebind from Settings applies without a restart.
     pub hotkey_config: Arc<Mutex<aloud_hotkey::model::Config>>,
     /// Composio reads held across opens of the Connectors pane, so it paints
-    /// from memory instead of a round-trip. See `commands::ConnectorCache`.
-    pub connectors: Arc<Mutex<commands::ConnectorCache>>,
+    /// from memory instead of a round-trip. See `aloud_agent::ResponseCache`.
+    pub connectors: commands::ConnectorCache,
 }
 
 pub fn run() {

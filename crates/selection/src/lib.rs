@@ -166,15 +166,40 @@ mod macos {
     /// name. Icons are extracted best-effort so a slow or missing icon never
     /// drops an app from the list.
     ///
-    /// Scanned once per run and cached: the walk costs ~0.3s for 70 apps and
-    /// scales with `/Applications`, almost all of it `sips` process spawns.
-    /// Apps are not installed while a picker is open, so a session-lifetime
-    /// cache is the right staleness — `run()` warms it in the background at
-    /// startup so even the first open is instant.
+    /// Cached for [`CACHE_TTL`]: the walk costs ~0.3s for 70 apps and scales
+    /// with `/Applications`, almost all of it `sips` process spawns.
+    ///
+    /// The TTL is what makes this safe to cache at all. Aloud is a menu-bar app
+    /// that is never quit — it hides on close and lives in the tray for weeks —
+    /// so a process-lifetime cache would mean an app installed today never
+    /// appears in App Rules, and a scan that ran while permissions were still
+    /// being granted would be wrong until the next reboot. Five minutes is long
+    /// enough that opening the picker repeatedly is free, short enough that a
+    /// newly installed app shows up without the user understanding why.
     pub fn installed_apps() -> Vec<InstalledApp> {
-        static CACHE: std::sync::OnceLock<Vec<InstalledApp>> = std::sync::OnceLock::new();
-        CACHE.get_or_init(scan).clone()
+        static CACHE: std::sync::Mutex<Option<(std::time::Instant, Vec<InstalledApp>)>> =
+            std::sync::Mutex::new(None);
+
+        if let Ok(cache) = CACHE.lock() {
+            if let Some((scanned_at, apps)) = cache.as_ref() {
+                if scanned_at.elapsed() < CACHE_TTL {
+                    return apps.clone();
+                }
+            }
+        }
+
+        // Deliberately not holding the lock across the scan: two pickers opening
+        // at once would rather duplicate a 0.3s scan than block each other, and
+        // the results are identical anyway.
+        let apps = scan();
+        if let Ok(mut cache) = CACHE.lock() {
+            *cache = Some((std::time::Instant::now(), apps.clone()));
+        }
+        apps
     }
+
+    /// How long a scan stays fresh. See [`installed_apps`].
+    pub(super) const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
 
     fn scan() -> Vec<InstalledApp> {
         let mut roots = vec![
@@ -302,5 +327,39 @@ mod tests {
         // Both paths must return, not crash, when nothing is selected. In CI
         // there is no focused UI, so this exercises the None/empty branches.
         let _ = super::selected_text();
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod cache_tests {
+    /// The regression this guards: a process-lifetime cache in a menu-bar app
+    /// that is never quit means an app installed today never shows up in App
+    /// Rules. The TTL is the only thing making the cache safe.
+    #[test]
+    fn cache_ttl_is_short_enough_for_a_long_running_app() {
+        assert!(
+            super::macos::CACHE_TTL <= std::time::Duration::from_secs(600),
+            "Aloud runs for weeks in the tray; a long TTL hides newly installed apps"
+        );
+    }
+
+    /// Two calls inside the TTL must not rescan.
+    #[test]
+    fn second_call_is_served_from_cache() {
+        let cold = std::time::Instant::now();
+        let first = super::installed_apps();
+        let cold = cold.elapsed();
+
+        let warm = std::time::Instant::now();
+        let second = super::installed_apps();
+        let warm = warm.elapsed();
+
+        assert_eq!(first.len(), second.len());
+        if !first.is_empty() {
+            assert!(
+                warm < cold / 5,
+                "cold {cold:?} vs warm {warm:?} — not cached"
+            );
+        }
     }
 }

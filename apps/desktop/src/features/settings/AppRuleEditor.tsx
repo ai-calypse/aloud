@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { commands, type AppRule, type InstalledApp } from "../../lib/bindings";
+import { or } from "../../lib/result";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,7 +68,10 @@ export function AppRuleEditor({
   const [editing, setEditing] = useState<number | null>(null);
 
   useEffect(() => {
-    commands.installedApps().then(setApps).catch(() => setApps([]));
+    // An empty list is a valid answer (Windows has no scan yet), so a failure
+    // logs rather than silently looking like "no apps installed". The picker
+    // still works: its search box doubles as a free-text app-name field.
+    or(commands.installedApps(), [], "listing installed apps").then(setApps);
   }, []);
 
   const taken = new Set(rules.map((r) => r.app_matches.toLowerCase()));

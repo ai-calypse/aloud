@@ -23,8 +23,11 @@ export const commands = {
 	 *  so the scan froze the whole webview rather than merely showing a spinner.
 	 *  The work is blocking (process spawns), hence `spawn_blocking` rather than
 	 *  parking an async worker on it.
+	 * 
+	 *  Fallible so a scan that dies is distinguishable from a machine with no
+	 *  applications — an empty picker with no error reads as the former.
 	 */
-	installedApps: () => __TAURI_INVOKE<InstalledApp[]>("installed_apps"),
+	installedApps: () => typedError<InstalledApp[], string>(__TAURI_INVOKE("installed_apps")),
 	/**
 	 *  Whether the OS lets us listen for keys. False on macOS until the user
 	 *  grants Accessibility permission.
