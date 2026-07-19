@@ -6,6 +6,7 @@
 use crate::AppState;
 use aloud_store::{history::Entry, Settings, Stats};
 use tauri::{AppHandle, State};
+use tauri_specta::Event;
 
 /// Commands must return a `Result` the frontend can read; anyhow's error is
 /// not serializable, so errors cross the boundary as strings.
@@ -84,10 +85,20 @@ pub fn input_devices() -> CmdResult<Vec<aloud_audio::AudioDevice>> {
 
 /// Installed apps, to fill the App Rules picker. Empty on Windows (no scan
 /// there yet); the custom-match field still works everywhere.
+///
+/// `async` is load-bearing: Tauri runs a non-async command on the main thread,
+/// so the scan froze the whole webview rather than merely showing a spinner.
+/// The work is blocking (process spawns), hence `spawn_blocking` rather than
+/// parking an async worker on it.
+///
+/// Fallible so a scan that dies is distinguishable from a machine with no
+/// applications — an empty picker with no error reads as the former.
 #[tauri::command]
 #[specta::specta]
-pub fn installed_apps() -> Vec<aloud_selection::InstalledApp> {
-    aloud_selection::installed_apps()
+pub async fn installed_apps() -> CmdResult<Vec<aloud_selection::InstalledApp>> {
+    tauri::async_runtime::spawn_blocking(aloud_selection::installed_apps)
+        .await
+        .map_err(|e| format!("listing installed apps: {e}"))
 }
 
 /// Whether the OS lets us listen for keys. False on macOS until the user
@@ -123,7 +134,7 @@ pub fn launch_at_login(app: AppHandle) -> CmdResult<bool> {
 }
 
 /// One connectable service, for the Connectors pane.
-#[derive(serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Connector {
     pub slug: String,
@@ -139,7 +150,7 @@ pub struct Connector {
     pub tools: Vec<ConnectorTool>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorTool {
     pub name: String,
@@ -149,8 +160,16 @@ pub struct ConnectorTool {
     pub read_only: bool,
 }
 
-fn client(settings: &State<'_, AppState>) -> CmdResult<aloud_agent::ComposioClient> {
-    let key = settings
+/// Composio responses held between opens of the Connectors pane. The policy
+/// (credential scoping, single-flight revalidation) lives in `aloud_agent`.
+pub type ConnectorCache = std::sync::Arc<aloud_agent::ResponseCache<Connector>>;
+
+/// The configured Composio key, or the error the pane should show.
+///
+/// Read before touching the cache: it doubles as the cache's scope, so an
+/// account swap misses rather than serving the previous account's data.
+fn api_key(state: &State<'_, AppState>) -> CmdResult<String> {
+    let key = state
         .settings
         .lock()
         .map(|s| s.composio_api_key.clone())
@@ -158,7 +177,11 @@ fn client(settings: &State<'_, AppState>) -> CmdResult<aloud_agent::ComposioClie
     if key.trim().is_empty() {
         return Err("Add a Composio API key first".into());
     }
-    to_string_err(aloud_agent::ComposioClient::new(&key))
+    Ok(key)
+}
+
+fn client(key: &str) -> CmdResult<aloud_agent::ComposioClient> {
+    to_string_err(aloud_agent::ComposioClient::new(key))
 }
 
 fn to_connector(toolkit: aloud_agent::Toolkit, tools: Vec<aloud_agent::ToolDef>) -> Connector {
@@ -181,40 +204,116 @@ fn to_connector(toolkit: aloud_agent::Toolkit, tools: Vec<aloud_agent::ToolDef>)
     }
 }
 
+/// Fetches the connected toolkits and maps them to the pane's shape.
+async fn fetch_connected(composio: &aloud_agent::ComposioClient) -> anyhow::Result<Vec<Connector>> {
+    Ok(composio
+        .connected_with_tools(aloud_agent::TOOLS_PER_TOOLKIT)
+        .await?
+        .into_iter()
+        .map(|(toolkit, tools)| to_connector(toolkit, tools))
+        .collect())
+}
+
+/// Refetches in the background and pushes the result only if it changed.
+///
+/// The cache decides both whether to run at all (one revalidation in flight at
+/// a time — every window focus asks for one) and whether the result is news.
+fn revalidate(app: AppHandle, key: String, cache: ConnectorCache) {
+    if !cache.begin_revalidation() {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let fetched = match client(&key) {
+            Ok(composio) => fetch_connected(&composio).await.ok(),
+            Err(_) => None,
+        };
+        // Release the claim on the failure path too, or nothing revalidates
+        // again for the life of the process.
+        let Some(fresh) = fetched else {
+            cache.finish_revalidation(&key, None);
+            return;
+        };
+        if cache.finish_revalidation(&key, Some(fresh.clone())) {
+            let _ = crate::ConnectorsUpdated(fresh).emit(&app);
+        }
+    });
+}
+
+/// Fills the connector cache in the background at startup.
+///
+/// Skipped entirely without a Composio key: there is nothing to fetch, and a
+/// launch should not touch the network for a feature the user has not set up.
+/// Failure is silent — this is a warm-up, and the pane still fetches for real.
+pub fn warm_connectors(app: AppHandle) {
+    use tauri::Manager;
+
+    let state = app.state::<AppState>();
+    let Ok(key) = api_key(&state) else {
+        return;
+    };
+    let cache = state.connectors.clone();
+    tauri::async_runtime::spawn(async move {
+        let Ok(composio) = client(&key) else {
+            return;
+        };
+        if let Ok(fresh) = fetch_connected(&composio).await {
+            cache.store_primary(&key, fresh);
+        }
+    });
+}
+
 /// Connected toolkits, each with the tools the agent will actually offer.
+///
+/// Stale-while-revalidate: a warm cache paints the pane with no network at
+/// all, and a background refresh pushes `connectors-updated` if anything moved.
+/// A plain TTL would be wrong here — OAuth finishes in the browser, so the user
+/// comes back expecting a service that was connected seconds ago.
 #[tauri::command]
 #[specta::specta]
-pub async fn list_connectors(state: State<'_, AppState>) -> CmdResult<Vec<Connector>> {
-    let composio = client(&state)?;
-    let toolkits = to_string_err(composio.connected_toolkits().await)?;
+pub async fn list_connectors(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<Vec<Connector>> {
+    let key = api_key(&state)?;
+    let cache = state.connectors.clone();
 
-    let mut out = Vec::new();
-    for toolkit in toolkits {
-        // The agent now picks tools per command, so there is no single set to
-        // show. An empty command yields the pins plus a stable head of the
-        // toolkit — representative of a typical request, not a promise.
-        let tools = composio
-            .toolkit_tools(&toolkit.slug, "", aloud_agent::TOOLS_PER_TOOLKIT)
-            .await
-            .unwrap_or_default();
-        out.push(to_connector(toolkit, tools));
+    if let Some(hit) = cache.primary(&key) {
+        revalidate(app, key, cache);
+        return Ok(hit);
     }
-    Ok(out)
+
+    // Cold: the only path that makes the pane wait on Composio.
+    let fresh = to_string_err(fetch_connected(&client(&key)?).await)?;
+    cache.store_primary(&key, fresh.clone());
+    Ok(fresh)
 }
 
 /// Toolkits matching `query`, for the add-a-connector search.
+///
+/// Cached per query: the pane fires the empty query on every mount to fill
+/// "Add a connector", and re-typing a query is common. Composio's catalogue
+/// does not move within a session, so this is served from memory once seen.
 #[tauri::command]
 #[specta::specta]
 pub async fn search_connectors(
     state: State<'_, AppState>,
     query: String,
 ) -> CmdResult<Vec<Connector>> {
-    let composio = client(&state)?;
-    let toolkits = to_string_err(composio.toolkits(&query).await)?;
-    Ok(toolkits
+    // Before the cache, so removing the key reports the same missing-key error
+    // here as in the connected list rather than serving the last session's.
+    let key = api_key(&state)?;
+    let cache = state.connectors.clone();
+    if let Some(hit) = cache.search(&key, &query) {
+        return Ok(hit);
+    }
+
+    let toolkits = to_string_err(client(&key)?.toolkits(&query).await)?;
+    let results: Vec<Connector> = toolkits
         .into_iter()
         .map(|t| to_connector(t, Vec::new()))
-        .collect())
+        .collect();
+    cache.store_search(&key, query, results.clone());
+    Ok(results)
 }
 
 /// Starts an OAuth connection and opens the consent page in the browser.
@@ -228,8 +327,7 @@ pub async fn connect_connector(
     state: State<'_, AppState>,
     toolkit: String,
 ) -> CmdResult<()> {
-    let composio = client(&state)?;
-    let url = to_string_err(composio.connect(&toolkit).await)?;
+    let url = to_string_err(client(&api_key(&state)?)?.connect(&toolkit).await)?;
 
     use tauri_plugin_opener::OpenerExt;
     to_string_err(app.opener().open_url(url, None::<&str>).map_err(Into::into))
@@ -241,8 +339,13 @@ pub async fn disconnect_connector(
     state: State<'_, AppState>,
     connection_id: String,
 ) -> CmdResult<()> {
-    let composio = client(&state)?;
-    to_string_err(composio.disconnect(&connection_id).await)
+    let key = api_key(&state)?;
+    to_string_err(client(&key)?.disconnect(&connection_id).await)?;
+    // Known-wrong now, so drop it rather than wait for a revalidation to
+    // notice. Searches go too: their rows carry the connection state that this
+    // call just invalidated.
+    state.connectors.clear();
+    Ok(())
 }
 
 #[tauri::command]

@@ -12,9 +12,11 @@
 //! The design principle survives both: an action never fires without explicit
 //! approval, and every write requires confirmation.
 
+pub mod cache;
 pub mod composio;
 pub mod tool_loop;
 
+pub use cache::ResponseCache;
 pub use composio::{toolkit_of_slug, ComposioClient, ToolDef, Toolkit, TOOLS_PER_TOOLKIT};
 pub use tool_loop::{run as run_tool_loop, LoopEvent};
 

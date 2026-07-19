@@ -22,6 +22,14 @@ const PERMISSION_POLL: std::time::Duration = std::time::Duration::from_secs(1);
 #[tauri_specta(event_name = "hotkeys-permitted")]
 pub struct HotkeysPermitted(pub bool);
 
+/// Pushed when a background revalidation finds the connector list has changed.
+///
+/// The Connectors pane paints from cache immediately, so this is how a service
+/// connected in the browser reaches a window that already rendered.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type, Event)]
+#[tauri_specta(event_name = "connectors-updated")]
+pub struct ConnectorsUpdated(pub Vec<commands::Connector>);
+
 /// Shared app state, injected into commands via `tauri::State`.
 pub struct AppState {
     pub settings: Arc<Mutex<Settings>>,
@@ -31,6 +39,9 @@ pub struct AppState {
     /// The live hotkey config the listener reads. Shared with the listener
     /// thread so a rebind from Settings applies without a restart.
     pub hotkey_config: Arc<Mutex<aloud_hotkey::model::Config>>,
+    /// Composio reads held across opens of the Connectors pane, so it paints
+    /// from memory instead of a round-trip. See `aloud_agent::ResponseCache`.
+    pub connectors: commands::ConnectorCache,
 }
 
 pub fn run() {
@@ -74,6 +85,7 @@ pub fn run() {
             overlay::OverlayError,
             overlay::ModelDownload,
             HotkeysPermitted,
+            ConnectorsUpdated,
         ]);
 
     // Regenerate the TypeScript bindings on every debug run so the frontend
@@ -138,10 +150,24 @@ pub fn run() {
                 pipeline: pipeline.clone(),
                 meeting: meeting.clone(),
                 hotkey_config: hotkey_config.clone(),
+                connectors: Default::default(),
             });
             app.manage(agent::PendingConfirmation::default());
 
             tray::init(app)?;
+
+            // Warm the installed-apps cache off the critical path: the App
+            // Rules picker then opens against a populated cache instead of
+            // paying for ~70 `sips` spawns on first click.
+            std::thread::spawn(|| {
+                let _ = aloud_selection::installed_apps();
+            });
+
+            // Same for connectors, so the first open is warm too. Only for
+            // users who have configured a key — otherwise there is nothing to
+            // fetch and no reason to touch the network on launch.
+            commands::warm_connectors(app.handle().clone());
+
             spawn_hotkey_listener(
                 app.handle().clone(),
                 settings,

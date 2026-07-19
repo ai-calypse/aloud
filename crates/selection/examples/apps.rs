@@ -1,6 +1,22 @@
 // Verifies installed_apps() against real bundles on this machine.
 fn main() {
+    // Cold vs warm: the scan is cached for the process lifetime, so the second
+    // call must not pay for the ~70 `sips` spawns again.
+    let cold_start = std::time::Instant::now();
     let apps = aloud_selection::installed_apps();
+    let cold = cold_start.elapsed();
+
+    let warm_start = std::time::Instant::now();
+    let again = aloud_selection::installed_apps();
+    let warm = warm_start.elapsed();
+
+    assert_eq!(apps.len(), again.len(), "cached scan changed under us");
+    println!("cold: {cold:?}   warm: {warm:?}\n");
+    assert!(
+        warm < cold / 10,
+        "warm call ({warm:?}) should be far cheaper than cold ({cold:?}) — cache not working"
+    );
+
     println!("{} apps:", apps.len());
     for a in &apps {
         let icon = a
