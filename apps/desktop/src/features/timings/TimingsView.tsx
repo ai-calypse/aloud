@@ -83,12 +83,13 @@ export function TimingsView() {
 
   useEffect(() => {
     refresh();
-    // Rows are written when the utterance span closes, which is after the
-    // pill has already gone to done/error — so refetch on the phase, not on a
-    // timer.
+    // Every terminal phase, not just "done": agent and ask runs finish on
+    // Idle, so watching done/error alone missed exactly the runs worth
+    // inspecting. The row is written when the span closes, which is just
+    // after the phase is emitted — hence the delay.
     const unlisten = events.dictationPhase.listen((event) => {
-      if (event.payload === "done" || event.payload === "error") {
-        setTimeout(refresh, 100);
+      if (["done", "error", "idle"].includes(event.payload)) {
+        setTimeout(refresh, 150);
       }
     });
     return () => {
