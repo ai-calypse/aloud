@@ -5,7 +5,7 @@
 
 use crate::AppState;
 use aloud_store::{history::Entry, Settings, Stats};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 /// Commands must return a `Result` the frontend can read; anyhow's error is
 /// not serializable, so errors cross the boundary as strings.
@@ -102,4 +102,35 @@ pub fn hotkeys_permitted() -> bool {
 #[specta::specta]
 pub fn paste_again(state: State<'_, AppState>) -> CmdResult<()> {
     to_string_err(state.pipeline.paste_again())
+}
+
+/// Plays the start chime, so the volume slider can be judged by ear rather
+/// than by guessing at a number.
+#[tauri::command]
+#[specta::specta]
+pub fn preview_sound(volume: f32) {
+    crate::sound::play(crate::sound::Chime::Start, true, volume);
+}
+
+/// Whether the OS launches Aloud at login. The autostart plugin owns this
+/// state (a login item / registry key), not settings.json — storing a copy
+/// would drift the moment the user changed it outside the app.
+#[tauri::command]
+#[specta::specta]
+pub fn launch_at_login(app: AppHandle) -> CmdResult<bool> {
+    use tauri_plugin_autostart::ManagerExt;
+    to_string_err(app.autolaunch().is_enabled().map_err(Into::into))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_launch_at_login(app: AppHandle, enabled: bool) -> CmdResult<()> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autolaunch = app.autolaunch();
+    let result = if enabled {
+        autolaunch.enable()
+    } else {
+        autolaunch.disable()
+    };
+    to_string_err(result.map_err(Into::into))
 }

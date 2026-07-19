@@ -36,9 +36,18 @@ const NAV: { id: Nav; title: string; icon: string; group: "app" | "settings" }[]
     { id: "hotkeys", title: "Hotkeys", group: "settings", icon: "M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" },
     { id: "macros", title: "Voice Macros", group: "settings", icon: "M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3ZM5 11a7 7 0 0 0 14 0M12 18v4" },
     { id: "rules", title: "App Rules", group: "settings", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM4 9h16M8 6h.01" },
+    { id: "prompts", title: "Prompts", group: "settings", icon: "M4 4h16v12H7l-3 3V4ZM8 9h8M8 12h5" },
+    { id: "integrations", title: "Integrations", group: "settings", icon: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" },
   ];
 
-const SETTINGS_IDS: SettingsSection[] = ["general", "hotkeys", "macros", "rules"];
+const SETTINGS_IDS: SettingsSection[] = [
+  "general",
+  "hotkeys",
+  "macros",
+  "rules",
+  "prompts",
+  "integrations",
+];
 
 /**
  * Mirrors `Stats::time_saved_seconds` (crates/store/src/stats.rs): typing at
