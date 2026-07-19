@@ -27,7 +27,6 @@ mark {
   color: var(--muted);
   font: inherit;
   font-size: 0.78rem;
-  cursor: default;
 }
 
 .reader__toggle:hover {
@@ -40,7 +39,6 @@ mark {
   background: transparent;
   color: var(--accent);
   font: inherit;
-  cursor: default;
 }
 
 .reader__title {

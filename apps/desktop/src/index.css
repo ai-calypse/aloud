@@ -71,3 +71,23 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 }
+
+/* Tailwind v4's Preflight sets `cursor: default` on buttons to match the raw
+ * browser behaviour, which left every control in the app showing an arrow. Put
+ * the hand back, once, rather than hanging `cursor-pointer` on each element.
+ *
+ * The role selectors cover the controls that are not <button>: Radix and cmdk
+ * render list options as divs, so a select or the app picker would otherwise
+ * still read as unclickable. Disabled buttons keep the arrow — they are not.
+ */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  [role="option"],
+  [role="menuitem"],
+  [role="switch"],
+  [role="tab"],
+  input[type="range"]:not(:disabled) {
+    cursor: pointer;
+  }
+}

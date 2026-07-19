@@ -398,34 +398,6 @@ impl ComposioClient {
         Ok(out)
     }
 
-    /// Connected toolkits paired with the tools each would offer.
-    ///
-    /// Both levels fan out concurrently: the toolkit lookups inside
-    /// `connected_toolkits`, then one `toolkit_tools` call per toolkit. Awaited
-    /// serially this cost two round-trips per connected service.
-    ///
-    /// A toolkit whose tools fail to load still comes back, with an empty list
-    /// — one unreachable service must not empty the whole pane.
-    pub async fn connected_with_tools(
-        &self,
-        per_toolkit: usize,
-    ) -> Result<Vec<(Toolkit, Vec<ToolDef>)>> {
-        let toolkits = self.connected_toolkits().await?;
-        Ok(
-            futures_util::future::join_all(toolkits.into_iter().map(|toolkit| async move {
-                // The agent picks tools per command, so there is no single set
-                // to show. An empty command yields the pins plus a stable head
-                // of the toolkit — typical of a request, not a promise.
-                let tools = self
-                    .toolkit_tools(&toolkit.slug, "", per_toolkit)
-                    .await
-                    .unwrap_or_default();
-                (toolkit, tools)
-            }))
-            .await,
-        )
-    }
-
     /// Starts an OAuth connection and returns the URL the user must visit.
     ///
     /// Composio needs an auth config per toolkit before an account can be

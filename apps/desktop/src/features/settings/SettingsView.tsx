@@ -360,12 +360,14 @@ export function SettingsView({ section }: { section: SettingsSection }) {
 
       {section === "connectors" && (
         <>
-          <PaneTitle
-            title="Connectors"
-            subtitle="Agent mode needs a Cerebras key to understand a spoken command and a Composio key to reach the services below."
-          />
+          {/* Owns the pane title: the design puts the search box on the same
+              row as it. Remounts when the key changes so the list reloads. */}
+          <ConnectorEditor key={settings.composioApiKey ?? ""} />
+
+          {/* Setup, not the point of the pane — so it sits under the list. The
+              connector list names the missing key in its own error when unset. */}
           <Group title="Keys">
-            <Row label="Cerebras key">
+            <Row label="Cerebras key" hint="Understands a spoken command">
               <Value className="flex-1">
                 <Input
                   type="password"
@@ -376,7 +378,7 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                 />
               </Value>
             </Row>
-            <Row label="Composio key">
+            <Row label="Composio key" hint="Reaches the services above">
               <Value className="flex-1">
                 <Input
                   type="password"
@@ -388,9 +390,6 @@ export function SettingsView({ section }: { section: SettingsSection }) {
               </Value>
             </Row>
           </Group>
-
-          {/* Remounts when the key changes so the list reloads against it. */}
-          <ConnectorEditor key={settings.composioApiKey ?? ""} />
         </>
       )}
 
