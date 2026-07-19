@@ -103,15 +103,26 @@
   white-space: nowrap;
 }
 
-/* The listening meter.
+/* The listening wave.
  *
- * Each bar is one 50ms sample of measured loudness, newest on the right, so
- * the row scrolls as you speak. What it replaced was a fixed 0.9s sine loop
- * per bar with the whole row squashed by the level — which meant the motion
- * was identical whether you spoke or sat in silence, and read as a spinner.
+ * A continuous travelling wave, not a reaction to the microphone. Each bar
+ * runs the same keyframe with a small NEGATIVE delay, so it is already part
+ * way through its cycle when the row appears: the phase offset between
+ * neighbours is what makes a wave travel, and starting mid-cycle means it is
+ * fully formed on the first frame rather than rippling up from flat.
  *
- * Only `transform` animates, so the compositor owns every frame even though a
- * new sample lands 20 times a second.
+ * The delay step and the cycle length together set the wavelength. At 14 bars,
+ * -185ms a bar over a 1.6s cycle spreads about 1.5 wavelengths across the row,
+ * so a crest and a trough are visible at once and the row reads as a wave. At
+ * -95ms (0.8 of a wavelength) only part of one crest fits, which looked like a
+ * ramp sliding back and forth rather than something travelling.
+ *
+ * An earlier version of this looked like a spinner. It was not because it
+ * ignored the voice: it was six chunky bars with a 0.1s stagger on a 0.9s
+ * cycle, which is a big enough jump per bar to read as blinking rather than
+ * as one wave moving.
+ *
+ * Pure CSS, so nothing re-renders and the compositor owns every frame.
  */
 .bars {
   display: flex;
@@ -126,19 +137,20 @@
   border-radius: var(--radius-pill);
   background: var(--pill-ink);
   transform-origin: center;
-  transform: scaleY(var(--v, 0.12));
-  /* Slightly shorter than the 50ms sample interval, so a bar has settled
-     before the next value arrives instead of being permanently re-targeted. */
-  transition: transform 45ms linear;
-  /* The entrance only: bars rise left-to-right as the pill appears. */
-  animation: bar-in var(--dur-base) var(--ease-out) backwards;
-  animation-delay: calc(var(--i, 0) * 18ms);
+  /* --peak is a per-bar envelope set in the TSX: taller in the middle, so the
+     row reads as a waveform rather than a uniform ribbon. */
+  transform: scaleY(calc(var(--peak, 1) * 0.28));
+  animation: wave 1.6s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * -185ms);
 }
 
-@keyframes bar-in {
-  from {
-    transform: scaleY(0.06);
-    opacity: 0;
+@keyframes wave {
+  0%,
+  100% {
+    transform: scaleY(calc(var(--peak, 1) * 0.28));
+  }
+  50% {
+    transform: scaleY(var(--peak, 1));
   }
 }
 

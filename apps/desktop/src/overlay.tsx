@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { events, type Phase } from "./lib/bindings";
-import { pushLevel, restingLevels } from "./lib/meter";
 import "./styles/overlay.css";
 
 const LABEL: Record<Phase, string> = {
@@ -17,6 +16,21 @@ const LABEL: Record<Phase, string> = {
 /** A long error still has to fit one line on a small pill. */
 const ERROR_CHARS = 90;
 
+/** Bars in the listening wave. */
+const BAR_COUNT = 14;
+
+/**
+ * Per-bar height ceiling: a raised cosine, tallest in the middle.
+ *
+ * Without it every bar reaches the same height and the row reads as a ribbon
+ * rather than a waveform. Computed rather than hand-tuned so the shape holds
+ * if BAR_COUNT changes.
+ */
+const BAR_PEAKS = Array.from({ length: BAR_COUNT }, (_, i) => {
+  const position = i / (BAR_COUNT - 1); // 0…1 across the row
+  return 0.45 + 0.55 * Math.sin(Math.PI * position);
+});
+
 
 
 /**
@@ -30,23 +44,16 @@ function Overlay() {
   const preview = new URLSearchParams(location.search).get("phase") as Phase | null;
   const [phase, setPhase] = useState<Phase>(preview ?? "idle");
   const [error, setError] = useState<string | null>(null);
-  // The meter's rolling history, newest last. Starts flat so the first frames
-  // of a session are a resting row rather than an empty gap.
-  const [levels, setLevels] = useState<number[]>(restingLevels);
   const [download, setDownload] = useState<number | null>(null);
 
   useEffect(() => {
     const unlistenPhase = events.dictationPhase.listen((e) => {
       setPhase(e.payload);
-      // A new run clears the last run's message and stale level.
+      // A new run clears the last run’s message.
       if (e.payload === "recording") {
         setError(null);
-        setLevels(restingLevels());
       }
     });
-    const unlistenLevel = events.audioLevel.listen((e) =>
-      setLevels((prev) => pushLevel(prev, e.payload)),
-    );
     const unlistenError = events.overlayError.listen((e) => setError(e.payload));
     // First use of the local engine fetches ~150MB; without this the pill sits
     // on "Transcribing…" for minutes and the app looks hung.
@@ -55,7 +62,6 @@ function Overlay() {
     );
     return () => {
       unlistenPhase.then((off) => off());
-      unlistenLevel.then((off) => off());
       unlistenError.then((off) => off());
       unlistenDownload.then((off) => off());
     };
@@ -97,18 +103,17 @@ function Overlay() {
       {/* Warped glass highlight sitting over the real backdrop blur. */}
       <span className="pill__refraction" aria-hidden />
       {phase === "recording" ? (
-        // A scrolling level meter: each bar is one 50ms sample of what the mic
-        // actually heard, newest on the right. The bars it replaced ran a
-        // canned sine loop that played identically whether you spoke or not.
+        // A continuous wave, deliberately not driven by the microphone. The
+        // CSS owns the motion; these two custom properties only give each bar
+        // its place in the row and its height ceiling.
         <span className="bars" aria-hidden>
-          {levels.map((value, i) => (
+          {BAR_PEAKS.map((peak, i) => (
             <i
               key={i}
               style={
                 {
-                  "--v": value,
-                  // Staggered only for the entrance; see .bars i in the CSS.
                   "--i": i,
+                  "--peak": peak,
                 } as React.CSSProperties
               }
             />
