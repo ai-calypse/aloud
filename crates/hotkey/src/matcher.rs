@@ -277,6 +277,39 @@ mod tests {
         assert!(!state.is_active(Role::Hold));
     }
 
+    /// Command mode's bug: a modifier arriving from *our own* synthetic Cmd+C
+    /// tears down the hold, and its release starts it again. Since the restart
+    /// re-reads the selection, which synthesises another Cmd+C, the pair
+    /// repeats for as long as the user holds the key — the chime toggling on
+    /// and off with nothing ever transcribed.
+    ///
+    /// The matcher is right to do this: for a modifier-only binding, Cmd+Option
+    /// genuinely is not Option. The fix belongs at the tap, which should never
+    /// have fed our own keystrokes back to us.
+    #[test]
+    fn a_foreign_modifier_tears_down_a_modifier_only_hold() {
+        let config = hold_right_option();
+        let mut state = State::default();
+
+        let down = state.reduce(Input::KeyDown(Key::RightOption), &config);
+        assert_eq!(down.events, vec![Event::Activated(Role::Hold)]);
+
+        // What enigo's Cmd+C looks like arriving at our own tap.
+        let cmd_down = state.reduce(Input::KeyDown(Key::LeftCommand), &config);
+        assert_eq!(
+            cmd_down.events,
+            vec![Event::Deactivated(Role::Hold)],
+            "a synthetic Cmd must not be able to end a hold the user is still holding"
+        );
+
+        let cmd_up = state.reduce(Input::KeyUp(Key::LeftCommand), &config);
+        assert_eq!(
+            cmd_up.events,
+            vec![Event::Activated(Role::Hold)],
+            "...and releasing it restarts the hold, which is the other half of the loop"
+        );
+    }
+
     #[test]
     fn key_binding_requires_its_modifier() {
         let config = hold_cmd_d();
