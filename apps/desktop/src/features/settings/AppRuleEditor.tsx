@@ -18,6 +18,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { Group } from "./rows";
 
 /**
  * Per-app rules, modelled on the Swift app. A rule pins how dictation behaves
@@ -84,81 +85,86 @@ export function AppRuleEditor({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-start gap-4">
-        <p className="flex-1 text-sm text-muted-foreground leading-relaxed">
+    <div className="flex flex-col gap-6">
+      <div>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-bold leading-[1.1] tracking-[-0.02em]">
+            App Rules
+          </h1>
+          <button
+            className="shrink-0 whitespace-nowrap rounded-lg bg-[var(--accent)] px-[15px] py-[7px] text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(0,60,160,.3)] active:scale-[0.97]"
+            onClick={() => setEditing(-1)}
+          >
+            Add Rule
+          </button>
+        </div>
+        <p className="mt-1.5 max-w-[520px] text-[13px] text-[var(--text2)]">
           Adjust dictation cleanup per app: paste verbatim in terminals, or steer
           the tone in chat and email apps.
         </p>
-        <Button variant="secondary" size="sm" onClick={() => setEditing(-1)}>
-          Add Rule
-        </Button>
       </div>
 
-      {rules.length === 0 ? (
-        <div className="py-8 text-center text-sm text-muted-foreground">
-          <p className="mb-1 text-base font-semibold text-foreground">
-            No App Rules Yet
-          </p>
-          <p>Click "Add Rule" to define your first app rule.</p>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-xl border border-border">
-          {rules.map((r, i) => (
+      <Group>
+        {rules.length === 0 ? (
+          <div className="py-8 text-center text-[13px] text-[var(--text2)]">
+            <p className="mb-1 text-[15px] font-semibold text-foreground">
+              No App Rules Yet
+            </p>
+            <p>Click "Add Rule" to define your first app rule.</p>
+          </div>
+        ) : (
+          rules.map((r, i) => (
             <div
               key={i}
-              className="flex items-center gap-4 border-b border-border/60 bg-muted/40 p-3 last:border-b-0"
+              className="grid grid-cols-[130px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-[var(--sep)] py-[13px] last:border-b-0"
             >
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="font-semibold">{r.app_matches}</span>
-                <span className="truncate text-sm text-muted-foreground">
-                  {summary(r)}
-                </span>
+              <span className="truncate text-[13.5px] font-semibold">
+                {r.app_matches}
+              </span>
+              <span className="truncate text-[12.5px] text-[var(--text2)]">
+                {summary(r)}
+              </span>
+              <div className="flex gap-4 text-[13px] font-medium">
+                <button
+                  className="text-[var(--accent)] active:scale-95"
+                  onClick={() => setEditing(i)}
+                >
+                  Edit
+                </button>
+                <button
+                  className="text-[var(--danger)] active:scale-95"
+                  onClick={() => remove(i)}
+                >
+                  Delete
+                </button>
               </div>
-              <Button variant="link" size="sm" onClick={() => setEditing(i)}>
-                Edit
-              </Button>
-              <Button
-                variant="link"
-                size="sm"
-                className="text-destructive"
-                onClick={() => remove(i)}
-              >
-                Delete
-              </Button>
             </div>
-          ))}
-        </div>
-      )}
+          ))
+        )}
+      </Group>
 
       {suggestions.length > 0 && (
-        <>
-          <p className="text-xs font-semibold text-muted-foreground">
-            Suggestions
-          </p>
-          <div className="overflow-hidden rounded-xl border border-border">
-            {suggestions.map((s) => (
-              <div
-                key={s.app_matches}
-                className="flex items-center gap-4 border-b border-border/60 bg-muted/20 p-3 last:border-b-0"
+        <Group title="Suggestions">
+          {suggestions.map((s) => (
+            <div
+              key={s.app_matches}
+              className="grid grid-cols-[130px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-[var(--sep)] py-3 last:border-b-0"
+            >
+              <span className="truncate text-[13.5px] font-medium">
+                {s.app_matches}
+              </span>
+              <span className="truncate text-[12.5px] text-[var(--text2)]">
+                {summary(s)}
+              </span>
+              <button
+                className="text-[13px] font-medium text-[var(--accent)] active:scale-95"
+                onClick={() => onChange([...rules, s])}
               >
-                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="font-semibold">{s.app_matches}</span>
-                  <span className="truncate text-sm text-muted-foreground">
-                    {summary(s)}
-                  </span>
-                </div>
-                <Button
-                  variant="link"
-                  size="sm"
-                  onClick={() => onChange([...rules, s])}
-                >
-                  Add
-                </Button>
-              </div>
-            ))}
-          </div>
-        </>
+                Add
+              </button>
+            </div>
+          ))}
+        </Group>
       )}
 
       <RuleDialog
