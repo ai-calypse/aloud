@@ -38,7 +38,6 @@ tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 tokio = { version = "1", features = ["time", "sync"] }
 # Native NSVisualEffectView vibrancy behind the main window (macOS Liquid Glass).
 window-vibrancy = "0.5"
-tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 tracing.workspace = true

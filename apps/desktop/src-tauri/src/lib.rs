@@ -83,7 +83,6 @@ pub fn run() {
         .expect("failed to export typescript bindings");
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         // MacosLauncher is ignored off macOS; no launch args are needed.
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
