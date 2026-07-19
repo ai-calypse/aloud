@@ -24,6 +24,8 @@
   --toggle-on: #34c759;
   --danger: #ff3b30;
   --field: rgba(0, 0, 0, 0.05);
+  --hover: rgba(0, 122, 255, 0.05);
+  --search-icon: #a0a0a4;
 
   color-scheme: light dark;
   font-family:
@@ -51,6 +53,8 @@
     --toggle-off: #39393d;
     --danger: #ff453a;
     --field: rgba(255, 255, 255, 0.08);
+    --hover: rgba(10, 132, 255, 0.14);
+    --search-icon: #7c7c82;
   }
 }
 

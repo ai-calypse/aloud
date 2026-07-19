@@ -1,7 +1,7 @@
 import { type Macro } from "../../lib/bindings";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Group, rowInput } from "./rows";
+import { Group, rowInput } from "@/components/ui/rows";
 
 /**
  * Edits the voice-macro list: a trigger phrase and the text it expands to.

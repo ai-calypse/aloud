@@ -6,7 +6,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Group } from "./rows";
+import { Group } from "@/components/ui/rows";
 
 /**
  * A compact hotkey binder, one row per role. A full keystroke recorder is the

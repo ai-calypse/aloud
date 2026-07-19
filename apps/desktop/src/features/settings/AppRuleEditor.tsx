@@ -18,7 +18,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Group } from "./rows";
+import { Group } from "@/components/ui/rows";
 
 /**
  * Per-app rules, modelled on the Swift app. A rule pins how dictation behaves

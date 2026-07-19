@@ -13,7 +13,7 @@ import {
   Value,
   rowInput,
   rowSelect,
-} from "./rows";
+} from "@/components/ui/rows";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
