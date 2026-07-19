@@ -13,6 +13,7 @@ import {
   type SettingsSection,
 } from "./features/settings/SettingsView";
 import { Onboarding } from "./features/onboarding/Onboarding";
+import { Materialize, SlidingPill } from "@/components/ui/motion";
 import { cn } from "@/lib/utils";
 
 const PHASE_LABEL: Record<Phase, string> = {
@@ -76,6 +77,9 @@ const isSettings = (n: Nav): n is SettingsSection =>
 
 export default function App() {
   const [nav, setNav] = useState<Nav>("notes");
+  // The pill measures itself against the active row, so it needs the element,
+  // not just the id — the sidebar's group divider makes row pitch uneven.
+  const [activeRow, setActiveRow] = useState<HTMLElement | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -139,20 +143,32 @@ export default function App() {
       {/* Glass sidebar sits directly on the native vibrancy (transparent). Top
           padding clears the macOS traffic lights (Overlay title-bar style). */}
       <nav
-        className="flex flex-col gap-1 overflow-y-auto px-2.5 pb-3 pt-11"
+        className="relative flex flex-col gap-1 overflow-y-auto px-2.5 pb-3 pt-11"
         data-tauri-drag-region
       >
+        {/* Sits behind the rows, inset to match the nav's own padding. */}
+        <SlidingPill
+          target={activeRow}
+          deps={[nav]}
+          className="left-2.5 right-2.5"
+        />
+
         {NAV.map((n, i) => (
           <div key={n.id} className="contents">
             {n.group === "settings" && NAV[i - 1]?.group === "app" && (
               <div className="my-2 mx-2 h-px bg-separator" />
             )}
             <button
+              ref={nav === n.id ? setActiveRow : undefined}
               onClick={() => setNav(n.id)}
               className={cn(
-                "flex h-[30px] w-full items-center gap-2.5 rounded-row px-2 text-left text-ui font-medium transition-colors",
+                // Colour swaps under the arriving pill rather than with it, so
+                // the label is already white by the time the chip covers it.
+                "relative flex h-[30px] w-full items-center gap-2.5 rounded-row px-2 text-left text-ui font-medium",
+                "transition-[color,font-weight,background-color] duration-[var(--dur-fast)]",
+                "active:scale-[0.98]",
                 nav === n.id
-                  ? "bg-brand font-semibold text-white shadow-accent"
+                  ? "font-semibold text-white"
                   : "hover:bg-field",
               )}
             >
@@ -195,7 +211,10 @@ export default function App() {
 
       {/* Solid canvas: the grouped setting cards need an opaque backdrop for
           their hairline separators to read. */}
-      <div className="flex flex-col gap-5 overflow-y-auto border-l border-separator bg-canvas px-[30px] pb-9 pt-7">
+      <Materialize
+        index={NAV.findIndex((n) => n.id === nav)}
+        className="flex flex-col gap-5 overflow-y-auto border-l border-separator bg-canvas px-[30px] pb-9 pt-7"
+      >
         {!isSettings(nav) && (
           <h1 className="text-2xl font-bold leading-[1.1] tracking-[-0.02em]">
             {active.title}
@@ -249,7 +268,7 @@ export default function App() {
             </p>
           </section>
         )}
-      </div>
+      </Materialize>
     </main>
   );
 }
