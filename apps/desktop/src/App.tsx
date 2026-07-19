@@ -27,19 +27,26 @@ const PHASE_LABEL: Record<Phase, string> = {
 /** A sidebar row: either a top-level view or one settings pane. */
 type Nav = "notes" | "status" | SettingsSection;
 
-// icon is an inline SVG path — no icon dependency. Grouping mirrors the Swift
-// app: content views on top, settings panes below a divider.
-const NAV: { id: Nav; title: string; icon: string; group: "app" | "settings" }[] =
-  [
-    { id: "notes", title: "Notes", group: "app", icon: "M4 4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4ZM14 2v6h6M8 13h8M8 17h8" },
-    { id: "status", title: "Status", group: "app", icon: "M3 12h4l3 8 4-16 3 8h4" },
-    { id: "general", title: "General", group: "settings", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" },
-    { id: "hotkeys", title: "Hotkeys", group: "settings", icon: "M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" },
-    { id: "macros", title: "Voice Macros", group: "settings", icon: "M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3ZM5 11a7 7 0 0 0 14 0M12 18v4" },
-    { id: "rules", title: "App Rules", group: "settings", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM4 9h16M8 6h.01" },
-    { id: "prompts", title: "Prompts", group: "settings", icon: "M4 4h16v12H7l-3 3V4ZM8 9h8M8 12h5" },
-    { id: "connectors", title: "Connectors", group: "settings", icon: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" },
-  ];
+// icon is an inline SVG path — no icon dependency. `tint` is the System
+// Settings-style rounded icon chip behind it; each pane keeps one hue so a row
+// is recognisable by colour before the label is read. Grouping mirrors the
+// Swift app: content views on top, settings panes below a divider.
+const NAV: {
+  id: Nav;
+  title: string;
+  icon: string;
+  tint: string;
+  group: "app" | "settings";
+}[] = [
+  { id: "notes", title: "Notes", group: "app", tint: "#ff9f0a", icon: "M4 4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4ZM14 2v6h6M8 13h8M8 17h8" },
+  { id: "status", title: "Status", group: "app", tint: "#34c759", icon: "M3 12h4l3 8 4-16 3 8h4" },
+  { id: "general", title: "General", group: "settings", tint: "#8e8e93", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" },
+  { id: "hotkeys", title: "Hotkeys", group: "settings", tint: "#5856d6", icon: "M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" },
+  { id: "macros", title: "Voice Macros", group: "settings", tint: "#34c759", icon: "M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3ZM5 11a7 7 0 0 0 14 0M12 18v4" },
+  { id: "rules", title: "App Rules", group: "settings", tint: "#007aff", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM4 9h16M8 6h.01" },
+  { id: "prompts", title: "Prompts", group: "settings", tint: "#ff375f", icon: "M4 4h16v12H7l-3 3V4ZM8 9h8M8 12h5" },
+  { id: "connectors", title: "Connectors", group: "settings", tint: "#64d2ff", icon: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" },
+];
 
 const SETTINGS_IDS: SettingsSection[] = [
   "general",
@@ -129,50 +136,72 @@ export default function App() {
   const active = NAV.find((n) => n.id === nav)!;
 
   return (
-    <main className="grid h-screen grid-cols-[200px_1fr] box-border">
+    <main className="grid h-screen grid-cols-[214px_1fr] box-border">
       {/* Glass sidebar sits directly on the native vibrancy (transparent). Top
           padding clears the macOS traffic lights (Overlay title-bar style). */}
       <nav
-        className="flex flex-col gap-0.5 overflow-y-auto px-2.5 pb-3 pt-11"
+        className="flex flex-col gap-1 overflow-y-auto px-2.5 pb-3 pt-11"
         data-tauri-drag-region
       >
         {NAV.map((n, i) => (
           <div key={n.id} className="contents">
             {n.group === "settings" && NAV[i - 1]?.group === "app" && (
-              <div className="my-2 mx-2 h-px bg-border" />
+              <div className="my-2 mx-2 h-px bg-[var(--sep)]" />
             )}
             <button
               onClick={() => setNav(n.id)}
               className={cn(
-                "flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-[7px] text-left text-[0.9rem] transition-colors",
+                "flex h-[30px] w-full items-center gap-2.5 rounded-[7px] px-2 text-left text-[13px] font-medium transition-colors",
                 nav === n.id
-                  ? "border-primary/35 bg-primary/20 font-semibold"
-                  : "hover:bg-muted",
+                  ? "bg-[var(--accent)] font-semibold text-white shadow-[0_1px_2px_rgba(0,60,160,.35)]"
+                  : "hover:bg-[var(--field)]",
               )}
             >
-              <svg
-                className={cn(
-                  "size-[17px] shrink-0",
-                  nav === n.id ? "text-primary" : "text-muted-foreground",
-                )}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+              <span
+                className="grid size-5 shrink-0 place-items-center rounded-[5px]"
+                style={{ background: n.tint }}
               >
-                <path d={n.icon} />
-              </svg>
-              <span>{n.title}</span>
+                <svg
+                  className="size-3.5 text-white"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d={n.icon} />
+                </svg>
+              </span>
+              <span className="truncate">{n.title}</span>
             </button>
           </div>
         ))}
+
+        <div className="mt-auto flex items-center gap-[7px] px-1.5 pt-3 text-[11px] leading-[1.6] text-[var(--text2)]">
+          <span
+            className={cn(
+              "size-[7px] shrink-0 rounded-full",
+              phase === "idle" ? "bg-[#34c759]" : "bg-[var(--accent)]",
+            )}
+          />
+          <span>
+            {PHASE_LABEL[phase]} ·{" "}
+            {settings.engine === "cloud" ? "Cloud" : "On-device"}
+            <br />
+            {stats?.totalWords ?? 0} words
+          </span>
+        </div>
       </nav>
 
-      {/* Scrim over the vibrancy keeps the reading pane high-contrast. */}
-      <div className="flex flex-col gap-5 overflow-y-auto border-l border-border bg-background p-8">
-        <h1 className="text-2xl font-bold">{active.title}</h1>
+      {/* Solid canvas: the grouped setting cards need an opaque backdrop for
+          their hairline separators to read. */}
+      <div className="flex flex-col gap-5 overflow-y-auto border-l border-[var(--sep)] bg-[var(--bg)] px-[30px] pb-9 pt-7">
+        {!isSettings(nav) && (
+          <h1 className="text-2xl font-bold leading-[1.1] tracking-[-0.02em]">
+            {active.title}
+          </h1>
+        )}
 
         {!hotkeysReady && (
           <p className="rounded-lg bg-[var(--warning-bg)] px-4 py-3 text-sm leading-relaxed text-[var(--warning)]">
@@ -184,7 +213,7 @@ export default function App() {
         {nav === "notes" && <NotesView />}
         {isSettings(nav) && <SettingsView section={nav} />}
         {nav === "status" && (
-          <section className="rounded-2xl border border-border bg-card p-5 backdrop-blur-2xl">
+          <section className="rounded-[11px] border-[0.5px] border-[var(--card-border)] bg-[var(--card-solid)] p-5 shadow-[0_1px_2px_rgba(0,0,0,.05)]">
             <p
               className={cn(
                 "text-lg",

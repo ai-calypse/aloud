@@ -6,6 +6,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Group } from "@/components/ui/rows";
 
 /**
  * A compact hotkey binder, one row per role. A full keystroke recorder is the
@@ -18,14 +19,14 @@ import {
  */
 
 /** The roles a user binds, and the Config key each writes to. */
-const ROLES: { key: keyof Config; label: string; hint: string }[] = [
-  { key: "hold", label: "Dictate (hold)", hint: "Hold to talk, release to paste" },
-  { key: "toggle", label: "Dictate (toggle)", hint: "Tap to start, tap again to stop" },
-  { key: "ask", label: "Ask (hold)", hint: "Hold, ask a question, read the answer" },
-  { key: "command", label: "Command (hold)", hint: "Hold to transform the selection" },
-  { key: "agent", label: "Agent (hold)", hint: "Hold to run a command across apps" },
-  { key: "meeting_notes", label: "Meeting notes", hint: "Tap to start/stop a session" },
-  { key: "copy_again", label: "Paste again", hint: "Re-paste the last transcript" },
+const ROLES: { key: keyof Config; label: string; mode: string; hint: string }[] = [
+  { key: "hold", label: "Dictate", mode: "hold", hint: "Hold to talk, release to paste" },
+  { key: "toggle", label: "Dictate", mode: "tap", hint: "Tap to start, tap again to stop" },
+  { key: "ask", label: "Ask", mode: "hold", hint: "Hold, ask a question, read the answer" },
+  { key: "command", label: "Command", mode: "hold", hint: "Hold to transform the selection" },
+  { key: "agent", label: "Agent", mode: "hold", hint: "Hold to run a command across apps" },
+  { key: "meeting_notes", label: "Meeting notes", mode: "tap", hint: "Tap to start/stop a session" },
+  { key: "copy_again", label: "Paste again", mode: "tap", hint: "Re-paste the last transcript" },
 ];
 
 /** The modifier-only holds offered, keyed by a stable id for the <select>. */
@@ -71,20 +72,30 @@ export function HotkeyEditor({
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <Group>
       {ROLES.map((role) => {
         const current = choiceId(config[role.key]);
         return (
           <div
             key={role.key}
-            className="grid grid-cols-[9rem_1fr] items-center gap-x-4 gap-y-1 text-sm"
+            className="grid grid-cols-[150px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-[var(--sep)] py-3 last:border-b-0"
           >
-            <span>{role.label}</span>
+            <div className="whitespace-nowrap text-[13.5px] font-medium">
+              {role.label}
+              <span className="ml-[7px] text-[10px] uppercase tracking-[0.06em] text-[var(--text3)]">
+                {role.mode}
+              </span>
+            </div>
+            <span className="text-[12.5px] text-[var(--text2)]">
+              {role.hint}
+            </span>
+            {/* The trigger is styled as a keycap — the binding is the value of
+                the row, so it reads as a key, not as a form field. */}
             <Select
               value={current === "custom" ? "custom" : current}
               onValueChange={(v) => setRole(role.key, v)}
             >
-              <SelectTrigger>
+              <SelectTrigger className="h-auto gap-1.5 rounded-[7px] border-[0.5px] border-[var(--keycap-border)] bg-[var(--keycap)] px-3 py-[5px] font-mono text-xs shadow-none data-[size=default]:h-auto [&_svg]:text-[var(--chev)]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -98,15 +109,9 @@ export function HotkeyEditor({
                 ))}
               </SelectContent>
             </Select>
-            <small className="col-start-2 text-xs text-muted-foreground">
-              {role.hint}
-            </small>
           </div>
         );
       })}
-      <p className="text-xs text-muted-foreground">
-        Two roles on the same key will clash — give each its own.
-      </p>
-    </div>
+    </Group>
   );
 }

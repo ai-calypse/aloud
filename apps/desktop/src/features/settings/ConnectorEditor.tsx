@@ -76,7 +76,7 @@ export function ConnectorEditor() {
       )}
 
       <section className="flex flex-col gap-3">
-        <h3 className="m-0 text-[0.95rem] font-semibold">Connected</h3>
+        <h3 className="m-0 ml-1 text-xs font-semibold uppercase tracking-[0.03em] text-[var(--text2)]">Connected</h3>
         {connected === null ? (
           <p className="m-0 text-sm text-muted-foreground">Loading…</p>
         ) : connected.length === 0 ? (
@@ -88,7 +88,7 @@ export function ConnectorEditor() {
           connected.map((c) => (
             <article
               key={c.slug}
-              className="rounded-xl border border-border bg-card p-4"
+              className="rounded-[11px] border-[0.5px] border-[var(--card-border)] bg-[var(--card-solid)] shadow-[0_1px_2px_rgba(0,0,0,.05)] p-4"
             >
               <header className="flex items-center gap-3">
                 <Logo connector={c} />
@@ -135,7 +135,7 @@ export function ConnectorEditor() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <h3 className="m-0 text-[0.95rem] font-semibold">Add a connector</h3>
+        <h3 className="m-0 ml-1 text-xs font-semibold uppercase tracking-[0.03em] text-[var(--text2)]">Add a connector</h3>
         <Input
           type="search"
           value={query}
@@ -152,7 +152,7 @@ export function ConnectorEditor() {
             {addable.map((c) => (
               <li
                 key={c.slug}
-                className="flex items-center gap-3 rounded-xl border border-border bg-card p-3"
+                className="flex items-center gap-3 rounded-[11px] border-[0.5px] border-[var(--card-border)] bg-[var(--card-solid)] shadow-[0_1px_2px_rgba(0,0,0,.05)] p-3"
               >
                 <Logo connector={c} />
                 <div className="min-w-0 flex-1">

@@ -3,6 +3,7 @@ import { commands, events, type Note, type SearchResult } from "../../lib/bindin
 import { Highlight } from "./Highlight";
 import { or } from "../../lib/result";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { Group } from "@/components/ui/rows";
 import "./notes.css";
 
 /**
@@ -56,39 +57,59 @@ export function NotesView() {
   const notes = showing ? results.map((r) => r.note) : recent;
 
   return (
-    <div className="notes">
-      <input
-        className="notes__search"
-        type="search"
-        placeholder="Search notes"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        autoFocus
-      />
+    <div className="flex min-h-0 flex-col gap-3.5">
+      <div className="flex items-center gap-3">
+        <div className="flex flex-1 items-center gap-[7px] rounded-[9px] border-[0.5px] border-[var(--card-border)] bg-[var(--card-solid)] px-3 py-2 shadow-[0_1px_2px_rgba(0,0,0,.04)] focus-within:border-[var(--accent)]">
+          <svg
+            viewBox="0 0 16 16"
+            className="size-[13px] shrink-0 text-[var(--search-icon)]"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+          >
+            <circle cx="7" cy="7" r="4.2" />
+            <line x1="10.2" y1="10.2" x2="13.5" y2="13.5" strokeLinecap="round" />
+          </svg>
+          <input
+            type="search"
+            className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--text2)]"
+            placeholder="Search notes"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+          />
+        </div>
+        <span className="shrink-0 text-xs text-[var(--text2)]">
+          {notes.length} {notes.length === 1 ? "note" : "notes"}
+        </span>
+      </div>
 
       {notes.length === 0 ? (
-        <p className="notes__empty">
+        <p className="text-[13px] text-[var(--text2)]">
           {showing ? `No notes match “${query}”` : "No notes yet."}
         </p>
       ) : (
-        <ul className="notes__list">
+        <Group className="min-h-0 overflow-y-auto">
           {notes.map((note, i) => (
-            <li key={note.path}>
-              <button className="notes__item" onClick={() => setOpen(note)}>
-                <span className="notes__title">
-                  <Highlight text={note.title} terms={terms} />
+            <button
+              key={note.path}
+              onClick={() => setOpen(note)}
+              className="grid w-full grid-cols-[1fr_auto] items-center gap-3.5 border-b-[0.5px] border-[var(--sep)] py-3 text-left last:border-b-0 hover:bg-[var(--hover)]"
+            >
+              <span className="truncate text-sm font-medium">
+                <Highlight text={note.title} terms={terms} />
+              </span>
+              <span className="shrink-0 whitespace-nowrap text-xs text-[var(--text2)]">
+                {formatDate(note.date)}
+              </span>
+              {showing && (
+                <span className="col-span-2 truncate text-xs text-[var(--text2)]">
+                  <Highlight text={results[i].snippet} terms={terms} />
                 </span>
-                <span className="notes__snippet">
-                  {showing ? (
-                    <Highlight text={results[i].snippet} terms={terms} />
-                  ) : (
-                    formatDate(note.date)
-                  )}
-                </span>
-              </button>
-            </li>
+              )}
+            </button>
           ))}
-        </ul>
+        </Group>
       )}
     </div>
   );
@@ -130,10 +151,8 @@ function Reader({ note, onBack }: { note: Note; onBack: () => void }) {
   );
 }
 
-/** `date` is unix seconds from Rust. */
+/** `date` is unix seconds from Rust. Middot separator, as in the design. */
 function formatDate(date: number) {
-  return new Date(date * 1000).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  const at = new Date(date * 1000);
+  return `${at.toLocaleDateString(undefined, { dateStyle: "medium" })} · ${at.toLocaleTimeString(undefined, { timeStyle: "short" })}`;
 }
