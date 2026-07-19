@@ -43,9 +43,22 @@ export const commands = {
 	 */
 	launchAtLogin: () => typedError<boolean, string>(__TAURI_INVOKE("launch_at_login")),
 	setLaunchAtLogin: (enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("set_launch_at_login", { enabled })),
-	/**  Connected toolkits, each with the tools the agent will actually offer. */
+	/**
+	 *  Connected toolkits, each with the tools the agent will actually offer.
+	 * 
+	 *  Stale-while-revalidate: a warm cache paints the pane with no network at
+	 *  all, and a background refresh pushes `connectors-updated` if anything moved.
+	 *  A plain TTL would be wrong here — OAuth finishes in the browser, so the user
+	 *  comes back expecting a service that was connected seconds ago.
+	 */
 	listConnectors: () => typedError<Connector[], string>(__TAURI_INVOKE("list_connectors")),
-	/**  Toolkits matching `query`, for the add-a-connector search. */
+	/**
+	 *  Toolkits matching `query`, for the add-a-connector search.
+	 * 
+	 *  Cached per query: the pane fires the empty query on every mount to fill
+	 *  "Add a connector", and re-typing a query is common. Composio's catalogue
+	 *  does not move within a session, so this is served from memory once seen.
+	 */
 	searchConnectors: (query: string) => typedError<Connector[], string>(__TAURI_INVOKE("search_connectors", { query })),
 	/**
 	 *  Starts an OAuth connection and opens the consent page in the browser.
@@ -68,6 +81,7 @@ export const events = {
 	agent: makeEvent<AgentEvent>("agent"),
 	ask: makeEvent<AskEvent>("ask"),
 	audioLevel: makeEvent<AudioLevel>("audio-level"),
+	connectorsUpdated: makeEvent<ConnectorsUpdated>("connectors-updated"),
 	dictationPhase: makeEvent<Phase>("dictation-phase"),
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
@@ -185,6 +199,14 @@ export type ConnectorTool = {
 	 */
 	readOnly: boolean,
 };
+
+/**
+ *  Pushed when a background revalidation finds the connector list has changed.
+ * 
+ *  The Connectors pane paints from cache immediately, so this is how a service
+ *  connected in the browser reaches a window that already rendered.
+ */
+export type ConnectorsUpdated = Connector[];
 
 export type Engine = 
 /**  On-device whisper.cpp. No network, no API key. */

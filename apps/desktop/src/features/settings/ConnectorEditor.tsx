@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { commands, type Connector } from "../../lib/bindings";
+import { commands, events, type Connector } from "../../lib/bindings";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,7 +35,17 @@ export function ConnectorEditor() {
     // OAuth finishes in the browser, so the new account only shows up once we
     // come back to this window.
     window.addEventListener("focus", refresh);
-    return () => window.removeEventListener("focus", refresh);
+    // `refresh` answers from cache and revalidates behind it, so the fresh
+    // list arrives here rather than as the return value. Without this listener
+    // a service connected in the browser would never appear.
+    const unlisten = events.connectorsUpdated.listen(({ payload }) => {
+      setError(null);
+      setConnected(payload);
+    });
+    return () => {
+      window.removeEventListener("focus", refresh);
+      unlisten.then((off) => off());
+    };
   }, [refresh]);
 
   useEffect(() => {

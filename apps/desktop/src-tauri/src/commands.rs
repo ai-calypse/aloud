@@ -6,6 +6,7 @@
 use crate::AppState;
 use aloud_store::{history::Entry, Settings, Stats};
 use tauri::{AppHandle, State};
+use tauri_specta::Event;
 
 /// Commands must return a `Result` the frontend can read; anyhow's error is
 /// not serializable, so errors cross the boundary as strings.
@@ -130,7 +131,7 @@ pub fn launch_at_login(app: AppHandle) -> CmdResult<bool> {
 }
 
 /// One connectable service, for the Connectors pane.
-#[derive(serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Connector {
     pub slug: String,
@@ -146,7 +147,7 @@ pub struct Connector {
     pub tools: Vec<ConnectorTool>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorTool {
     pub name: String,
@@ -154,6 +155,23 @@ pub struct ConnectorTool {
     /// Drives the "asks first" badge: anything not read-only is confirmed
     /// before it runs.
     pub read_only: bool,
+}
+
+pub type ConnectorCacheRef = std::sync::Arc<std::sync::Mutex<ConnectorCache>>;
+
+/// Composio responses held between opens of the Connectors pane.
+///
+/// Every entry is a pure read of remote state, so a stale one is only ever
+/// briefly wrong and is corrected by the revalidation that serving it kicks
+/// off. Cleared outright on connect/disconnect, where we know it is wrong.
+#[derive(Default)]
+pub struct ConnectorCache {
+    /// The connected list. `None` means "never fetched", which is the only
+    /// case that has to block the pane on the network.
+    pub connected: Option<Vec<Connector>>,
+    /// Search results by query. The empty query is the one that matters —
+    /// it fires on every mount to fill "Add a connector".
+    pub searches: std::collections::HashMap<String, Vec<Connector>>,
 }
 
 fn client(settings: &State<'_, AppState>) -> CmdResult<aloud_agent::ComposioClient> {
@@ -188,47 +206,143 @@ fn to_connector(toolkit: aloud_agent::Toolkit, tools: Vec<aloud_agent::ToolDef>)
     }
 }
 
-/// Connected toolkits, each with the tools the agent will actually offer.
-#[tauri::command]
-#[specta::specta]
-pub async fn list_connectors(state: State<'_, AppState>) -> CmdResult<Vec<Connector>> {
-    let composio = client(&state)?;
-    let toolkits = to_string_err(composio.connected_toolkits().await)?;
-
-    // One concurrent wave rather than a serial await per toolkit — the calls
-    // are independent, so serially this pane cost one round-trip per connected
-    // service on top of the per-service lookup inside connected_toolkits.
+/// Fetches the connected toolkits and the tools each would offer.
+///
+/// One concurrent wave rather than a serial await per toolkit — the calls are
+/// independent, so serially this cost one round-trip per connected service on
+/// top of the per-service lookup inside `connected_toolkits`.
+async fn fetch_connected(composio: &aloud_agent::ComposioClient) -> anyhow::Result<Vec<Connector>> {
+    let toolkits = composio.connected_toolkits().await?;
     Ok(
-        futures_util::future::join_all(toolkits.into_iter().map(|toolkit| {
-            let composio = &composio;
-            async move {
-                // The agent now picks tools per command, so there is no single set
-                // to show. An empty command yields the pins plus a stable head of
-                // the toolkit — representative of a typical request, not a promise.
-                let tools = composio
-                    .toolkit_tools(&toolkit.slug, "", aloud_agent::TOOLS_PER_TOOLKIT)
-                    .await
-                    .unwrap_or_default();
-                to_connector(toolkit, tools)
-            }
+        futures_util::future::join_all(toolkits.into_iter().map(|toolkit| async move {
+            // The agent picks tools per command, so there is no single set to
+            // show. An empty command yields the pins plus a stable head of the
+            // toolkit — representative of a typical request, not a promise.
+            let tools = composio
+                .toolkit_tools(&toolkit.slug, "", aloud_agent::TOOLS_PER_TOOLKIT)
+                .await
+                .unwrap_or_default();
+            to_connector(toolkit, tools)
         }))
         .await,
     )
 }
 
+/// Whether a revalidation result is worth pushing to the window.
+///
+/// Its own function because getting this wrong fails silently in the direction
+/// that matters: too eager only costs a redundant re-render, but too shy means
+/// a service connected in the browser never appears, which reads as the
+/// feature being broken.
+fn should_push(cached: Option<&Vec<Connector>>, fresh: &[Connector]) -> bool {
+    cached.map(|c| c.as_slice() != fresh).unwrap_or(true)
+}
+
+/// Refetches in the background and pushes the result only if it differs.
+///
+/// Emitting unconditionally would re-render the pane on every focus for no
+/// reason; the equality check makes the common case (nothing changed) silent.
+fn revalidate(app: AppHandle, composio: aloud_agent::ComposioClient, cache: ConnectorCacheRef) {
+    tauri::async_runtime::spawn(async move {
+        let Ok(fresh) = fetch_connected(&composio).await else {
+            // A failed revalidation leaves the cache alone: showing the last
+            // known list beats blanking the pane because a request dropped.
+            return;
+        };
+        let changed = cache
+            .lock()
+            .map(|c| should_push(c.connected.as_ref(), &fresh))
+            .unwrap_or(false);
+        if !changed {
+            return;
+        }
+        if let Ok(mut c) = cache.lock() {
+            c.connected = Some(fresh.clone());
+        }
+        let _ = crate::ConnectorsUpdated(fresh).emit(&app);
+    });
+}
+
+/// Fills the connector cache in the background at startup.
+///
+/// Skipped entirely without a Composio key: there is nothing to fetch, and a
+/// launch should not touch the network for a feature the user has not set up.
+/// Failure is silent — this is a warm-up, and the pane still fetches for real.
+pub fn warm_connectors(app: AppHandle) {
+    use tauri::Manager;
+
+    let state = app.state::<AppState>();
+    let Ok(composio) = client(&state) else {
+        return;
+    };
+    let cache = state.connectors.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Ok(fresh) = fetch_connected(&composio).await {
+            if let Ok(mut c) = cache.lock() {
+                c.connected = Some(fresh);
+            }
+        }
+    });
+}
+
+/// Connected toolkits, each with the tools the agent will actually offer.
+///
+/// Stale-while-revalidate: a warm cache paints the pane with no network at
+/// all, and a background refresh pushes `connectors-updated` if anything moved.
+/// A plain TTL would be wrong here — OAuth finishes in the browser, so the user
+/// comes back expecting a service that was connected seconds ago.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_connectors(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CmdResult<Vec<Connector>> {
+    let composio = client(&state)?;
+    let cache = state.connectors.clone();
+
+    if let Some(hit) = cache.lock().ok().and_then(|c| c.connected.clone()) {
+        revalidate(app, composio, cache);
+        return Ok(hit);
+    }
+
+    // Cold: the only path that makes the pane wait on Composio.
+    let fresh = to_string_err(fetch_connected(&composio).await)?;
+    if let Ok(mut c) = cache.lock() {
+        c.connected = Some(fresh.clone());
+    }
+    Ok(fresh)
+}
+
 /// Toolkits matching `query`, for the add-a-connector search.
+///
+/// Cached per query: the pane fires the empty query on every mount to fill
+/// "Add a connector", and re-typing a query is common. Composio's catalogue
+/// does not move within a session, so this is served from memory once seen.
 #[tauri::command]
 #[specta::specta]
 pub async fn search_connectors(
     state: State<'_, AppState>,
     query: String,
 ) -> CmdResult<Vec<Connector>> {
+    let cache = state.connectors.clone();
+    if let Some(hit) = cache
+        .lock()
+        .ok()
+        .and_then(|c| c.searches.get(&query).cloned())
+    {
+        return Ok(hit);
+    }
+
     let composio = client(&state)?;
     let toolkits = to_string_err(composio.toolkits(&query).await)?;
-    Ok(toolkits
+    let results: Vec<Connector> = toolkits
         .into_iter()
         .map(|t| to_connector(t, Vec::new()))
-        .collect())
+        .collect();
+    if let Ok(mut c) = cache.lock() {
+        c.searches.insert(query, results.clone());
+    }
+    Ok(results)
 }
 
 /// Starts an OAuth connection and opens the consent page in the browser.
@@ -256,7 +370,13 @@ pub async fn disconnect_connector(
     connection_id: String,
 ) -> CmdResult<()> {
     let composio = client(&state)?;
-    to_string_err(composio.disconnect(&connection_id).await)
+    to_string_err(composio.disconnect(&connection_id).await)?;
+    // Known-wrong now, so drop it rather than wait for a revalidation to
+    // notice — the pane refetches straight after this returns.
+    if let Ok(mut c) = state.connectors.lock() {
+        c.connected = None;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -270,4 +390,66 @@ pub fn set_launch_at_login(app: AppHandle, enabled: bool) -> CmdResult<()> {
         autolaunch.disable()
     };
     to_string_err(result.map_err(Into::into))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn connector(slug: &str) -> Connector {
+        Connector {
+            slug: slug.into(),
+            name: slug.into(),
+            logo: String::new(),
+            description: String::new(),
+            tools_count: 0,
+            connected: true,
+            connection_id: Some("c1".into()),
+            tools: Vec::new(),
+        }
+    }
+
+    /// The regression that would look like "connecting a service does nothing":
+    /// the pane paints from cache, so a newly connected toolkit only ever
+    /// reaches it through a push.
+    #[test]
+    fn pushes_when_a_connector_appears() {
+        let cached = vec![connector("gmail")];
+        let fresh = vec![connector("gmail"), connector("slack")];
+        assert!(should_push(Some(&cached), &fresh));
+    }
+
+    #[test]
+    fn pushes_when_a_connector_disappears() {
+        let cached = vec![connector("gmail"), connector("slack")];
+        assert!(should_push(Some(&cached), &[connector("gmail")]));
+    }
+
+    /// A cold cache has nothing on screen to preserve, so anything is news.
+    #[test]
+    fn pushes_when_nothing_is_cached() {
+        assert!(should_push(None, &[connector("gmail")]));
+    }
+
+    /// The common case — every window focus revalidates, and an unchanged
+    /// result must not re-render the pane.
+    #[test]
+    fn stays_quiet_when_nothing_changed() {
+        let cached = vec![connector("gmail")];
+        assert!(!should_push(Some(&cached), &[connector("gmail")]));
+    }
+
+    /// Tool lists are part of what the pane draws, so a change inside one is
+    /// still a change worth pushing.
+    #[test]
+    fn pushes_when_a_connectors_tools_change() {
+        let cached = vec![connector("gmail")];
+        let mut fresh = connector("gmail");
+        fresh.tools.push(ConnectorTool {
+            name: "GMAIL_SEND_EMAIL".into(),
+            description: String::new(),
+            read_only: false,
+        });
+        assert!(should_push(Some(&cached), &[fresh]));
+    }
 }
