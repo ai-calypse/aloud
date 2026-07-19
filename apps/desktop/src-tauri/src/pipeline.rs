@@ -15,6 +15,7 @@ use std::{
 };
 use tauri::AppHandle;
 use tauri_specta::Event;
+use tracing::Instrument;
 
 /// How long the pill stays up after a dictation finishes.
 const OVERLAY_LINGER: Duration = Duration::from_millis(900);
@@ -25,6 +26,13 @@ const ERROR_LINGER: Duration = Duration::from_secs(4);
 /// utterance correctly on its own, and the prompt costs far more than the
 /// words it is fixing.
 const CLEANUP_MIN_WORDS: usize = 3;
+/// Correlates every stage of one dictation. A counter rather than a UUID:
+/// it is only ever read back on this machine, and it sorts by time for free.
+fn next_utterance_id() -> i64 {
+    static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// How often the input level is pushed to the overlay. 20 Hz is smooth to the
 /// eye without flooding the event channel.
 const LEVEL_INTERVAL: Duration = Duration::from_millis(50);
@@ -240,6 +248,21 @@ impl Pipeline {
     }
 
     /// Stops capturing, transcribes, cleans up and pastes.
+    ///
+    /// The span opens here, on the hotkey's release edge, so its duration is
+    /// the one latency number the user actually feels; every stage below is a
+    /// slice of it. Instrumenting only the inner calls would report a pipeline
+    /// measurably faster than the app, because the clock starts before them.
+    #[tracing::instrument(
+        name = "utterance",
+        skip_all,
+        fields(
+            utterance_id = next_utterance_id(),
+            spoken_ms = tracing::field::Empty,
+            outcome = tracing::field::Empty,
+            ok = tracing::field::Empty,
+        )
+    )]
     pub async fn stop_and_paste(&self) -> Result<()> {
         let (recorder, started_at) = {
             let mut session = self.session.lock().unwrap();
@@ -249,6 +272,11 @@ impl Pipeline {
             return Ok(()); // not recording
         };
 
+        let span = tracing::Span::current();
+        if let Some(start) = started_at {
+            span.record("spoken_ms", start.elapsed().as_millis() as u64);
+        }
+
         let generation = self.generation();
         self.emit(Phase::Transcribing);
         let result = tokio::select! {
@@ -257,10 +285,21 @@ impl Pipeline {
             // in-flight HTTP request.
             _ = self.cancelled.notified() => {
                 tracing::info!("dictation cancelled");
+                span.record("outcome", "cancelled");
                 self.emit(Phase::Idle);
                 return Ok(());
             }
         };
+
+        match &result {
+            Ok(outcome) => {
+                span.record("outcome", format!("{outcome:?}").to_lowercase());
+            }
+            Err(_) => {
+                span.record("outcome", "error");
+                span.record("ok", false);
+            }
+        }
 
         match &result {
             // Silence is a normal outcome, but reporting "Pasted" when nothing
@@ -285,11 +324,32 @@ impl Pipeline {
         generation: u64,
     ) -> Result<Outcome> {
         let wav = temp_wav_path();
-        recorder.stop_to_wav(&wav)?;
+        // Draining the capture buffer and writing the WAV is invisible latency
+        // between the key release and the first byte the transcriber sees.
+        {
+            let span = tracing::info_span!("finalize_audio", wav_bytes = tracing::field::Empty);
+            let _e = span.enter();
+            recorder.stop_to_wav(&wav)?;
+            if let Ok(meta) = std::fs::metadata(&wav) {
+                span.record("wav_bytes", meta.len());
+            }
+        }
 
         let settings = self.settings();
-        let transcriber = self.transcriber(&settings).await?;
-        let raw = transcriber.transcribe(&wav).await?;
+        // The first local run pays for the model load inside this span, which
+        // is right: it is time the user spends waiting for a transcript.
+        let raw = async {
+            let transcriber = self.transcriber(&settings).await?;
+            let raw = transcriber.transcribe(&wav).await?;
+            tracing::Span::current().record("chars", raw.len());
+            anyhow::Ok(raw)
+        }
+        .instrument(tracing::info_span!(
+            "transcribe",
+            engine = ?settings.engine,
+            chars = tracing::field::Empty,
+        ))
+        .await?;
         let _ = std::fs::remove_file(&wav);
 
         // Whisper returns nothing for silence, and the cleanup prompt maps
@@ -324,7 +384,15 @@ impl Pipeline {
             return Ok(Outcome::Cancelled);
         }
 
-        aloud_paste::paste_text(&final_text, false)?;
+        {
+            let _e = tracing::info_span!(
+                "paste",
+                target_app = app_name.as_deref().unwrap_or("unknown"),
+                chars = final_text.len(),
+            )
+            .entered();
+            aloud_paste::paste_text(&final_text, false)?;
+        }
         self.record(
             &raw,
             &final_text,
@@ -396,6 +464,11 @@ impl Pipeline {
                 &messages,
                 Some(0.0), // deterministic: this is cleanup, not writing
             )
+            .instrument(tracing::info_span!(
+                "cleanup",
+                model = %settings.post_processing_model,
+                words = raw.split_whitespace().count(),
+            ))
             .await?;
 
         // The prompt specifies this sentinel for filler-only input.

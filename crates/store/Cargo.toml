@@ -17,6 +17,10 @@ serde_json.workspace = true
 specta.workspace = true
 specta-typescript = "0.0.12"
 tracing.workspace = true
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 
 [dev-dependencies]
 tempfile = "3"
+# The example builds the app's real subscriber stack, which needs the fmt
+# layer and env-filter the library itself does not.
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

@@ -4,7 +4,7 @@
 //! resembling logic belongs in a crate where it can be tested.
 
 use crate::AppState;
-use aloud_store::{history::Entry, Settings, Stats};
+use aloud_store::{history::Entry, timings::Span, Settings, Stats};
 use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
@@ -338,4 +338,16 @@ pub fn set_launch_at_login(app: AppHandle, enabled: bool) -> CmdResult<()> {
         autolaunch.disable()
     };
     to_string_err(result.map_err(Into::into))
+}
+
+/// The last `utterances` dictations, every stage of each, for the dev panel's
+/// waterfall. Newest utterance first; stages in start order within one.
+#[tauri::command]
+#[specta::specta]
+pub fn recent_timings(state: State<'_, AppState>, utterances: u32) -> CmdResult<Vec<Span>> {
+    let timings = state
+        .timings
+        .lock()
+        .map_err(|_| "timings lock poisoned".to_string())?;
+    to_string_err(timings.recent(utterances as usize))
 }

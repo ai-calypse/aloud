@@ -35,6 +35,11 @@ export const commands = {
 	hotkeysPermitted: () => __TAURI_INVOKE<boolean>("hotkeys_permitted"),
 	pasteAgain: () => typedError<null, string>(__TAURI_INVOKE("paste_again")),
 	/**
+	 *  The last `utterances` dictations, every stage of each, for the dev panel's
+	 *  waterfall. Newest utterance first; stages in start order within one.
+	 */
+	recentTimings: (utterances: number) => typedError<Span[], string>(__TAURI_INVOKE("recent_timings", { utterances })),
+	/**
 	 *  Plays the start chime, so the volume slider can be judged by ear rather
 	 *  than by guessing at a number.
 	 */
@@ -344,6 +349,23 @@ export type Settings = {
 	/**  Whether the first-run wizard has been completed. False shows it. */
 	onboarded?: boolean,
 	historyRetention?: number,
+};
+
+/**  One closed span. */
+export type Span = {
+	/**
+	 *  Groups the stages of one dictation. Monotonic, so ordering by it is
+	 *  ordering by time.
+	 */
+	utteranceId: number,
+	/**  The span name: `utterance`, `transcribe`, `cleanup`, … */
+	stage: string,
+	/**  Unix milliseconds at span entry — the waterfall's x offset. */
+	startedAt: number,
+	durationMs: number,
+	success: boolean,
+	/**  The span's fields, as JSON. Whatever the call site recorded. */
+	fields: string,
 };
 
 /**

@@ -42,14 +42,34 @@ pub struct AppState {
     /// Composio reads held across opens of the Connectors pane, so it paints
     /// from memory instead of a round-trip. See `aloud_agent::ResponseCache`.
     pub connectors: commands::ConnectorCache,
+    /// Per-stage latency, written by the tracing layer and read by the dev
+    /// panel. Shared with the layer, which owns the writes.
+    pub timings: Arc<Mutex<aloud_store::Timings>>,
 }
 
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "aloud=info,aloud_hotkey=info".into()),
+    // Spans go two places: the terminal, as before, and `timings.sqlite`, so
+    // the waterfall survives the process and reads offline.
+    let timings = aloud_notes::data_dir()
+        .and_then(|dir| aloud_store::Timings::open(&dir.join("timings.sqlite")))
+        .unwrap_or_else(|e| {
+            eprintln!("timings disabled: {e:#}");
+            aloud_store::Timings::open_in_memory().expect("in-memory sqlite")
+        });
+    let timings = Arc::new(Mutex::new(timings));
+
+    use tracing_subscriber::prelude::*;
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer().with_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "aloud=info,aloud_hotkey=info".into()),
+            ),
         )
+        // Unfiltered on purpose: the layer records only spans that descend
+        // from an utterance, and an env filter tuned for readable logs would
+        // silently punch holes in the waterfall.
+        .with(aloud_store::TimingLayer::new(timings.clone()))
         .init();
 
     let builder = Builder::<tauri::Wry>::new()
@@ -65,6 +85,7 @@ pub fn run() {
             commands::installed_apps,
             commands::hotkeys_permitted,
             commands::paste_again,
+            commands::recent_timings,
             commands::preview_sound,
             commands::launch_at_login,
             commands::set_launch_at_login,
@@ -151,6 +172,7 @@ pub fn run() {
                 meeting: meeting.clone(),
                 hotkey_config: hotkey_config.clone(),
                 connectors: Default::default(),
+                timings: timings.clone(),
             });
             app.manage(agent::PendingConfirmation::default());
 
