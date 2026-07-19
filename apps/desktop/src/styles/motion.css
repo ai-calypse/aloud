@@ -59,3 +59,44 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* --- Named motions ------------------------------------------------------
+ *
+ * Kept in CSS rather than inline styles so the compositor owns every frame:
+ * JS only sets a transform target or restarts the animation, and stays off
+ * the per-frame path entirely.
+ */
+
+/* The travelling selection chip. --ease-glide is the curve that makes it feel
+   weighted: almost no overshoot, but a long tail, so it settles rather than
+   arrives. --dur-slow is deliberately generous — this is the one motion the
+   user watches on purpose, because they caused it. */
+.motion-pill {
+  border-radius: var(--radius-row);
+  background: var(--accent);
+  box-shadow: var(--shadow-accent);
+  will-change: transform;
+  transition:
+    transform var(--dur-slow) var(--ease-glide),
+    height var(--dur-slow) var(--ease-glide);
+}
+
+/* Content arriving in a pane: out of focus and slightly displaced, coming
+   into focus and settling. The displacement is signed by the direction the
+   user moved through the list, set from JS as --materialize-from. */
+@keyframes materialize {
+  from {
+    opacity: 0.4;
+    filter: blur(4px);
+    transform: translateY(var(--materialize-from, 7px));
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+  }
+}
+
+.motion-materialize {
+  animation: materialize var(--dur-slow) var(--ease-out) both;
+}
