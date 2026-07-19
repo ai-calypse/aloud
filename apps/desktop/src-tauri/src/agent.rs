@@ -17,6 +17,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 use tokio::sync::oneshot;
+use tracing::Instrument;
 
 const LABEL: &str = "agent";
 /// How long a write waits for a yes before giving up and declining.
@@ -121,6 +122,11 @@ pub async fn run(app: &AppHandle, transcript: String, settings: &Settings) -> Re
 const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
 const GEMINI_MODEL: &str = "gemini-3.1-flash-lite";
 
+#[tracing::instrument(
+    name = "agent_run",
+    skip_all,
+    fields(tool_count = tracing::field::Empty)
+)]
 async fn execute(app: &AppHandle, transcript: &str, settings: &Settings) -> Result<String> {
     if settings.gemini_api_key.trim().is_empty() {
         bail!("Agent mode needs a Gemini API key to understand commands — add one in Settings");
@@ -135,7 +141,16 @@ async fn execute(app: &AppHandle, transcript: &str, settings: &Settings) -> Resu
     // Discover the tools the user actually has connected, ranked for this
     // command. Empty means nothing is connected — say so rather than letting
     // the model flail.
-    let tools = composio.available_tools(transcript).await?;
+    // Discovery is a Composio round-trip on every command, before the model
+    // is even asked — invisible in any per-tool timing, so it gets its own span.
+    let tools = composio
+        .available_tools(transcript)
+        .instrument(tracing::info_span!(
+            "tool_discovery",
+            count = tracing::field::Empty
+        ))
+        .await?;
+    tracing::Span::current().record("tool_count", tools.len());
     if tools.is_empty() {
         bail!("No app is connected in Composio yet");
     }

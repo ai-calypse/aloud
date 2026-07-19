@@ -669,6 +669,15 @@ impl Pipeline {
     /// Stops capturing and runs the spoken command as an agent action,
     /// rather than pasting it. Like ask, the whole utterance is the command,
     /// so no spoken trigger phrase is needed.
+    #[tracing::instrument(
+        name = "utterance",
+        skip_all,
+        fields(
+            utterance_id = next_utterance_id(),
+            mode = "agent",
+            ok = tracing::field::Empty,
+        )
+    )]
     pub async fn stop_and_agent(&self) -> Result<()> {
         let recorder = self.session.lock().unwrap().recorder.take();
         let Some(recorder) = recorder else {
@@ -677,6 +686,9 @@ impl Pipeline {
 
         self.emit(Phase::Transcribing);
         let result = self.transcribe_and_agent(recorder).await;
+        if result.is_err() {
+            tracing::Span::current().record("ok", false);
+        }
         match &result {
             // Ask and Agent show their own panel; the pill just gets out of
             // the way unless there is an error worth reading.
@@ -688,10 +700,24 @@ impl Pipeline {
 
     async fn transcribe_and_agent(&self, recorder: aloud_audio::Recorder) -> Result<()> {
         let wav = temp_wav_path();
-        recorder.stop_to_wav(&wav)?;
+        {
+            let _e = tracing::info_span!("finalize_audio").entered();
+            recorder.stop_to_wav(&wav)?;
+        }
 
         let settings = self.settings();
-        let command = self.transcriber(&settings).await?.transcribe(&wav).await?;
+        let command = async {
+            let transcriber = self.transcriber(&settings).await?;
+            let command = transcriber.transcribe(&wav).await?;
+            tracing::Span::current().record("chars", command.len());
+            anyhow::Ok(command)
+        }
+        .instrument(tracing::info_span!(
+            "transcribe",
+            engine = ?settings.engine,
+            chars = tracing::field::Empty,
+        ))
+        .await?;
         let _ = std::fs::remove_file(&wav);
 
         if command.trim().is_empty() {

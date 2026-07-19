@@ -11,6 +11,14 @@ const STAGE_TINT: Record<string, string> = {
   cleanup: "#5856d6",
   llm_fallback: "#ff375f",
   paste: "#34c759",
+  // Agent mode.
+  agent_run: "#8e8e93",
+  tool_discovery: "#64d2ff",
+  tool_select: "#5856d6",
+  tool_select_retry: "#ff375f",
+  composio_exec: "#af52de",
+  // Human time, not machine time — greyed so it never reads as a hot stage.
+  confirm: "#c7c7cc",
 };
 
 type Utterance = {
@@ -101,6 +109,12 @@ export function TimingsView() {
       {utterances.map((u) => {
         const total = Math.max(u.root.durationMs, 1);
         const f = fields(u.root);
+        // Time spent at a confirmation prompt is the user deciding. Counting
+        // it as pipeline latency would make every approved write look like a
+        // catastrophic regression.
+        const waiting = u.stages
+          .filter((s) => s.stage === "confirm")
+          .reduce((n, s) => n + s.durationMs, 0);
         return (
           <section
             key={u.id}
@@ -116,9 +130,10 @@ export function TimingsView() {
                 {total} ms
               </span>
               <span className="text-[var(--text2)]">
-                {String(f.outcome ?? "—")}
+                {String(f.outcome ?? f.mode ?? "—")}
                 {typeof f.spoken_ms === "number" &&
                   ` · ${f.spoken_ms} ms spoken`}
+                {waiting > 0 && ` · ${waiting} ms waiting on you`}
               </span>
             </header>
 

@@ -56,25 +56,75 @@ fn main() -> anyhow::Result<()> {
         std::thread::sleep(Duration::from_millis(50)); // app overhead
     }
 
-    let rows = db.lock().unwrap().recent(20)?;
-    let root = rows.iter().find(|r| r.stage == "utterance").unwrap();
-    println!(
-        "\nutterance {} — {} ms total",
-        root.utterance_id, root.duration_ms
-    );
-    for row in rows.iter().filter(|r| r.stage != "utterance") {
-        println!(
-            "  {:>14}  +{:>4} ms  {:>4} ms  {}",
-            row.stage,
-            row.started_at - root.started_at,
-            row.duration_ms,
-            row.fields
-        );
+    // Agent mode: a second root, with the stages the dictation path never has.
+    {
+        let root = tracing::info_span!("utterance", utterance_id = 2i64, mode = "agent");
+        let _r = root.enter();
+
+        work!("finalize_audio", 30);
+        work!("transcribe", 300);
+        {
+            let agent = tracing::info_span!("agent_run");
+            let _a = agent.enter();
+            work!("tool_discovery", 260);
+            work!("tool_select", 410);
+            // Human time. Must land on its own bar, not inside composio_exec.
+            work!("confirm", 900);
+            {
+                let exec = tracing::info_span!("composio_exec", toolkit = "gmail", ok = true);
+                let _e = exec.enter();
+                std::thread::sleep(Duration::from_millis(640));
+            }
+            work!("tool_select", 220);
+        }
     }
 
-    assert_eq!(rows.len(), 6, "a span was dropped: {rows:?}");
-    assert!(rows.iter().all(|r| r.utterance_id == 1));
-    assert!(root.duration_ms >= 700, "root must span its children");
-    println!("\nok: every stage recorded and correlated");
+    let rows = db.lock().unwrap().recent(20)?;
+
+    for id in [1, 2] {
+        let mine: Vec<_> = rows.iter().filter(|r| r.utterance_id == id).collect();
+        let root = mine.iter().find(|r| r.stage == "utterance").unwrap();
+        println!(
+            "\nutterance {} — {} ms total {}",
+            root.utterance_id, root.duration_ms, root.fields
+        );
+        for row in mine.iter().filter(|r| r.stage != "utterance") {
+            println!(
+                "  {:>16}  +{:>5} ms  {:>5} ms  {}",
+                row.stage,
+                row.started_at - root.started_at,
+                row.duration_ms,
+                row.fields
+            );
+        }
+    }
+
+    assert_eq!(rows.len(), 6 + 9, "a span was dropped: {rows:?}");
+
+    let dictation = rows
+        .iter()
+        .find(|r| r.stage == "utterance" && r.utterance_id == 1)
+        .unwrap();
+    assert!(dictation.duration_ms >= 700, "root must span its children");
+
+    // Confirmation is its own bar, not swallowed by the tool it gates —
+    // otherwise an approved write reads as a 1.5s Composio call.
+    let confirm = rows.iter().find(|r| r.stage == "confirm").unwrap();
+    let exec = rows.iter().find(|r| r.stage == "composio_exec").unwrap();
+    assert!(confirm.duration_ms >= 900);
+    assert!(
+        exec.started_at >= confirm.started_at + confirm.duration_ms,
+        "confirmation leaked into the exec span"
+    );
+    assert!(
+        exec.fields.contains("gmail"),
+        "toolkit not segmented: {}",
+        exec.fields
+    );
+
+    // Two tool_select rounds: the reselect that doubles latency is visible.
+    assert_eq!(rows.iter().filter(|r| r.stage == "tool_select").count(), 2);
+
+    println!("\nok: both paths recorded, correlated, and confirmation kept separate");
     Ok(())
 }
