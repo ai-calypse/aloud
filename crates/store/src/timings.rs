@@ -21,9 +21,10 @@ use tracing_subscriber::layer::Context as LayerContext;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 
-/// Utterances kept before the oldest are pruned. The dev panel shows 20; this
-/// leaves enough history to compare a bad run against a good one.
-const RETAIN_UTTERANCES: i64 = 200;
+/// Utterances kept before the oldest are pruned. Sized for days of use, not
+/// one session: per-mode averages need a population, and a heavy dictation
+/// day alone runs past a couple of hundred. Rows are a few hundred bytes.
+const RETAIN_UTTERANCES: i64 = 5000;
 
 /// One closed span.
 #[derive(Debug, Clone, Serialize, specta::Type)]

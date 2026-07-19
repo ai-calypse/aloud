@@ -258,6 +258,7 @@ impl Pipeline {
         skip_all,
         fields(
             utterance_id = next_utterance_id(),
+            mode = "dictation",
             spoken_ms = tracing::field::Empty,
             outcome = tracing::field::Empty,
             ok = tracing::field::Empty,
@@ -555,6 +556,15 @@ impl Pipeline {
 
     /// Stops capturing, transforms the captured selection per the spoken
     /// command, and pastes the result over it.
+    #[tracing::instrument(
+        name = "utterance",
+        skip_all,
+        fields(
+            utterance_id = next_utterance_id(),
+            mode = "command",
+            ok = tracing::field::Empty,
+        )
+    )]
     pub async fn stop_and_command(&self) -> Result<()> {
         let (recorder, selection) = {
             let mut session = self.session.lock().unwrap();
@@ -573,6 +583,9 @@ impl Pipeline {
 
         self.emit(Phase::Transcribing);
         let result = self.transcribe_and_command(recorder, &selection).await;
+        if result.is_err() {
+            tracing::Span::current().record("ok", false);
+        }
         match &result {
             Ok(()) => self.emit(Phase::Done),
             Err(e) => self.emit_error(e),
@@ -586,19 +599,43 @@ impl Pipeline {
         selection: &str,
     ) -> Result<()> {
         let wav = temp_wav_path();
-        recorder.stop_to_wav(&wav)?;
+        {
+            let _e = tracing::info_span!("finalize_audio").entered();
+            recorder.stop_to_wav(&wav)?;
+        }
 
         let settings = self.settings();
-        let command = self.transcriber(&settings).await?.transcribe(&wav).await?;
+        let command = async {
+            let transcriber = self.transcriber(&settings).await?;
+            let command = transcriber.transcribe(&wav).await?;
+            tracing::Span::current().record("chars", command.len());
+            anyhow::Ok(command)
+        }
+        .instrument(tracing::info_span!(
+            "transcribe",
+            engine = ?settings.engine,
+            chars = tracing::field::Empty,
+        ))
+        .await?;
         let _ = std::fs::remove_file(&wav);
 
         if command.trim().is_empty() {
             return Ok(()); // no command spoken; leave the selection alone
         }
 
-        let transformed = self.transform(selection, &command, &settings).await?;
-        // Paste over the still-selected text, replacing it.
-        aloud_paste::paste_text(&transformed, false)?;
+        let transformed = self
+            .transform(selection, &command, &settings)
+            .instrument(tracing::info_span!(
+                "transform",
+                model = %settings.post_processing_model,
+                selection_chars = selection.len(),
+            ))
+            .await?;
+        {
+            let _e = tracing::info_span!("paste", chars = transformed.len()).entered();
+            // Paste over the still-selected text, replacing it.
+            aloud_paste::paste_text(&transformed, false)?;
+        }
         Ok(())
     }
 
@@ -633,6 +670,15 @@ impl Pipeline {
     ///
     /// The Ask hotkey means the whole utterance is a question, so no spoken
     /// trigger phrase is needed.
+    #[tracing::instrument(
+        name = "utterance",
+        skip_all,
+        fields(
+            utterance_id = next_utterance_id(),
+            mode = "ask",
+            ok = tracing::field::Empty,
+        )
+    )]
     pub async fn stop_and_ask(&self) -> Result<()> {
         let recorder = self.session.lock().unwrap().recorder.take();
         let Some(recorder) = recorder else {
@@ -641,6 +687,9 @@ impl Pipeline {
 
         self.emit(Phase::Transcribing);
         let result = self.transcribe_and_ask(recorder).await;
+        if result.is_err() {
+            tracing::Span::current().record("ok", false);
+        }
         match &result {
             // Ask and Agent show their own panel; the pill just gets out of
             // the way unless there is an error worth reading.
@@ -652,10 +701,24 @@ impl Pipeline {
 
     async fn transcribe_and_ask(&self, recorder: aloud_audio::Recorder) -> Result<()> {
         let wav = temp_wav_path();
-        recorder.stop_to_wav(&wav)?;
+        {
+            let _e = tracing::info_span!("finalize_audio").entered();
+            recorder.stop_to_wav(&wav)?;
+        }
 
         let settings = self.settings();
-        let question = self.transcriber(&settings).await?.transcribe(&wav).await?;
+        let question = async {
+            let transcriber = self.transcriber(&settings).await?;
+            let question = transcriber.transcribe(&wav).await?;
+            tracing::Span::current().record("chars", question.len());
+            anyhow::Ok(question)
+        }
+        .instrument(tracing::info_span!(
+            "transcribe",
+            engine = ?settings.engine,
+            chars = tracing::field::Empty,
+        ))
+        .await?;
         let _ = std::fs::remove_file(&wav);
 
         if question.trim().is_empty() {
@@ -663,7 +726,9 @@ impl Pipeline {
         }
         // Tolerate a trigger phrase said out of habit while holding the key.
         let question = aloud_llm::ask::question_from_trigger(&question).unwrap_or(question);
-        crate::ask::answer(&self.app, question, &settings).await
+        crate::ask::answer(&self.app, question, &settings)
+            .instrument(tracing::info_span!("ask_answer"))
+            .await
     }
 
     /// Stops capturing and runs the spoken command as an agent action,

@@ -37,6 +37,7 @@ fn main() -> anyhow::Result<()> {
         let root = tracing::info_span!(
             "utterance",
             utterance_id = 1i64,
+            mode = "dictation",
             spoken_ms = 2200u64,
             outcome = "pasted"
         );
@@ -79,9 +80,26 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Ask and command modes: the other two roots, so every mode is groupable.
+    {
+        let root = tracing::info_span!("utterance", utterance_id = 3i64, mode = "ask");
+        let _r = root.enter();
+        work!("finalize_audio", 25);
+        work!("transcribe", 280);
+        work!("ask_answer", 700);
+    }
+    {
+        let root = tracing::info_span!("utterance", utterance_id = 4i64, mode = "command");
+        let _r = root.enter();
+        work!("finalize_audio", 25);
+        work!("transcribe", 260);
+        work!("transform", 480);
+        work!("paste", 30);
+    }
+
     let rows = db.lock().unwrap().recent(20)?;
 
-    for id in [1, 2] {
+    for id in [1, 2, 3, 4] {
         let mine: Vec<_> = rows.iter().filter(|r| r.utterance_id == id).collect();
         let root = mine.iter().find(|r| r.stage == "utterance").unwrap();
         println!(
@@ -99,7 +117,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    assert_eq!(rows.len(), 6 + 9, "a span was dropped: {rows:?}");
+    assert_eq!(rows.len(), 6 + 9 + 4 + 5, "a span was dropped: {rows:?}");
 
     let dictation = rows
         .iter()
@@ -125,6 +143,30 @@ fn main() -> anyhow::Result<()> {
     // Two tool_select rounds: the reselect that doubles latency is visible.
     assert_eq!(rows.iter().filter(|r| r.stage == "tool_select").count(), 2);
 
-    println!("\nok: both paths recorded, correlated, and confirmation kept separate");
+    // Every root must be taggable, or per-mode averages silently merge modes.
+    let modes: Vec<&str> = rows
+        .iter()
+        .filter(|r| r.stage == "utterance")
+        .map(|r| {
+            if r.fields.contains("dictation") {
+                "dictation"
+            } else if r.fields.contains("agent") {
+                "agent"
+            } else if r.fields.contains("ask") {
+                "ask"
+            } else if r.fields.contains("command") {
+                "command"
+            } else {
+                "UNTAGGED"
+            }
+        })
+        .collect();
+    assert_eq!(modes.len(), 4, "every run needs a root span: {modes:?}");
+    assert!(
+        !modes.contains(&"UNTAGGED"),
+        "a mode cannot be grouped: {modes:?}"
+    );
+
+    println!("\nok: all four modes recorded, tagged, and correlated");
     Ok(())
 }
