@@ -211,15 +211,21 @@ impl Recorder {
 /// Perceived loudness of a block, 0.0–1.0.
 ///
 /// RMS rather than peak: peak jumps on a single click and reads as a spike,
-/// where RMS tracks how loud speech actually sounds. Scaled because normal
-/// speech sits near RMS 0.1 — unscaled, the bars would barely move.
+/// where RMS tracks how loud speech actually sounds.
+///
+/// The square root matters more than the gain. Loudness is perceived roughly
+/// logarithmically, so a linear scale spends most of its range on volumes
+/// nobody produces: ordinary speech sits near RMS 0.05, which `rms * 4` maps
+/// to 0.2 — a meter that looks broken until you shout at it. The curve lifts
+/// that to 0.45 and still leaves headroom, so the pill responds to a normal
+/// speaking voice.
 pub fn loudness(samples: &[f32]) -> f32 {
     if samples.is_empty() {
         return 0.0;
     }
     let sum_squares: f32 = samples.iter().map(|s| s * s).sum();
     let rms = (sum_squares / samples.len() as f32).sqrt();
-    (rms * 4.0).clamp(0.0, 1.0)
+    (rms * 4.0).clamp(0.0, 1.0).sqrt()
 }
 
 /// Writes mono f32 samples as a PCM16 WAV.
@@ -250,10 +256,12 @@ mod tests {
         assert_eq!(loudness(&[]), 0.0);
         assert_eq!(loudness(&[0.0; 512]), 0.0);
 
-        // Speech sits around RMS 0.1, which should be clearly visible but not
-        // maxed out; a loud clip clamps rather than overflowing the bar.
-        let speech = loudness(&[0.1; 512]);
-        assert!(speech > 0.2 && speech < 0.6, "got {speech}");
+        // Ordinary speech must land in the visibly-moving middle of the
+        // range, not down near the floor where the meter looks dead.
+        let speech = loudness(&[0.05; 512]);
+        assert!(speech > 0.35 && speech < 0.75, "got {speech}");
+        // Louder speech is still distinguishable, not already pegged.
+        assert!(loudness(&[0.1; 512]) > speech);
         assert_eq!(loudness(&[1.0; 512]), 1.0);
         assert!(loudness(&[-0.5; 512]) > 0.0, "sign must not matter");
     }

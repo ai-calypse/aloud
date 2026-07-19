@@ -113,53 +113,69 @@ pub async fn run(app: &AppHandle, transcript: String, settings: &Settings) -> Re
     Ok(())
 }
 
-// The tool loop runs on Cerebras, not Groq: a multi-round tool loop makes
-// several chat calls in a row and Groq's tokens-per-minute limit throttles it.
-// Cerebras is OpenAI-compatible, so the same LlmClient works against its
-// endpoint, and gpt-oss-120b supports function calling.
-const CEREBRAS_BASE_URL: &str = "https://api.cerebras.ai/v1";
-const CEREBRAS_MODEL: &str = "gpt-oss-120b";
+// The tool loop runs on Gemini, not Groq: a multi-round tool loop makes several
+// chat calls in a row and Groq's tokens-per-minute limit throttles it. Gemini
+// serves an OpenAI-compatible endpoint, so the same LlmClient works unchanged,
+// and flash-lite supports function calling. Cerebras served this role before
+// and was itself rate-limiting mid-command.
+const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
+const GEMINI_MODEL: &str = "gemini-3.1-flash-lite";
 
 async fn execute(app: &AppHandle, transcript: &str, settings: &Settings) -> Result<String> {
-    if settings.cerebras_api_key.trim().is_empty() {
-        bail!("Agent mode needs a Cerebras API key to understand commands — add one in Settings");
+    if settings.gemini_api_key.trim().is_empty() {
+        bail!("Agent mode needs a Gemini API key to understand commands — add one in Settings");
     }
     if settings.composio_api_key.trim().is_empty() {
-        bail!("Agent mode needs a Composio API key to reach Gmail/GitHub — add one in Settings");
+        bail!("Agent mode needs a Composio API key to reach your connected apps — add one in Settings");
     }
 
-    let llm = aloud_llm::LlmClient::new(&settings.cerebras_api_key, Some(CEREBRAS_BASE_URL))?;
+    let llm = aloud_llm::LlmClient::new(&settings.gemini_api_key, Some(GEMINI_BASE_URL))?;
     let composio = aloud_agent::ComposioClient::new(&settings.composio_api_key)?;
 
-    // Discover the Gmail/GitHub tools the user actually has connected. Empty
-    // means nothing is connected — say so rather than letting the model flail.
-    let tools = composio.available_tools().await?;
+    // Discover the tools the user actually has connected, ranked for this
+    // command. Empty means nothing is connected — say so rather than letting
+    // the model flail.
+    let tools = composio.available_tools(transcript).await?;
     if tools.is_empty() {
-        bail!("No Gmail or GitHub account is connected in Composio yet");
+        bail!("No app is connected in Composio yet");
     }
 
     aloud_agent::run_tool_loop(
         &llm,
-        CEREBRAS_MODEL,
+        GEMINI_MODEL,
         &composio,
         transcript,
         &tools,
         // Each tool call surfaces on the panel as it happens (AG-UI lifecycle).
         |event| emit(app, event_of(event)),
-        // A write tool waits for an explicit yes; this is the safety gate.
-        |name, args| confirm_write(app, name, args),
+        // A write tool waits for an explicit yes; this is the safety gate. The
+        // offered tools carry their toolkit, so the gate names the real app
+        // rather than deriving one from the slug.
+        |name, args| {
+            let toolkit = tools
+                .iter()
+                .find(|t| t.name == name)
+                .map(|t| t.toolkit.clone())
+                .unwrap_or_else(|| tool_app(&name));
+            confirm_write(app, name, toolkit, args)
+        },
     )
     .await
 }
 
 /// Surfaces a write tool for confirmation and awaits the panel's decision. Takes
 /// owned args so the returned future doesn't borrow the loop's transient data.
-async fn confirm_write(app: &AppHandle, name: String, args: serde_json::Value) -> bool {
+async fn confirm_write(
+    app: &AppHandle,
+    name: String,
+    toolkit: String,
+    args: serde_json::Value,
+) -> bool {
     let args = display_args(&args);
     emit(
         app,
         AgentEvent::ToolCall(ToolCall {
-            app: tool_app(&name),
+            app: toolkit,
             name,
             args,
             requires_confirmation: true,
@@ -215,12 +231,14 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
 }
 
 /// The toolkit a Composio tool slug belongs to, for display.
+///
+/// This was a two-way branch from when Gmail and GitHub were the only
+/// toolkits, so every other one — calendar, Slack, Notion — was announced as
+/// "this writes to github" on the confirmation the user is meant to read
+/// before approving. Naming the wrong app on a write gate is worse than naming
+/// none. The agent crate already derives this from the slug prefix.
 fn tool_app(slug: &str) -> String {
-    if slug.starts_with("GMAIL_") {
-        "gmail".to_string()
-    } else {
-        "github".to_string()
-    }
+    aloud_agent::toolkit_of_slug(slug)
 }
 
 /// Blocks until the panel approves or rejects. A dropped sender (panel closed,

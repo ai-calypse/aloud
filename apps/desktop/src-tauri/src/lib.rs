@@ -259,7 +259,8 @@ fn spawn_hotkey_listener(
             tracing::warn!(%e, "could not publish hotkey permission");
         }
 
-        let result = aloud_hotkey::listen(config, move |event| {
+        let busy = pipeline.busy_flag();
+        let result = aloud_hotkey::listen(config, busy, move |event| {
             handle_hotkey(&app, &pipeline, &settings, &meeting, event);
         });
         if let Err(e) = result {

@@ -291,10 +291,16 @@ export type Settings = {
 	groqApiKey?: string,
 	composioApiKey?: string,
 	/**
-	 *  Cerebras key. Agent tool-call parsing runs here (gpt-oss-120b) because
-	 *  Groq's tokens-per-minute limit is too low for the agent's heavier calls.
+	 *  Cerebras key. Kept for existing installs and as the agent's fallback;
+	 *  [`Self::gemini_api_key`] is what agent mode reaches for first.
 	 */
 	cerebrasApiKey?: string,
+	/**
+	 *  Gemini key. Agent tool-call parsing runs here — Groq's tokens-per-minute
+	 *  limit is too low for the agent's heavier calls, and Cerebras was
+	 *  rate-limiting mid-command.
+	 */
+	geminiApiKey?: string,
 	engine?: Engine,
 	transcriptionModel?: string,
 	baseUrl?: string,

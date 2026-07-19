@@ -33,6 +33,12 @@ pub struct State {
     /// One-shots that have fired and are still held, so they fire once per
     /// press rather than on every key repeat.
     fired: BTreeSet<Role>,
+    /// Whether a session is still running after its key was released —
+    /// transcribing, cleaning up, pasting. Escape has to reach that window:
+    /// `active` empties the instant the user lifts the Hold key, which is
+    /// exactly when the slow part begins, and a Toggle recording is never in
+    /// `active` at all.
+    busy: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +50,12 @@ pub struct Outcome {
 impl State {
     pub fn is_active(&self, role: Role) -> bool {
         self.active.contains(&role)
+    }
+
+    /// Tells the reducer whether a session is still in flight. Drives nothing
+    /// but Escape: it decides whether Escape is ours to swallow.
+    pub fn set_busy(&mut self, busy: bool) {
+        self.busy = busy;
     }
 
     fn modifiers(&self) -> Modifiers {
@@ -70,7 +82,7 @@ impl State {
 
                 // Escape cancels an in-flight session and is swallowed only
                 // then — otherwise Escape must reach the focused app.
-                if key == Key::Escape && down && !self.active.is_empty() {
+                if key == Key::Escape && down && (!self.active.is_empty() || self.busy) {
                     let events = std::iter::once(Event::Cancelled)
                         .chain(self.active.iter().copied().map(Event::Deactivated))
                         .collect();
@@ -338,6 +350,40 @@ mod tests {
         );
         assert_eq!(out.consume, Consume::Yes);
         assert!(!state.is_active(Role::Hold));
+    }
+
+    /// The bug this fixes: the user releases Hold, transcription starts, and
+    /// Escape did nothing for the whole (up to 80s) network round trip because
+    /// `active` had already emptied on the key release.
+    #[test]
+    fn escape_cancels_after_the_key_is_released() {
+        let config = hold_right_option();
+        let mut state = State::default();
+        state.reduce(Input::KeyDown(Key::RightOption), &config);
+        state.reduce(Input::KeyUp(Key::RightOption), &config);
+        assert!(!state.is_active(Role::Hold), "key released, work in flight");
+
+        state.set_busy(true);
+        let out = state.reduce(Input::KeyDown(Key::Escape), &config);
+        assert_eq!(out.events, vec![Event::Cancelled]);
+        assert_eq!(
+            out.consume,
+            Consume::Yes,
+            "the cancelling Escape must not also reach the focused app"
+        );
+    }
+
+    /// Toggle is a one-shot, so it never enters `active` — before `busy` it
+    /// was uncancellable for its entire life, not just while transcribing.
+    #[test]
+    fn escape_cancels_a_toggle_recording() {
+        let config = hold_right_option();
+        let mut state = State::default();
+        state.set_busy(true);
+
+        let out = state.reduce(Input::KeyDown(Key::Escape), &config);
+        assert_eq!(out.events, vec![Event::Cancelled]);
+        assert_eq!(out.consume, Consume::Yes);
     }
 
     #[test]

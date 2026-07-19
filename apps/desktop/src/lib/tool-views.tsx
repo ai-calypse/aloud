@@ -60,6 +60,24 @@ function emailBody(args: ToolArgs): ReactNode {
   );
 }
 
+/** When and where, which is what you check before letting an event save. */
+function eventBody(args: ToolArgs): ReactNode {
+  const start = text(args, "start_datetime");
+  const location = text(args, "location");
+  if (!start && !location) return null;
+
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
+      {start && (
+        <p className="m-0 text-[13px] font-medium">{start.replace("T", " ")}</p>
+      )}
+      {location && (
+        <p className="m-0 text-[13px] text-muted-foreground">{location}</p>
+      )}
+    </div>
+  );
+}
+
 const VIEWS: Record<string, ToolView> = {
   GMAIL_SEND_EMAIL: {
     label: (a) => {
@@ -106,6 +124,43 @@ const VIEWS: Record<string, ToolView> = {
     },
   },
   GITHUB_GET_THE_AUTHENTICATED_USER: { label: () => "Checking your GitHub account" },
+
+  GOOGLECALENDAR_CREATE_EVENT: {
+    label: (a) => {
+      const title = text(a, "summary");
+      return title ? `Adding "${title}" to your calendar` : "Adding a calendar event";
+    },
+    body: eventBody,
+  },
+  GOOGLECALENDAR_UPDATE_EVENT: {
+    label: (a) => {
+      const title = text(a, "summary");
+      return title ? `Updating "${title}"` : "Updating a calendar event";
+    },
+    body: eventBody,
+  },
+  GOOGLECALENDAR_FIND_EVENT: { label: () => "Looking through your calendar" },
+  GOOGLECALENDAR_FIND_FREE_SLOTS: { label: () => "Finding a free slot" },
+  // The only destructive tool in the default set, and it was the one with no
+  // view: its confirmation read "Googlecalendar: delete event" over an empty
+  // body. Delete carries no title or time — only ids — so the gate shows the
+  // id rather than pretending to more.
+  GOOGLECALENDAR_DELETE_EVENT: {
+    label: () => "Deleting a calendar event",
+    body: (args) => {
+      const id = text(args, "event_id");
+      const calendar = text(args, "calendar_id");
+      if (!id) return null;
+      return (
+        <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
+          <p className="m-0 text-[13px] font-medium">Event {id}</p>
+          {calendar && calendar !== "primary" && (
+            <p className="m-0 text-[13px] text-muted-foreground">{calendar}</p>
+          )}
+        </div>
+      );
+    },
+  },
 };
 
 /**

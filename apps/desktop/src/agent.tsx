@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Loader } from "@/components/ai-elements/loader";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
   Confirmation,
   ConfirmationAction,
@@ -138,7 +139,7 @@ function Agent() {
         {run.steps.length === 0 && !run.error && !run.status && (
           <div className="flex items-center gap-2 text-muted-foreground">
             <Loader />
-            Understanding…
+            <Shimmer>Understanding…</Shimmer>
           </div>
         )}
 
@@ -194,7 +195,7 @@ function Agent() {
         {run.status && (
           <div className="flex items-center gap-2 text-muted-foreground">
             <Loader />
-            {run.status}
+            <Shimmer>{run.status}</Shimmer>
           </div>
         )}
 

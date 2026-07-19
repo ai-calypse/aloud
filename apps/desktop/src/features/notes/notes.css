@@ -78,8 +78,29 @@ mark {
   gap: 0.4rem;
 }
 
+.reader__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.reader__toggle {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: default;
+}
+
+.reader__toggle:hover {
+  color: inherit;
+}
+
 .reader__back {
-  align-self: flex-start;
   padding: 0.3rem 0;
   border: 0;
   background: transparent;
@@ -98,12 +119,71 @@ mark {
   font-size: 0.8125rem;
 }
 
+/* Source view: the raw markdown, monospaced so the syntax lines up. */
 .reader__body {
   overflow-y: auto;
   margin: 0.8rem 0 0;
-  font-family: inherit;
-  font-size: 0.9rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
   line-height: 1.55;
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+/* Rendered view. Meeting notes are headings, bullets, and task lists, so the
+   defaults need spacing rules rather than a full prose stylesheet. */
+.reader__rendered {
+  overflow-y: auto;
+  margin: 0.8rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.reader__rendered h1,
+.reader__rendered h2,
+.reader__rendered h3 {
+  margin: 1.1rem 0 0.4rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.reader__rendered h1:first-child,
+.reader__rendered h2:first-child {
+  margin-top: 0;
+}
+
+.reader__rendered p {
+  margin: 0 0 0.6rem;
+}
+
+/* The global reset strips list markers, so bullets have to be asked for
+   again — without them "Key Points" reads as loose indented lines. */
+.reader__rendered ul {
+  margin: 0 0 0.6rem;
+  padding-left: 1.2rem;
+  list-style: disc;
+}
+
+.reader__rendered ol {
+  margin: 0 0 0.6rem;
+  padding-left: 1.2rem;
+  list-style: decimal;
+}
+
+.reader__rendered li {
+  margin: 0.15rem 0;
+}
+
+/* Action items come back as "- [ ] task — owner". */
+.reader__rendered li:has(input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -1.2rem;
+}
+
+.reader__rendered code {
+  font-size: 0.85em;
+}
+
+.reader__rendered a {
+  color: var(--accent);
 }

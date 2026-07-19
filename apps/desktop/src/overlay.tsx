@@ -98,8 +98,10 @@ function Overlay() {
       <span className="pill__refraction" aria-hidden />
       {phase === "recording" ? (
         <span
-          className={`bars${level === null ? " bars--idle" : ""}`}
-          style={{ "--level": level ?? 0 } as React.CSSProperties}
+          // No level yet (the first frames of a session) sits at mid-scale
+          // rather than collapsed, so the pill never appears as a flat row.
+          className="bars"
+          style={{ "--level": level ?? 0.5 } as React.CSSProperties}
           aria-hidden
         >
           {/* Staggered + a per-bar peak so the row reads as a waveform. */}

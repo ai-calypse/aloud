@@ -18,6 +18,13 @@ use tauri_specta::Event;
 
 /// How long the pill stays up after a dictation finishes.
 const OVERLAY_LINGER: Duration = Duration::from_millis(900);
+/// How long a failure stays up. Long enough to actually read: 900ms was tuned
+/// for "Pasted", and left a rate-limit message unreadable.
+const ERROR_LINGER: Duration = Duration::from_secs(4);
+/// Transcripts this short skip cleanup entirely. Whisper punctuates a short
+/// utterance correctly on its own, and the prompt costs far more than the
+/// words it is fixing.
+const CLEANUP_MIN_WORDS: usize = 3;
 /// How often the input level is pushed to the overlay. 20 Hz is smooth to the
 /// eye without flooding the event channel.
 const LEVEL_INTERVAL: Duration = Duration::from_millis(50);
@@ -43,6 +50,8 @@ enum Outcome {
     Asked,
     /// Silence or filler only — a normal result, not a failure.
     NoSpeech,
+    /// Escape landed while the work was in flight.
+    Cancelled,
 }
 
 /// In-flight dictation state, owned by the app and shared with the hotkey
@@ -69,6 +78,19 @@ pub struct Pipeline {
     /// Loaded lazily: the model costs ~200ms and memory, so only when the
     /// local engine is actually used.
     local: Mutex<Option<Arc<dyn Transcriber>>>,
+    /// True from the moment a session starts until it settles. Read by the
+    /// hotkey thread to decide whether Escape is ours to swallow.
+    busy: Arc<std::sync::atomic::AtomicBool>,
+    /// Fired by [`Pipeline::cancel`] to abandon an in-flight session. Racing
+    /// this against the work drops the transcribe/LLM future, which aborts the
+    /// HTTP request — dropping the recorder alone left the request running and
+    /// the pill up for as long as 80s.
+    cancelled: tokio::sync::Notify,
+    /// Bumped by every cancel. `notify_waiters` only wakes waiters that have
+    /// already registered, so an Escape arriving between the phase change and
+    /// the `select!` would be lost and the transcript would paste anyway. The
+    /// counter closes that window: the work checks it before using its result.
+    cancel_generation: std::sync::atomic::AtomicU64,
 }
 
 impl Pipeline {
@@ -84,7 +106,20 @@ impl Pipeline {
             stats: Mutex::new(Stats::load()),
             phase: Mutex::new(Phase::Idle),
             local: Mutex::new(None),
+            busy: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            cancelled: tokio::sync::Notify::new(),
+            cancel_generation: std::sync::atomic::AtomicU64::new(0),
         })
+    }
+
+    fn generation(&self) -> u64 {
+        self.cancel_generation
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Shared with the hotkey listener so Escape knows a session is running.
+    pub fn busy_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.busy.clone()
     }
 
     /// Publishes the phase and drives the overlay's visibility with it, so
@@ -93,6 +128,11 @@ impl Pipeline {
         if let Ok(mut current) = self.phase.lock() {
             *current = phase;
         }
+        // Escape is only ours to swallow while something is actually running.
+        self.busy.store(
+            matches!(phase, Phase::Recording | Phase::Transcribing),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         // The tray shows the phase and the running totals, and it is visible
         // when the main window is not.
         crate::tray::refresh(&self.app);
@@ -119,8 +159,13 @@ impl Pipeline {
             // Leave the result on screen briefly, then dismiss.
             Phase::Done | Phase::Error => {
                 let app = self.app.clone();
+                let linger = if matches!(phase, Phase::Error) {
+                    ERROR_LINGER
+                } else {
+                    OVERLAY_LINGER
+                };
                 tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(OVERLAY_LINGER).await;
+                    tokio::time::sleep(linger).await;
                     crate::overlay::hide(&app);
                 });
             }
@@ -131,7 +176,7 @@ impl Pipeline {
     /// Reports a failure to the user, not just to the log. The pill showed a
     /// bare "Failed" for every error while the real cause went to stderr.
     fn emit_error(&self, error: &anyhow::Error) {
-        crate::overlay::send_error(&self.app, &format!("{error:#}"));
+        crate::overlay::send_error(&self.app, &user_message(error));
         self.emit(Phase::Error);
     }
 
@@ -204,15 +249,27 @@ impl Pipeline {
             return Ok(()); // not recording
         };
 
+        let generation = self.generation();
         self.emit(Phase::Transcribing);
-        let result = self.transcribe_and_paste(recorder, started_at).await;
+        let result = tokio::select! {
+            result = self.transcribe_and_paste(recorder, started_at, generation) => result,
+            // Dropping the work future here is what actually aborts the
+            // in-flight HTTP request.
+            _ = self.cancelled.notified() => {
+                tracing::info!("dictation cancelled");
+                self.emit(Phase::Idle);
+                return Ok(());
+            }
+        };
 
         match &result {
             // Silence is a normal outcome, but reporting "Pasted" when nothing
             // was pasted would be a lie: go back to Idle instead.
             Ok(Outcome::Pasted) => self.emit(Phase::Done),
             // The Ask panel is the feedback; the pill would just cover it.
-            Ok(Outcome::Asked) | Ok(Outcome::NoSpeech) => self.emit(Phase::Idle),
+            Ok(Outcome::Asked) | Ok(Outcome::NoSpeech) | Ok(Outcome::Cancelled) => {
+                self.emit(Phase::Idle)
+            }
             Err(e) => {
                 tracing::error!(%e, "dictation failed");
                 self.emit_error(e);
@@ -225,6 +282,7 @@ impl Pipeline {
         &self,
         recorder: aloud_audio::Recorder,
         started_at: Option<std::time::Instant>,
+        generation: u64,
     ) -> Result<Outcome> {
         let wav = temp_wav_path();
         recorder.stop_to_wav(&wav)?;
@@ -256,6 +314,14 @@ impl Pipeline {
         let final_text = self.post_process(&raw, &effective).await;
         if final_text.trim().is_empty() {
             return Ok(Outcome::NoSpeech);
+        }
+
+        // Last point before the text lands in someone else's app. A cancel
+        // that raced the `select!` registration is only truly honoured here:
+        // pasting after Escape is the one failure the user cannot undo.
+        if self.generation() != generation {
+            tracing::info!("cancelled before pasting");
+            return Ok(Outcome::Cancelled);
         }
 
         aloud_paste::paste_text(&final_text, false)?;
@@ -297,6 +363,15 @@ impl Pipeline {
     }
 
     async fn clean_up(&self, raw: &str, settings: &Settings) -> Result<String> {
+        // The cleanup prompt is ~1,500 tokens and is spent on every dictation,
+        // against a free-tier budget of 8,000 per minute — about five
+        // dictations before a 429. On "yes", "one sec", "send it" there is
+        // nothing to clean, so skipping those is most of the spend for none of
+        // the benefit.
+        if raw.split_whitespace().count() <= CLEANUP_MIN_WORDS {
+            return Ok(raw.to_string());
+        }
+
         let client = aloud_llm::LlmClient::new(&settings.groq_api_key, Some(&settings.base_url))?;
 
         let system = if settings.custom_system_prompt.trim().is_empty() {
@@ -554,13 +629,20 @@ impl Pipeline {
         crate::agent::run(&self.app, command, &settings).await
     }
 
-    /// Cancels an in-flight recording, discarding the audio.
+    /// Cancels an in-flight session, discarding the audio and abandoning any
+    /// transcription or cleanup already sent.
     pub fn cancel(&self) {
         if let Ok(mut session) = self.session.lock() {
             // Dropping the recorder stops capture; the samples go with it.
             session.recorder = None;
             session.started_at = None;
         }
+        // Wakes the select! in the stop_* paths. A no-op when nothing is
+        // waiting, which is the case for a cancel during plain recording —
+        // the emit below is what ends that one.
+        self.cancel_generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.cancelled.notify_waiters();
         self.emit(Phase::Idle);
     }
 
@@ -660,6 +742,29 @@ fn prompt_with_hint(custom: &str, hint: &str) -> String {
     format!("{}\n\n{}", base.trim_end(), hint.trim())
 }
 
+/// A failure in words the user can act on.
+///
+/// The pill is one truncated line, so the raw error is the wrong thing to show
+/// — a rate limit arrived as `transcription failed (429 Too Many Requests):
+/// {"error":{"message":"Rate limit reached for model...`, cut off long before
+/// the part that matters. Everything else falls through unchanged rather than
+/// being guessed at.
+fn user_message(error: &anyhow::Error) -> String {
+    let full = format!("{error:#}");
+    if full.contains("429") || full.to_lowercase().contains("rate limit") {
+        // The wait is in the headers, which are gone by here; the LLM path
+        // reports its own cooldown, so keep this honest and short.
+        return "Rate limited — wait a moment and try again".to_string();
+    }
+    if full.contains("401") || full.contains("invalid_api_key") {
+        return "API key rejected — check it in Settings".to_string();
+    }
+    if full.contains("timed out") || full.contains("operation timed out") {
+        return "Timed out — check your connection".to_string();
+    }
+    full
+}
+
 /// A unique temp path per dictation, so overlapping sessions cannot collide.
 fn temp_wav_path() -> PathBuf {
     let unique = std::time::SystemTime::now()
@@ -675,6 +780,23 @@ mod tests {
     #[test]
     fn temp_paths_are_unique() {
         assert_ne!(temp_wav_path(), temp_wav_path());
+    }
+
+    /// The pill shows one truncated line, so a 429 must not arrive as the raw
+    /// Groq body — the readable part fell off the end.
+    #[test]
+    fn rate_limits_become_words_instead_of_a_raw_http_body() {
+        let raw = anyhow::anyhow!(
+            r#"transcription failed (429 Too Many Requests): {{"error":{{"message":"Rate limit reached for model `whisper-large-v3`"}}}}"#
+        );
+        assert_eq!(
+            user_message(&raw),
+            "Rate limited — wait a moment and try again"
+        );
+
+        // Anything unrecognised must survive intact rather than be guessed at.
+        let other = anyhow::anyhow!("no microphone found");
+        assert_eq!(user_message(&other), "no microphone found");
     }
 
     /// An app rule's prompt is a style hint, not a replacement. Replacing the

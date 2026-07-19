@@ -23,9 +23,13 @@ pub struct Settings {
     // Keys. In the same file as the rest, matching the Swift app.
     pub groq_api_key: String,
     pub composio_api_key: String,
-    /// Cerebras key. Agent tool-call parsing runs here (gpt-oss-120b) because
-    /// Groq's tokens-per-minute limit is too low for the agent's heavier calls.
+    /// Cerebras key. Kept for existing installs and as the agent's fallback;
+    /// [`Self::gemini_api_key`] is what agent mode reaches for first.
     pub cerebras_api_key: String,
+    /// Gemini key. Agent tool-call parsing runs here — Groq's tokens-per-minute
+    /// limit is too low for the agent's heavier calls, and Cerebras was
+    /// rate-limiting mid-command.
+    pub gemini_api_key: String,
 
     // Transcription
     pub engine: aloud_transcribe::Engine,
@@ -67,6 +71,7 @@ impl Default for Settings {
             groq_api_key: String::new(),
             composio_api_key: String::new(),
             cerebras_api_key: String::new(),
+            gemini_api_key: String::new(),
             // Local by default: works with no key and no network.
             engine: aloud_transcribe::Engine::Local,
             transcription_model: aloud_transcribe::cloud::DEFAULT_MODEL.into(),
@@ -146,6 +151,7 @@ impl Settings {
             ("GROQ_API_KEY", &mut self.groq_api_key),
             ("COMPOSIO_API_KEY", &mut self.composio_api_key),
             ("CEREBRAS_API_KEY", &mut self.cerebras_api_key),
+            ("GEMINI_API_KEY", &mut self.gemini_api_key),
         ] {
             if !field.trim().is_empty() {
                 continue;

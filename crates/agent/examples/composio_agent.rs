@@ -1,6 +1,6 @@
-//! Exercises the real Composio + Cerebras tool loop against live APIs, without
+//! Exercises the real Composio + Gemini tool loop against live APIs, without
 //! launching the app. Keys come from settings/.env exactly as the app loads
-//! them (Groq/Cerebras/Composio).
+//! them (Groq/Gemini/Composio).
 //!
 //! Run from the repo root so the `.env` walk finds the root file:
 //!
@@ -13,8 +13,8 @@
 use aloud_agent::{run_tool_loop, ComposioClient, LoopEvent};
 use aloud_store::Settings;
 
-const CEREBRAS_BASE_URL: &str = "https://api.cerebras.ai/v1";
-const CEREBRAS_MODEL: &str = "gpt-oss-120b";
+const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
+const GEMINI_MODEL: &str = "gemini-3.1-flash-lite";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -25,20 +25,20 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let settings = Settings::load();
-    if settings.cerebras_api_key.trim().is_empty() {
-        anyhow::bail!("no CEREBRAS_API_KEY (settings or .env)");
+    if settings.gemini_api_key.trim().is_empty() {
+        anyhow::bail!("no GEMINI_API_KEY (settings or .env)");
     }
     if settings.composio_api_key.trim().is_empty() {
         anyhow::bail!("no COMPOSIO_API_KEY (settings or .env)");
     }
 
-    let llm = aloud_llm::LlmClient::new(&settings.cerebras_api_key, Some(CEREBRAS_BASE_URL))?;
+    let llm = aloud_llm::LlmClient::new(&settings.gemini_api_key, Some(GEMINI_BASE_URL))?;
     let composio = ComposioClient::new(&settings.composio_api_key)?;
 
-    println!("→ discovering connected Gmail/GitHub tools…");
-    let tools = composio.available_tools().await?;
+    println!("→ selecting connected tools for this command…");
+    let tools = composio.available_tools(&command).await?;
     if tools.is_empty() {
-        anyhow::bail!("no Gmail/GitHub account connected in Composio");
+        anyhow::bail!("no account connected in Composio");
     }
     println!(
         "  tools available: {}",
@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
     println!("→ command: {command}\n");
     let answer = run_tool_loop(
         &llm,
-        CEREBRAS_MODEL,
+        GEMINI_MODEL,
         &composio,
         &command,
         &tools,
