@@ -10,7 +10,9 @@
  * so light/dark already work via the prefers-color-scheme block in App.css.
  */
 
-@custom-variant dark (&:where(.dark, .dark *));
+/* Point `dark:` at the OS, not a `.dark` class — nothing sets that class, so
+   every dark: utility silently never fired. Same signal App.css flips on. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
 
 :root {
   --radius: 0.7rem;
