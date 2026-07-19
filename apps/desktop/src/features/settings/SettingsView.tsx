@@ -14,6 +14,7 @@ import {
   rowInput,
   rowSelect,
 } from "@/components/ui/rows";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -298,14 +299,15 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                       update({ soundVolume: Number(e.target.value) })
                     }
                   />
-                  <button
-                    className="shrink-0 text-ui font-medium text-brand active:scale-95"
+                  <Button
+                    variant="plain"
+                    size="text"
                     onClick={() =>
                       commands.previewSound(settings.soundVolume ?? 0.5)
                     }
                   >
                     Preview
-                  </button>
+                  </Button>
                 </Value>
               </Row>
             )}
@@ -346,12 +348,13 @@ export function SettingsView({ section }: { section: SettingsSection }) {
             </Row>
             {(settings.customSystemPrompt ?? "").trim() !== "" && (
               <Row label="Custom prompt in use">
-                <button
-                  className="text-ui font-medium text-brand active:scale-95"
+                <Button
+                  variant="plain"
+                  size="text"
                   onClick={() => update({ customSystemPrompt: "" })}
                 >
                   Reset to default
-                </button>
+                </Button>
               </Row>
             )}
           </Group>

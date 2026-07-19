@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import { commands, type Settings } from "../../lib/bindings";
-import "./onboarding.css";
+
+// Repeated on every nav button; the "go" button layers onto it.
+const BTN =
+  "rounded-[8px] border-[0.5px] border-surface-border bg-field px-4 py-[0.45rem] disabled:opacity-40";
+const GO =
+  "border-transparent bg-brand font-semibold hover:bg-[color-mix(in_srgb,var(--accent)_80%,white)]";
+
+function Lead({ children }: { children: React.ReactNode }) {
+  return <p className="mb-4 leading-[1.55] text-ink-2">{children}</p>;
+}
 
 /**
  * First-run wizard. Shown once, when `settings.onboarded` is false, in place of
@@ -48,22 +57,22 @@ export function Onboarding({
     {
       title: "Welcome to Aloud",
       body: (
-        <p className="ob__lead">
+        <Lead>
           Hold a key, speak, and clean text lands wherever you're typing. A
           few quick choices and you're set.
-        </p>
+        </Lead>
       ),
     },
     {
       title: "Grant accessibility",
       body: (
         <>
-          <p className="ob__lead">
+          <Lead>
             Aloud needs Accessibility permission to read your hotkey and paste
             text. Grant it in System Settings → Privacy &amp; Security →
             Accessibility.
-          </p>
-          <p className={permitted ? "ob__ok" : "ob__warn"}>
+          </Lead>
+          <p className={permitted ? "text-success" : "text-warning"}>
             {permitted ? "✓ Permission granted" : "Not granted yet"}
           </p>
         </>
@@ -73,11 +82,11 @@ export function Onboarding({
       title: "Choose an engine",
       body: (
         <>
-          <p className="ob__lead">
+          <Lead>
             On-device whisper works offline with no key. Cloud is faster and
             needs an API key.
-          </p>
-          <label className="ob__choice">
+          </Lead>
+          <label className="flex cursor-pointer items-center gap-2 py-[0.4rem]">
             <input
               type="radio"
               name="engine"
@@ -86,7 +95,7 @@ export function Onboarding({
             />
             On-device whisper (recommended)
           </label>
-          <label className="ob__choice">
+          <label className="flex cursor-pointer items-center gap-2 py-[0.4rem]">
             <input
               type="radio"
               name="engine"
@@ -102,13 +111,13 @@ export function Onboarding({
       title: engine === "cloud" ? "Add your API key" : "Optional: API key",
       body: (
         <>
-          <p className="ob__lead">
+          <Lead>
             {engine === "cloud"
               ? "Cloud transcription needs a key."
               : "Add a key now to enable cleanup, Ask, and Agent — or skip and add it later in Settings."}
-          </p>
+          </Lead>
           <input
-            className="ob__input"
+            className="w-full rounded-[8px] border-[0.5px] border-surface-border bg-field px-[0.7rem] py-[0.55rem]"
             type="password"
             placeholder="API key"
             value={apiKey}
@@ -125,29 +134,32 @@ export function Onboarding({
   const blocked = isLast && engine === "cloud" && apiKey.trim() === "";
 
   return (
-    <div className="ob">
-      <div className="ob__card">
-        <div className="ob__dots">
+    <div className="flex min-h-screen items-center justify-center p-8">
+      <div className="w-full max-w-[440px]">
+        <div className="mb-6 flex gap-[0.4rem]">
           {steps.map((_, i) => (
-            <span key={i} className={`ob__dot ${i === step ? "ob__dot--on" : ""}`} />
+            <span
+              key={i}
+              className={`size-[7px] rounded-full ${i === step ? "bg-brand" : "bg-separator"}`}
+            />
           ))}
         </div>
 
-        <h1 className="ob__title">{current.title}</h1>
-        <div className="ob__body">{current.body}</div>
+        <h1 className="mb-3 text-[22px] font-semibold">{current.title}</h1>
+        <div className="min-h-[140px]">{current.body}</div>
 
-        <div className="ob__nav">
+        <div className="mt-6 flex justify-end gap-2">
           {step > 0 && (
-            <button className="ob__btn" onClick={() => setStep((s) => s - 1)}>
+            <button className={BTN} onClick={() => setStep((s) => s - 1)}>
               Back
             </button>
           )}
           {isLast ? (
-            <button className="ob__btn ob__btn--go" onClick={finish} disabled={blocked}>
+            <button className={`${BTN} ${GO}`} onClick={finish} disabled={blocked}>
               Finish
             </button>
           ) : (
-            <button className="ob__btn ob__btn--go" onClick={() => setStep((s) => s + 1)}>
+            <button className={`${BTN} ${GO}`} onClick={() => setStep((s) => s + 1)}>
               Next
             </button>
           )}

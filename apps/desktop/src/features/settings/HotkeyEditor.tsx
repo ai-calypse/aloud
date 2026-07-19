@@ -6,7 +6,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Group } from "@/components/ui/rows";
+import { GridRow, Group } from "@/components/ui/rows";
 
 /**
  * A compact hotkey binder, one row per role. A full keystroke recorder is the
@@ -76,10 +76,7 @@ export function HotkeyEditor({
       {ROLES.map((role) => {
         const current = choiceId(config[role.key]);
         return (
-          <div
-            key={role.key}
-            className="grid grid-cols-[150px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-separator py-3 last:border-b-0"
-          >
+          <GridRow key={role.key} columns="150px 1fr auto">
             <div className="whitespace-nowrap text-row font-medium">
               {role.label}
               <span className="ml-[7px] text-[10px] uppercase tracking-[0.06em] text-ink-3">
@@ -109,7 +106,7 @@ export function HotkeyEditor({
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </GridRow>
         );
       })}
     </Group>

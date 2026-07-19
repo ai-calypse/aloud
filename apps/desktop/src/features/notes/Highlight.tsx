@@ -16,7 +16,15 @@ export function Highlight({ text, terms }: { text: string; terms: string[] }) {
     <>
       {parts.map((part, i) =>
         // split() with a capture group puts matches at odd indices.
-        i % 2 === 1 ? <mark key={i}>{part}</mark> : part,
+        // Bold, not the browser's yellow block: the classes live here rather
+        // than as a `mark {}` rule so they cannot leak to the rest of the app.
+        i % 2 === 1 ? (
+          <mark key={i} className="bg-transparent font-bold text-inherit">
+            {part}
+          </mark>
+        ) : (
+          part
+        ),
       )}
     </>
   );

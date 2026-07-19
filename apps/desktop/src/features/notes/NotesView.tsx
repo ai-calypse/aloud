@@ -4,6 +4,7 @@ import { Highlight } from "./Highlight";
 import { or } from "../../lib/result";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Group } from "@/components/ui/rows";
+import { SearchField } from "@/components/ui/search-field";
 import "./notes.css";
 
 /**
@@ -59,26 +60,13 @@ export function NotesView() {
   return (
     <div className="flex min-h-0 flex-col gap-3.5">
       <div className="flex items-center gap-3">
-        <div className="flex flex-1 items-center gap-[7px] rounded-field border-[0.5px] border-surface-border bg-surface px-3 py-2 shadow-field focus-within:border-brand">
-          <svg
-            viewBox="0 0 16 16"
-            className="size-[13px] shrink-0 text-search-icon"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-          >
-            <circle cx="7" cy="7" r="4.2" />
-            <line x1="10.2" y1="10.2" x2="13.5" y2="13.5" strokeLinecap="round" />
-          </svg>
-          <input
-            type="search"
-            className="w-full bg-transparent text-ui outline-none placeholder:text-ink-2"
-            placeholder="Search notes"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            autoFocus
-          />
-        </div>
+        <SearchField
+          className="flex-1"
+          value={query}
+          onChange={setQuery}
+          placeholder="Search notes"
+          autoFocus
+        />
         <span className="shrink-0 text-xs text-ink-2">
           {notes.length} {notes.length === 1 ? "note" : "notes"}
         </span>
@@ -121,29 +109,33 @@ function Reader({ note, onBack }: { note: Note; onBack: () => void }) {
   const [source, setSource] = useState(false);
 
   return (
-    <div className="reader">
-      <div className="reader__bar">
-        <button className="reader__back" onClick={onBack}>
+    <div className="flex h-full flex-col gap-[0.4rem]">
+      <div className="flex items-center justify-between gap-2">
+        <button className="py-[0.3rem] text-brand" onClick={onBack}>
           ← Search
         </button>
         <button
-          className="reader__toggle"
+          className="rounded-full border border-border px-[0.6rem] py-1 text-[0.78rem] text-ink-2 hover:text-inherit"
           onClick={() => setSource((s) => !s)}
           aria-pressed={source}
         >
           {source ? "Preview" : "Markdown"}
         </button>
       </div>
-      <h2 className="reader__title">{note.title}</h2>
-      <time className="reader__date">{formatDate(note.date)}</time>
+      <h2 className="mt-[0.4rem] text-[1.2rem]">{note.title}</h2>
+      <time className="text-ui text-ink-2">{formatDate(note.date)}</time>
 
       {source ? (
-        <pre className="reader__body">{note.content}</pre>
+        /* Source view: the raw markdown, monospaced so the syntax lines up. */
+        <pre className="mt-[0.8rem] overflow-y-auto font-mono text-[0.82rem] leading-[1.55] break-words whitespace-pre-wrap">
+          {note.content}
+        </pre>
       ) : (
         /* Streamdown parses the markdown to React elements — no innerHTML, so
            a note staying untrusted input costs nothing. Same renderer the ask
-           and agent panels use. */
-        <MessageResponse className="reader__rendered">
+           and agent panels use. `reader__rendered` is only a hook for the
+           descendant rules in notes.css; its own box is utilities. */
+        <MessageResponse className="reader__rendered mt-[0.8rem] overflow-y-auto text-[0.9rem] leading-[1.6]">
           {note.content}
         </MessageResponse>
       )}

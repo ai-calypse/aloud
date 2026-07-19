@@ -1,7 +1,8 @@
 import { type Macro } from "../../lib/bindings";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Group, rowInput } from "@/components/ui/rows";
+import { GridRow, Group, rowInput } from "@/components/ui/rows";
 
 /**
  * Edits the voice-macro list: a trigger phrase and the text it expands to.
@@ -33,10 +34,7 @@ export function MacroEditor({
           </div>
         ) : (
           macros.map((m, i) => (
-            <div
-              key={i}
-              className="grid grid-cols-[200px_1fr_auto] items-center gap-3.5 border-b-[0.5px] border-separator py-[13px] last:border-b-0"
-            >
+            <GridRow key={i} columns="200px 1fr auto" className="py-[13px]">
               <Input
                 className={`${rowInput} text-left font-semibold text-brand`}
                 placeholder="trigger (e.g. my email)"
@@ -50,22 +48,20 @@ export function MacroEditor({
                 value={m.expansion}
                 onChange={(e) => set(i, { expansion: e.target.value })}
               />
-              <button
-                className="text-ui font-medium text-danger active:scale-95"
+              <Button
+                variant="plain-danger"
+                size="text"
                 onClick={() => remove(i)}
               >
                 Delete
-              </button>
-            </div>
+              </Button>
+            </GridRow>
           ))
         )}
       </Group>
-      <button
-        className="self-start rounded-lg bg-brand px-[15px] py-[7px] text-ui font-medium text-white shadow-accent active:scale-[0.97]"
-        onClick={add}
-      >
+      <Button variant="accent" size="row" className="self-start" onClick={add}>
         Add Macro
-      </button>
+      </Button>
     </div>
   );
 }
