@@ -9,8 +9,14 @@ import { Badge } from "@/components/ui/badge";
  *
  * Everything here comes from Composio at runtime rather than a hardcoded list,
  * so connecting a new service in the browser makes its tools available to the
- * agent without a release. The tool rows are the real set the model is offered,
- * not a description of it — if a tool is not listed, the agent cannot call it.
+ * agent without a release.
+ *
+ * The tool rows are a SAMPLE, not the agent's allowance. Selection is per
+ * command (`ComposioClient::available_tools`): every tool in a connected
+ * toolkit is a candidate on every request, and TOOLS_PER_TOOLKIT is the
+ * context budget for choosing among them. This pane asks with an empty
+ * command, which yields the pins plus a stable head of the toolkit — so it
+ * must not claim these are the only tools the agent can call.
  */
 export function ConnectorEditor() {
   const [connected, setConnected] = useState<Connector[] | null>(null);
@@ -95,8 +101,8 @@ export function ConnectorEditor() {
                 <div className="min-w-0 flex-1">
                   <p className="m-0 text-sm font-medium">{c.name}</p>
                   <p className="m-0 truncate text-xs text-muted-foreground">
-                    {c.toolsCount} tools available · {c.tools.length} offered to
-                    the agent
+                    {c.toolsCount} tools · up to {c.tools.length} picked per
+                    command
                   </p>
                 </div>
                 <Button
@@ -110,24 +116,30 @@ export function ConnectorEditor() {
               </header>
 
               {c.tools.length > 0 && (
-                <ul className="m-0 mt-3 flex list-none flex-col gap-1.5 p-0">
-                  {c.tools.map((t) => (
-                    <li
-                      key={t.name}
-                      className="flex items-center gap-2 text-xs"
-                      title={t.description}
-                    >
-                      <code className="min-w-0 truncate text-muted-foreground">
-                        {t.name}
-                      </code>
-                      {!t.readOnly && (
-                        <Badge variant="secondary" className="shrink-0">
-                          asks first
-                        </Badge>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <p className="m-0 mt-3 text-xs text-muted-foreground">
+                    Example picks — the agent chooses from all {c.toolsCount}{" "}
+                    based on what you ask for.
+                  </p>
+                  <ul className="m-0 mt-1.5 flex list-none flex-col gap-1.5 p-0">
+                    {c.tools.map((t) => (
+                      <li
+                        key={t.name}
+                        className="flex items-center gap-2 text-xs"
+                        title={t.description}
+                      >
+                        <code className="min-w-0 truncate text-muted-foreground">
+                          {t.name}
+                        </code>
+                        {!t.readOnly && (
+                          <Badge variant="secondary" className="shrink-0">
+                            asks first
+                          </Badge>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </>
               )}
             </article>
           ))
