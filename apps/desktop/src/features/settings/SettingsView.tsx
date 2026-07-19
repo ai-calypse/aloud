@@ -4,6 +4,7 @@ import { or } from "../../lib/result";
 import { HotkeyEditor } from "./HotkeyEditor";
 import { MacroEditor } from "./MacroEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
+import { ConnectorEditor } from "./ConnectorEditor";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,7 @@ export type SettingsSection =
   | "macros"
   | "rules"
   | "prompts"
-  | "integrations";
+  | "connectors";
 
 /** Glass card grouping related fields (mirrors the Swift SettingsCard). */
 function Card({ title, children }: { title?: string; children: ReactNode }) {
@@ -350,22 +351,12 @@ export function SettingsView({ section }: { section: SettingsSection }) {
         </Card>
       )}
 
-      {section === "integrations" && (
+      {section === "connectors" && (
         <>
-          <Card title="Agent mode">
+          <Card title="Keys">
             <p className="m-0 text-xs text-muted-foreground">
-              Agent mode runs spoken commands against Gmail and GitHub. It needs
-              a Cerebras key to understand the command and a Composio key to
-              reach the connected accounts. Connect the accounts themselves at{" "}
-              <a
-                className="underline"
-                href="https://app.composio.dev"
-                target="_blank"
-                rel="noreferrer"
-              >
-                app.composio.dev
-              </a>
-              .
+              Agent mode needs a Cerebras key to understand a spoken command and
+              a Composio key to reach the services below.
             </p>
             <Field label="Cerebras key">
               <Input
@@ -384,6 +375,9 @@ export function SettingsView({ section }: { section: SettingsSection }) {
               />
             </Field>
           </Card>
+
+          {/* Remounts when the key changes so the list reloads against it. */}
+          <ConnectorEditor key={settings.composioApiKey ?? ""} />
         </>
       )}
 

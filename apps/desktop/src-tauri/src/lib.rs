@@ -57,6 +57,10 @@ pub fn run() {
             commands::preview_sound,
             commands::launch_at_login,
             commands::set_launch_at_login,
+            commands::list_connectors,
+            commands::search_connectors,
+            commands::connect_connector,
+            commands::disconnect_connector,
             ask::close_ask,
             agent::confirm_agent,
             agent::close_agent,
@@ -83,6 +87,8 @@ pub fn run() {
         .expect("failed to export typescript bindings");
 
     tauri::Builder::default()
+        // Opens the Composio OAuth URL when connecting a connector.
+        .plugin(tauri_plugin_opener::init())
         // MacosLauncher is ignored off macOS; no launch args are needed.
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,

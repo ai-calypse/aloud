@@ -7,7 +7,7 @@
 //! rather than loop forever. Write tools (send email, create issue) pause for an
 //! explicit confirmation before they run; that is the one non-negotiable gate.
 
-use crate::composio::{is_write_tool, ComposioClient, ToolDef};
+use crate::composio::{ComposioClient, ToolDef};
 use aloud_llm::{LlmClient, LlmError, Message};
 use anyhow::Result;
 use std::future::Future;
@@ -19,8 +19,15 @@ const MAX_ROUNDS: usize = 5;
 /// maps these onto its own UI events.
 #[derive(Debug, Clone)]
 pub enum LoopEvent {
-    /// The model asked to run a tool (with its parsed args as display lines).
-    ToolCallStart { name: String, args: Vec<String> },
+    /// The model asked to run a tool, with the arguments it chose.
+    ///
+    /// The whole JSON object, not a flattened list: the panel renders a draft's
+    /// body as text and ignores `user_id`, which it can only do if it still has
+    /// the fields to choose between.
+    ToolCallStart {
+        name: String,
+        args: serde_json::Value,
+    },
     /// That tool finished (success carries no payload; the model gets the JSON).
     ToolCallResult { name: String, success: bool },
     /// The chat API throttled us; the loop is waiting this long to retry once.
@@ -35,7 +42,11 @@ the command asks for such an action or needs that data; otherwise just answer. \
 The command is a transcription of speech and may contain minor errors; act on \
 the intent. After acting, confirm what you did in one short plain sentence. \
 If a tool result was not successful or contains an error, say the action \
-failed and why — never claim it worked.";
+failed and why — never claim it worked. \
+Fill every argument you send with real content. If the user asks you to write \
+or draft something, compose the actual text — never send an empty body, an \
+empty subject, or a placeholder. If the same content is needed by two calls, \
+repeat it in full rather than leaving the second one blank.";
 
 /// Runs the loop for `command`. Returns the model's final answer.
 ///
@@ -49,7 +60,7 @@ pub async fn run<F>(
     command: &str,
     tools: &[ToolDef],
     mut on_event: impl FnMut(LoopEvent),
-    confirm: impl Fn(String, Vec<String>) -> F,
+    confirm: impl Fn(String, serde_json::Value) -> F,
 ) -> Result<String>
 where
     F: Future<Output = bool>,
@@ -120,18 +131,16 @@ where
             let name = call.function.name.clone();
             let args: serde_json::Value = serde_json::from_str(&call.function.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
-            let arg_lines = arg_display_lines(&args);
 
             on_event(LoopEvent::ToolCallStart {
                 name: name.clone(),
-                args: arg_lines.clone(),
+                args: args.clone(),
             });
 
             // A write waits for an explicit yes. A rejected write is reported to
             // the model as a normal result so it can respond ("Okay, cancelled")
             // rather than erroring the whole command.
-            let result = if is_write_tool(&name) && !confirm(name.clone(), arg_lines.clone()).await
-            {
+            let result = if is_write(&name, tools) && !confirm(name.clone(), args.clone()).await {
                 on_event(LoopEvent::ToolCallResult {
                     name: name.clone(),
                     success: false,
@@ -153,6 +162,21 @@ where
     }
 
     anyhow::bail!("reached the tool-round limit without an answer")
+}
+
+/// Whether a tool needs confirmation before it runs.
+///
+/// Fail-safe by construction: only a tool Composio explicitly marks
+/// `readOnlyHint` skips the gate. A create, an update, a delete, an
+/// unannotated tool, or a name that is not in the offered set at all is
+/// treated as a write. This replaced a hardcoded list of two slugs, which
+/// silently let every tool of a newly connected toolkit run unconfirmed.
+fn is_write(name: &str, tools: &[ToolDef]) -> bool {
+    !tools
+        .iter()
+        .find(|t| t.name == name)
+        .map(|t| t.read_only)
+        .unwrap_or(false)
 }
 
 /// Whether a compacted tool result reports success. The execute path returns
@@ -180,27 +204,35 @@ fn tool_succeeded(result: &str) -> bool {
     !matches!(json.get("error"), Some(e) if !e.is_null())
 }
 
-/// Turns a JSON args object into "field: value" display lines for the panel and
-/// the confirmation prompt. Non-objects render as a single line.
-fn arg_display_lines(args: &serde_json::Value) -> Vec<String> {
-    match args.as_object() {
-        Some(map) => map
-            .iter()
-            .map(|(k, v)| {
-                let value = match v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                format!("{k}: {value}")
-            })
-            .collect(),
-        None => vec![args.to_string()],
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tool(name: &str, read_only: bool) -> ToolDef {
+        ToolDef {
+            name: name.into(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            read_only,
+        }
+    }
+
+    /// The confirmation gate is the one non-negotiable safety property, so it
+    /// must fail closed: anything not proven read-only asks first.
+    #[test]
+    fn only_explicitly_read_only_tools_skip_confirmation() {
+        let tools = [
+            tool("GMAIL_FETCH_EMAILS", true),
+            tool("GMAIL_SEND_EMAIL", false),
+        ];
+
+        assert!(!is_write("GMAIL_FETCH_EMAILS", &tools));
+        assert!(is_write("GMAIL_SEND_EMAIL", &tools));
+        // A hallucinated or newly added name we were never offered must not
+        // slip through as a read.
+        assert!(is_write("SLACK_DELETE_EVERYTHING", &tools));
+        assert!(is_write("anything", &[]));
+    }
 
     #[test]
     fn success_trusts_the_successful_flag_not_a_null_error() {
@@ -223,13 +255,5 @@ mod tests {
         assert!(tool_succeeded(
             r#"{"successful":true,"data":{"status_code":201,"number":7}}"#
         ));
-    }
-
-    #[test]
-    fn arg_lines_render_strings_without_quotes() {
-        let args = serde_json::json!({ "to": "a@b.com", "max_results": 4 });
-        let lines = arg_display_lines(&args);
-        assert!(lines.contains(&"to: a@b.com".to_string()));
-        assert!(lines.contains(&"max_results: 4".to_string()));
     }
 }

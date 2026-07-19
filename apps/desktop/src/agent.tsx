@@ -1,21 +1,21 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import type { ToolUIPart } from "ai";
-import { CheckIcon, CopyIcon, XIcon } from "lucide-react";
-import { commands, events, type ToolCall, type ToolResult } from "./lib/bindings";
+import { CheckIcon, CopyIcon, TriangleAlertIcon, XIcon } from "lucide-react";
+import { commands, events } from "./lib/bindings";
+import {
+  pendingStep,
+  withCall,
+  withResult,
+  type Run,
+  type Step,
+} from "./lib/agent-steps";
+import { bodyFor, labelFor } from "./lib/tool-views";
 import { usePanelAutosize } from "./lib/autosize";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Loader } from "@/components/ai-elements/loader";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool";
 import {
   Confirmation,
   ConfirmationAction,
@@ -26,42 +26,25 @@ import {
 import "./index.css";
 import "./panel.css";
 
-/**
- * One AG-UI-style run: what was heard, the tool call it resolved to (if any),
- * that call's result, and the run's closing message or error. The confirm gate
- * lives on the tool call — a write never runs until "Confirm" is pressed here.
- */
-type Run = {
-  heard: string;
-  call?: ToolCall;
-  result?: ToolResult;
-  /** Set by the Confirm/Cancel buttons; undefined while the gate is open. */
-  confirmed?: boolean;
-  finished?: string;
-  error?: string;
-  /** Transient line ("Rate limited — retrying…"); cleared by the next event. */
-  status?: string;
-};
-
-/** Map the run's progress onto the AI SDK tool-part lifecycle. */
-function toolState(run: Run): ToolUIPart["state"] {
-  if (run.result) return run.result.success ? "output-available" : "output-error";
-  // A run error while the gate is open also closes it — nothing can fire now.
-  if (run.error) return "output-error";
-  if (run.confirmed === false) return "output-denied";
-  if (run.call?.requiresConfirmation && run.confirmed === undefined)
-    return "approval-requested";
-  return "input-available";
+function stepStatus(step: Step, pending: boolean): string {
+  if (step.result) return step.result.success ? "done" : "failed";
+  if (step.confirmed === false) return "cancelled";
+  if (pending) return "needs approval";
+  return "running…";
 }
 
-/** The tool call's "field: value" lines as an object, for ToolInput's JSON view. */
-function argsObject(args: string[]): Record<string, string> {
-  return Object.fromEntries(
-    args.map((line) => {
-      const i = line.indexOf(": ");
-      return i === -1 ? [line, ""] : [line.slice(0, i), line.slice(i + 2)];
-    }),
-  );
+function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
+  if (step.result)
+    return step.result.success ? (
+      <CheckIcon className="size-3.5 shrink-0 text-muted-foreground" />
+    ) : (
+      <XIcon className="size-3.5 shrink-0 text-destructive" />
+    );
+  if (step.confirmed === false)
+    return <XIcon className="size-3.5 shrink-0 text-muted-foreground" />;
+  if (pending)
+    return <TriangleAlertIcon className="size-3.5 shrink-0 text-[var(--warning)]" />;
+  return <Loader />;
 }
 
 /**
@@ -70,7 +53,7 @@ function argsObject(args: string[]): Record<string, string> {
  * before it fires, then reports the result.
  */
 function Agent() {
-  const [run, setRun] = useState<Run>({ heard: "" });
+  const [run, setRun] = useState<Run>({ heard: "", steps: [] });
   const [copied, setCopied] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -81,14 +64,22 @@ function Agent() {
       switch (payload.kind) {
         case "runStarted":
           // A new run resets the panel; it is reused, not recreated.
-          setRun({ heard: payload.value });
+          setRun({ heard: payload.value, steps: [] });
           setCopied(false);
           break;
         case "toolCall":
-          setRun((r) => ({ ...r, call: payload.value, status: undefined }));
+          setRun((r) => ({
+            ...r,
+            steps: withCall(r.steps, payload.value),
+            status: undefined,
+          }));
           break;
         case "toolResult":
-          setRun((r) => ({ ...r, result: payload.value, status: undefined }));
+          setRun((r) => ({
+            ...r,
+            steps: withResult(r.steps, payload.value),
+            status: undefined,
+          }));
           break;
         case "status":
           setRun((r) => ({ ...r, status: payload.value }));
@@ -116,12 +107,19 @@ function Agent() {
   }, []);
 
   const confirm = (approved: boolean) => {
-    setRun((r) => ({ ...r, confirmed: approved }));
+    setRun((r) => ({
+      ...r,
+      steps: r.steps.map((s) =>
+        s.requiresConfirmation && s.confirmed === undefined && !s.result
+          ? { ...s, confirmed: approved }
+          : s,
+      ),
+    }));
     commands.confirmAgent(approved);
   };
 
-  const state = toolState(run);
-  const copyText = run.finished || run.result?.message || "";
+  const pending = pendingStep(run);
+  const copyText = run.finished || "";
 
   return (
     <Card ref={cardRef} className="panel gap-3 rounded-2xl border-white/10 py-4 shadow-none">
@@ -136,46 +134,51 @@ function Agent() {
       <Separator className="bg-white/10" />
 
       <CardContent className="panel__answer flex flex-col gap-3 px-4 text-[15px] leading-normal">
-        {/* Before a tool call resolves, we're still parsing the transcript. */}
-        {!run.call && !run.error && !run.status && (
+        {/* Before any tool call resolves, we're still parsing the transcript. */}
+        {run.steps.length === 0 && !run.error && !run.status && (
           <div className="flex items-center gap-2 text-muted-foreground">
             <Loader />
             Understanding…
           </div>
         )}
 
-        {run.call && (
-          <Tool defaultOpen className="mb-0">
-            <ToolHeader
-              type={`tool-${run.call.name}`}
-              title={run.call.name}
-              state={state}
-            />
-            <ToolContent>
-              <ToolInput input={argsObject(run.call.args)} />
-              <ToolOutput
-                output={
-                  run.result?.success ? (
-                    <MessageResponse className="p-3">
-                      {run.result.message}
-                    </MessageResponse>
-                  ) : undefined
-                }
-                errorText={
-                  run.result && !run.result.success ? run.result.message : undefined
-                }
-              />
-            </ToolContent>
-          </Tool>
+        {/* One line per tool: what is running and how it went. The arguments
+            are deliberately not shown here — they are a wall of JSON, and the
+            only moment they matter is when approving a write, below. */}
+        {run.steps.length > 0 && (
+          <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+            {run.steps.map((step, i) => (
+              <li key={`${step.name}-${i}`} className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2 text-[13px]">
+                  <StepIcon step={step} pending={step === pending} />
+                  <span className="min-w-0 flex-1 truncate">
+                    {labelFor(step.name, step.args)}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                    {stepStatus(step, step === pending)}
+                  </span>
+                </div>
+                {/* Only what this tool is worth showing. A step with no
+                    registered view renders its label and nothing else. */}
+                {step !== pending && (
+                  <div className="pl-[22px]">{bodyFor(step.name, step.args)}</div>
+                )}
+              </li>
+            ))}
+          </ul>
         )}
 
-        {run.call && state === "approval-requested" && (
-          <Confirmation approval={{ id: run.call.name }} state={state}>
+        {pending && (
+          <Confirmation approval={{ id: pending.name }} state="approval-requested">
             <ConfirmationTitle>
-              Run <span className="font-mono text-[13px]">{run.call.name}</span>?
-              This will write to {run.call.app}.
+              {labelFor(pending.name, pending.args)} — this writes to{" "}
+              {pending.app}.
             </ConfirmationTitle>
             <ConfirmationRequest>
+              {/* Approving a write without seeing what it will do is not a
+                  gate, so the body shows here even though the step list is
+                  otherwise quiet. */}
+              <div className="mb-3">{bodyFor(pending.name, pending.args)}</div>
               <ConfirmationActions>
                 <ConfirmationAction variant="outline" onClick={() => confirm(false)}>
                   Cancel
@@ -203,7 +206,12 @@ function Agent() {
 
       <CardFooter className="gap-2.5 px-4">
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground/70">
-          {run.call ? `· ${run.call.name}` : ""}
+          {run.steps.length > 0
+            ? `· ${labelFor(
+                run.steps[run.steps.length - 1].name,
+                run.steps[run.steps.length - 1].args,
+              )}`
+            : ""}
         </span>
         {copyText && (
           <Button

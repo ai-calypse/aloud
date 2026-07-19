@@ -122,6 +122,128 @@ pub fn launch_at_login(app: AppHandle) -> CmdResult<bool> {
     to_string_err(app.autolaunch().is_enabled().map_err(Into::into))
 }
 
+/// One connectable service, for the Connectors pane.
+#[derive(serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Connector {
+    pub slug: String,
+    pub name: String,
+    pub logo: String,
+    pub description: String,
+    #[specta(type = specta_typescript::Number)]
+    pub tools_count: u32,
+    pub connected: bool,
+    pub connection_id: Option<String>,
+    /// The tools the agent can actually call. Only filled for connected
+    /// toolkits — a search result would need a request per row.
+    pub tools: Vec<ConnectorTool>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorTool {
+    pub name: String,
+    pub description: String,
+    /// Drives the "asks first" badge: anything not read-only is confirmed
+    /// before it runs.
+    pub read_only: bool,
+}
+
+fn client(settings: &State<'_, AppState>) -> CmdResult<aloud_agent::ComposioClient> {
+    let key = settings
+        .settings
+        .lock()
+        .map(|s| s.composio_api_key.clone())
+        .unwrap_or_default();
+    if key.trim().is_empty() {
+        return Err("Add a Composio API key first".into());
+    }
+    to_string_err(aloud_agent::ComposioClient::new(&key))
+}
+
+fn to_connector(toolkit: aloud_agent::Toolkit, tools: Vec<aloud_agent::ToolDef>) -> Connector {
+    Connector {
+        slug: toolkit.slug,
+        name: toolkit.name,
+        logo: toolkit.logo,
+        description: toolkit.description,
+        tools_count: toolkit.tools_count,
+        connected: toolkit.connected,
+        connection_id: toolkit.connection_id,
+        tools: tools
+            .into_iter()
+            .map(|t| ConnectorTool {
+                name: t.name,
+                description: t.description,
+                read_only: t.read_only,
+            })
+            .collect(),
+    }
+}
+
+/// Connected toolkits, each with the tools the agent will actually offer.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_connectors(state: State<'_, AppState>) -> CmdResult<Vec<Connector>> {
+    let composio = client(&state)?;
+    let toolkits = to_string_err(composio.connected_toolkits().await)?;
+
+    let mut out = Vec::new();
+    for toolkit in toolkits {
+        // Show exactly what the agent gets, so the pane cannot claim a tool
+        // the model was never offered.
+        let tools = composio
+            .toolkit_tools(&toolkit.slug, aloud_agent::TOOLS_PER_TOOLKIT)
+            .await
+            .unwrap_or_default();
+        out.push(to_connector(toolkit, tools));
+    }
+    Ok(out)
+}
+
+/// Toolkits matching `query`, for the add-a-connector search.
+#[tauri::command]
+#[specta::specta]
+pub async fn search_connectors(
+    state: State<'_, AppState>,
+    query: String,
+) -> CmdResult<Vec<Connector>> {
+    let composio = client(&state)?;
+    let toolkits = to_string_err(composio.toolkits(&query).await)?;
+    Ok(toolkits
+        .into_iter()
+        .map(|t| to_connector(t, Vec::new()))
+        .collect())
+}
+
+/// Starts an OAuth connection and opens the consent page in the browser.
+///
+/// Composio hosts the callback, so there is nothing to catch here — the user
+/// finishes in the browser and the pane picks the new account up on refresh.
+#[tauri::command]
+#[specta::specta]
+pub async fn connect_connector(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    toolkit: String,
+) -> CmdResult<()> {
+    let composio = client(&state)?;
+    let url = to_string_err(composio.connect(&toolkit).await)?;
+
+    use tauri_plugin_opener::OpenerExt;
+    to_string_err(app.opener().open_url(url, None::<&str>).map_err(Into::into))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn disconnect_connector(
+    state: State<'_, AppState>,
+    connection_id: String,
+) -> CmdResult<()> {
+    let composio = client(&state)?;
+    to_string_err(composio.disconnect(&connection_id).await)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn set_launch_at_login(app: AppHandle, enabled: bool) -> CmdResult<()> {

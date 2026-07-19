@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
         &tools,
         |event| match event {
             LoopEvent::ToolCallStart { name, args } => {
-                println!("  [tool] {name}({})", args.join(", "));
+                println!("  [tool] {name}({args})");
             }
             LoopEvent::ToolCallResult { name, success } => {
                 println!("  [{}] {name}", if success { "ok" } else { "ERR" });
@@ -68,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         // No panel here: auto-approve writes. Reads dominate the test commands.
-        |name, _args| async move {
+        |name, _args: serde_json::Value| async move {
             println!("  [auto-confirm write] {name}");
             true
         },

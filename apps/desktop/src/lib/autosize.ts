@@ -22,10 +22,20 @@ export function usePanelAutosize(ref: React.RefObject<HTMLDivElement | null>) {
       "--answer-cap",
       `${Math.round(screen.availHeight * 0.55 - CHROME_HEIGHT)}px`,
     );
-    const win = getCurrentWindow();
+    // Absent outside a Tauri window — a browser preview, or a webview that has
+    // not finished attaching. Sizing is an enhancement; throwing here would
+    // take the whole panel down with it, which is a poor trade for a window
+    // that is already the right width.
+    let win: ReturnType<typeof getCurrentWindow> | null = null;
+    try {
+      win = getCurrentWindow();
+    } catch {
+      return;
+    }
+
     const observer = new ResizeObserver(() => {
       const height = Math.max(60, Math.ceil(el.getBoundingClientRect().height));
-      void win.setSize(new LogicalSize(PANEL_WIDTH, height));
+      void win?.setSize(new LogicalSize(PANEL_WIDTH, height));
     });
     observer.observe(el);
     return () => observer.disconnect();
