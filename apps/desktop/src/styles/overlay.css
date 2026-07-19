@@ -50,7 +50,7 @@
   font-weight: 500;
   letter-spacing: 0.01em;
 
-  animation: rise var(--dur-fast) var(--ease-out);
+  animation: pill-in var(--dur-base) var(--ease-spring) both;
 }
 
 /* A glass sheen (top-lit gradient + a diagonal chromatic streak) warped by the
@@ -82,10 +82,20 @@
   z-index: 1;
 }
 
-@keyframes rise {
+/* The pill is glass, so it arrives the way a material does: out of focus and
+   slightly small, coming into focus at size. --ease-spring gives it a touch of
+   overshoot, which is what makes it feel like an object landing rather than a
+   box being drawn. */
+@keyframes pill-in {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.96);
+    transform: translateY(10px) scale(0.94);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
   }
 }
 
@@ -93,41 +103,42 @@
   white-space: nowrap;
 }
 
-/* Recording: a white waveform, tallest in the middle.
-
-   Voice scales the whole row; the per-bar animation is the one that shipped
-   before levels existed. Driving the bars *directly* from the level replaced
-   the motion instead of adding to it, so a quiet moment parked every bar at
-   its floor — a row of 4px squares that never moved. The row never scales
-   below 0.6, so the pill always reads as a waveform. */
+/* The listening meter.
+ *
+ * Each bar is one 50ms sample of measured loudness, newest on the right, so
+ * the row scrolls as you speak. What it replaced was a fixed 0.9s sine loop
+ * per bar with the whole row squashed by the level — which meant the motion
+ * was identical whether you spoke or sat in silence, and read as a spinner.
+ *
+ * Only `transform` animates, so the compositor owns every frame even though a
+ * new sample lands 20 times a second.
+ */
 .bars {
   display: flex;
   align-items: center;
-  gap: 3px;
-  height: 22px;
-  transform-origin: center;
-  transform: scaleY(calc(0.6 + 0.4 * var(--level, 0.5)));
-  transition: transform var(--dur-instant) var(--ease-out);
+  gap: 2.5px;
+  height: 20px;
 }
 
 .bars i {
-  width: 4px;
+  width: 2.5px;
   height: 100%;
   border-radius: var(--radius-pill);
   background: var(--pill-ink);
-  /* Scale the whole animation by this bar's peak (set per-bar in the TSX) so
-     the edges stay shorter than the centre — a waveform envelope. */
-  transform: scaleY(calc(0.55 * var(--peak, 1)));
-  animation: pulse 0.9s ease-in-out infinite;
+  transform-origin: center;
+  transform: scaleY(var(--v, 0.12));
+  /* Slightly shorter than the 50ms sample interval, so a bar has settled
+     before the next value arrives instead of being permanently re-targeted. */
+  transition: transform 45ms linear;
+  /* The entrance only: bars rise left-to-right as the pill appears. */
+  animation: bar-in var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 18ms);
 }
 
-@keyframes pulse {
-  0%,
-  100% {
-    transform: scaleY(calc(0.55 * var(--peak, 1)));
-  }
-  50% {
-    transform: scaleY(var(--peak, 1));
+@keyframes bar-in {
+  from {
+    transform: scaleY(0.06);
+    opacity: 0;
   }
 }
 

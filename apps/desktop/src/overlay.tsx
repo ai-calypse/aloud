@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { events, type Phase } from "./lib/bindings";
+import { pushLevel, restingLevels } from "./lib/meter";
 import "./styles/overlay.css";
 
 const LABEL: Record<Phase, string> = {
@@ -16,9 +17,7 @@ const LABEL: Record<Phase, string> = {
 /** A long error still has to fit one line on a small pill. */
 const ERROR_CHARS = 90;
 
-// A waveform envelope: shorter at the edges, tallest in the middle, so the
-// bars read as a voice level rather than an even row. Values are peak scaleY.
-const BAR_PEAKS = [0.55, 0.8, 1, 1, 0.8, 0.55];
+
 
 /**
  * The recording pill. Rust drives the window's visibility, so this only ever
@@ -31,9 +30,9 @@ function Overlay() {
   const preview = new URLSearchParams(location.search).get("phase") as Phase | null;
   const [phase, setPhase] = useState<Phase>(preview ?? "idle");
   const [error, setError] = useState<string | null>(null);
-  // null means "no level has arrived yet", which is what the canned-animation
-  // fallback keys off — distinct from a real level of 0 during silence.
-  const [level, setLevel] = useState<number | null>(null);
+  // The meter's rolling history, newest last. Starts flat so the first frames
+  // of a session are a resting row rather than an empty gap.
+  const [levels, setLevels] = useState<number[]>(restingLevels);
   const [download, setDownload] = useState<number | null>(null);
 
   useEffect(() => {
@@ -42,11 +41,12 @@ function Overlay() {
       // A new run clears the last run's message and stale level.
       if (e.payload === "recording") {
         setError(null);
-      } else if (e.payload !== "error") {
-        setLevel(null);
+        setLevels(restingLevels());
       }
     });
-    const unlistenLevel = events.audioLevel.listen((e) => setLevel(e.payload ?? 0));
+    const unlistenLevel = events.audioLevel.listen((e) =>
+      setLevels((prev) => pushLevel(prev, e.payload)),
+    );
     const unlistenError = events.overlayError.listen((e) => setError(e.payload));
     // First use of the local engine fetches ~150MB; without this the pill sits
     // on "Transcribing…" for minutes and the app looks hung.
@@ -97,21 +97,18 @@ function Overlay() {
       {/* Warped glass highlight sitting over the real backdrop blur. */}
       <span className="pill__refraction" aria-hidden />
       {phase === "recording" ? (
-        <span
-          // No level yet (the first frames of a session) sits at mid-scale
-          // rather than collapsed, so the pill never appears as a flat row.
-          className="bars"
-          style={{ "--level": level ?? 0.5 } as React.CSSProperties}
-          aria-hidden
-        >
-          {/* Staggered + a per-bar peak so the row reads as a waveform. */}
-          {BAR_PEAKS.map((peak, i) => (
+        // A scrolling level meter: each bar is one 50ms sample of what the mic
+        // actually heard, newest on the right. The bars it replaced ran a
+        // canned sine loop that played identically whether you spoke or not.
+        <span className="bars" aria-hidden>
+          {levels.map((value, i) => (
             <i
               key={i}
               style={
                 {
-                  animationDelay: `${i * 0.1}s`,
-                  "--peak": peak,
+                  "--v": value,
+                  // Staggered only for the entrance; see .bars i in the CSS.
+                  "--i": i,
                 } as React.CSSProperties
               }
             />
