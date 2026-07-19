@@ -1,51 +1,56 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./styles/tokens.css";
+@import "./styles/base.css";
+@import "./styles/motion.css";
 
-/* shadcn/ui theme, mapped onto Aloud's glass palette.
+/* Bridges Aloud's palette (styles/tokens.css) to the two consumers that need
+ * names of their own: shadcn's semantic tokens, and Tailwind's utility
+ * namespace. Nothing here invents a colour — every value resolves to a token.
  *
- * Surfaces (background, card, popover) are deliberately TRANSLUCENT so the
- * native macOS vibrancy (NSVisualEffectView, applied in lib.rs) shows through
- * — this is what gives the Liquid Glass look. Solid tokens (foreground,
- * primary, border) come straight from the existing --fg/--accent/--muted vars
- * so light/dark already work via the prefers-color-scheme block in App.css.
+ * Adding a colour: put it in styles/tokens.css, then expose it below only if a
+ * component needs it as a Tailwind utility.
  */
 
 /* Point `dark:` at the OS, not a `.dark` class — nothing sets that class, so
-   every dark: utility silently never fired. Same signal App.css flips on. */
+   every dark: utility silently never fired. Same signal tokens.css flips on. */
 @custom-variant dark (@media (prefers-color-scheme: dark));
 
 :root {
   --radius: 0.7rem;
 
-  /* Glass surfaces: scrim over the vibrancy, not a solid fill. */
+  /* shadcn surfaces. Deliberately TRANSLUCENT so the native macOS vibrancy
+     (NSVisualEffectView, applied in lib.rs) shows through — this is what gives
+     the Liquid Glass look. The app's own grouped cards are solid instead; see
+     --card-solid in tokens.css. */
   --background: color-mix(in srgb, var(--bg) 55%, transparent);
   --foreground: var(--fg);
   --card: color-mix(in srgb, var(--bg) 45%, transparent);
   --card-foreground: var(--fg);
   /* Floating surfaces (dialogs, dropdowns, command lists) must read as solid —
      they hover over content, not over the window vibrancy, so translucency here
-     looks broken. Near-opaque with a touch of blur behind it. */
+     looks broken. */
   --popover: color-mix(in srgb, var(--bg) 98%, transparent);
   --popover-foreground: var(--fg);
 
   --primary: var(--accent);
-  --primary-foreground: #ffffff;
-  --secondary: color-mix(in srgb, var(--muted) 12%, transparent);
+  --primary-foreground: var(--accent-fg);
+  --secondary: color-mix(in srgb, var(--text2) 12%, transparent);
   --secondary-foreground: var(--fg);
-  --muted-color: color-mix(in srgb, var(--muted) 12%, transparent);
-  --muted-foreground: var(--muted);
+  --muted-color: color-mix(in srgb, var(--text2) 12%, transparent);
+  --muted-foreground: var(--text2);
   --accent-surface: color-mix(in srgb, var(--accent) 18%, transparent);
   --accent-foreground: var(--fg);
-  --destructive: #ef4444;
-  --destructive-foreground: #ffffff;
+  --destructive: var(--danger);
+  --destructive-foreground: var(--accent-fg);
 
-  --border: color-mix(in srgb, var(--muted) 20%, transparent);
-  --input: color-mix(in srgb, var(--muted) 40%, transparent);
+  --border: color-mix(in srgb, var(--text2) 20%, transparent);
+  --input: color-mix(in srgb, var(--text2) 40%, transparent);
   --ring: var(--accent);
 }
 
-/* Map shadcn's Tailwind color utilities to the vars above. */
 @theme inline {
+  /* shadcn's utility namespace. */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -66,28 +71,49 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
+  /* Aloud's own tokens as utilities, so components write `bg-surface` and
+     `text-muted` instead of `bg-[var(--card-solid)]` and
+     `text-[var(--text2)]`. These names are the vocabulary of the UI. */
+  --color-canvas: var(--bg);
+  --color-surface: var(--card-solid);
+  --color-surface-border: var(--card-border);
+  --color-separator: var(--sep);
+  --color-field: var(--field);
+  --color-hover: var(--hover);
+  --color-sidebar: var(--sidebar);
+  --color-ink: var(--fg);
+  --color-ink-2: var(--text2);
+  --color-ink-3: var(--text3);
+  --color-chevron: var(--chev);
+  --color-search-icon: var(--search-icon);
+  --color-brand: var(--accent);
+  --color-brand-fg: var(--accent-fg);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-keycap: var(--keycap);
+  --color-keycap-border: var(--keycap-border);
+  --color-toggle-on: var(--toggle-on);
+  --color-toggle-off: var(--toggle-off);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-}
+  /* Named for what they wrap; see tokens.css. */
+  --radius-card: var(--radius-card);
+  --radius-field: var(--radius-field);
+  --radius-row: var(--radius-row);
+  --radius-chip: var(--radius-chip);
 
-/* Tailwind v4's Preflight sets `cursor: default` on buttons to match the raw
- * browser behaviour, which left every control in the app showing an arrow. Put
- * the hand back, once, rather than hanging `cursor-pointer` on each element.
- *
- * The role selectors cover the controls that are not <button>: Radix and cmdk
- * render list options as divs, so a select or the app picker would otherwise
- * still read as unclickable. Disabled buttons keep the arrow — they are not.
- */
-@layer base {
-  button:not(:disabled),
-  [role="button"]:not(:disabled),
-  [role="option"],
-  [role="menuitem"],
-  [role="switch"],
-  [role="tab"],
-  input[type="range"]:not(:disabled) {
-    cursor: pointer;
-  }
+  --shadow-card: var(--shadow-card);
+  --shadow-field: var(--shadow-field);
+  --shadow-accent: var(--shadow-accent);
+  --shadow-knob: var(--shadow-knob);
+
+  /* The design's sizes sit between Tailwind's steps. */
+  --text-row: var(--text-row);
+  --text-ui: var(--text-ui);
+  --text-hint: var(--text-hint);
 }

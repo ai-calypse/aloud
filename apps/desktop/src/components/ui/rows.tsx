@@ -21,11 +21,11 @@ export function Group({
   return (
     <section className={className}>
       {title && (
-        <h3 className="mb-[7px] ml-1 text-xs font-semibold uppercase tracking-[0.03em] text-[var(--text2)]">
+        <h3 className="mb-[7px] ml-1 text-xs font-semibold uppercase tracking-[0.03em] text-ink-2">
           {title}
         </h3>
       )}
-      <div className="rounded-[11px] border-[0.5px] border-[var(--card-border)] bg-[var(--card-solid)] px-[15px] shadow-[0_1px_2px_rgba(0,0,0,.05)]">
+      <div className="rounded-card border-[0.5px] border-surface-border bg-surface px-[15px] shadow-card">
         {children}
       </div>
     </section>
@@ -47,7 +47,7 @@ export function Row({
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-4 border-b-[0.5px] border-[var(--sep)] py-3 text-[13.5px] last:border-b-0",
+        "flex items-center justify-between gap-4 border-b-[0.5px] border-separator py-3 text-row last:border-b-0",
         className,
       )}
     >
@@ -55,7 +55,7 @@ export function Row({
         <div className="min-w-0">
           {label && <div className="font-medium">{label}</div>}
           {hint && (
-            <div className="mt-px text-xs text-[var(--text2)]">{hint}</div>
+            <div className="mt-px text-xs text-ink-2">{hint}</div>
           )}
         </div>
       )}
@@ -86,10 +86,10 @@ export function Value({
  * own height by data attribute, which a plain `h-auto` cannot outrank.
  */
 export const rowSelect =
-  "h-auto w-fit max-w-full gap-1 border-0 bg-transparent p-0 text-[13.5px] text-[var(--text2)] shadow-none data-[size=default]:h-auto focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent [&_svg]:text-[var(--chev)]";
+  "h-auto w-fit max-w-full gap-1 border-0 bg-transparent p-0 text-row text-ink-2 shadow-none data-[size=default]:h-auto focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent [&_svg]:text-chevron";
 
 export const rowInput =
-  "h-auto rounded-none border-0 bg-transparent p-0 text-right text-[13.5px] text-[var(--text2)] shadow-none focus-visible:ring-0 md:text-[13.5px] dark:bg-transparent";
+  "h-auto rounded-none border-0 bg-transparent p-0 text-right text-row text-ink-2 shadow-none focus-visible:ring-0 md:text-row dark:bg-transparent";
 
 /** Pane heading, matching the mock's 24px/700 title and optional subtitle. */
 export function PaneTitle({
@@ -105,7 +105,7 @@ export function PaneTitle({
         {title}
       </h1>
       {subtitle && (
-        <p className="mt-1.5 text-[13px] text-[var(--text2)]">{subtitle}</p>
+        <p className="mt-1.5 text-ui text-ink-2">{subtitle}</p>
       )}
     </div>
   );
@@ -135,12 +135,12 @@ export function Toggle({
       className={cn(
         "relative h-6 w-10 shrink-0 rounded-full transition-colors duration-300 outline-none",
         "focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2",
-        checked ? "bg-[var(--toggle-on)]" : "bg-[var(--toggle-off)]",
+        checked ? "bg-toggle-on" : "bg-toggle-off",
       )}
     >
       <span
         className={cn(
-          "absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,.28)]",
+          "absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow-knob",
           "transition-transform duration-300 ease-[cubic-bezier(.32,.72,0,1)]",
           checked ? "translate-x-4" : "translate-x-0",
         )}

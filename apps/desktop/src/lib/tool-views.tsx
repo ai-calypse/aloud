@@ -44,15 +44,15 @@ function emailBody(args: ToolArgs): ReactNode {
 
   return (
     <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
-      {subject && <p className="m-0 text-[13px] font-medium">{subject}</p>}
+      {subject && <p className="m-0 text-ui font-medium">{subject}</p>}
       {body ? (
-        <p className="m-0 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+        <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
           {body}
         </p>
       ) : (
         // Surfaced rather than silently sent: an empty body reaching the
         // confirmation is the model having dropped the content.
-        <p className="m-0 text-[13px] italic text-[var(--warning)]">
+        <p className="m-0 text-ui italic text-warning">
           No message body — cancel and ask again.
         </p>
       )}
@@ -69,10 +69,10 @@ function eventBody(args: ToolArgs): ReactNode {
   return (
     <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
       {start && (
-        <p className="m-0 text-[13px] font-medium">{start.replace("T", " ")}</p>
+        <p className="m-0 text-ui font-medium">{start.replace("T", " ")}</p>
       )}
       {location && (
-        <p className="m-0 text-[13px] text-muted-foreground">{location}</p>
+        <p className="m-0 text-ui text-muted-foreground">{location}</p>
       )}
     </div>
   );
@@ -107,9 +107,9 @@ const VIEWS: Record<string, ToolView> = {
       if (!title) return null;
       return (
         <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
-          <p className="m-0 text-[13px] font-medium">{title}</p>
+          <p className="m-0 text-ui font-medium">{title}</p>
           {body && (
-            <p className="m-0 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+            <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
               {body}
             </p>
           )}
@@ -153,9 +153,9 @@ const VIEWS: Record<string, ToolView> = {
       if (!id) return null;
       return (
         <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
-          <p className="m-0 text-[13px] font-medium">Event {id}</p>
+          <p className="m-0 text-ui font-medium">Event {id}</p>
           {calendar && calendar !== "primary" && (
-            <p className="m-0 text-[13px] text-muted-foreground">{calendar}</p>
+            <p className="m-0 text-ui text-muted-foreground">{calendar}</p>
           )}
         </div>
       );

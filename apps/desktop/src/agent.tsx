@@ -25,7 +25,7 @@ import {
   ConfirmationTitle,
 } from "@/components/ai-elements/confirmation";
 import "./index.css";
-import "./panel.css";
+import "./styles/panel.css";
 
 function stepStatus(step: Step, pending: boolean): string {
   if (step.result) return step.result.success ? "done" : "failed";
@@ -44,7 +44,7 @@ function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
   if (step.confirmed === false)
     return <XIcon className="size-3.5 shrink-0 text-muted-foreground" />;
   if (pending)
-    return <TriangleAlertIcon className="size-3.5 shrink-0 text-[var(--warning)]" />;
+    return <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" />;
   return <Loader />;
 }
 
@@ -126,7 +126,7 @@ function Agent() {
     <Card ref={cardRef} className="panel gap-3 rounded-2xl border-white/10 py-4 shadow-none">
       <CardHeader className="px-4">
         <p
-          className="m-0 line-clamp-2 text-[13px] font-medium text-muted-foreground"
+          className="m-0 line-clamp-2 text-ui font-medium text-muted-foreground"
           data-tauri-drag-region
         >
           {run.heard}
@@ -150,7 +150,7 @@ function Agent() {
           <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
             {run.steps.map((step, i) => (
               <li key={`${step.name}-${i}`} className="flex flex-col gap-1.5">
-                <div className="flex items-center gap-2 text-[13px]">
+                <div className="flex items-center gap-2 text-ui">
                   <StepIcon step={step} pending={step === pending} />
                   <span className="min-w-0 flex-1 truncate">
                     {labelFor(step.name, step.args)}

@@ -165,10 +165,10 @@ export function ConnectorEditor() {
         <h1 className="text-2xl font-bold leading-[1.1] tracking-[-0.02em]">
           Connectors
         </h1>
-        <div className="flex w-[260px] items-center gap-[7px] rounded-[9px] border-[0.5px] border-[var(--card-border)] bg-[var(--card-solid)] px-3 py-1.5 shadow-[0_1px_2px_rgba(0,0,0,.04)] focus-within:border-[var(--accent)]">
+        <div className="flex w-[260px] items-center gap-[7px] rounded-field border-[0.5px] border-surface-border bg-surface px-3 py-1.5 shadow-field focus-within:border-brand">
           <svg
             viewBox="0 0 16 16"
-            className="size-[13px] shrink-0 text-[var(--search-icon)]"
+            className="size-[13px] shrink-0 text-search-icon"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.6"
@@ -178,7 +178,7 @@ export function ConnectorEditor() {
           </svg>
           <input
             type="search"
-            className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--text2)]"
+            className="w-full bg-transparent text-ui outline-none placeholder:text-ink-2"
             placeholder="Search Slack, Notion, Linear…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -187,7 +187,7 @@ export function ConnectorEditor() {
       </div>
 
       {error && (
-        <p className="m-0 rounded-lg bg-[var(--warning-bg)] px-3 py-2 text-xs text-[var(--warning)]">
+        <p className="m-0 rounded-lg bg-warning-bg px-3 py-2 text-xs text-warning">
           {error}
         </p>
       )}
@@ -198,10 +198,10 @@ export function ConnectorEditor() {
             key={f.id}
             onClick={() => setFilter(f.id)}
             className={cn(
-              "rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors",
+              "rounded-lg px-3 py-1.5 text-ui font-medium transition-colors",
               filter === f.id
-                ? "bg-[var(--field)] text-foreground"
-                : "text-[var(--text2)] hover:text-foreground",
+                ? "bg-field text-foreground"
+                : "text-ink-2 hover:text-foreground",
             )}
           >
             {f.label}
@@ -211,21 +211,21 @@ export function ConnectorEditor() {
 
       {popular.length > 0 && (
         <section>
-          <h3 className="mb-[7px] ml-1 text-xs font-semibold uppercase tracking-[0.03em] text-[var(--text2)]">
+          <h3 className="mb-[7px] ml-1 text-xs font-semibold uppercase tracking-[0.03em] text-ink-2">
             Popular
           </h3>
           <div className="grid grid-cols-3 gap-3">
             {popular.map((c) => (
               <div
                 key={c.slug}
-                className="flex items-center gap-2 rounded-[11px] border-[0.5px] border-[var(--card-border)] bg-[var(--card-solid)] p-2.5 shadow-[0_1px_2px_rgba(0,0,0,.05)]"
+                className="flex items-center gap-2 rounded-card border-[0.5px] border-surface-border bg-surface p-2.5 shadow-card"
               >
                 <Logo connector={c} small />
                 {/* Three-up in a 686px pane, so a long name ellipsizes —
                     the title keeps it recoverable. */}
                 <span
                   title={c.name}
-                  className="min-w-0 flex-1 truncate text-[13px] font-medium"
+                  className="min-w-0 flex-1 truncate text-ui font-medium"
                 >
                   {c.name}
                 </span>
@@ -241,16 +241,16 @@ export function ConnectorEditor() {
       )}
 
       <section>
-        <div className="grid grid-cols-[1fr_90px_110px] items-center gap-4 border-b-[0.5px] border-[var(--sep)] px-1 pb-2 text-[13px] font-medium text-[var(--text2)]">
+        <div className="grid grid-cols-[1fr_90px_110px] items-center gap-4 border-b-[0.5px] border-separator px-1 pb-2 text-ui font-medium text-ink-2">
           <span>Connector</span>
           <span>Type</span>
           <span>Status</span>
         </div>
 
         {connected === null ? (
-          <p className="px-1 py-6 text-[13px] text-[var(--text2)]">Loading…</p>
+          <p className="px-1 py-6 text-ui text-ink-2">Loading…</p>
         ) : tableRows.length === 0 ? (
-          <p className="px-1 py-6 text-[13px] text-[var(--text2)]">
+          <p className="px-1 py-6 text-ui text-ink-2">
             {query.trim()
               ? `Nothing matches “${query}”.`
               : "Nothing connected yet. Search to add Gmail, GitHub, Slack, or anything else Composio supports."}
@@ -259,7 +259,7 @@ export function ConnectorEditor() {
           tableRows.map((c) => (
             <div
               key={c.slug}
-              className="group grid grid-cols-[1fr_90px_110px] items-center gap-4 border-b-[0.5px] border-[var(--sep)] px-1 py-2.5 last:border-b-0 hover:bg-[var(--hover)]"
+              className="group grid grid-cols-[1fr_90px_110px] items-center gap-4 border-b-[0.5px] border-separator px-1 py-2.5 last:border-b-0 hover:bg-hover"
             >
               <div className="flex min-w-0 items-center gap-2.5">
                 <Logo connector={c} />
@@ -267,12 +267,12 @@ export function ConnectorEditor() {
                   {c.name}
                 </span>
               </div>
-              <span className="text-[13px] text-[var(--text2)]">Web</span>
+              <span className="text-ui text-ink-2">Web</span>
               {c.connected ? (
                 <div className="flex items-center gap-3">
                   <svg
                     viewBox="0 0 16 16"
-                    className="size-4 shrink-0 text-[var(--text2)]"
+                    className="size-4 shrink-0 text-ink-2"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="1.8"
@@ -286,7 +286,7 @@ export function ConnectorEditor() {
                   {/* Hidden until hover so a connected row stays quiet, but
                       focusable so it is reachable without a mouse. */}
                   <button
-                    className="text-[13px] font-medium text-[var(--danger)] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50"
+                    className="text-ui font-medium text-danger opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50"
                     disabled={busy === c.slug}
                     onClick={() => setConfirming(c)}
                   >
@@ -304,7 +304,7 @@ export function ConnectorEditor() {
         )}
       </section>
 
-      <p className="m-0 text-xs text-[var(--text2)]">
+      <p className="m-0 text-xs text-ink-2">
         Connecting opens Composio's consent page in your browser. Come back to
         this window when you are done and the connector appears here.
       </p>
@@ -357,8 +357,8 @@ function ConnectButton({
       disabled={busy}
       onClick={onClick}
       className={cn(
-        "shrink-0 rounded-lg bg-[var(--field)] font-medium transition-colors hover:bg-[var(--accent)] hover:text-white disabled:opacity-50",
-        compact ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-[13px]",
+        "shrink-0 rounded-lg bg-field font-medium transition-colors hover:bg-brand hover:text-white disabled:opacity-50",
+        compact ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-ui",
       )}
     >
       {busy ? "Opening…" : "Connect"}
@@ -382,7 +382,7 @@ function Logo({
     return (
       <span
         className={cn(
-          "flex shrink-0 items-center justify-center rounded-lg bg-[var(--field)] text-xs font-semibold",
+          "flex shrink-0 items-center justify-center rounded-lg bg-field text-xs font-semibold",
           size,
         )}
       >

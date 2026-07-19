@@ -56,7 +56,7 @@ export function SettingsView({ section }: { section: SettingsSection }) {
     or(commands.launchAtLogin(), false, "reading launch-at-login").then(setAtLogin);
   }, []);
 
-  if (!settings) return <p className="text-[var(--text2)]">Loading…</p>;
+  if (!settings) return <p className="text-ink-2">Loading…</p>;
 
   // Every field is optional in TS because the Rust struct is #[serde(default)]
   // — a partial settings file is valid. Read through these rather than
@@ -292,14 +292,14 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                     min={0}
                     max={1}
                     step={0.1}
-                    className="flex-1 accent-[var(--accent)]"
+                    className="flex-1 accent-brand"
                     value={settings.soundVolume ?? 0.5}
                     onChange={(e) =>
                       update({ soundVolume: Number(e.target.value) })
                     }
                   />
                   <button
-                    className="shrink-0 text-[13px] font-medium text-[var(--accent)] active:scale-95"
+                    className="shrink-0 text-ui font-medium text-brand active:scale-95"
                     onClick={() =>
                       commands.previewSound(settings.soundVolume ?? 0.5)
                     }
@@ -347,7 +347,7 @@ export function SettingsView({ section }: { section: SettingsSection }) {
             {(settings.customSystemPrompt ?? "").trim() !== "" && (
               <Row label="Custom prompt in use">
                 <button
-                  className="text-[13px] font-medium text-[var(--accent)] active:scale-95"
+                  className="text-ui font-medium text-brand active:scale-95"
                   onClick={() => update({ customSystemPrompt: "" })}
                 >
                   Reset to default
@@ -427,7 +427,7 @@ export function SettingsView({ section }: { section: SettingsSection }) {
       )}
 
       <p
-        className={`text-xs text-[var(--text2)] transition-opacity duration-150 ${
+        className={`text-xs text-ink-2 transition-opacity duration-150 ${
           saved ? "opacity-100" : "opacity-0"
         }`}
       >

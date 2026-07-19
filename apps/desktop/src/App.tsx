@@ -14,7 +14,6 @@ import {
 } from "./features/settings/SettingsView";
 import { Onboarding } from "./features/onboarding/Onboarding";
 import { cn } from "@/lib/utils";
-import "./App.css";
 
 const PHASE_LABEL: Record<Phase, string> = {
   idle: "Ready",
@@ -146,19 +145,19 @@ export default function App() {
         {NAV.map((n, i) => (
           <div key={n.id} className="contents">
             {n.group === "settings" && NAV[i - 1]?.group === "app" && (
-              <div className="my-2 mx-2 h-px bg-[var(--sep)]" />
+              <div className="my-2 mx-2 h-px bg-separator" />
             )}
             <button
               onClick={() => setNav(n.id)}
               className={cn(
-                "flex h-[30px] w-full items-center gap-2.5 rounded-[7px] px-2 text-left text-[13px] font-medium transition-colors",
+                "flex h-[30px] w-full items-center gap-2.5 rounded-row px-2 text-left text-ui font-medium transition-colors",
                 nav === n.id
-                  ? "bg-[var(--accent)] font-semibold text-white shadow-[0_1px_2px_rgba(0,60,160,.35)]"
-                  : "hover:bg-[var(--field)]",
+                  ? "bg-brand font-semibold text-white shadow-accent"
+                  : "hover:bg-field",
               )}
             >
               <span
-                className="grid size-5 shrink-0 place-items-center rounded-[5px]"
+                className="grid size-5 shrink-0 place-items-center rounded-chip"
                 style={{ background: n.tint }}
               >
                 <svg
@@ -178,11 +177,11 @@ export default function App() {
           </div>
         ))}
 
-        <div className="mt-auto flex items-center gap-[7px] px-1.5 pt-3 text-[11px] leading-[1.6] text-[var(--text2)]">
+        <div className="mt-auto flex items-center gap-[7px] px-1.5 pt-3 text-[11px] leading-[1.6] text-ink-2">
           <span
             className={cn(
               "size-[7px] shrink-0 rounded-full",
-              phase === "idle" ? "bg-[#34c759]" : "bg-[var(--accent)]",
+              phase === "idle" ? "bg-toggle-on" : "bg-brand",
             )}
           />
           <span>
@@ -196,7 +195,7 @@ export default function App() {
 
       {/* Solid canvas: the grouped setting cards need an opaque backdrop for
           their hairline separators to read. */}
-      <div className="flex flex-col gap-5 overflow-y-auto border-l border-[var(--sep)] bg-[var(--bg)] px-[30px] pb-9 pt-7">
+      <div className="flex flex-col gap-5 overflow-y-auto border-l border-separator bg-canvas px-[30px] pb-9 pt-7">
         {!isSettings(nav) && (
           <h1 className="text-2xl font-bold leading-[1.1] tracking-[-0.02em]">
             {active.title}
@@ -204,7 +203,7 @@ export default function App() {
         )}
 
         {!hotkeysReady && (
-          <p className="rounded-lg bg-[var(--warning-bg)] px-4 py-3 text-sm leading-relaxed text-[var(--warning)]">
+          <p className="rounded-lg bg-warning-bg px-4 py-3 text-sm leading-relaxed text-warning">
             Accessibility permission is needed for hotkeys. Grant it in System
             Settings → Privacy &amp; Security → Accessibility, then restart.
           </p>
@@ -213,13 +212,13 @@ export default function App() {
         {nav === "notes" && <NotesView />}
         {isSettings(nav) && <SettingsView section={nav} />}
         {nav === "status" && (
-          <section className="rounded-[11px] border-[0.5px] border-[var(--card-border)] bg-[var(--card-solid)] p-5 shadow-[0_1px_2px_rgba(0,0,0,.05)]">
+          <section className="rounded-card border-[0.5px] border-surface-border bg-surface p-5 shadow-card">
             <p
               className={cn(
                 "text-lg",
                 (phase === "recording" || phase === "transcribing") &&
                   "text-primary",
-                phase === "error" && "text-[var(--warning)]",
+                phase === "error" && "text-warning",
                 phase !== "recording" &&
                   phase !== "transcribing" &&
                   phase !== "error" &&

@@ -22,11 +22,11 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: rgb(255 255 255 / 0.18);
+  background: var(--sep);
 }
 
 .ob__dot--on {
-  background: #0a84ff;
+  background: var(--accent);
 }
 
 .ob__title {
@@ -41,7 +41,7 @@
 
 .ob__lead {
   margin: 0 0 1rem;
-  color: #a1a1a6;
+  color: var(--text2);
   line-height: 1.55;
 }
 
@@ -57,21 +57,21 @@
   width: 100%;
   box-sizing: border-box;
   padding: 0.55rem 0.7rem;
-  border: 0.5px solid rgb(255 255 255 / 0.16);
+  border: 0.5px solid var(--card-border);
   border-radius: 8px;
-  background: rgb(255 255 255 / 0.06);
+  background: var(--field);
   color: inherit;
   font: inherit;
 }
 
 .ob__ok {
   margin: 0;
-  color: #30d158;
+  color: var(--success);
 }
 
 .ob__warn {
   margin: 0;
-  color: #ff9f0a;
+  color: var(--warning);
 }
 
 .ob__nav {
@@ -83,25 +83,25 @@
 
 .ob__btn {
   padding: 0.45rem 1rem;
-  border: 0.5px solid rgb(255 255 255 / 0.16);
+  border: 0.5px solid var(--card-border);
   border-radius: 8px;
-  background: rgb(255 255 255 / 0.06);
+  background: var(--field);
   color: inherit;
   font: inherit;
 }
 
 .ob__btn:hover {
-  background: rgb(255 255 255 / 0.12);
+  background: var(--field);
 }
 
 .ob__btn--go {
   border-color: transparent;
-  background: #0a84ff;
+  background: var(--accent);
   font-weight: 600;
 }
 
 .ob__btn--go:hover {
-  background: #409cff;
+  background: color-mix(in srgb, var(--accent) 80%, white);
 }
 
 .ob__btn:disabled {

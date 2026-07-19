@@ -1,0 +1,46 @@
+/* Document-level rules shared by every window.
+ *
+ * Each window used to carry its own copy of the same `html, body` reset in
+ * App.css, panel.css and overlay.css; they had drifted apart on `overflow` and
+ * `height` for no reason anyone recorded.
+ */
+
+body {
+  margin: 0;
+  /* Transparent everywhere: the main window shows macOS vibrancy through it,
+     and the overlay/panel windows are shaped by the card they contain. */
+  background: transparent;
+  color: var(--fg);
+}
+
+/* Windows that float over the desktop are click-through or drag-only, so
+   nothing in them should look selectable. */
+:root[data-surface="floating"] body {
+  height: 100%;
+  overflow: hidden;
+  user-select: none;
+}
+
+:root[data-surface="floating"] html {
+  height: 100%;
+}
+
+/* Tailwind v4's Preflight sets `cursor: default` on buttons to match the raw
+ * browser behaviour, which left every control in the app showing an arrow. Put
+ * the hand back once, rather than hanging cursor-pointer on each element.
+ *
+ * The role selectors cover the controls that are not <button>: Radix and cmdk
+ * render list options as divs. Disabled buttons keep the arrow — they are not
+ * clickable, and saying otherwise is a lie the pointer tells.
+ */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  [role="option"],
+  [role="menuitem"],
+  [role="switch"],
+  [role="tab"],
+  input[type="range"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
