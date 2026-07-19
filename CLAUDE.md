@@ -54,6 +54,52 @@ app, and the typed binding appears.
 never leaking into app code. `hotkey` is the model: one pure reducer, two
 thin OS backends.
 
+## Frontend architecture
+
+```
+src/styles/          the design system — every colour, size and curve
+  tokens.css         THE palette. A colour not here should not exist
+  base.css           document reset + cursor rules, shared by all windows
+  motion.css         durations, easings, named animations, reduced-motion
+  panel.css          ask/agent window chrome
+  overlay.css        the recording pill
+src/components/ui/   shared primitives. Nothing app-specific lives here
+src/features/<area>/ one folder per area of the app
+src/lib/             logic worth testing away from React
+```
+
+**Colours go in `tokens.css`, never in a component.** Tokens come in two
+tiers: raw macOS system colours (`--sys-blue`), then semantic names that say
+what a colour is *for* (`--card-solid`, `--sep`, `--danger`). Components use
+only the semantic tier, through the Tailwind utilities wired up in
+`index.css` — `bg-surface`, `text-ink-2`, `rounded-card`. An arbitrary value
+like `bg-[var(--card-solid)]` in a component means a token is missing a
+utility.
+
+**All four windows load the same palette.** Floating windows (overlay, ask,
+agent) declare `data-surface="floating"` on `<html>`, which scopes the
+always-dark overrides. It is declared in the markup rather than set from
+React so the palette is right on the first paint.
+
+**`cn()` must know about custom tokens.** `lib/utils.ts` extends
+tailwind-merge with our class groups. Without it, tailwind-merge sees
+`text-ui` (a size) and `text-brand` (a colour) as the same group and silently
+drops one — it typechecks, lints, builds, and renders the wrong colour. Add a
+token to `@theme inline`, add it to that list.
+
+**Motion is CSS; JavaScript only sets a target or restarts a keyframe.** The
+compositor then owns every frame, so animation does not stutter while React
+renders. Durations and curves come from `motion.css` — a component inventing
+its own `240ms cubic-bezier(...)` will drift out of step with everything
+around it. Reduced motion is one global switch that collapses durations to
+1ms rather than setting `animation: none`, which can strand an element on its
+opening frame.
+
+**Before adding markup, check `components/ui/`.** The search field, the
+grouped card, the hairline row, the pane title and every button shape already
+exist. Each of them was extracted after being copy-pasted into two or three
+files and drifting apart.
+
 ## Conventions
 
 - **Comments say why, not what.** A comment earns its place by explaining a
