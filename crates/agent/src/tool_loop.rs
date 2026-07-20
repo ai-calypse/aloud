@@ -12,6 +12,7 @@ use aloud_llm::{LlmClient, LlmError, Message};
 use anyhow::Result;
 use std::future::Future;
 use std::time::Duration;
+use tracing::Instrument;
 
 const MAX_ROUNDS: usize = 5;
 
@@ -112,6 +113,11 @@ where
                 (!is_last).then_some(schemas.as_slice()),
                 Some(0.3),
             )
+            // Per round, not per run: a command that takes three rounds to
+            // settle spends three model calls, and "the model was slow" and
+            // "the model went round twice" are different problems with
+            // different fixes.
+            .instrument(tracing::info_span!("tool_select", model, round))
         };
 
         // Ported from `AskService.requestChatMessage`: a 429 mid-loop is
@@ -126,8 +132,16 @@ where
                     on_event(LoopEvent::RateLimited {
                         seconds: wait.as_secs(),
                     });
-                    tokio::time::sleep(wait).await;
-                    chat().await?
+                    async {
+                        tokio::time::sleep(wait).await;
+                        chat().await
+                    }
+                    .instrument(tracing::info_span!(
+                        "tool_select_retry",
+                        round,
+                        waited_s = wait.as_secs()
+                    ))
+                    .await?
                 }
                 _ => return Err(e),
             },
@@ -169,15 +183,42 @@ where
             // A write waits for an explicit yes. A rejected write is reported to
             // the model as a normal result so it can respond ("Okay, cancelled")
             // rather than erroring the whole command.
-            let result = if is_write(&name, tools) && !confirm(name.clone(), args.clone()).await {
+            // The toolkit drives the latency profile — a Gmail send and a
+            // Calendar create behave nothing alike — so it is a field on the
+            // exec span rather than something to infer from the tool name.
+            let toolkit = tools
+                .iter()
+                .find(|t| t.name == name)
+                .map(|t| t.toolkit.as_str())
+                .unwrap_or("unknown");
+
+            // Confirmation is the user thinking, not the app working. Its own
+            // span so it can be subtracted: left inside the run it would put a
+            // 40s "latency" spike on a pipeline that was never running.
+            let declined = is_write(&name, tools)
+                && !confirm(name.clone(), args.clone())
+                    .instrument(tracing::info_span!("confirm", tool = %name, toolkit))
+                    .await;
+
+            let result = if declined {
                 on_event(LoopEvent::ToolCallResult {
                     name: name.clone(),
                     success: false,
                 });
                 r#"{"error":"user declined this action"}"#.to_string()
             } else {
-                let result = composio.execute(&name, &args).await;
+                let span = tracing::info_span!(
+                    "composio_exec",
+                    tool = %name,
+                    toolkit,
+                    ok = tracing::field::Empty
+                );
+                let result = composio
+                    .execute(&name, &args)
+                    .instrument(span.clone())
+                    .await;
                 let success = tool_succeeded(&result);
+                span.record("ok", success);
                 any_failed |= !success;
                 on_event(LoopEvent::ToolCallResult {
                     name: name.clone(),
