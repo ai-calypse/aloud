@@ -18,6 +18,11 @@ bottom** and the stack unwinds itself.
 | **#71** | `feat/phase-4-run-log-v2` | Phase 4 — Run Log pane |
 | **#72** | `feat/phase-6-pipeline` | Phase 6 — instruction guard, offline fallback, typed Ask |
 | **#73** | `feat/phase-7-overlay-display` | Phase 7 — overlay style, display picker, permissions, build stamp |
+| **#74** | `docs/roadmap-and-morning-report` | This report, and seven false doc claims corrected |
+| **#75** | `feat/phase-5-audio-persistence` | Phase 5 — audio kept on a budget that evicts |
+| **#76** | `feat/phase-11-surfacing` | Phase 11 — meetings pane, bundle-ID rules, debug pane |
+| **#77** | `feat/phase-9-screen-context` | Phase 9 — screen context for the cleanup prompt |
+| **#78** | `feat/phase-10-streaming` | Phase 10 — transcribe while you speak (off by default) |
 
 **Close #62.** Its Run Log pane is not in the tree; #71 supersedes it.
 
@@ -107,21 +112,31 @@ deliberately noisy audio, and it trades accuracy on hard audio for nothing.
 
 ## Roadmap progress
 
-**Complete and in review:** Phases 2, 3, 4, 6, 7 — plus the latency work,
-which is not a phase.
+**Complete and in review: every phase except 8 and 12.** Phases 2, 3, 4, 5, 6,
+7, 9, 10, 11 — plus the latency work, which is not a phase.
 
-**Not done:** 5, 8, 9, 10, 11. Honest reasons:
+**Phase 8 (updates) is the one thing left, and it is not a coding task.** It
+is blocked on generating a signing keypair, which is a decision about key
+custody — where the private key lives, who can release. Not one to make on
+your behalf overnight. Everything below it (8.2-8.5) is unreachable until it
+exists: with no pubkey, `check()` returns before the network and every state
+is untestable.
 
-- **5 (audio persistence)** — now genuinely unblocked. #71 landed the
-  `PRAGMA user_version` migration it was waiting on; this is the next one to
-  pick up.
-- **8 (updates)** — blocked on generating a signing keypair. That is a decision
-  about key custody, not code, and not one to make on your behalf overnight.
-- **9 (screen context)** — XL, a new crate, and a TCC permission the app has
-  never requested.
-- **10 (streaming)** — a pipeline rewrite. Smaller than the roadmap thinks (see
-  below), but still not an overnight job.
-- **11 (surfacing)** — moderate, and the least urgent.
+**Phase 12 (cloud key provisioning) stays deferred**, as the roadmap intends —
+it is only needed when there is a shipped build.
+
+Two phases came in smaller than the roadmap thought, and one item was
+deliberately skipped:
+
+- **10 was not a `crates/audio` project.** That crate already streams and is in
+  production use by meeting mode. The real work was one chunk-level entry point
+  in `crates/transcribe` plus the pipeline branch.
+- **11.2 (onboarding) was skipped on purpose.** It wraps features from other
+  phases and the roadmap says sequence it last. Its dependency list in
+  ROADMAP.md was corrected instead — five of its seven steps were already
+  callable.
+- **9.3 was skipped** — the context settings surface is not worth building
+  before 9.1/9.2 have been used once.
 
 ### Seven claims in the docs that were false
 
@@ -197,12 +212,24 @@ Stated plainly, because the repo's convention is to say so:
 
 ## Where to start
 
-1. Merge the stack top to bottom; close #62.
-2. Pick up **Phase 5** — unblocked now, and the migration it needs exists.
-3. Decide the **Phase 8 keypair** question; nothing below it can be tested
-   until you do.
-4. Next time the machine is unlocked, run
-   `cargo run -p aloud-selection --example frontmost`. It now prints the AX
-   error code and will confirm the app-rules fix in one line.
+1. **Drive the stack once in a real window before merging, not after.** This
+   is the strongest recommendation here. Every branch is green on tests,
+   clippy, typecheck and lint — but nothing was clicked, no meeting was
+   recorded end to end, no audio was played back, no overlay was watched. The
+   two worst bugs found overnight (a meeting that re-armed itself, a prompt
+   injection through a window title) were both in paths their own authors had
+   already flagged as never exercised. One unlocked session with the app open
+   would be worth more than another round of static review.
+2. Merge the stack top to bottom; close #62.
+3. Decide the **Phase 8 keypair** question — it is the only thing standing
+   between here and a complete roadmap, and it is a decision rather than code.
+4. Two single-command checks worth running while the machine is unlocked:
+   - `cargo run -p aloud-selection --example frontmost` — prints the AX error
+     code and confirms the app-rules fix in one line.
+   - `cargo run -p aloud-transcribe --example stream_dictation` **while
+     talking** — it prints the streamed and batch transcripts side by side, so
+     one run answers both open questions about Phase 10 (the latency win and
+     the accuracy cost). Every run overnight was in a silent room, which is why
+     streaming ships off by default.
 
 `PROGRESS.md` has the detail.
