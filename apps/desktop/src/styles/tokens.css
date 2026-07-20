@@ -21,6 +21,7 @@
   --sys-pink: #ff375f;
   --sys-indigo: #5856d6;
   --sys-teal: #64d2ff;
+  --sys-purple: #af52de;
   --sys-grey: #8e8e93;
 
   /* --- Surfaces --------------------------------------------------------- */
@@ -92,6 +93,7 @@
     --sys-green: #30d158;
     --sys-red: #ff453a;
     --sys-teal: #64d2ff;
+    --sys-purple: #bf5af2;
 
     --bg: #1c1c1e;
     --card-solid: #2c2c2e;

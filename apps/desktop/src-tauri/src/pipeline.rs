@@ -790,6 +790,20 @@ impl Pipeline {
             .map_err(|_| anyhow::anyhow!("history lock poisoned"))?
             .recent(limit)
     }
+
+    pub fn delete_history_entry(&self, id: i64) -> Result<()> {
+        self.history
+            .lock()
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?
+            .delete(id)
+    }
+
+    pub fn clear_history(&self) -> Result<()> {
+        self.history
+            .lock()
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?
+            .clear()
+    }
 }
 
 /// Builds the configured transcription engine. Shared by the pipeline and

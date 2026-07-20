@@ -4,7 +4,7 @@
 //! resembling logic belongs in a crate where it can be tested.
 
 use crate::AppState;
-use aloud_store::{timings::Span, Settings, Stats};
+use aloud_store::{history::Entry, timings::Span, Settings, Stats};
 use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
@@ -354,4 +354,26 @@ pub fn recent_timings(state: State<'_, AppState>, utterances: u32) -> CmdResult<
         .lock()
         .map_err(|_| "timings lock poisoned".to_string())?;
     to_string_err(timings.recent(utterances as usize))
+}
+
+/// The newest `limit` dictations, for the Run Log pane.
+#[tauri::command]
+#[specta::specta]
+pub fn history_entries(state: State<'_, AppState>, limit: u32) -> CmdResult<Vec<Entry>> {
+    to_string_err(state.pipeline.history(limit as usize))
+}
+
+/// Row ids cross the boundary as i32 because specta refuses to export i64
+/// (see [`Entry`]). SQLite hands out ids by insertion count and retention
+/// caps the table in the hundreds, so 2^31 is not a reachable ceiling.
+#[tauri::command]
+#[specta::specta]
+pub fn delete_history_entry(state: State<'_, AppState>, id: i32) -> CmdResult<()> {
+    to_string_err(state.pipeline.delete_history_entry(id as i64))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn clear_history(state: State<'_, AppState>) -> CmdResult<()> {
+    to_string_err(state.pipeline.clear_history())
 }

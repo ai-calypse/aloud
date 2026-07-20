@@ -50,6 +50,7 @@ const NAV: {
   { id: "hotkeys", title: "Hotkeys", group: "settings", tint: "var(--sys-indigo)", icon: "M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" },
   { id: "macros", title: "Voice Macros", group: "settings", tint: "var(--sys-green)", icon: "M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3ZM5 11a7 7 0 0 0 14 0M12 18v4" },
   { id: "rules", title: "App Rules", group: "settings", tint: "var(--sys-blue)", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM4 9h16M8 6h.01" },
+  { id: "runlog", title: "Run Log", group: "settings", tint: "var(--sys-purple)", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM8 8h8M8 12h8M8 16h5" },
   { id: "prompts", title: "Prompts", group: "settings", tint: "var(--sys-pink)", icon: "M4 4h16v12H7l-3 3V4ZM8 9h8M8 12h5" },
   { id: "connectors", title: "Connectors", group: "settings", tint: "var(--sys-teal)", icon: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" },
 ];
@@ -59,6 +60,7 @@ const SETTINGS_IDS: SettingsSection[] = [
   "hotkeys",
   "macros",
   "rules",
+  "runlog",
   "prompts",
   "connectors",
 ];

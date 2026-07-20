@@ -117,6 +117,14 @@ impl History {
         Ok(())
     }
 
+    /// Removes one entry. A missing id is not an error: the Run Log paints
+    /// from a snapshot, so two windows deleting the same row must both succeed.
+    pub fn delete(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM history WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
     pub fn clear(&self) -> Result<()> {
         self.conn.execute("DELETE FROM history", [])?;
         Ok(())
@@ -183,6 +191,28 @@ mod tests {
             reopened.recent(10).unwrap()[0].final_transcript,
             "persisted"
         );
+    }
+
+    #[test]
+    fn delete_removes_only_that_entry() {
+        let history = History::open_in_memory().unwrap();
+        insert(&history, 100, "keep", 50);
+        insert(&history, 200, "drop", 50);
+
+        let doomed = history.recent(10).unwrap()[0].id;
+        history.delete(doomed).unwrap();
+
+        let left = history.recent(10).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].final_transcript, "keep");
+    }
+
+    #[test]
+    fn deleting_a_missing_id_is_not_an_error() {
+        let history = History::open_in_memory().unwrap();
+        insert(&history, 100, "kept", 50);
+        history.delete(9999).unwrap();
+        assert_eq!(history.recent(10).unwrap().len(), 1);
     }
 
     #[test]

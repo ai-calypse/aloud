@@ -5,6 +5,7 @@ import { HotkeyEditor } from "./HotkeyEditor";
 import { MacroEditor } from "./MacroEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
 import { ConnectorEditor } from "./ConnectorEditor";
+import { RunLogView } from "./RunLogView";
 import {
   Group,
   PaneTitle,
@@ -31,6 +32,7 @@ export type SettingsSection =
   | "hotkeys"
   | "macros"
   | "rules"
+  | "runlog"
   | "prompts"
   | "connectors";
 
@@ -421,6 +423,8 @@ export function SettingsView({ section }: { section: SettingsSection }) {
           />
         </>
       )}
+
+      {section === "runlog" && <RunLogView />}
 
       {section === "rules" && (
         <AppRuleEditor
