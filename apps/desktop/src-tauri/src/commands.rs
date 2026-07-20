@@ -160,6 +160,10 @@ pub async fn test_prompt(
         fallback: Some(settings.fallback_model.as_str()),
         custom_prompt: &prompt,
         vocabulary: &settings.vocabulary,
+        // The Prompts pane runs against a typed sample and the Run Log against
+        // a stored one; in neither case does the window in front now describe
+        // the moment being tested.
+        context: "",
         output_language: &settings.output_language,
         instruction_guard: settings.instruction_guard_enabled,
     };

@@ -28,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
         model: "openai/gpt-oss-20b",
         fallback: None,
         custom_prompt,
+        context: "",
         vocabulary: &[],
         output_language,
         instruction_guard: true,

@@ -1,0 +1,20 @@
+[package]
+name = "aloud-screen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "What is on screen right now, as a sentence the cleanup prompt can read"
+
+[dependencies]
+aloud-permissions = { path = "../permissions" }
+aloud-selection = { path = "../selection" }
+tracing.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Same trick `aloud-selection` uses for app icons: base64 a PNG into a data URI.
+base64 = "0.22"
+
+[dev-dependencies]
+# The example decodes its own data URI back to a file so the capture can be
+# looked at. Not target-gated: it has to build wherever the example does.
+base64 = "0.22"

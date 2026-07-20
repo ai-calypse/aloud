@@ -588,6 +588,23 @@ impl Pipeline {
         // the focused app is whatever the paste chord left in front.
         let app_name = tauri::async_runtime::spawn_blocking(aloud_selection::frontmost_app);
 
+        // Screen context, for the same two reasons and with the same timing:
+        // it describes the window being dictated into, which is not the window
+        // in front once the paste chord has run. Only when the user opted in —
+        // it leaves the machine with the transcript.
+        //
+        // ponytail: this repeats the frontmost-app read the task above just
+        // did, costing a second Accessibility round-trip on a path that is off
+        // by default. Threading the already-read name into `aloud_screen` is
+        // the upgrade if the context setting ever defaults on.
+        let context = {
+            let settings = self.settings();
+            settings.context_enabled.then(|| {
+                let screenshot = settings.context_screenshot_enabled;
+                tauri::async_runtime::spawn_blocking(move || aloud_screen::capture(screenshot))
+            })
+        };
+
         let (raw, settings, wav) = self.capture(recorder, true).await?;
         let mut wav = KeptWav(wav);
 
@@ -617,7 +634,15 @@ impl Pipeline {
             focused.as_ref().and_then(|f| f.bundle_id.as_deref()),
         );
 
-        let final_text = self.post_process(&raw, &effective).await;
+        let context = match context {
+            Some(handle) => handle.await.ok().unwrap_or_default(),
+            None => aloud_screen::Context::default(),
+        };
+        if !context.summary.is_empty() {
+            tracing::info!(context = %context.summary, "screen context");
+        }
+
+        let final_text = self.post_process(&raw, &effective, &context.summary).await;
         if final_text.trim().is_empty() {
             return Ok(Outcome::NoSpeech);
         }
@@ -654,7 +679,7 @@ impl Pipeline {
     /// Cleans up the transcript, falling back to the raw text if the LLM is
     /// unavailable: pasting the unpolished words beats pasting nothing. Voice
     /// macros expand last, on whichever text we settled on.
-    async fn post_process(&self, raw: &str, settings: &Settings) -> String {
+    async fn post_process(&self, raw: &str, settings: &Settings, context: &str) -> String {
         let cleaned =
             if !settings.post_processing_enabled || settings.groq_api_key.trim().is_empty() {
                 raw.to_string()
@@ -666,6 +691,7 @@ impl Pipeline {
                     fallback: Some(settings.fallback_model.as_str()),
                     custom_prompt: &settings.custom_system_prompt,
                     vocabulary: &settings.vocabulary,
+                    context,
                     output_language: &settings.output_language,
                     instruction_guard: settings.instruction_guard_enabled,
                 };
@@ -1162,7 +1188,9 @@ impl Pipeline {
             bail!("the recording transcribed to nothing — it may be silence");
         }
 
-        let final_text = self.post_process(&raw, &settings).await;
+        // No context: this re-runs a recording made at some earlier moment, and
+        // whatever is on screen now describes a different one.
+        let final_text = self.post_process(&raw, &settings, "").await;
         // Both halves, unlike a cleanup retry: this run really does have a new
         // transcriber output, and leaving the old "Heard" next to the new
         // "Pasted" would describe two different runs.

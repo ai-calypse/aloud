@@ -53,9 +53,26 @@ pub fn all() -> Vec<PermissionStatus> {
     .into_iter()
     .map(|permission| PermissionStatus {
         permission,
-        granted: granted(permission),
+        granted: is_granted(permission),
     })
     .collect()
+}
+
+/// Whether `permission` is granted right now, without prompting.
+///
+/// Public so a capability can preflight itself rather than discovering the
+/// denial as a confusing success: `screencapture` with Screen Recording
+/// denied still writes a PNG, it is just a picture of the wallpaper.
+pub fn is_granted(permission: Permission) -> bool {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = permission;
+        true
+    }
+    #[cfg(target_os = "macos")]
+    {
+        granted(permission)
+    }
 }
 
 /// Opens the System Settings pane that grants `permission`.

@@ -383,6 +383,20 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                     onChange={(c) => update({ instructionGuardEnabled: c })}
                   />
                 </Row>
+                {/* Off by default, and it has to stay that way: this sends the
+                    title of whatever window has focus — a document name, a
+                    chat participant, a URL — alongside every dictation. */}
+                <Row
+                  label="Use screen context"
+                  hint="Tell cleanup which app and window you are in, so it spells names the way they are already spelled on screen. Sends the window title with your dictation."
+                  className="py-[11px]"
+                >
+                  <Toggle
+                    checked={settings.contextEnabled ?? false}
+                    label="Use screen context"
+                    onChange={(c) => update({ contextEnabled: c })}
+                  />
+                </Row>
                 <Row
                   label="Vocabulary"
                   hint="Names the model should spell correctly"

@@ -30,6 +30,13 @@ pub struct Options<'a> {
     pub custom_prompt: &'a str,
     /// Proper nouns and jargon the transcriber tends to mangle.
     pub vocabulary: &'a [String],
+    /// What is on screen, as one line — see `aloud_screen`. Blank sends none.
+    ///
+    /// The prompt has expected this since it was ported: "if the context
+    /// clearly shows email recipients or participants, use those visible names
+    /// as a strong spelling reference". Nothing ever supplied it, so that rule
+    /// and the ones under it were dead text in every request.
+    pub context: &'a str,
     /// Language the *pasted* text should be in, blank to leave it alone.
     ///
     /// A post-processing instruction, never a transcription parameter — and
@@ -61,7 +68,7 @@ pub async fn clean(options: Options<'_>, raw: &str) -> Result<String> {
             options.custom_prompt,
             options.output_language,
         )),
-        Message::user(user_message(raw, options.vocabulary)),
+        Message::user(user_message(raw, options.vocabulary, options.context)),
     ];
 
     let cleaned = client
@@ -167,13 +174,24 @@ fn system_prompt(custom: &str, output_language: &str) -> String {
     prompt
 }
 
-/// The transcript, prefixed with the vocabulary when there is one.
-fn user_message(raw: &str, vocabulary: &[String]) -> String {
-    if vocabulary.is_empty() {
-        raw.to_string()
-    } else {
-        format!("VOCABULARY: {}\n\n{raw}", vocabulary.join(", "))
+/// The transcript, prefixed with the vocabulary and the on-screen context when
+/// there is either.
+///
+/// `CONTEXT: "…"` verbatim from Swift's `process` (PostProcessingService.swift
+/// :518) — the prompt's context rules were written against that exact label,
+/// and a blank one there reads as "the screen is empty", so an absent context
+/// omits the line rather than sending empty quotes.
+fn user_message(raw: &str, vocabulary: &[String], context: &str) -> String {
+    let mut message = String::new();
+    if !vocabulary.is_empty() {
+        message.push_str(&format!("VOCABULARY: {}\n\n", vocabulary.join(", ")));
     }
+    let context = context.trim();
+    if !context.is_empty() {
+        message.push_str(&format!("CONTEXT: \"{context}\"\n\n"));
+    }
+    message.push_str(raw);
+    message
 }
 
 /// The prompt specifies [`EMPTY_SENTINEL`] for filler-only input, which means
@@ -218,6 +236,32 @@ mod tests {
         // Whitespace is not a word; this would otherwise buy a request for
         // nothing on a transcript of pure spaces.
         assert!(is_too_short("   \n  "));
+    }
+
+    /// The failure this guards: the prompt's context rules key on the literal
+    /// `CONTEXT: "…"` label, and an empty one asserts the screen is blank —
+    /// which would make the model drop the recipient spellings it is being
+    /// told to trust. Off means the line is absent, not present and empty.
+    #[test]
+    fn an_absent_context_omits_the_line_rather_than_sending_empty_quotes() {
+        assert_eq!(user_message("hi there", &[], ""), "hi there");
+        assert_eq!(user_message("hi there", &[], "   "), "hi there");
+        assert!(!user_message("hi there", &[], "").contains("CONTEXT"));
+    }
+
+    /// Context and vocabulary are separate blocks and must both survive: an
+    /// earlier shape returned the raw transcript unchanged whenever the
+    /// vocabulary was empty, which would have dropped the context silently.
+    #[test]
+    fn context_and_vocabulary_both_reach_the_model() {
+        let with_both = user_message("hi aysha", &["Aloud".into()], "Mail — Re: Q3");
+        assert!(with_both.contains("VOCABULARY: Aloud"));
+        assert!(with_both.contains(r#"CONTEXT: "Mail — Re: Q3""#));
+        assert!(with_both.ends_with("hi aysha"));
+
+        let context_only = user_message("hi aysha", &[], "Mail — Re: Q3");
+        assert!(context_only.contains(r#"CONTEXT: "Mail — Re: Q3""#));
+        assert!(context_only.ends_with("hi aysha"));
     }
 
     /// The sentinel reaching the paste path types "EMPTY" into the document.
@@ -273,9 +317,9 @@ mod tests {
     /// just with the user's proper nouns spelled wrong.
     #[test]
     fn vocabulary_is_prefixed_only_when_there_is_one() {
-        assert_eq!(user_message("hello", &[]), "hello");
+        assert_eq!(user_message("hello", &[], ""), "hello");
         assert_eq!(
-            user_message("hello", &["Aloud".to_string(), "Tauri".to_string()]),
+            user_message("hello", &["Aloud".to_string(), "Tauri".to_string()], ""),
             "VOCABULARY: Aloud, Tauri\n\nhello"
         );
     }
@@ -291,6 +335,7 @@ mod tests {
             fallback: None,
             custom_prompt: "",
             vocabulary: &[],
+            context: "",
             output_language: "",
             instruction_guard: true,
         };

@@ -82,6 +82,25 @@ pub fn frontmost_app() -> Option<FocusedApp> {
     }
 }
 
+/// The title of the focused window, e.g. "Re: Q3 planning — Mail".
+///
+/// The cheapest real signal about *what* the user is looking at, which is what
+/// the cleanup prompt's context clause asks for: a mail window's title carries
+/// the subject and often the correspondent. None when there is no titled
+/// window, which many apps' menus and sheets are.
+pub fn frontmost_window_title() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::frontmost_window_title().filter(|t| !t.trim().is_empty())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // ponytail: Windows returns None, so screen context there is the app
+        // name alone. `GetWindowTextW(GetForegroundWindow())` is the upgrade.
+        None
+    }
+}
+
 /// Staged accessors behind the frontmost-app read, for the `frontmost`
 /// example. Not part of the API the app uses — `frontmost_app` is — but the
 /// read failed silently and identically for a permission denial and for a bad
@@ -175,6 +194,7 @@ mod macos {
     #[link(name = "ApplicationServices", kind = "framework")]
     extern "C" {
         fn AXUIElementCreateSystemWide() -> AXUIElementRef;
+        fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
         fn AXUIElementCopyAttributeValue(
             element: AXUIElementRef,
             attribute: CFStringRef,
@@ -255,6 +275,28 @@ mod macos {
             name: bundle_name(&path)?,
             bundle_id: bundle_path(&path).as_deref().and_then(bundle_id),
         })
+    }
+
+    /// The focused window's `AXTitle`.
+    ///
+    /// Read off `AXFocusedWindow` of the focused *application* element, not
+    /// off the system-wide element: the system-wide `AXFocusedWindow` is not
+    /// an attribute anything implements, and asking for it returns None for
+    /// every app — the same trap `frontmost_app` fell into with `AXTitle`.
+    pub(super) fn frontmost_window_title() -> Option<String> {
+        let pid = frontmost_pid()?;
+        // SAFETY: an application element for a live pid; released below.
+        let app = unsafe { AXUIElementCreateApplication(pid) };
+        if app.is_null() {
+            return None;
+        }
+        let window = copy_element(app, "AXFocusedWindow");
+        unsafe { CFRelease(app as CFTypeRef) };
+        let window = window?;
+
+        let title = copy_string(window, "AXTitle");
+        unsafe { CFRelease(window as CFTypeRef) };
+        title
     }
 
     /// The focused application's process id.

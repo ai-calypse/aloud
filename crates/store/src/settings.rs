@@ -93,6 +93,22 @@ pub struct Settings {
     pub instruction_guard_enabled: bool,
     /// Proper nouns and jargon fed to the model as a spelling reference.
     pub vocabulary: Vec<String>,
+    /// Tell cleanup what app and window are in front, so it can spell a
+    /// recipient's name the way the screen already spells it.
+    ///
+    /// Off by default. It sends the title of whatever window has focus to a
+    /// third party on every dictation, and a window title is not always
+    /// innocuous — it is a document name, a chat participant, a URL. That is
+    /// an opt-in, not something to turn on behind the user's back.
+    pub context_enabled: bool,
+    /// Also capture a screenshot with the context.
+    ///
+    /// Off by default, and separately from [`context_enabled`], because it
+    /// needs the Screen Recording grant Aloud has never asked for. Nothing in
+    /// the dictation path reads the image yet — see `aloud_screen::Context`.
+    ///
+    /// [`context_enabled`]: Settings::context_enabled
+    pub context_screenshot_enabled: bool,
     /// Spoken shorthand that expands to canned text after cleanup.
     pub macros: Vec<crate::macros::Macro>,
     /// Per-app behaviour overrides, applied by the focused app's name.
@@ -178,6 +194,8 @@ impl Default for Settings {
             output_language: String::new(),
             instruction_guard_enabled: true,
             vocabulary: Vec::new(),
+            context_enabled: false,
+            context_screenshot_enabled: false,
             macros: Vec::new(),
             app_rules: Vec::new(),
             command_mode_enabled: true,

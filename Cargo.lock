@@ -50,6 +50,7 @@ dependencies = [
  "aloud-notes",
  "aloud-paste",
  "aloud-permissions",
+ "aloud-screen",
  "aloud-selection",
  "aloud-store",
  "aloud-transcribe",
@@ -181,6 +182,16 @@ dependencies = [
  "anyhow",
  "serde",
  "specta",
+]
+
+[[package]]
+name = "aloud-screen"
+version = "0.1.0"
+dependencies = [
+ "aloud-permissions",
+ "aloud-selection",
+ "base64 0.22.1",
+ "tracing",
 ]
 
 [[package]]

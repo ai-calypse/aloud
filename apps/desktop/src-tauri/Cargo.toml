@@ -27,6 +27,7 @@ aloud-notes = { path = "../../../crates/notes" }
 aloud-paste = { path = "../../../crates/paste" }
 aloud-permissions = { path = "../../../crates/permissions" }
 aloud-volume = { path = "../../../crates/volume" }
+aloud-screen = { path = "../../../crates/screen" }
 aloud-selection = { path = "../../../crates/selection" }
 aloud-store = { path = "../../../crates/store" }
 aloud-transcribe = { path = "../../../crates/transcribe" }
