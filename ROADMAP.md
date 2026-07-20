@@ -13,6 +13,95 @@ result goes in the PR body.
 
 ---
 
+## Scope change: no BYOK
+
+**Users do not supply API keys.** This is a production app, not a developer
+tool, so every key entry surface comes out and the app ships with credentials
+it obtains itself.
+
+That inverts a few things this roadmap assumed, and it adds work that has to
+happen *before* the UI removal, not after — see **Phase A**. Deleting the key
+fields is the easy half; deciding where keys come from is the real task, and
+it is a security decision more than a product one.
+
+### What this removes
+
+| Was | Now |
+|---|---|
+| 0.1 Gemini key field | **revert** — merged in #59, has to come back out |
+| 1.6 API key validation on save | **deleted** — nothing to validate |
+| Groq key row (General → Transcription) | remove |
+| Gemini + Composio rows (Connectors → Keys) | remove; the whole Keys group goes |
+| Onboarding key step (`Onboarding.tsx:107-120`) | remove — one of the 4 steps is entirely this |
+| README "Bringing Cerebras back" step 3 (add a UI row) | rewrite against whatever Phase A picks |
+
+### What this does *not* remove
+
+`fill_keys_from_env` in `settings.rs` stays useful for development — a `.env`
+at the repo root configuring a dev build is unrelated to what users get. Keep
+it, but it must no longer be the *only* mechanism, because it does nothing in
+a shipped `.app`.
+
+---
+
+## Phase A — Key provisioning (blocks the BYOK removal)
+
+**Do this before deleting any UI.** Removing the key fields without a
+replacement ships an app that cannot transcribe.
+
+### A.1 — Decide how a shipped build gets credentials · **decision, then L**
+
+Three options, and they are not equivalent:
+
+1. **Compile keys into the binary** (`option_env!` at build time). Simplest,
+   and **the one to avoid**: a desktop binary is handed to the user, and
+   `strings Aloud.app/Contents/MacOS/aloud` recovers the key in seconds.
+   Obfuscation does not change this — anyone who wants the key gets it, then
+   bills it to you. Only defensible for a key that is already public or
+   free-tier and rate-limited per-device.
+
+2. **Proxy through a backend you run.** The app authenticates to your service;
+   your service holds the provider keys and forwards. Keys never ship. This is
+   the standard answer for a production desktop app and almost certainly the
+   right one, but it is real infrastructure: a service, auth, rate limiting per
+   user, and an outage in it takes dictation down.
+
+3. **Fetch short-lived credentials at runtime** from a backend you run. A
+   middle path — still needs the backend and the auth, but keeps the audio path
+   direct to the provider, so your service is not in the hot path for every
+   utterance and does not see transcript content.
+
+**Recommendation: (2) or (3).** Both need the same prerequisite — a backend and
+a notion of user identity — which the app does not have today. That is the
+actual size of this task, and it dwarfs everything else in the roadmap.
+
+- **Done** — a build with no `.env` and no user input transcribes successfully,
+  and no provider key appears in `strings` over the bundle. That second half is
+  the acceptance test; write it as a check, not a hope.
+
+### A.2 — Local-only fallback when there is no key path · S
+- **Scope** — local whisper already needs no key (`settings.rs`, engine defaults
+  to `Local`). Make it the guaranteed floor: if credentials cannot be obtained,
+  the app still dictates on-device rather than showing an error.
+- **Done** — an offline, unauthenticated launch still works. This also makes
+  A.1 less load-bearing, and overlaps with 6.2's offline fallback.
+
+### A.3 — Remove the key surfaces · S
+- **Scope** — the table above. Fields stay in `Settings` (harmless, and
+  `fill_keys_from_env` still fills them for dev); only the UI goes.
+- **Done** — no key input anywhere in the app. Blocked on A.1 landing.
+
+### A.4 — Stop storing keys in plaintext · M
+- **Scope** — worth reconsidering now. `settings.json` holds keys in the app
+  data dir in cleartext, deliberately, matching the Swift app. That was a
+  defensible call when the key was the *user's own*; it is a different call for
+  a credential you issue. If A.1 lands on (3), the short-lived token should go
+  in the OS keychain, not `settings.json`.
+- **Done** — no long-lived credential in a plaintext file. Skip entirely if A.1
+  lands on (2), since then nothing sensitive reaches the client.
+
+---
+
 ## Corrections to the parity audit
 
 Two claims in the source audit are wrong against the code, and the plan below
@@ -42,14 +131,10 @@ from the frontend.
 
 Small, independent, no design decisions. Good first branch.
 
-### 0.1 — Gemini API key field · S
-- **Scope** — `apps/desktop/src/features/settings/SettingsView.tsx:376-397`
-  (the `Group title="Keys"` at the bottom of the Connectors pane). The field
-  already exists end to end: `crates/store/src/settings.rs:32`, env fallback at
-  `:169`, TS type at `bindings.ts:307`.
-- **Done** — a Gemini row sits alongside Cerebras and Composio, using the same
-  `rowInput` from `components/ui/rows.tsx`. Setting it makes agent mode work
-  without editing `settings.json` or exporting `GEMINI_API_KEY`.
+### 0.1 — ~~Gemini API key field~~ · **shipped in #59, now to be reverted**
+Superseded by the no-BYOK decision before it was ever used. The row comes out
+in A.3. The Rust field stays — `fill_keys_from_env` still needs it for dev
+builds; only the input goes.
 
 ### 0.2 — ~~Fix the Cerebras/Gemini label~~ → **delete `cerebras_api_key`** · S
 Relabelling was the wrong fix. `grep` finds exactly three references to
@@ -135,12 +220,11 @@ because `#[serde(default)]` covers new fields (`settings.rs:21`).
 Wrong in the parity audit and wrong here. A "History kept" number input already
 sits at the bottom of the General → Behaviour group. No work needed.
 
-### 1.6 — API key validation on save · M
-- **Scope** — a `validate_key` command per provider doing one cheap authed call.
-  Aloud currently saves blind, which is how an expired Groq key
-  (`PROGRESS.md:25`) stays invisible until dictation fails.
-- **Done** — inline ✓ / ✗ / spinner per key row. Must not block saving — a
-  user offline still needs to paste a key. Validation is advisory.
+### 1.6 — ~~API key validation on save~~ · **deleted (no BYOK)**
+There is no key entry to validate. The underlying problem — a dead credential
+being invisible until dictation fails — does not go away though; it moves to
+Phase A, where the app must surface "credentials unavailable" and fall back to
+local (A.2) rather than failing silently.
 
 ---
 
@@ -397,10 +481,14 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 - **Done** — a pane showing an in-progress meeting and past ones.
 
 ### 11.2 — Onboarding expansion · L
-- **Scope** — 4 steps vs voice-dict's 14. Missing: screen recording (blocked on
-  9.1), all three shortcut-capture steps (blocked on 2.1), edit mode config
-  (2.2), vocabulary, overlay style + mic pick (7.1), launch-at-login (the
+- **Scope** — 4 steps vs voice-dict's 14, but one of the current 4 is the API
+  key step (`Onboarding.tsx:107-120`), which **goes away** with no-BYOK — so
+  the real starting point is 3. Missing: screen recording (blocked on 9.1), all
+  three shortcut-capture steps (unblocked by 2.1, shipped in #61), edit mode
+  config (2.2), vocabulary, overlay style + mic pick (7.1), launch-at-login (the
   command exists at `commands.rs:135`), and a live test-transcription step.
+- **Note** — voice-dict's 14 steps included key entry too. Parity here means
+  matching the *useful* steps, not the count.
 - **Done** — a new user reaches a working dictation without opening settings.
   **Sequence this last** — it is a wrapper around features from Phases 2, 7 and
   9, and building it first means building it twice.
@@ -422,24 +510,48 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 
 | Phase | State |
 |---|---|
-| 0 — Corrections and free wins | ✅ PR #59 (0.1–0.5) |
-| 1.1 — Clipboard toggles | ◐ PR #60 — `preserve_clipboard` done; transient marking deferred (needs `objc2-app-kit`) |
+| 0 — Corrections and free wins | ✅ **merged** (#59). 0.1 now to be reverted by A.3 |
+| 1.1 — Clipboard toggles | ✅ **merged** (#63) — `preserve_clipboard`. Transient marking deferred (needs `objc2-app-kit`) |
 | 1.2 — Shortcut start delay | ⚠️ attempted, backed out — resized to M, see above |
 | 1.5 — History retention | ✅ already existed |
+| 1.6 — Key validation | ❌ deleted (no BYOK) |
+| 2.1 — Hotkey recorder | ✅ PR #61, open |
+| 4.1 — Run Log pane | ✅ PR #62, open |
+| 2.2 — Command mode settings | ◐ in progress |
+| **A — Key provisioning** | **not started, and now blocks A.3 + any release** |
 | everything else | not started |
+
+⚠️ **CI has not run on any of this.** GitHub Actions is blocked on billing —
+jobs report `steps=0` with no logs, meaning no runner is ever allocated. Every
+merge so far landed on local verification only, and every Windows path in the
+repo remains unexecuted.
 
 ## Suggested order
 
-Phase 0 → 1 → 2 → 4 → 3 → 6 → 5 → 7 → 11.1/11.3 → 8 → 9 → 10 → 11.2
+~~Phase 0 → 1 → 2 → 4 → 3 → 6 → 5 → 7 → 11.1/11.3 → 8 → 9 → 10 → 11.2~~
+
+Revised for no-BYOK:
+
+**A.1 decision → A.2 → 2.2 → 3 → 6 → 5 → 7 → 11.1/11.3 → A.3 → 8 → 9 → 10 → 11.2**
+
+(0, 1.1, 2.1 and 4.1 are done.)
 
 Rationale for the non-obvious moves:
 
+- **A.1 is a decision, not a task, and it comes first.** Everything about
+  distribution depends on it, and it is the only item here that can lose you
+  money if it is got wrong — an embedded key in a shipped binary is an
+  extractable key.
+- **A.3 lands late, not early.** Removing the key UI is trivial, but doing it
+  before A.1 ships an app that cannot transcribe. It is sequenced after the
+  feature work so `main` stays usable while the backend is built.
 - **4 before 5** — the text Run Log is most of the value and needs no storage
   redesign. Playback is a separate decision you can make after using the pane.
 - **6 before 5** — Instruction Guard is a correctness fix affecting every
   dictation today; audio persistence is a convenience.
 - **8, 9, 10 late** — each is gated on something other than code: a keypair, a
-  TCC permission, a pipeline rewrite.
+  TCC permission, a pipeline rewrite. Phase 8 (updates) now also implies a
+  release process, which A.1 is a prerequisite of.
 - **11.2 last** — onboarding wraps features that do not exist yet.
 
 ## Standing constraints
