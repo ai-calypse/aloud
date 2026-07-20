@@ -95,6 +95,82 @@ pub fn recent_notes(limit: u32) -> CmdResult<Vec<aloud_notes::Note>> {
     Ok(notes)
 }
 
+/// The shipped cleanup prompt and the date it last changed.
+///
+/// Both halves serve the Prompts pane: the text backs "View Default", and the
+/// version is what `Settings::seen_prompt_version` is compared against to
+/// decide whether a user who forked the prompt is missing an improvement.
+#[derive(serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DefaultPrompt {
+    pub text: String,
+    pub version: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn default_prompt() -> DefaultPrompt {
+    DefaultPrompt {
+        text: aloud_llm::prompts::CLEANUP.to_string(),
+        version: aloud_llm::prompts::CLEANUP_VERSION.to_string(),
+    }
+}
+
+/// Runs a prompt against a sample without a dictation, for the Prompts pane.
+///
+/// Everything but the prompt comes from live settings, so what this shows is
+/// what the next dictation would do — including the model, the fallback and
+/// the vocabulary, all of which change the answer.
+///
+/// The two ways this can appear broken while working correctly are answered
+/// here rather than left as a puzzle: cleanup skips anything at or under
+/// [`aloud_llm::cleanup::MIN_WORDS`] and returns it verbatim, which reads as a
+/// prompt that did nothing; and a filler-only sample legitimately produces no
+/// text at all, which reads as a blank panel.
+#[tauri::command]
+#[specta::specta]
+pub async fn test_prompt(
+    state: State<'_, AppState>,
+    prompt: String,
+    sample: String,
+) -> CmdResult<String> {
+    let settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
+
+    if sample.trim().is_empty() {
+        return Err("Type a sample transcript to run the prompt against.".into());
+    }
+    if aloud_llm::cleanup::is_too_short(&sample) {
+        return Err(format!(
+            "Sample is too short. Dictations of {} words or fewer skip cleanup entirely \
+             and are pasted as spoken, so the prompt would never run. Add a few more words.",
+            aloud_llm::cleanup::MIN_WORDS
+        ));
+    }
+    if settings.groq_api_key.trim().is_empty() {
+        return Err("No API key is configured, so there is nothing to run against.".into());
+    }
+
+    let options = aloud_llm::cleanup::Options {
+        api_key: &settings.groq_api_key,
+        base_url: &settings.base_url,
+        model: &settings.post_processing_model,
+        fallback: Some(settings.fallback_model.as_str()),
+        custom_prompt: &prompt,
+        vocabulary: &settings.vocabulary,
+        output_language: &settings.output_language,
+    };
+    let cleaned = to_string_err(aloud_llm::cleanup::clean(options, &sample).await)?;
+
+    if cleaned.trim().is_empty() {
+        return Ok(
+            "(nothing — the prompt judged the sample to be filler and asked for an \
+             empty paste. That is the EMPTY sentinel doing its job, not a failure.)"
+                .into(),
+        );
+    }
+    Ok(cleaned)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn input_devices() -> CmdResult<Vec<aloud_audio::AudioDevice>> {

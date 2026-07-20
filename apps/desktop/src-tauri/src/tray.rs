@@ -144,6 +144,14 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         menu.append(&disabled(app, "last", format!("“{}”", snippet(text)))?)?;
     }
 
+    menu.append(&MenuItem::with_id(
+        app,
+        "vocab_from_clipboard",
+        "Add Clipboard Word to Vocabulary",
+        true,
+        None::<&str>,
+    )?)?;
+
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&history_submenu(app, &state)?)?;
     menu.append(&microphone_submenu(app, &settings)?)?;
@@ -261,6 +269,7 @@ fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
                 tracing::warn!(%e, "paste again failed");
             }
         }
+        "vocab_from_clipboard" => add_clipboard_to_vocabulary(app),
         "show" => show_main(app),
         "settings" => {
             show_main(app);
@@ -320,6 +329,39 @@ fn copy_history_entry(app: &AppHandle, raw_id: &str) {
     if let Err(e) = aloud_paste::set_clipboard(&entry.final_transcript) {
         tracing::warn!(%e, "could not copy transcript");
     }
+}
+
+/// Teaches the transcriber a spelling without opening Settings: copy the word
+/// wherever it is spelled correctly, then pick this.
+///
+/// ponytail: no checkmark flash, unlike the Swift menu. Every phase change
+/// rebuilds the menu wholesale (see [`refresh`]), so transient state does not
+/// survive long enough to be seen, and making it survive means threading a
+/// timestamp through `build`. The clipboard word is already in Settings →
+/// Vocabulary if the user wants confirmation. Revisit if Tauri ever allows
+/// mutating one item in place.
+fn add_clipboard_to_vocabulary(app: &AppHandle) {
+    let Ok(text) = aloud_paste::clipboard_text() else {
+        tracing::warn!("clipboard holds no text");
+        return;
+    };
+
+    let state = app.state::<AppState>();
+    let mut settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
+    if !settings.add_vocabulary_term(&text) {
+        tracing::info!("clipboard word is blank or already in the vocabulary");
+        return;
+    }
+    if let Err(e) = settings.save() {
+        tracing::warn!(%e, "could not save vocabulary");
+        return;
+    }
+    // Nothing to refresh afterwards: the menu shows no vocabulary, and the
+    // Settings pane reloads its own copy when it opens.
+    let Ok(mut current) = state.settings.lock() else {
+        return;
+    };
+    *current = settings;
 }
 
 fn select_microphone(app: &AppHandle, name: &str) {

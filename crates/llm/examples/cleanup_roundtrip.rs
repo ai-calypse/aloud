@@ -63,6 +63,7 @@ async fn main() -> anyhow::Result<()> {
         fallback: None,
         custom_prompt: "",
         vocabulary: &vocabulary,
+        output_language: "",
     };
     let cleaned = aloud_llm::cleanup::clean(options, "um so this is the raw transcript ok").await?;
     let request: serde_json::Value = serde_json::from_str(&server.join().unwrap())?;
@@ -98,6 +99,7 @@ async fn main() -> anyhow::Result<()> {
         fallback: None,
         custom_prompt: "",
         vocabulary: &[],
+        output_language: "",
     };
     let cleaned = aloud_llm::cleanup::clean(options, "um uh er hmm").await?;
     server.join().unwrap();
@@ -112,10 +114,34 @@ async fn main() -> anyhow::Result<()> {
         fallback: None,
         custom_prompt: "",
         vocabulary: &[],
+        output_language: "",
     };
     let cleaned = aloud_llm::cleanup::clean(options, "one sec").await?;
     println!("short input   -> {cleaned:?} (no request made)");
     assert_eq!(cleaned, "one sec");
+
+    // 4. The same sentinel reply, but translating. The sentinel belongs to the
+    //    cleanup prompt; once the model is also translating, "EMPTY" can be an
+    //    honest translation, and swallowing it pastes nothing with no reason.
+    let (url, server) = stub("EMPTY");
+    let options = aloud_llm::cleanup::Options {
+        api_key: "stub-key",
+        base_url: &url,
+        model: "stub-model",
+        fallback: None,
+        custom_prompt: "",
+        vocabulary: &[],
+        output_language: "German",
+    };
+    let cleaned = aloud_llm::cleanup::clean(options, "der tank ist leer").await?;
+    let request: serde_json::Value = serde_json::from_str(&server.join().unwrap())?;
+    let system = request["messages"][0]["content"].as_str().unwrap();
+    println!("sentinel reply while translating -> {cleaned:?}");
+    assert_eq!(cleaned, "EMPTY", "a translation must not hit the sentinel");
+    assert!(
+        system.contains("Output ONLY in German"),
+        "the target language must reach the system prompt"
+    );
 
     println!("\nok: request shape, sentinel handling and the skip threshold all hold");
     Ok(())

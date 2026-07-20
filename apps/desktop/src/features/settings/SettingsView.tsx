@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { commands, type AudioDevice, type Settings } from "../../lib/bindings";
+import {
+  commands,
+  type AudioDevice,
+  type DefaultPrompt,
+  type Settings,
+} from "../../lib/bindings";
 import { or } from "../../lib/result";
 import { HotkeyEditor } from "./HotkeyEditor";
 import { MacroEditor } from "./MacroEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
 import { ConnectorEditor } from "./ConnectorEditor";
-import { AUTO_DETECT, LANGUAGES } from "./languages";
+import { AUTO_DETECT, LANGUAGES, SAME_AS_SPOKEN } from "./languages";
 import {
   Group,
   PaneTitle,
@@ -18,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Select,
   SelectContent,
@@ -53,6 +59,16 @@ export function SettingsView({ section }: { section: SettingsSection }) {
   const live = useRef(settings);
   live.current = settings;
   const [devices, setDevices] = useState<AudioDevice[]>([]);
+  // The shipped prompt and its version, for the Prompts pane's banner and its
+  // View Default button. Null until it loads; both surfaces hide until then.
+  const [builtIn, setBuiltIn] = useState<DefaultPrompt | null>(null);
+  const [sample, setSample] = useState("");
+  const [running, setRunning] = useState(false);
+  // One panel for both the run's output and the built-in prompt, since only
+  // one is ever worth reading at a time.
+  const [panel, setPanel] = useState<{ title: string; body: string } | null>(
+    null,
+  );
   const [saved, setSaved] = useState(false);
   // Owned by the OS (a login item / registry key), not settings.json, so it is
   // read from the autostart plugin rather than from `settings`.
@@ -60,6 +76,7 @@ export function SettingsView({ section }: { section: SettingsSection }) {
 
   useEffect(() => {
     commands.getSettings().then(setSettings);
+    commands.defaultPrompt().then(setBuiltIn);
     or(commands.inputDevices(), [], "listing microphones").then(setDevices);
     or(commands.launchAtLogin(), false, "reading launch-at-login").then(setAtLogin);
   }, []);
@@ -106,6 +123,31 @@ export function SettingsView({ section }: { section: SettingsSection }) {
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 1200);
+  }
+
+  // Only a fork can go stale: an empty prompt always *is* the current default.
+  const promptOutdated =
+    builtIn !== null &&
+    (settings.customSystemPrompt ?? "").trim() !== "" &&
+    settings.seenPromptVersion !== builtIn.version;
+
+  /** Records that the user has seen this default, whatever they chose to do. */
+  function acknowledgePrompt() {
+    update({ seenPromptVersion: builtIn!.version });
+  }
+
+  /** Runs the prompt in the editor against the sample. */
+  async function runPrompt() {
+    setRunning(true);
+    const result = await commands.testPrompt(
+      settings!.customSystemPrompt ?? "",
+      sample,
+    );
+    setRunning(false);
+    setPanel({
+      title: result.status === "error" ? "Failed" : "Result",
+      body: result.status === "error" ? result.error : result.data,
+    });
   }
 
   return (
@@ -185,8 +227,8 @@ export function SettingsView({ section }: { section: SettingsSection }) {
             </Row>
 
             <Row
-              label="Language"
-              hint="Auto-detect can guess wrong on short utterances. Naming the language avoids that."
+              label="Spoken language"
+              hint="The language you dictate in. Auto-detect can guess wrong on short utterances; naming it avoids that."
             >
               <Value>
                 <Select
@@ -245,6 +287,40 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                         update({ fallbackModel: e.target.value })
                       }
                     />
+                  </Value>
+                </Row>
+                {/* Deliberately in Cleanup, not Transcription: whisper's
+                    translate task only ever targets English, so this is an
+                    instruction to the cleanup model and lives beside it. */}
+                <Row
+                  label="Output language"
+                  hint="Translate the finished text before pasting. “Same as spoken” leaves it alone."
+                >
+                  <Value>
+                    <Select
+                      // The name, not the code: it is interpolated into the
+                      // system prompt verbatim, and "de" is not an instruction.
+                      value={settings.outputLanguage || SAME_AS_SPOKEN}
+                      onValueChange={(v) =>
+                        update({
+                          outputLanguage: v === SAME_AS_SPOKEN ? "" : v,
+                        })
+                      }
+                    >
+                      <SelectTrigger className={rowSelect}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SAME_AS_SPOKEN}>
+                          Same as spoken
+                        </SelectItem>
+                        {LANGUAGES.map((l) => (
+                          <SelectItem key={l.code} value={l.name}>
+                            {l.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Value>
                 </Row>
                 <Row
@@ -428,6 +504,48 @@ export function SettingsView({ section }: { section: SettingsSection }) {
             title="Prompts"
             subtitle="Replaces the built-in prompt that tidies every transcript. Leave it empty to use the default — an App Rule’s style hint is appended to whichever prompt is in play here."
           />
+          {promptOutdated && (
+            <Alert>
+              <AlertTitle>The built-in prompt has been improved</AlertTitle>
+              <AlertDescription>
+                <p>
+                  Your custom prompt was written against an older default, so
+                  none of the fixes since have reached you.
+                </p>
+                <div className="flex gap-4 pt-1">
+                  <Button
+                    variant="plain"
+                    size="text"
+                    onClick={() => {
+                      setPanel({
+                        title: "Built-in prompt",
+                        body: builtIn!.text,
+                      });
+                      acknowledgePrompt();
+                    }}
+                  >
+                    View default
+                  </Button>
+                  <Button
+                    variant="plain"
+                    size="text"
+                    onClick={() =>
+                      update({
+                        customSystemPrompt: "",
+                        seenPromptVersion: builtIn!.version,
+                      })
+                    }
+                  >
+                    Switch to it
+                  </Button>
+                  <Button variant="plain" size="text" onClick={acknowledgePrompt}>
+                    Keep mine
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
           <Group>
             <Row className="block py-3">
               <Textarea
@@ -450,6 +568,43 @@ export function SettingsView({ section }: { section: SettingsSection }) {
               </Row>
             )}
           </Group>
+
+          <Group title="Test">
+            <Row className="block py-3">
+              <Textarea
+                rows={3}
+                className="w-full resize-none border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
+                placeholder="A raw transcript to run the prompt against — as messy as a real one."
+                value={sample}
+                onChange={(e) => setSample(e.target.value)}
+              />
+            </Row>
+            <Row
+              label="Run"
+              hint="Uses your current model and vocabulary, so this is what the next dictation would do."
+            >
+              <Button
+                variant="plain"
+                size="text"
+                disabled={running}
+                onClick={runPrompt}
+              >
+                {running ? "Running…" : "Run"}
+              </Button>
+            </Row>
+          </Group>
+
+          {panel && (
+            <Group title={panel.title}>
+              <Row className="block py-3">
+                {/* Read-only, and errors land here as text: a toast for a
+                    rate limit vanishes before it can be acted on. */}
+                <p className="whitespace-pre-wrap font-mono text-xs text-foreground">
+                  {panel.body}
+                </p>
+              </Row>
+            </Group>
+          )}
         </>
       )}
 

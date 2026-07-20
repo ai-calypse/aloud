@@ -12,6 +12,21 @@ export const commands = {
 	searchNotes: (query: string) => typedError<SearchResult[], string>(__TAURI_INVOKE("search_notes", { query })),
 	/**  Newest notes, for the empty-query state. */
 	recentNotes: (limit: number) => typedError<Note[], string>(__TAURI_INVOKE("recent_notes", { limit })),
+	defaultPrompt: () => __TAURI_INVOKE<DefaultPrompt>("default_prompt"),
+	/**
+	 *  Runs a prompt against a sample without a dictation, for the Prompts pane.
+	 * 
+	 *  Everything but the prompt comes from live settings, so what this shows is
+	 *  what the next dictation would do — including the model, the fallback and
+	 *  the vocabulary, all of which change the answer.
+	 * 
+	 *  The two ways this can appear broken while working correctly are answered
+	 *  here rather than left as a puzzle: cleanup skips anything at or under
+	 *  [`aloud_llm::cleanup::MIN_WORDS`] and returns it verbatim, which reads as a
+	 *  prompt that did nothing; and a filler-only sample legitimately produces no
+	 *  text at all, which reads as a blank panel.
+	 */
+	testPrompt: (prompt: string, sample: string) => typedError<string, string>(__TAURI_INVOKE("test_prompt", { prompt, sample })),
 	inputDevices: () => typedError<AudioDevice[], string>(__TAURI_INVOKE("input_devices")),
 	/**
 	 *  Installed apps, to fill the App Rules picker. Empty on Windows (no scan
@@ -222,6 +237,18 @@ export type Connector = {
  */
 export type ConnectorsUpdated = Connector[];
 
+/**
+ *  The shipped cleanup prompt and the date it last changed.
+ * 
+ *  Both halves serve the Prompts pane: the text backs "View Default", and the
+ *  version is what `Settings::seen_prompt_version` is compared against to
+ *  decide whether a user who forked the prompt is missing an improvement.
+ */
+export type DefaultPrompt = {
+	text: string,
+	version: string,
+};
+
 export type Engine = 
 /**  On-device whisper.cpp. No network, no API key. */
 "local" | 
@@ -327,6 +354,20 @@ export type Settings = {
 	fallbackModel?: string,
 	/**  Overrides the built-in cleanup prompt when non-empty. */
 	customSystemPrompt?: string,
+	/**
+	 *  The version of the built-in prompt the user last acknowledged. Empty
+	 *  means never, which is exactly right for a fork made before this
+	 *  existed: they should see the offer once.
+	 */
+	seenPromptVersion?: string,
+	/**
+	 *  Language the pasted text is written in — distinct from [`language`],
+	 *  which is the language *spoken into the mic*. Blank keeps the spoken
+	 *  one. Cleanup applies it; transcription never sees it.
+	 * 
+	 *  [`language`]: Settings::language
+	 */
+	outputLanguage?: string,
 	/**  Proper nouns and jargon fed to the model as a spelling reference. */
 	vocabulary?: string[],
 	/**  Spoken shorthand that expands to canned text after cleanup. */

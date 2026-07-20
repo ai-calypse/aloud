@@ -30,6 +30,16 @@ pub struct Options<'a> {
     pub custom_prompt: &'a str,
     /// Proper nouns and jargon the transcriber tends to mangle.
     pub vocabulary: &'a [String],
+    /// Language the *pasted* text should be in, blank to leave it alone.
+    ///
+    /// A post-processing instruction, never a transcription parameter — and
+    /// deliberately not passed to `aloud_transcribe`. Whisper's `translate`
+    /// task only ever targets English, so it cannot express "into German", and
+    /// translating before cleanup would hand the cleanup prompt text in a
+    /// language its rules were not written for. voice-dict reached the same
+    /// conclusion: `outputLanguage` threads through `PostProcessingService`
+    /// and nowhere near the transcriber.
+    pub output_language: &'a str,
 }
 
 /// Cleans `raw`, or returns it unchanged when there is nothing worth spending
@@ -44,7 +54,10 @@ pub async fn clean(options: Options<'_>, raw: &str) -> Result<String> {
 
     let client = LlmClient::new(options.api_key, Some(options.base_url))?;
     let messages = [
-        Message::system(system_prompt(options.custom_prompt)),
+        Message::system(system_prompt(
+            options.custom_prompt,
+            options.output_language,
+        )),
         Message::user(user_message(raw, options.vocabulary)),
     ];
 
@@ -62,22 +75,34 @@ pub async fn clean(options: Options<'_>, raw: &str) -> Result<String> {
         ))
         .await?;
 
-    Ok(interpret(&cleaned))
+    Ok(interpret(&cleaned, options.output_language))
 }
 
 /// Whether the transcript is too short to be worth a cleanup request.
-fn is_too_short(raw: &str) -> bool {
+///
+/// Public because the Test Prompt runner has to say so: a short sample returns
+/// verbatim, which looks exactly like a prompt that did nothing.
+pub fn is_too_short(raw: &str) -> bool {
     raw.split_whitespace().count() <= MIN_WORDS
 }
 
 /// The custom prompt *replaces* the built-in one rather than adding to it —
 /// an app rule's style hint is appended upstream, before it reaches here.
-fn system_prompt(custom: &str) -> String {
-    if custom.trim().is_empty() {
+/// A target language is appended to whichever prompt won, verbatim from
+/// voice-dict's `applyOutputLanguage`.
+fn system_prompt(custom: &str, output_language: &str) -> String {
+    let mut prompt = if custom.trim().is_empty() {
         prompts::CLEANUP.to_string()
     } else {
         custom.to_string()
+    };
+    let language = output_language.trim();
+    if !language.is_empty() {
+        prompt.push_str(&format!(
+            "\n\nIMPORTANT: Translate the final cleaned text into {language}. Output ONLY in {language}, regardless of the original spoken language."
+        ));
     }
+    prompt
 }
 
 /// The transcript, prefixed with the vocabulary when there is one.
@@ -92,12 +117,18 @@ fn user_message(raw: &str, vocabulary: &[String]) -> String {
 /// The prompt specifies [`EMPTY_SENTINEL`] for filler-only input, which means
 /// paste nothing. Returning it literally would type "EMPTY" into the user's
 /// document.
-fn interpret(cleaned: &str) -> String {
-    if cleaned.trim() == EMPTY_SENTINEL {
-        String::new()
-    } else {
-        cleaned.to_string()
+///
+/// The sentinel is *skipped* while translating, ported from Swift's
+/// `sanitizeVerbatimTranslation`. The sentinel belongs to the cleanup prompt,
+/// but the model is now also being told to translate — so a transcript whose
+/// honest translation is the word "empty" would be swallowed and the user
+/// would get a blank paste with nothing to explain it.
+fn interpret(cleaned: &str, output_language: &str) -> String {
+    let translating = !output_language.trim().is_empty();
+    if !translating && cleaned.trim() == EMPTY_SENTINEL {
+        return String::new();
     }
+    cleaned.to_string()
 }
 
 #[cfg(test)]
@@ -119,21 +150,50 @@ mod tests {
     /// The sentinel reaching the paste path types "EMPTY" into the document.
     #[test]
     fn the_empty_sentinel_means_paste_nothing() {
-        assert_eq!(interpret(EMPTY_SENTINEL), "");
-        assert_eq!(interpret("  EMPTY \n"), "", "trimmed, as the prompt emits");
+        assert_eq!(interpret(EMPTY_SENTINEL, ""), "");
         assert_eq!(
-            interpret("EMPTY the calendar"),
+            interpret("  EMPTY \n", ""),
+            "",
+            "trimmed, as the prompt emits"
+        );
+        assert_eq!(
+            interpret("EMPTY the calendar", ""),
             "EMPTY the calendar",
             "a transcript that merely starts with the word is not the sentinel"
         );
-        assert_eq!(interpret("hello there"), "hello there");
+        assert_eq!(interpret("hello there", ""), "hello there");
+    }
+
+    /// Translating "the tank is empty" into English must not vanish: the
+    /// sentinel is the cleanup prompt's, and a translation of it is real text.
+    #[test]
+    fn translating_does_not_swallow_a_literal_empty() {
+        assert_eq!(interpret(EMPTY_SENTINEL, "English"), EMPTY_SENTINEL);
+        assert_eq!(interpret("EMPTY", "German"), "EMPTY");
+        // A blank-but-whitespace language is still "not translating".
+        assert_eq!(interpret(EMPTY_SENTINEL, "  "), "");
     }
 
     #[test]
     fn a_blank_custom_prompt_falls_back_to_the_built_in_one() {
-        assert_eq!(system_prompt(""), prompts::CLEANUP);
-        assert_eq!(system_prompt("   \n"), prompts::CLEANUP);
-        assert_eq!(system_prompt("be terse"), "be terse");
+        assert_eq!(system_prompt("", ""), prompts::CLEANUP);
+        assert_eq!(system_prompt("   \n", ""), prompts::CLEANUP);
+        assert_eq!(system_prompt("be terse", ""), "be terse");
+    }
+
+    /// The target language is appended to whichever prompt won, not swapped
+    /// for it — a custom prompt that also translates has to keep both.
+    #[test]
+    fn a_target_language_is_appended_to_either_prompt() {
+        let custom = system_prompt("be terse", "French");
+        assert!(custom.starts_with("be terse"));
+        assert!(custom.contains("Output ONLY in French"));
+
+        let built_in = system_prompt("", "Japanese");
+        assert!(built_in.starts_with(prompts::CLEANUP));
+        assert!(built_in.contains("Translate the final cleaned text into Japanese"));
+
+        assert_eq!(system_prompt("be terse", "  \n"), "be terse");
     }
 
     /// A dropped vocabulary is invisible: the transcript still reads fine,
@@ -158,6 +218,7 @@ mod tests {
             fallback: None,
             custom_prompt: "",
             vocabulary: &[],
+            output_language: "",
         };
         assert_eq!(clean(options, "one sec").await.unwrap(), "one sec");
     }

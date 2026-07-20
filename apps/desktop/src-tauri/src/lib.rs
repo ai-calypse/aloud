@@ -82,6 +82,8 @@ pub fn run() {
             commands::get_stats,
             commands::search_notes,
             commands::recent_notes,
+            commands::default_prompt,
+            commands::test_prompt,
             commands::input_devices,
             commands::installed_apps,
             commands::hotkeys_permitted,

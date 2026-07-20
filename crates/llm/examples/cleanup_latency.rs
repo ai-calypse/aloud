@@ -40,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
             fallback: None,
             custom_prompt: "",
             vocabulary: &[],
+            output_language: "",
         };
 
         let started = Instant::now();

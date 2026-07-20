@@ -40,6 +40,16 @@ pub struct Settings {
     pub fallback_model: String,
     /// Overrides the built-in cleanup prompt when non-empty.
     pub custom_system_prompt: String,
+    /// The version of the built-in prompt the user last acknowledged. Empty
+    /// means never, which is exactly right for a fork made before this
+    /// existed: they should see the offer once.
+    pub seen_prompt_version: String,
+    /// Language the pasted text is written in — distinct from [`language`],
+    /// which is the language *spoken into the mic*. Blank keeps the spoken
+    /// one. Cleanup applies it; transcription never sees it.
+    ///
+    /// [`language`]: Settings::language
+    pub output_language: String,
     /// Proper nouns and jargon fed to the model as a spelling reference.
     pub vocabulary: Vec<String>,
     /// Spoken shorthand that expands to canned text after cleanup.
@@ -111,6 +121,8 @@ impl Default for Settings {
             post_processing_model: DEFAULT_CLEANUP_MODEL.into(),
             fallback_model: DEFAULT_FALLBACK_MODEL.into(),
             custom_system_prompt: String::new(),
+            seen_prompt_version: String::new(),
+            output_language: String::new(),
             vocabulary: Vec::new(),
             macros: Vec::new(),
             app_rules: Vec::new(),
@@ -217,6 +229,35 @@ impl Settings {
         }
     }
 
+    /// Appends a vocabulary term, returning whether it was new.
+    ///
+    /// Case-insensitive, matching Swift's `mergedVocabularyTerms`: the list is
+    /// pasted into the prompt as a spelling reference, so "Tauri" and "tauri"
+    /// are the same hint twice and only make the prompt longer. The *first*
+    /// spelling wins, since that is the one the user chose to teach.
+    ///
+    /// `to_lowercase` rather than `eq_ignore_ascii_case`: a vocabulary is
+    /// where names like "Café" live, and the ASCII comparison would happily
+    /// store that twice.
+    pub fn add_vocabulary_term(&mut self, term: &str) -> bool {
+        let term = term.trim();
+        if term.is_empty() {
+            return false;
+        }
+        let folded = term.to_lowercase();
+        // ponytail: linear scan — the list is a handful of words the user
+        // typed, and a HashSet is the upgrade path if it ever isn't.
+        if self
+            .vocabulary
+            .iter()
+            .any(|existing| existing.trim().to_lowercase() == folded)
+        {
+            return false;
+        }
+        self.vocabulary.push(term.to_string());
+        true
+    }
+
     pub fn save(&self) -> Result<()> {
         let path = Self::path()?;
         let dir = path.parent().context("settings path has no parent")?;
@@ -302,6 +343,23 @@ mod tests {
     #[test]
     fn rewriting_a_selection_is_on_by_default() {
         assert!(Settings::default().command_mode_enabled);
+    }
+
+    /// A term added twice in different casing is the same spelling hint said
+    /// twice — it only lengthens every cleanup prompt from then on.
+    #[test]
+    fn vocabulary_terms_dedupe_ignoring_case() {
+        let mut settings = Settings::default();
+        assert!(settings.add_vocabulary_term("Tauri"));
+        assert!(!settings.add_vocabulary_term("tauri"));
+        assert!(!settings.add_vocabulary_term("  TAURI \n"), "trimmed first");
+        assert!(!settings.add_vocabulary_term("   "), "blank is not a term");
+        assert!(settings.add_vocabulary_term("Café"));
+        assert!(
+            !settings.add_vocabulary_term("café"),
+            "case folding must be Unicode, not ASCII"
+        );
+        assert_eq!(settings.vocabulary, ["Tauri", "Café"]);
     }
 
     #[test]

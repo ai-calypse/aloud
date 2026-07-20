@@ -598,6 +598,7 @@ impl Pipeline {
                     fallback: Some(settings.fallback_model.as_str()),
                     custom_prompt: &settings.custom_system_prompt,
                     vocabulary: &settings.vocabulary,
+                    output_language: &settings.output_language,
                 };
                 match aloud_llm::cleanup::clean(options, raw).await {
                     Ok(text) => text,

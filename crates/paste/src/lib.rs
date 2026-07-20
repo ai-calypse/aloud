@@ -197,6 +197,16 @@ pub fn set_clipboard(text: &str) -> Result<()> {
         .context("writing to clipboard")
 }
 
+/// Reads the clipboard as text. An image or an empty board yields an error
+/// rather than a blank string, so a caller cannot mistake "nothing there" for
+/// "the user copied whitespace".
+pub fn clipboard_text() -> Result<String> {
+    arboard::Clipboard::new()
+        .context("opening clipboard")?
+        .get_text()
+        .context("reading clipboard")
+}
+
 /// Sends the paste chord (Cmd+V / Ctrl+V), optionally followed by Return.
 fn send_paste(press_enter: bool) -> Result<()> {
     on_main_thread(move || -> Result<()> {
