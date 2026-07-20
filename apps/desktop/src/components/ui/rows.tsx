@@ -203,7 +203,7 @@ export function Toggle({
       onClick={() => onChange(!checked)}
       className={cn(
         "relative h-6 w-10 shrink-0 rounded-full transition-colors duration-300 outline-none",
-        "focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2",
+        "focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
         checked ? "bg-toggle-on" : "bg-toggle-off",
       )}
     >
