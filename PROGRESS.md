@@ -22,8 +22,10 @@ section used to describe. Every Windows path here (`WH_KEYBOARD_LL`, WASAPI,
 stale-while-revalidate push and the disconnect flow are unit-tested and driven
 against stubs, never against the live API.
 
-**The Groq API key is expired** — live calls return 401. Local whisper is
-unaffected; cloud transcription and LLM cleanup need a new key in settings.
+~~**The Groq API key is expired**~~ — **not true as of 20 July.** The key in
+`.env` returns 200, and Phase 3's cleanup work was verified against it live.
+This entry stood for long enough that later planning assumed cloud was
+untestable; check the claim before repeating it.
 
 ---
 
@@ -46,8 +48,8 @@ unaffected; cloud transcription and LLM cleanup need a new key in settings.
 | Notes window | ✅ verified in a headless browser against stubbed IPC |
 | Settings UI | ✅ verified in a headless browser against stubbed IPC |
 | Ask panel | ✅ |
-| Command mode | ✅ core flow; no enable toggle or invocation style |
-| Meeting notes | ✅ chunks transcribe serially on stop, not in the background |
+| Command mode | ✅ enable toggle; the invocation-style picker was removed deliberately (#61) |
+| Meeting notes | ✅ chunks transcribe from a spawned task as they arrive — the old "serially on stop" note was stale |
 | Onboarding | ✅ 4 steps, vs the Swift wizard's 14; re-runnable from the tray |
 | Voice macros | ✅ inline expansion (the Swift feature matched whole utterances) |
 | App rules | ✅ matched on app name, where Swift keyed on bundle ID |
@@ -59,12 +61,25 @@ clippy clean · typecheck clean · 150 Rust tests · 14 frontend tests.
 
 ## Not done
 
-Realtime streaming · app context/screenshot · updater (registered but inert —
-no signing pubkey) · signing/notarization · network monitoring and the offline
-fallback · typed ask · the Run Log settings pane · hotkey recorder (the UI can
-only author the six modifier-only holds; `Binding::Key` is unreachable) ·
-Instruction Guard · output-language translation · overlay style and display
-picker · prompt test runner.
+Realtime streaming (though `crates/audio` already streams — see below) · app
+context/screenshot · updater (registered but inert — no signing pubkey) ·
+signing/notarization · audio persistence and Run Log playback · meeting notes
+in the main window · app rules keyed on bundle ID · a debug pane · onboarding
+beyond three steps.
+
+**Landed overnight on 20 July, in review as a stack of six PRs** (#61, #69,
+#70, #71, #72, #73): the hotkey recorder and eight hotkey defects · command
+mode without the invocation picker · ~320ms off every dictation · the prompt
+test runner · the stale-prompt banner · clipboard-to-vocabulary ·
+output-language translation · the Run Log pane · the Instruction Guard · the
+offline fallback · typed Ask · overlay style · the display picker · a
+permissions card · a build stamp.
+
+**`crates/audio` is not the streaming gap.** `Chunker` and the `on_pcm16` tap
+are in production use by meeting mode, which transcribes chunks concurrently
+as they arrive. What Phase 10 actually needs is a chunk-level entry point in
+`crates/transcribe` and a decision about how partial text reaches the user
+without corrupting the paste.
 
 See [ROADMAP.md](ROADMAP.md) for these broken into phased, sized tasks.
 

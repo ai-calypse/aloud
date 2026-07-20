@@ -569,14 +569,44 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 | 1.4 — Menu bar icon toggle | ✅ **done** — reopen event is the escape hatch |
 | 1.5 — History retention | ✅ already existed |
 | 1.6 — Key validation | ❌ deleted (no BYOK) |
-| 2.1 — Hotkey recorder | ✅ PR #61, open |
-| 4.1 — Run Log pane | ✅ PR #62, open |
-| 2.2 — Command mode settings | ◐ in progress |
+| **2 — Hotkey recorder + command mode** | ✅ **PR #61, open** — 2.1 and 2.2, plus eight hotkey defects |
+| **3 — Prompt and vocabulary tooling** | ✅ **PR #70, open** — 3.1-3.4 |
+| **4 — Run Log pane** | ✅ **PR #71, open** — 4.1-4.4. Supersedes #62, which should be closed |
+| **6 — Pipeline behaviour** | ✅ **PR #72, open** — 6.1-6.3 |
+| **7 — Overlay and display** | ✅ **PR #73, open** — 7.1-7.4 |
+| **Latency (not a phase)** | ✅ **PR #69, open** — ~320ms measured off the cleanup stage |
 | **A — Remove key surfaces** | ✅ **merged** (#66) — both A.1 and A.2 |
 | **A.1 — Remove key surfaces** | ✅ no key input anywhere; keys come from `.env` |
 | **A.2 — Local as the floor** | ✅ cloud without a key falls back to on-device |
+| **5 — Audio persistence** | not started. Unblocked: #71 landed the `PRAGMA user_version` migration it needs |
+| **8 — Updates** | blocked on a signing keypair, which is a decision, not code |
+| **9 — Screen context** | not started (XL, and needs a TCC permission the app has never asked for) |
+| **10 — Realtime streaming** | not started. Smaller than the roadmap says — see the note below |
+| **11 — Surfacing what exists** | not started |
 | **12 — Cloud key provisioning** | deferred until there is a shipped build |
-| everything else | not started |
+
+### Corrections found while building the above
+
+Each of these was believed by this document or `PROGRESS.md` and is false
+against the code. Listed because a plan built on them plans the wrong work.
+
+- **The Groq key is not expired.** `PROGRESS.md` says it is; it returns 200.
+  Phase 3's live verification ran against it.
+- **4.1 did not ship in #62.** That branch's pane is not in the tree.
+- **7.2 was substantially already built** — the active-monitor mode and the
+  primary fallback both existed. Only the setting and the picker were missing.
+- **The overlay is top-centre on the cursor's monitor**, not "fixed
+  bottom-centre". Corrected in 7.1 and in `PROGRESS.md`.
+- **`crates/audio` already streams.** `Chunker` and the `on_pcm16` tap are in
+  production use by meeting mode, which transcribes chunks concurrently as they
+  arrive. Phase 10's real work is a chunk-level entry point in
+  `crates/transcribe` and the pipeline restructure — not the audio half.
+- **11.2's blocked list is mostly wrong.** Shortcut capture, edit-mode config,
+  launch-at-login and mic selection are all callable today. Only screen
+  recording (9.1) and overlay style (7.1) genuinely gated it, and 7.1 has
+  landed.
+- **`frontmost_app` returned None for every app**, so no app rule had ever
+  fired. Fixed in #69.
 
 ⚠️ **CI has not run on any of this.** GitHub Actions is blocked on billing —
 jobs report `steps=0` with no logs, meaning no runner is ever allocated. Every
