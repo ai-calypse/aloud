@@ -165,7 +165,7 @@ pub fn run() {
             let hotkey_config = Arc::new(Mutex::new(
                 settings
                     .lock()
-                    .map(|s| s.hotkey_config())
+                    .map(|s| s.hotkeys.clone())
                     .unwrap_or_default(),
             ));
             let hotkey_capture: aloud_hotkey::CaptureSlot = Default::default();
@@ -340,8 +340,8 @@ fn spawn_hotkey_listener(
         }
 
         let busy = pipeline.busy_flag();
-        let result = aloud_hotkey::listen(config, busy, capture, move |event, held| {
-            handle_hotkey(&app, &pipeline, &settings, &meeting, event, held);
+        let result = aloud_hotkey::listen(config, busy, capture, move |event, _held| {
+            handle_hotkey(&app, &pipeline, &settings, &meeting, event);
         });
         if let Err(e) = result {
             tracing::error!(%e, "hotkey listener stopped");
@@ -355,23 +355,18 @@ fn handle_hotkey(
     settings: &Arc<Mutex<Settings>>,
     meeting: &Arc<Mutex<Option<meeting::Meeting>>>,
     event: aloud_hotkey::model::Event,
-    held: &aloud_hotkey::model::Modifiers,
 ) {
     use aloud_hotkey::model::{Event, Role};
 
     match event {
         Event::Activated(Role::Hold) => {
             // Note anything selected before recording begins: with a selection
-            // the utterance rewrites it, without one it is dictated. Command
-            // mode decides whether to look at all — under Manual, a selection
-            // only counts when the user also held the marker modifier.
-            // Decision lives in `Settings` so it is testable without Tauri;
-            // a poisoned lock falls back to the behaviour that predates the
-            // setting rather than dropping the selection silently.
-            if settings
-                .lock()
-                .map_or(true, |s| s.command_mode_wants_selection(held))
-            {
+            // the utterance rewrites it, without one it is dictated. A
+            // selection is the only signal — the extra-modifier gesture came
+            // out, because the Rewrite hotkey covers rewriting on demand. A
+            // poisoned lock falls back to looking, which is the behaviour that
+            // predates the toggle, rather than dropping the selection silently.
+            if settings.lock().map_or(true, |s| s.command_mode_enabled) {
                 pipeline.note_selection_if_any();
             }
             if let Err(e) = pipeline.start() {

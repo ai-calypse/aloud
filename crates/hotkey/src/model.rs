@@ -157,20 +157,6 @@ pub struct Config {
     pub rewrite: Option<Binding>,
     pub meeting_notes: Option<Binding>,
     pub agent: Option<Binding>,
-    /// A modifier that may additionally be held without stopping a
-    /// modifier-only binding from firing.
-    ///
-    /// Manual command mode needs exactly this: holding Option+Fn must still
-    /// start dictation, because the Option is the "rewrite this selection"
-    /// signal rather than a different chord. Without it the exact-match rule
-    /// below swallows the gesture and nothing happens at all.
-    ///
-    /// Runtime-only — derived from `Settings` every time the config is pushed,
-    /// so it never reaches `settings.json` where it would be a second, stale
-    /// copy of the command-mode preference.
-    #[serde(skip)]
-    #[specta(skip)]
-    pub permitted_extra: Option<Modifier>,
 }
 
 impl Config {

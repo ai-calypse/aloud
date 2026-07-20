@@ -187,23 +187,6 @@ export type Binding = { kind: "disabled" } |
  */
 { kind: "modifierKey"; key: Key; modifiers: Modifier[] };
 
-/**
- *  How dictating over a selection becomes a rewrite. Ported from Swift's
- *  `CommandModeStyle`.
- */
-export type CommandModeStyle = 
-/**
- *  A selection is enough: dictating with text selected rewrites it. This
- *  is what Aloud did before the setting existed, so it stays the default.
- */
-"automatic" | 
-/**
- *  A selection is not enough — the dictate key must be pressed together
- *  with [`Settings::command_mode_manual_modifier`]. Without it, a
- *  selection is ignored and the utterance is dictated.
- */
-"manual";
-
 export type Config = {
 	hold: Binding | null,
 	toggle: Binding | null,
@@ -353,15 +336,19 @@ export type Settings = {
 	/**
 	 *  Whether a selection can turn a dictation into a rewrite at all.
 	 * 
+	 *  A selection is the *only* signal: there is no extra-modifier gesture.
+	 *  Swift offered one, and it was removed here because it collided with the
+	 *  dictate key in three of the four modifier choices and had to be
+	 *  defended by a conflict-detection routine that could only ever tell the
+	 *  user their setting does nothing. An explicit rewrite that does not
+	 *  depend on a selection is [`aloud_hotkey::model::Role::Rewrite`], which
+	 *  has its own hotkey.
+	 * 
 	 *  **Defaults to on, where the Swift app defaults to off.** Aloud shipped
 	 *  selection-aware rewriting with no way to disable it, so defaulting to
 	 *  off would silently remove a working feature from every existing user.
 	 */
 	commandModeEnabled?: boolean,
-	/**  How a rewrite is invoked once enabled. */
-	commandModeStyle?: CommandModeStyle,
-	/**  The extra modifier that means "rewrite" under [`CommandModeStyle::Manual`]. */
-	commandModeManualModifier?: Modifier,
 	hotkeys?: Config,
 	selectedMicrophone?: string | null,
 	playSounds?: boolean,

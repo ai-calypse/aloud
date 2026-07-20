@@ -34,9 +34,8 @@ pub fn update_settings(
 
     // Push the hotkey slice into the live config the listener reads, so a
     // rebind takes effect on the next key event rather than at next launch.
-    // Via `hotkey_config` so a command-mode change reaches the matcher too.
     if let Ok(mut config) = state.hotkey_config.lock() {
-        *config = settings.hotkey_config();
+        *config = settings.hotkeys.clone();
     }
 
     // Applied live rather than at next launch: a toggle that appears to do

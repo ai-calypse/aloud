@@ -6,7 +6,6 @@ import { MacroEditor } from "./MacroEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
 import { ConnectorEditor } from "./ConnectorEditor";
 import { AUTO_DETECT, LANGUAGES } from "./languages";
-import { bindingModifier } from "./binding-label";
 import {
   Group,
   PaneTitle,
@@ -85,9 +84,6 @@ export function SettingsView({ section }: { section: SettingsSection }) {
   // #[serde(default)]), and repeating the fallback per row is how one of them
   // ends up with a different default from the rest.
   const commandMode = settings.commandModeEnabled ?? true;
-  const commandStyle = settings.commandModeStyle ?? "automatic";
-  const commandMarker = settings.commandModeManualModifier ?? "option";
-  const manualCommand = commandMode && commandStyle === "manual";
   const sounds = settings.playSounds ?? true;
 
   /** Applies one field and persists immediately — no Save button to forget. */
@@ -468,10 +464,14 @@ export function SettingsView({ section }: { section: SettingsSection }) {
             onChange={(hotkeys) => update({ hotkeys })}
           />
 
+          {/* A selection is the whole trigger. The extra-modifier gesture Swift
+              offered came out: it collided with the dictate key in most of the
+              modifier choices, and the Rewrite hotkey above already covers
+              rewriting on demand. */}
           <Group title="Command mode">
             <Row
               label="Rewrite the selection"
-              hint="Dictating with text selected changes it instead of typing over it."
+              hint="Dictating with text selected changes it instead of typing over it. With nothing selected, you dictate as usual."
               className="py-[11px]"
             >
               <Toggle
@@ -480,77 +480,6 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                 onChange={(c) => update({ commandModeEnabled: c })}
               />
             </Row>
-
-            {commandMode && (
-              <Row label="Invoke it">
-                <Value>
-                  <Select
-                    value={commandStyle}
-                    onValueChange={(v) =>
-                      update({
-                        commandModeStyle: v as Settings["commandModeStyle"],
-                      })
-                    }
-                  >
-                    <SelectTrigger className={rowSelect}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="automatic">
-                        Whenever text is selected
-                      </SelectItem>
-                      <SelectItem value="manual">
-                        Only with an extra key held
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Value>
-              </Row>
-            )}
-
-            {manualCommand && (
-                <Row
-                  label="Extra key"
-                  hint="Hold this with the dictate key to rewrite. Without it, a selection is ignored."
-                >
-                  <Value>
-                    <Select
-                      value={commandMarker}
-                      onValueChange={(v) =>
-                        update({
-                          commandModeManualModifier:
-                            v as Settings["commandModeManualModifier"],
-                        })
-                      }
-                    >
-                      <SelectTrigger className={rowSelect}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="command">Command ⌘</SelectItem>
-                        <SelectItem value="control">Control ⌃</SelectItem>
-                        <SelectItem value="option">Option ⌥</SelectItem>
-                        <SelectItem value="shift">Shift ⇧</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Value>
-                </Row>
-              )}
-
-            {/* Ported from Swift's collision message. Choosing the modifier the
-                dictate key already is leaves nothing to detect — its press is
-                the binding's own press — so the setting would silently never
-                fire, which is the worst way for it to fail. */}
-            {manualCommand &&
-              bindingModifier(hotkeys.hold ?? null) === commandMarker && (
-                <Row label="">
-                  <p className="text-warning">
-                    Your dictate key is already this modifier, so there is no
-                    extra key to detect. Pick another, or dictation will never
-                    rewrite the selection.
-                  </p>
-                </Row>
-              )}
           </Group>
         </>
       )}
