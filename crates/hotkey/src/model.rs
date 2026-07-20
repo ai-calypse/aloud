@@ -135,7 +135,7 @@ pub enum Role {
     /// Record while held, then answer instead of pasting.
     Ask,
     /// Record while held, then transform the current selection with it.
-    Command,
+    Rewrite,
     /// Start/stop a meeting-notes session.
     MeetingNotes,
     /// Record while held, then execute the spoken command across apps.
@@ -148,7 +148,7 @@ impl Role {
         Role::Toggle,
         Role::CopyAgain,
         Role::Ask,
-        Role::Command,
+        Role::Rewrite,
         Role::MeetingNotes,
         Role::Agent,
     ];
@@ -165,7 +165,11 @@ pub struct Config {
     pub toggle: Option<Binding>,
     pub copy_again: Option<Binding>,
     pub ask: Option<Binding>,
-    pub command: Option<Binding>,
+    /// Rewrite the selected text by voice. Called `command` in settings files
+    /// written before the rename; `Settings::load` moves those across, rather
+    /// than a serde alias — an alias makes specta emit a union type, and
+    /// `keyof Config` on a union is `never`, which breaks the settings UI.
+    pub rewrite: Option<Binding>,
     pub meeting_notes: Option<Binding>,
     pub agent: Option<Binding>,
 }
@@ -177,7 +181,7 @@ impl Config {
             Role::Toggle => &self.toggle,
             Role::CopyAgain => &self.copy_again,
             Role::Ask => &self.ask,
-            Role::Command => &self.command,
+            Role::Rewrite => &self.rewrite,
             Role::MeetingNotes => &self.meeting_notes,
             Role::Agent => &self.agent,
         };

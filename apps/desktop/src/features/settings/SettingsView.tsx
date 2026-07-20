@@ -72,7 +72,7 @@ export function SettingsView({ section }: { section: SettingsSection }) {
     toggle: null,
     copy_again: null,
     ask: null,
-    command: null,
+    rewrite: null,
     meeting_notes: null,
     agent: null,
   };

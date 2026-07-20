@@ -135,10 +135,25 @@ impl Settings {
         let Ok(text) = fs::read_to_string(&path) else {
             return Self::default();
         };
-        serde_json::from_str(&text).unwrap_or_else(|e| {
+        Self::from_json(&text).unwrap_or_else(|e| {
             tracing::warn!(%e, path = %path.display(), "settings unreadable; using defaults");
             Self::default()
         })
+    }
+
+    /// Parses a settings file, carrying renamed keys forward.
+    ///
+    /// `hotkeys.command` became `hotkeys.rewrite`. Without this the field would
+    /// simply deserialize to None and the user's hotkey would stop working with
+    /// no error anywhere — the quietest possible way to break someone's setup.
+    pub(crate) fn from_json(text: &str) -> serde_json::Result<Self> {
+        let mut raw: serde_json::Value = serde_json::from_str(text)?;
+        if let Some(hotkeys) = raw.get_mut("hotkeys").and_then(|h| h.as_object_mut()) {
+            if let Some(old) = hotkeys.remove("command") {
+                hotkeys.entry("rewrite").or_insert(old);
+            }
+        }
+        serde_json::from_value(raw)
     }
 
     /// Fills any *empty* key from the environment, so a `.env` at the repo root
@@ -339,5 +354,43 @@ mod tests {
         // load() must never panic the app on a mangled file.
         let parsed: Result<Settings, _> = serde_json::from_str("{not json");
         assert!(parsed.is_err(), "sanity: this really is invalid");
+    }
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+
+    /// The rewrite hotkey was called `command` before. Losing this migration
+    /// would not fail to parse — the field would deserialize to None and the
+    /// user's hotkey would quietly stop working, with nothing logged.
+    #[test]
+    fn an_old_settings_file_keeps_its_rewrite_hotkey() {
+        let on_disk = r#"{
+            "hotkeys": {
+                "hold": { "kind": "modifierKey", "key": "fn", "modifiers": [] },
+                "command": { "kind": "modifierKey", "key": "leftOption", "modifiers": [] }
+            }
+        }"#;
+
+        let settings = Settings::from_json(on_disk).expect("old settings must still parse");
+        assert!(
+            settings.hotkeys.rewrite.is_some(),
+            "a hotkey saved as `command` must load as `rewrite`"
+        );
+        assert!(settings.hotkeys.hold.is_some(), "other roles are untouched");
+    }
+
+    /// A file already using the new name must not be disturbed.
+    #[test]
+    fn a_current_settings_file_is_unchanged() {
+        let on_disk = r#"{
+            "hotkeys": {
+                "rewrite": { "kind": "modifierKey", "key": "rightOption", "modifiers": [] }
+            }
+        }"#;
+
+        let settings = Settings::from_json(on_disk).expect("current settings must parse");
+        assert!(settings.hotkeys.rewrite.is_some());
     }
 }

@@ -174,7 +174,7 @@ where
             //
             // `aloud_paste` types Cmd+C to read a selection and Cmd+V to paste,
             // and a Session-level tap sees those exactly as it sees the user's
-            // keyboard. That fed back: holding Left Option for command mode
+            // keyboard. That fed back: holding Left Option to rewrite
             // fired Activated, which read the selection, which typed Cmd+C,
             // which the matcher read as Cmd+Option — not the bound Option — so
             // it fired Deactivated. Releasing the synthetic Cmd re-fired

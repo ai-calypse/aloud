@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { events, type Phase } from "./lib/bindings";
-import { pushLevel, restingLevels } from "./lib/meter";
 import "./styles/overlay.css";
 
 const LABEL: Record<Phase, string> = {
@@ -17,6 +16,32 @@ const LABEL: Record<Phase, string> = {
 /** A long error still has to fit one line on a small pill. */
 const ERROR_CHARS = 90;
 
+/**
+ * Bars in the listening wave.
+ *
+ * Five, as the Swift app used. The count and the per-bar phase step together
+ * set how much of a wave fits across the row (see the delay in overlay.css) —
+ * change this and that has to move with it.
+ */
+const BAR_COUNT = 5;
+
+/**
+ * Per-bar height ceiling: a raised cosine, tallest in the middle.
+ *
+ * Without it every bar reaches the same height and the row reads as a ribbon
+ * rather than a waveform. Computed rather than hand-tuned so the shape holds
+ * if BAR_COUNT changes.
+ *
+ * The floor is 0.6, not 0, because this multiplies through the wave's trough
+ * and the silent-level scale as well: a shallower envelope crushed the outer
+ * bars to a 1px dash at rest, which read as a broken row of dots rather than
+ * as short bars.
+ */
+const BAR_PEAKS = Array.from({ length: BAR_COUNT }, (_, i) => {
+  const position = i / (BAR_COUNT - 1); // 0…1 across the row
+  return 0.6 + 0.4 * Math.sin(Math.PI * position);
+});
+
 
 
 /**
@@ -30,23 +55,31 @@ function Overlay() {
   const preview = new URLSearchParams(location.search).get("phase") as Phase | null;
   const [phase, setPhase] = useState<Phase>(preview ?? "idle");
   const [error, setError] = useState<string | null>(null);
-  // The meter's rolling history, newest last. Starts flat so the first frames
-  // of a session are a resting row rather than an empty gap.
-  const [levels, setLevels] = useState<number[]>(restingLevels);
   const [download, setDownload] = useState<number | null>(null);
+  const bars = useRef<HTMLSpanElement>(null);
+
+  // Levels land every 50ms. Writing --level straight onto the node keeps them
+  // out of React entirely: at 20 renders a second the pill would rebuild its
+  // subtree while the compositor is mid-wave, which is exactly the stutter the
+  // CSS-owned animation exists to avoid. Null (no signal yet) reads as silence.
+  useEffect(() => {
+    const unlisten = events.audioLevel.listen((e) => {
+      const level = Math.min(1, Math.max(0, e.payload ?? 0));
+      bars.current?.style.setProperty("--level", String(level));
+    });
+    return () => {
+      unlisten.then((off) => off());
+    };
+  }, []);
 
   useEffect(() => {
     const unlistenPhase = events.dictationPhase.listen((e) => {
       setPhase(e.payload);
-      // A new run clears the last run's message and stale level.
+      // A new run clears the last run’s message.
       if (e.payload === "recording") {
         setError(null);
-        setLevels(restingLevels());
       }
     });
-    const unlistenLevel = events.audioLevel.listen((e) =>
-      setLevels((prev) => pushLevel(prev, e.payload)),
-    );
     const unlistenError = events.overlayError.listen((e) => setError(e.payload));
     // First use of the local engine fetches ~150MB; without this the pill sits
     // on "Transcribing…" for minutes and the app looks hung.
@@ -55,7 +88,6 @@ function Overlay() {
     );
     return () => {
       unlistenPhase.then((off) => off());
-      unlistenLevel.then((off) => off());
       unlistenError.then((off) => off());
       unlistenDownload.then((off) => off());
     };
@@ -97,18 +129,17 @@ function Overlay() {
       {/* Warped glass highlight sitting over the real backdrop blur. */}
       <span className="pill__refraction" aria-hidden />
       {phase === "recording" ? (
-        // A scrolling level meter: each bar is one 50ms sample of what the mic
-        // actually heard, newest on the right. The bars it replaced ran a
-        // canned sine loop that played identically whether you spoke or not.
-        <span className="bars" aria-hidden>
-          {levels.map((value, i) => (
+        // A continuous wave the voice scales rather than drives. CSS owns the
+        // motion; these two custom properties only give each bar its place in
+        // the row and its height ceiling.
+        <span className="bars" ref={bars} aria-hidden>
+          {BAR_PEAKS.map((peak, i) => (
             <i
               key={i}
               style={
                 {
-                  "--v": value,
-                  // Staggered only for the entrance; see .bars i in the CSS.
                   "--i": i,
+                  "--peak": peak,
                 } as React.CSSProperties
               }
             />

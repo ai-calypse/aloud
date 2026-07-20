@@ -20,10 +20,10 @@ import { GridRow, Group } from "@/components/ui/rows";
 
 /** The roles a user binds, and the Config key each writes to. */
 const ROLES: { key: keyof Config; label: string; mode: string; hint: string }[] = [
-  { key: "hold", label: "Dictate", mode: "hold", hint: "Hold to talk, release to paste" },
+  { key: "hold", label: "Dictate", mode: "hold", hint: "Hold to talk. With text selected, rewrites it instead" },
   { key: "toggle", label: "Dictate", mode: "tap", hint: "Tap to start, tap again to stop" },
   { key: "ask", label: "Ask", mode: "hold", hint: "Hold, ask a question, read the answer" },
-  { key: "command", label: "Command", mode: "hold", hint: "Hold to transform the selection" },
+  { key: "rewrite", label: "Rewrite", mode: "hold", hint: "Hold to change the selected text by voice" },
   { key: "agent", label: "Agent", mode: "hold", hint: "Hold to run a command across apps" },
   { key: "meeting_notes", label: "Meeting notes", mode: "tap", hint: "Tap to start/stop a session" },
   { key: "copy_again", label: "Paste again", mode: "tap", hint: "Re-paste the last transcript" },

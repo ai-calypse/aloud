@@ -277,7 +277,7 @@ mod tests {
         assert!(!state.is_active(Role::Hold));
     }
 
-    /// Command mode's bug: a modifier arriving from *our own* synthetic Cmd+C
+    /// The rewrite hotkey's bug: a modifier arriving from *our own* synthetic Cmd+C
     /// tears down the hold, and its release starts it again. Since the restart
     /// re-reads the selection, which synthesises another Cmd+C, the pair
     /// repeats for as long as the user holds the key — the chime toggling on

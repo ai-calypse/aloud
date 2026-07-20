@@ -466,10 +466,26 @@ impl Pipeline {
         }
     }
 
-    /// Reads the current selection, so command mode can transform it.
+    /// Reads the current selection, so an utterance can rewrite it.
     ///
     /// Called on the *leading* edge of the command hotkey, before recording:
     /// starting dictation moves focus and loses the selection.
+    /// Notes the selection for a plain dictation, if the OS will say what it
+    /// is without being asked twice.
+    ///
+    /// Deliberately the quiet read: this runs on every utterance, and the
+    /// clipboard fallback would synthesise a Cmd+C into the user's app each
+    /// time they dictate. Where Accessibility cannot answer we simply dictate,
+    /// which is what happened before selection-aware dictation existed.
+    pub fn note_selection_if_any(&self) {
+        // Off the hotkey thread like the rewrite path, and for the same reason:
+        // an Accessibility read waits on the target app, which can be busy.
+        let handle = tauri::async_runtime::spawn_blocking(aloud_selection::selected_text_quietly);
+        if let Ok(mut session) = self.session.lock() {
+            session.selection = Some(handle);
+        }
+    }
+
     /// Starts reading the selection, without waiting for it.
     ///
     /// Called from the hotkey thread, which must never block: a stalled event
@@ -483,7 +499,7 @@ impl Pipeline {
             tauri::async_runtime::spawn_blocking(|| match aloud_selection::selected_text() {
                 Ok(text) if !text.trim().is_empty() => Some(text),
                 Ok(_) => {
-                    tracing::info!("command mode: nothing selected");
+                    tracing::info!("rewrite: nothing selected");
                     None
                 }
                 Err(e) => {
@@ -498,30 +514,38 @@ impl Pipeline {
 
     /// Stops capturing, transforms the captured selection per the spoken
     /// command, and pastes the result over it.
-    pub async fn stop_and_command(&self) -> Result<()> {
-        let (recorder, reading) = {
-            let mut session = self.session.lock().unwrap();
-            (session.recorder.take(), session.selection.take())
-        };
-        let Some(recorder) = recorder else {
-            return Ok(());
-        };
-        // The read was started when the key went down; by the time it comes up
-        // it has almost always finished.
+    /// Stops capturing and either rewrites the selection or types fresh text.
+    ///
+    /// One stop path for both hotkeys. They differ only in the read started
+    /// when the key went down: dictation asks Accessibility quietly, while the
+    /// rewrite key also pays for the clipboard fallback. Whatever that read
+    /// found decides the outcome here — an utterance with something selected is
+    /// an instruction for changing it, and with nothing selected it is the text
+    /// itself.
+    pub async fn stop_and_dictate(&self) -> Result<()> {
+        let reading = self.session.lock().unwrap().selection.take();
         let selection = match reading {
+            // Started when the key went down, so by key-up it has almost
+            // always finished.
             Some(handle) => handle.await.ok().flatten(),
             None => None,
         };
-        let Some(selection) = selection else {
-            // No selection was captured; treat the utterance as plain dictation
-            // rather than doing nothing.
-            recorder.stop_to_wav(&temp_wav_path()).ok();
-            self.emit(Phase::Idle);
+
+        match selection {
+            Some(selection) => self.finish_rewrite(selection).await,
+            // Nothing selected, so the utterance is dictation. This used to
+            // stop the recorder and drop the audio on the floor.
+            None => self.stop_and_paste().await,
+        }
+    }
+
+    async fn finish_rewrite(&self, selection: String) -> Result<()> {
+        let Some(recorder) = self.session.lock().unwrap().recorder.take() else {
             return Ok(());
         };
 
         self.emit(Phase::Transcribing);
-        let result = self.transcribe_and_command(recorder, &selection).await;
+        let result = self.transcribe_and_rewrite(recorder, &selection).await;
         match &result {
             Ok(()) => self.emit(Phase::Done),
             Err(e) => self.emit_error(e),
@@ -529,7 +553,7 @@ impl Pipeline {
         result
     }
 
-    async fn transcribe_and_command(
+    async fn transcribe_and_rewrite(
         &self,
         recorder: aloud_audio::Recorder,
         selection: &str,
@@ -559,7 +583,7 @@ impl Pipeline {
         settings: &Settings,
     ) -> Result<String> {
         if settings.groq_api_key.trim().is_empty() {
-            bail!("Command mode needs an API key — add one in Settings");
+            bail!("Rewriting a selection needs an API key — add one in Settings");
         }
         let client = aloud_llm::LlmClient::new(&settings.groq_api_key, Some(&settings.base_url))?;
         let messages = [

@@ -1,7 +1,8 @@
 //! Chat completions against any OpenAI-compatible endpoint.
 //!
 //! Ported from `PostProcessingService.swift` + `LLMCooldownManager.swift`.
-//! Used for transcript cleanup, command mode, Ask, and meeting summaries —
+//! Used for transcript cleanup, rewriting a selection, Ask, and meeting
+//! summaries —
 //! the Swift app hit the same Groq endpoint for all four.
 
 pub mod ask;
