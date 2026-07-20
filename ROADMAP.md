@@ -51,13 +51,14 @@ Small, independent, no design decisions. Good first branch.
   `rowInput` from `components/ui/rows.tsx`. Setting it makes agent mode work
   without editing `settings.json` or exporting `GEMINI_API_KEY`.
 
-### 0.2 — Fix the Cerebras/Gemini label · S
-- **Scope** — same Keys group. The pane credits Cerebras with "Understands a
-  spoken command"; `src-tauri/src/agent.rs:122-138` shows Gemini is what agent
-  mode reaches for, with Cerebras as fallback.
-- **Done** — Gemini carries the command-understanding caption; Cerebras is
-  described as the fallback it actually is. Verify by reading `agent.rs`, not
-  by trusting this file.
+### 0.2 — ~~Fix the Cerebras/Gemini label~~ → **delete `cerebras_api_key`** · S
+Relabelling was the wrong fix. `grep` finds exactly three references to
+`cerebras_api_key` — the field, its default, its env var — and no consumer. It
+was never the agent's fallback; the doc comment saying so was aspirational. The
+field, its UI row and its env entry are deleted in PR #59.
+
+Wiring Cerebras up as a real fallback is a *feature*, and should be designed on
+its merits rather than back-filled to justify a stale comment.
 
 ### 0.3 — Ungate the Timings pane · S
 - **Scope** — `apps/desktop/src/App.tsx:46-48`, the `import.meta.env.DEV`
@@ -100,11 +101,19 @@ because `#[serde(default)]` covers new fields (`settings.rs:21`).
   marking visible to a clipboard manager. PR body states the Windows path is
   a no-op.
 
-### 1.2 — Shortcut start delay · S
-- **Scope** — `Settings` field (0–500ms) consumed in `src-tauri/src/pipeline.rs`
-  before recording starts. Slider in the Hotkeys pane.
-- **Done** — a non-zero delay measurably postpones capture. Verify against the
-  timings waterfall, which already records stage starts (`timings.rs:45`).
+### 1.2 — Shortcut start delay · ~~S~~ **M — resized, see below**
+- **The obvious implementation is a bug.** A sleep in `Pipeline::start` runs on
+  the CGEventTap callback thread: `handle_hotkey` → `aloud_hotkey::listen`'s
+  callback → invoked inside the tap at `crates/hotkey/src/macos.rs:194`.
+  Blocking there stalls every keystroke on the machine, and macOS disables a tap
+  that overruns its timeout (`kCGEventTapDisabledByTimeout`) — a 500ms delay
+  could kill the hotkey listener outright. Tried and backed out in PR #60.
+- **Scope** — reserve the recorder slot under the session lock, return from the
+  tap immediately, and start capture from a spawned thread after the delay. The
+  guard against a second press arriving mid-delay is the actual work.
+- **Done** — a non-zero delay postpones capture and the event tap keeps running
+  under repeated presses. Verify with a real `CGEvent`, and watch for the tap
+  being disabled — that failure is silent.
 
 ### 1.3 — Mute system audio during dictation · M
 - **Scope** — new, platform-owned. macOS has no public output-mute API worth
@@ -122,10 +131,9 @@ because `#[serde(default)]` covers new fields (`settings.rs:21`).
   user — decide and document the recovery path (recommend: hiding is only
   offered once a hotkey to open settings exists).
 
-### 1.5 — History retention control · S
-- **Scope** — `history_retention` exists (`settings.rs:65`) and prunes on every
-  insert (`history.rs:70`), with no UI.
-- **Done** — a stepper or select in General. Natural companion to Phase 4.
+### 1.5 — ~~History retention control~~ · **already done**
+Wrong in the parity audit and wrong here. A "History kept" number input already
+sits at the bottom of the General → Behaviour group. No work needed.
 
 ### 1.6 — API key validation on save · M
 - **Scope** — a `validate_key` command per provider doing one cheap authed call.
@@ -409,6 +417,16 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 - **Done** — overlay states are inspectable without triggering real dictation.
 
 ---
+
+## Status
+
+| Phase | State |
+|---|---|
+| 0 — Corrections and free wins | ✅ PR #59 (0.1–0.5) |
+| 1.1 — Clipboard toggles | ◐ PR #60 — `preserve_clipboard` done; transient marking deferred (needs `objc2-app-kit`) |
+| 1.2 — Shortcut start delay | ⚠️ attempted, backed out — resized to M, see above |
+| 1.5 — History retention | ✅ already existed |
+| everything else | not started |
 
 ## Suggested order
 

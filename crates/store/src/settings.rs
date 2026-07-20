@@ -55,6 +55,9 @@ pub struct Settings {
     /// system sounds have no per-sound volume, so it is ignored there.
     pub sound_volume: f32,
     pub press_enter_command: bool,
+    /// Put the previous clipboard back after pasting. Off leaves the dictated
+    /// text on the clipboard so it can be pasted again.
+    pub preserve_clipboard: bool,
     /// Whether the first-run wizard has been completed. False shows it.
     pub onboarded: bool,
     /// Reveals the latency waterfall. A debugging tool, not a feature — but it
@@ -88,6 +91,7 @@ impl Default for Settings {
             play_sounds: true,
             sound_volume: 0.5,
             press_enter_command: true,
+            preserve_clipboard: true,
             history_retention: 50,
             // A fresh install has not been through the wizard; a migrated one
             // is handled below, since the Swift users are already set up.
