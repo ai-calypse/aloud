@@ -249,10 +249,7 @@ pub fn run() {
             // toggle has to go behind a settings hotkey (see 1.4 / 2.1).
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
-                if let Some(window) = _app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                tray::show_main(_app);
             }
         });
 }

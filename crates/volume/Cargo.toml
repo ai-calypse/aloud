@@ -11,4 +11,5 @@ aloud-notes = { path = "../notes" }
 tracing.workspace = true
 
 [dev-dependencies]
+tempfile = "3"
 tracing-subscriber = "0.3"

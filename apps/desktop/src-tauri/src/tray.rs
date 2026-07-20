@@ -46,15 +46,10 @@ fn create(app: &AppHandle) -> tauri::Result<()> {
 
 /// Shows or hides the menu-bar icon without a restart.
 ///
-/// Hiding it is safe only because reopening the app (double-clicking it in
-/// Finder) raises the window — macOS turns that into `applicationShouldHandle
-/// Reopen` rather than a second instance, and `lib.rs` listens for it. Without
-/// that hook this would be a one-way door: no dock icon, no menu bar, and no
-/// way back to the settings that would turn it on again.
-///
-/// That hook is **not yet verified against a real build** — see the TODO on the
-/// `RunEvent::Reopen` arm in `lib.rs`. Until it is, treat this toggle as the
-/// one setting that could strand a user.
+/// Hiding is a one-way door — no dock icon, no menu bar, no way back to the
+/// settings that would turn it on again — except for the `RunEvent::Reopen`
+/// arm in `lib.rs`, which is what makes this safe and is **not yet verified
+/// against a real build**. See the TODO there before trusting this toggle.
 pub fn set_visible(app: &AppHandle, visible: bool) {
     let handle = app.clone();
     // Creating and destroying a status item is main-thread-only on macOS, and
@@ -389,7 +384,9 @@ fn disabled(
     MenuItem::with_id(app, id, text.as_ref(), false, None::<&str>)
 }
 
-fn show_main(app: &AppHandle) {
+/// Raises the main window. The single way back to it, shared by the tray's
+/// Open/Settings/Re-run Setup rows and by the reopen handler in `lib.rs`.
+pub(crate) fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
