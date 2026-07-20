@@ -385,18 +385,27 @@ impl Pipeline {
     /// the one latency number the user actually feels; every stage below is a
     /// slice of it. Instrumenting only the inner calls would report a pipeline
     /// measurably faster than the app, because the clock starts before them.
+    ///
+    /// The id is minted by the caller rather than inside `fields(…)` so that
+    /// the history row can be stamped with it: a field expression's value is
+    /// not readable back off the span, and the Run Log's per-stage breakdown
+    /// is exactly that join.
+    pub async fn stop_and_paste(&self) -> Result<()> {
+        self.dictate(next_utterance_id()).await
+    }
+
     #[tracing::instrument(
         name = "utterance",
         skip_all,
         fields(
-            utterance_id = next_utterance_id(),
+            utterance_id = utterance_id,
             mode = "dictation",
             spoken_ms = tracing::field::Empty,
             outcome = tracing::field::Empty,
             ok = tracing::field::Empty,
         )
     )]
-    pub async fn stop_and_paste(&self) -> Result<()> {
+    async fn dictate(&self, utterance_id: i64) -> Result<()> {
         let (recorder, started_at) = self.take_recorder();
         let Some(recorder) = recorder else {
             return Ok(()); // not recording
@@ -410,7 +419,7 @@ impl Pipeline {
         let generation = self.generation();
         self.emit(Phase::Transcribing);
         let result = tokio::select! {
-            result = self.transcribe_and_paste(recorder, started_at, generation) => result,
+            result = self.transcribe_and_paste(recorder, started_at, generation, utterance_id) => result,
             // Dropping the work future here is what actually aborts the
             // in-flight HTTP request.
             _ = self.cancelled.notified() => {
@@ -518,6 +527,7 @@ impl Pipeline {
         recorder: aloud_audio::Recorder,
         started_at: Option<std::time::Instant>,
         generation: u64,
+        utterance_id: i64,
     ) -> Result<Outcome> {
         // Started before transcription rather than after it. The read depends
         // on nothing transcription produces, and an Accessibility call blocks
@@ -579,6 +589,7 @@ impl Pipeline {
             started_at,
             &settings,
             app_name.as_deref(),
+            utterance_id,
         );
         Ok(Outcome::Pasted)
     }
@@ -673,6 +684,7 @@ impl Pipeline {
         started_at: Option<std::time::Instant>,
         settings: &Settings,
         app_name: Option<&str>,
+        utterance_id: i64,
     ) {
         let duration_ms = started_at.map_or(0, |s| s.elapsed().as_millis() as i64);
 
@@ -687,6 +699,7 @@ impl Pipeline {
                 final_text,
                 app_name,
                 duration_ms,
+                Some(utterance_id),
                 settings.history_retention,
             ) {
                 tracing::warn!(%e, "could not record history");
