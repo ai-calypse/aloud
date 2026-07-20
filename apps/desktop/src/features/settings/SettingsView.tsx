@@ -139,15 +139,23 @@ export function SettingsView({ section }: { section: SettingsSection }) {
   /** Runs the prompt in the editor against the sample. */
   async function runPrompt() {
     setRunning(true);
-    const result = await commands.testPrompt(
-      settings!.customSystemPrompt ?? "",
-      sample,
-    );
-    setRunning(false);
-    setPanel({
-      title: result.status === "error" ? "Failed" : "Result",
-      body: result.status === "error" ? result.error : result.data,
-    });
+    try {
+      const result = await commands.testPrompt(
+        settings!.customSystemPrompt ?? "",
+        sample,
+      );
+      setPanel({
+        title: result.status === "error" ? "Failed" : "Result",
+        body: result.status === "error" ? result.error : result.data,
+      });
+    } catch (e) {
+      // A rejected invoke — serialization, a panic, the window going away —
+      // never reaches the Result type, and without this the button stays
+      // disabled until the pane remounts.
+      setPanel({ title: "Failed", body: String(e) });
+    } finally {
+      setRunning(false);
+    }
   }
 
   return (
@@ -516,13 +524,16 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                   <Button
                     variant="plain"
                     size="text"
-                    onClick={() => {
+                    // Deliberately does NOT acknowledge: dismissing here takes
+                    // "Switch to it" with it, and view-then-decide is the whole
+                    // point of the button. Swift's View Default only toggles a
+                    // disclosure too.
+                    onClick={() =>
                       setPanel({
                         title: "Built-in prompt",
                         body: builtIn!.text,
-                      });
-                      acknowledgePrompt();
-                    }}
+                      })
+                    }
                   >
                     View default
                   </Button>
@@ -553,7 +564,17 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                 className="w-full resize-none border-0 bg-transparent p-0 font-mono text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
                 placeholder="Leave empty to use the built-in cleanup prompt."
                 value={settings.customSystemPrompt ?? ""}
-                onChange={(e) => update({ customSystemPrompt: e.target.value })}
+                // The version is stamped on every edit, mirroring Swift's
+                // `customSystemPromptLastModified`. Without it a fresh install
+                // that types one character into an empty box is immediately
+                // told its prompt "was written against an older default",
+                // which is false — it was written against this one.
+                onChange={(e) =>
+                  update({
+                    customSystemPrompt: e.target.value,
+                    ...(builtIn ? { seenPromptVersion: builtIn.version } : {}),
+                  })
+                }
               />
             </Row>
             {(settings.customSystemPrompt ?? "").trim() !== "" && (

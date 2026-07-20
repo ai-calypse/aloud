@@ -120,9 +120,12 @@ async fn main() -> anyhow::Result<()> {
     println!("short input   -> {cleaned:?} (no request made)");
     assert_eq!(cleaned, "one sec");
 
-    // 4. The same sentinel reply, but translating. The sentinel belongs to the
-    //    cleanup prompt; once the model is also translating, "EMPTY" can be an
-    //    honest translation, and swallowing it pastes nothing with no reason.
+    // 4. The same sentinel reply, but translating. The translation instruction
+    //    is *appended* to the cleanup prompt rather than replacing it, so the
+    //    sentinel instruction is still in play and filler-only speech still
+    //    returns it — it must still mean "paste nothing". An earlier port
+    //    disabled the check here, which typed EMPTY into the document on every
+    //    "um, uh" while an output language was set.
     let (url, server) = stub("EMPTY");
     let options = aloud_llm::cleanup::Options {
         api_key: "stub-key",
@@ -137,7 +140,10 @@ async fn main() -> anyhow::Result<()> {
     let request: serde_json::Value = serde_json::from_str(&server.join().unwrap())?;
     let system = request["messages"][0]["content"].as_str().unwrap();
     println!("sentinel reply while translating -> {cleaned:?}");
-    assert_eq!(cleaned, "EMPTY", "a translation must not hit the sentinel");
+    assert_eq!(
+        cleaned, "",
+        "the sentinel still means paste nothing while translating"
+    );
     assert!(
         system.contains("Output ONLY in German"),
         "the target language must reach the system prompt"

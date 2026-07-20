@@ -348,8 +348,12 @@ fn add_clipboard_to_vocabulary(app: &AppHandle) {
 
     let state = app.state::<AppState>();
     let mut settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
-    if !settings.add_vocabulary_term(&text) {
-        tracing::info!("clipboard word is blank or already in the vocabulary");
+    // Split, not stored whole: the source is the clipboard, so whatever the
+    // user last copied arrives here. A paragraph stored as one "term" would be
+    // prefixed to the user message of every subsequent cleanup request.
+    let added = settings.add_vocabulary_terms(&text);
+    if added == 0 {
+        tracing::info!("clipboard holds nothing new to add to the vocabulary");
         return;
     }
     if let Err(e) = settings.save() {

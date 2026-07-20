@@ -75,7 +75,7 @@ pub async fn clean(options: Options<'_>, raw: &str) -> Result<String> {
         ))
         .await?;
 
-    Ok(interpret(&cleaned, options.output_language))
+    Ok(interpret(&cleaned))
 }
 
 /// Whether the transcript is too short to be worth a cleanup request.
@@ -118,14 +118,25 @@ fn user_message(raw: &str, vocabulary: &[String]) -> String {
 /// paste nothing. Returning it literally would type "EMPTY" into the user's
 /// document.
 ///
-/// The sentinel is *skipped* while translating, ported from Swift's
-/// `sanitizeVerbatimTranslation`. The sentinel belongs to the cleanup prompt,
-/// but the model is now also being told to translate — so a transcript whose
-/// honest translation is the word "empty" would be swallowed and the user
-/// would get a blank paste with nothing to explain it.
-fn interpret(cleaned: &str, output_language: &str) -> String {
-    let translating = !output_language.trim().is_empty();
-    if !translating && cleaned.trim() == EMPTY_SENTINEL {
+/// **The sentinel applies while translating too.** An earlier port disabled it
+/// whenever an output language was set, following Swift's
+/// `sanitizeVerbatimTranslation` — but that function belongs to a *different*
+/// Swift path. `verbatimTranslationSystemPrompt` is a minimal literal
+/// translator carrying no cleanup rules and no sentinel instruction, which is
+/// the precondition its comment names. The path this crate implements is
+/// Swift's `applyOutputLanguage`, whose reply goes to
+/// `sanitizePostProcessedTranscript` — and that one *does* strip the sentinel.
+///
+/// It has to: `system_prompt` appends the translation instruction to the
+/// cleanup prompt rather than replacing it, so the sentinel instruction is
+/// still in play and filler-only speech still returns it. Skipping the check
+/// meant every "um, uh" while translating typed EMPTY into the document.
+///
+/// The exact match is what makes it safe in both directions: the sentinel is
+/// the whole output, all caps, untranslated. A real translation is a sentence,
+/// and even a single-word one is lowercase, so it does not collide.
+fn interpret(cleaned: &str) -> String {
+    if cleaned.trim() == EMPTY_SENTINEL {
         return String::new();
     }
     cleaned.to_string()
@@ -150,28 +161,28 @@ mod tests {
     /// The sentinel reaching the paste path types "EMPTY" into the document.
     #[test]
     fn the_empty_sentinel_means_paste_nothing() {
-        assert_eq!(interpret(EMPTY_SENTINEL, ""), "");
+        assert_eq!(interpret(EMPTY_SENTINEL), "");
+        assert_eq!(interpret("  EMPTY \n"), "", "trimmed, as the prompt emits");
         assert_eq!(
-            interpret("  EMPTY \n", ""),
-            "",
-            "trimmed, as the prompt emits"
-        );
-        assert_eq!(
-            interpret("EMPTY the calendar", ""),
+            interpret("EMPTY the calendar"),
             "EMPTY the calendar",
             "a transcript that merely starts with the word is not the sentinel"
         );
-        assert_eq!(interpret("hello there", ""), "hello there");
+        assert_eq!(interpret("hello there"), "hello there");
     }
 
-    /// Translating "the tank is empty" into English must not vanish: the
-    /// sentinel is the cleanup prompt's, and a translation of it is real text.
+    /// The failure this guards: the first port disabled the sentinel whenever
+    /// an output language was set, to avoid swallowing a translation that
+    /// happened to be the word "empty". But filler-only speech still makes the
+    /// model emit the sentinel while translating, so every "um, uh" typed
+    /// EMPTY into the user's document.
     #[test]
-    fn translating_does_not_swallow_a_literal_empty() {
-        assert_eq!(interpret(EMPTY_SENTINEL, "English"), EMPTY_SENTINEL);
-        assert_eq!(interpret("EMPTY", "German"), "EMPTY");
-        // A blank-but-whitespace language is still "not translating".
-        assert_eq!(interpret(EMPTY_SENTINEL, "  "), "");
+    fn the_sentinel_still_means_paste_nothing_while_translating() {
+        assert_eq!(interpret(EMPTY_SENTINEL), "");
+        // A real translation is a sentence, or at worst a lowercase word, so
+        // the exact all-caps match does not collide with one.
+        assert_eq!(interpret("Der Tank ist leer."), "Der Tank ist leer.");
+        assert_eq!(interpret("empty"), "empty");
     }
 
     #[test]

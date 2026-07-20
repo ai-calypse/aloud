@@ -13,6 +13,14 @@ use std::{fs, path::PathBuf};
 const DEFAULT_CLEANUP_MODEL: &str = "openai/gpt-oss-20b";
 const DEFAULT_FALLBACK_MODEL: &str = "qwen/qwen3.6-27b";
 
+/// Longest single vocabulary term accepted from the clipboard.
+///
+/// A vocabulary term is a proper noun or a piece of jargon — "Kubernetes",
+/// "Anthropic". Anything longer is a sentence the user happened to have
+/// copied, and every term is re-sent with every cleanup request, so a stray
+/// paragraph would be paid for on each dictation until someone noticed.
+const MAX_TERM_CHARS: usize = 48;
+
 /// Everything the app remembers between launches.
 ///
 /// One coarse struct rather than ~70 individual commands: the whole thing is
@@ -258,6 +266,27 @@ impl Settings {
         true
     }
 
+    /// Adds every term in `text`, returning how many were new.
+    ///
+    /// Splits on newlines, commas and semicolons, matching Swift's
+    /// `mergedVocabularyTerms`. Without the split, "Tauri, Specta" becomes one
+    /// term — and since the menu item's source is *the clipboard*, whatever
+    /// the user last copied lands here verbatim.
+    ///
+    /// [`MAX_TERM_CHARS`] is why the length bound exists at all: the whole
+    /// vocabulary is prefixed to the user message of every subsequent cleanup
+    /// request, so a copied paragraph or email would be re-sent on each
+    /// dictation for as long as it stayed in the list.
+    pub fn add_vocabulary_terms(&mut self, text: &str) -> usize {
+        text.split(['\n', ',', ';'])
+            .filter(|t| {
+                let t = t.trim();
+                !t.is_empty() && t.chars().count() <= MAX_TERM_CHARS
+            })
+            .filter(|t| self.add_vocabulary_term(t))
+            .count()
+    }
+
     pub fn save(&self) -> Result<()> {
         let path = Self::path()?;
         let dir = path.parent().context("settings path has no parent")?;
@@ -360,6 +389,31 @@ mod tests {
             "case folding must be Unicode, not ASCII"
         );
         assert_eq!(settings.vocabulary, ["Tauri", "Café"]);
+    }
+
+    /// The failure this guards: the source is the clipboard, so "Tauri, Specta"
+    /// arrived as a single term and a copied paragraph arrived whole — and the
+    /// whole vocabulary is prefixed to every later cleanup request.
+    #[test]
+    fn clipboard_text_is_split_into_terms_and_long_ones_are_dropped() {
+        let mut settings = Settings::default();
+
+        assert_eq!(
+            settings.add_vocabulary_terms("Tauri, Specta; Rust\nserde"),
+            4
+        );
+        assert_eq!(settings.vocabulary, ["Tauri", "Specta", "Rust", "serde"]);
+
+        // Re-adding the same list is a no-op, so the menu item is idempotent.
+        assert_eq!(settings.add_vocabulary_terms("tauri, SPECTA"), 0);
+
+        // A sentence someone happened to have copied is not a proper noun.
+        let paragraph = "a".repeat(MAX_TERM_CHARS + 1);
+        assert_eq!(settings.add_vocabulary_terms(&paragraph), 0);
+        assert_eq!(
+            settings.add_vocabulary_terms(&"b".repeat(MAX_TERM_CHARS)),
+            1
+        );
     }
 
     #[test]
