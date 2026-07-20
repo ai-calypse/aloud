@@ -51,6 +51,10 @@ fn create(app: &AppHandle) -> tauri::Result<()> {
 /// Reopen` rather than a second instance, and `lib.rs` listens for it. Without
 /// that hook this would be a one-way door: no dock icon, no menu bar, and no
 /// way back to the settings that would turn it on again.
+///
+/// That hook is **not yet verified against a real build** — see the TODO on the
+/// `RunEvent::Reopen` arm in `lib.rs`. Until it is, treat this toggle as the
+/// one setting that could strand a user.
 pub fn set_visible(app: &AppHandle, visible: bool) {
     let handle = app.clone();
     // Creating and destroying a status item is main-thread-only on macOS, and

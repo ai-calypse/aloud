@@ -238,6 +238,15 @@ pub fn run() {
             // already running — raises the window. This is the recovery path
             // that makes hiding the menu-bar icon safe: with no dock icon and
             // no status item, it is otherwise the only way back to settings.
+            //
+            // TODO: unverified — test this against a real build (`pnpm build`),
+            // not `pnpm dev`. `applicationShouldHandleReopen` is delivered by
+            // LaunchServices to a bundled `.app`, so a bare `cargo run` binary
+            // can never raise it and no test here can cover it. Steps: turn
+            // "Show menu bar icon" off, close the window, then double-click
+            // Aloud in Applications — the window must come back. If it does
+            // not, hiding the icon is a one-way door out of the app and the
+            // toggle has to go behind a settings hotkey (see 1.4 / 2.1).
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
                 if let Some(window) = _app.get_webview_window("main") {
