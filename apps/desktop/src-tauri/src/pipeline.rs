@@ -519,6 +519,15 @@ impl Pipeline {
         started_at: Option<std::time::Instant>,
         generation: u64,
     ) -> Result<Outcome> {
+        // Started before transcription rather than after it. The read depends
+        // on nothing transcription produces, and an Accessibility call blocks
+        // on the *target* app's run loop — a busy Chrome makes it unbounded —
+        // so it overlaps the transcribe instead of being billed after it.
+        //
+        // It is also read *now* rather than post-paste for correctness: by then
+        // the focused app is whatever the paste chord left in front.
+        let app_name = tauri::async_runtime::spawn_blocking(aloud_selection::frontmost_app);
+
         let (raw, settings) = self.capture(recorder).await?;
 
         // Whisper returns nothing for silence, and the cleanup prompt maps
@@ -538,13 +547,8 @@ impl Pipeline {
         // Apply the focused app's rule (if any) to a working copy, so every
         // downstream step just reads the effective settings. History still
         // records against the real config; only cleanup behaviour changes.
-        // Off-thread for the same reason `capture_selection` is: an
-        // Accessibility read waits on the *target* app, so a busy app would
-        // stall a tokio worker here.
-        let app_name = tauri::async_runtime::spawn_blocking(aloud_selection::frontmost_app)
-            .await
-            .ok()
-            .flatten();
+        // By here the read started above has almost always finished.
+        let app_name = app_name.await.ok().flatten();
         let effective = apply_app_rule(settings.clone(), app_name.as_deref());
 
         let final_text = self.post_process(&raw, &effective).await;
@@ -612,6 +616,33 @@ impl Pipeline {
         } else {
             aloud_store::macros::expand(&cleaned, &settings.macros)
         }
+    }
+
+    /// Loads the local model ahead of the first dictation, if that is the
+    /// engine in play.
+    ///
+    /// Without this the cache is filled lazily *inside* the first utterance, so
+    /// the user's first dictation of the session pays a 150MB read plus the
+    /// Metal pipeline build — and on a fresh install, the whole model download.
+    /// Nothing about that work depends on the utterance, so it has no business
+    /// being in front of one.
+    ///
+    /// Deliberately silent: a failure here is not the user's problem yet, and
+    /// the real attempt inside `capture` will surface it properly if it
+    /// persists. It also must not block startup, hence the spawn.
+    pub fn warm_up(self: &Arc<Self>) {
+        let pipeline = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let settings = pipeline.settings();
+            if effective_engine(&settings) != Engine::Local {
+                return;
+            }
+            let started = std::time::Instant::now();
+            match pipeline.transcriber(&settings).await {
+                Ok(_) => tracing::info!(ms = started.elapsed().as_millis(), "warmed local model"),
+                Err(e) => tracing::warn!(%e, "could not warm the local model"),
+            }
+        });
     }
 
     /// The configured engine. The local model is cached after first load.

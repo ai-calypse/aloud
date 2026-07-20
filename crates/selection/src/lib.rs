@@ -68,6 +68,51 @@ pub fn frontmost_app() -> Option<String> {
     }
 }
 
+/// Staged accessors behind the frontmost-app read, for the `frontmost`
+/// example. Not part of the API the app uses — `frontmost_app` is — but the
+/// read failed silently and identically for a permission denial and for a bad
+/// attribute, which is how it stayed broken.
+#[cfg(target_os = "macos")]
+pub mod debug {
+    pub fn is_trusted() -> bool {
+        #[link(name = "ApplicationServices", kind = "framework")]
+        extern "C" {
+            fn AXIsProcessTrusted() -> bool;
+        }
+        unsafe { AXIsProcessTrusted() }
+    }
+
+    pub fn frontmost_pid() -> Option<i32> {
+        super::macos::frontmost_pid()
+    }
+
+    pub fn executable_path(pid: i32) -> Option<String> {
+        super::macos::executable_path(pid)
+    }
+
+    /// The raw AX error code. -25204 is `kAXErrorCannotComplete`, which is what
+    /// a locked screen looks like — not a permission problem.
+    pub fn frontmost_error() -> i32 {
+        super::macos::frontmost_error()
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub mod debug {
+    pub fn is_trusted() -> bool {
+        true
+    }
+    pub fn frontmost_pid() -> Option<i32> {
+        None
+    }
+    pub fn executable_path(_pid: i32) -> Option<String> {
+        None
+    }
+    pub fn frontmost_error() -> i32 {
+        0
+    }
+}
+
 /// An installed application, for the App Rules picker.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct InstalledApp {
@@ -118,6 +163,13 @@ mod macos {
             value: *mut CFTypeRef,
         ) -> AXError;
         fn CFRelease(cf: CFTypeRef);
+        fn AXUIElementGetPid(element: AXUIElementRef, pid: *mut i32) -> AXError;
+    }
+
+    extern "C" {
+        /// libproc, linked into every process on macOS. Gives the executable
+        /// path, from which the `.app` bundle name falls out.
+        fn proc_pidpath(pid: i32, buf: *mut std::ffi::c_void, size: u32) -> i32;
     }
 
     /// Reads one string attribute off an element, releasing the copy.
@@ -168,21 +220,94 @@ mod macos {
         Some(value as AXUIElementRef)
     }
 
-    /// The focused application's title, via the same system-wide AX element the
-    /// selection read uses. No new dependency: `AXFocusedApplication` →
-    /// `AXTitle` is the app's display name ("Slack", "Code").
+    /// The focused application's display name.
+    ///
+    /// Resolved from the process's bundle path rather than `AXTitle`. AXTitle
+    /// on an *application* element is empty for most apps — every Electron one
+    /// among them — so the previous read returned None for everything and app
+    /// rules never fired at all. The recorded timings said so: every `paste`
+    /// span logged `target_app: "unknown"`.
+    ///
+    /// The `.app` stem is also exactly the string `installed_apps` puts in the
+    /// picker, so a rule created by picking an app still matches.
     pub fn frontmost_app() -> Option<String> {
+        let pid = frontmost_pid()?;
+        let path = executable_path(pid)?;
+        bundle_name(&path)
+    }
+
+    /// The focused application's process id.
+    ///
+    /// Either attribute answers — both hang off the system-wide element and
+    /// both resolve to a process — so it tries the direct one and falls back to
+    /// the element the selection read already relies on. Which of the two is
+    /// available varies with what has focus; a text field gives both, a native
+    /// menu or a window with no text focus often gives only the first.
+    pub(super) fn frontmost_pid() -> Option<i32> {
         let system = unsafe { AXUIElementCreateSystemWide() };
         if system.is_null() {
             return None;
         }
-        let app = copy_element(system, "AXFocusedApplication");
+        let focused = copy_element(system, "AXFocusedApplication")
+            .or_else(|| copy_element(system, "AXFocusedUIElement"));
         unsafe { CFRelease(system as CFTypeRef) };
-        let app = app?;
+        let focused = focused?;
 
-        let title = copy_string(app, "AXTitle");
-        unsafe { CFRelease(app as CFTypeRef) };
-        title.filter(|t| !t.is_empty())
+        let mut pid: i32 = 0;
+        let err = unsafe { AXUIElementGetPid(focused, &mut pid) };
+        unsafe { CFRelease(focused as CFTypeRef) };
+        (err == AX_SUCCESS && pid > 0).then_some(pid)
+    }
+
+    /// The raw AX error for the focused-application read, so the `frontmost`
+    /// example can tell a permission problem from a locked screen
+    /// (`kAXErrorCannotComplete`, -25204) from a genuinely absent attribute.
+    pub(super) fn frontmost_error() -> i32 {
+        let system = unsafe { AXUIElementCreateSystemWide() };
+        if system.is_null() {
+            return -1;
+        }
+        let attr = CFString::new("AXFocusedApplication");
+        let mut value: CFTypeRef = std::ptr::null();
+        let err = unsafe {
+            AXUIElementCopyAttributeValue(system, attr.as_concrete_TypeRef(), &mut value)
+        };
+        if !value.is_null() {
+            unsafe { CFRelease(value) };
+        }
+        unsafe { CFRelease(system as CFTypeRef) };
+        err
+    }
+
+    /// The executable path for a pid, via libproc.
+    pub(super) fn executable_path(pid: i32) -> Option<String> {
+        let mut buf = [0u8; 4096];
+        let written = unsafe { proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+        if written <= 0 {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&buf[..written as usize]).into_owned())
+    }
+
+    /// The `.app` bundle name from an executable path, e.g.
+    /// `/Applications/Slack.app/Contents/MacOS/Slack` → `Slack`. Falls back to
+    /// the executable's own file name for a plain binary with no bundle.
+    ///
+    /// The *outermost* `.app`, not the nearest one. Electron nests helper
+    /// bundles — `Cursor.app/Contents/Frameworks/Cursor Helper.app/…` — and a
+    /// rule the user wrote by picking "Cursor" from the list has to match when
+    /// focus is in a helper, which is most of the time.
+    pub(super) fn bundle_name(exec_path: &str) -> Option<String> {
+        let path = Path::new(exec_path);
+        // `ancestors()` walks deepest-first and is not double-ended, so the
+        // outermost match is simply the last one it yields.
+        path.ancestors()
+            .filter(|a| a.extension().is_some_and(|e| e == "app"))
+            .last()
+            .and_then(|a| a.file_stem())
+            .or_else(|| path.file_name())
+            .map(|s| s.to_string_lossy().into_owned())
+            .filter(|s| !s.is_empty())
     }
 
     use super::InstalledApp;
@@ -390,5 +515,29 @@ mod cache_tests {
                 "cold {cold:?} vs warm {warm:?} — not cached"
             );
         }
+    }
+
+    /// The failure this guards: `frontmost_app` read `AXTitle` off the
+    /// application element, which is empty for most apps, so it returned None
+    /// for everything and no app rule ever fired.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_bundle_path_yields_the_name_a_rule_would_be_written_against() {
+        use super::macos::bundle_name;
+
+        assert_eq!(
+            bundle_name("/Applications/Slack.app/Contents/MacOS/Slack").as_deref(),
+            Some("Slack")
+        );
+        // Nested helper bundles resolve to the outermost .app, which is the one
+        // the user sees and the one `installed_apps` lists.
+        assert_eq!(
+            bundle_name("/Applications/Cursor.app/Contents/Frameworks/Cursor Helper.app/Contents/MacOS/Helper")
+                .as_deref(),
+            Some("Cursor")
+        );
+        // A plain binary with no bundle still gets a usable name.
+        assert_eq!(bundle_name("/usr/bin/vim").as_deref(), Some("vim"));
+        assert_eq!(bundle_name(""), None);
     }
 }

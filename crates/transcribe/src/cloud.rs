@@ -25,6 +25,31 @@ pub struct CloudTranscriber {
     language: Option<String>,
 }
 
+/// One connection pool for the process.
+///
+/// A `CloudTranscriber` is built on every dictation — the pipeline caches only
+/// the local engine, deliberately, because caching this one would freeze the
+/// key and base URL until restart. That is fine, but a fresh
+/// `reqwest::Client` per transcriber also meant a fresh *pool*, so each
+/// dictation paid a full TCP+TLS handshake: 85-130ms measured against Groq.
+/// `reqwest::Client` is an `Arc` inside, so this keeps the per-dictation
+/// construction and shares the connections.
+static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+
+fn shared_http() -> Result<reqwest::Client> {
+    // The timeout moves to the request: this pool is per process, and 20s is
+    // right for an audio upload but not for everything that might share it.
+    match HTTP.get() {
+        Some(client) => Ok(client.clone()),
+        None => {
+            let client = reqwest::Client::builder()
+                .build()
+                .context("building http client")?;
+            Ok(HTTP.get_or_init(|| client).clone())
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct Response {
     text: String,
@@ -48,10 +73,7 @@ impl CloudTranscriber {
     ) -> Result<Self> {
         let model = model.map(str::trim).filter(|m| !m.is_empty());
         Ok(Self {
-            client: reqwest::Client::builder()
-                .timeout(TIMEOUT)
-                .build()
-                .context("building http client")?,
+            client: shared_http()?,
             base_url: normalize_base_url(base_url.unwrap_or(DEFAULT_BASE_URL)),
             api_key: api_key.into(),
             model: model.unwrap_or(DEFAULT_MODEL).to_string(),
@@ -95,6 +117,8 @@ impl Transcriber for CloudTranscriber {
         let response = self
             .client
             .post(format!("{}/audio/transcriptions", self.base_url))
+            // Per request: the client is process-wide now.
+            .timeout(TIMEOUT)
             .bearer_auth(&self.api_key)
             .multipart(form)
             .send()
