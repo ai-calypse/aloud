@@ -21,20 +21,23 @@ it obtains itself.
 
 **Keys come from `.env` for now.** `fill_keys_from_env` already resolves every
 key from a `.env` walked up from the working directory, so development needs no
-input fields at all. That makes the UI removal (**Phase A**) unblocked and
-small. Provisioning for *shipped* builds is a separate, later concern —
-**Phase 12** — because `.env` does not survive bundling.
+input fields at all. That made the UI removal (**Phase A**, now complete)
+unblocked and small. Provisioning for *shipped* builds is a separate, later
+concern — **Phase 12** — because `.env` does not survive bundling.
 
 ### What this removes
 
+All of this landed in #66.
+
 | Was | Now |
 |---|---|
-| 0.1 Gemini key field | **revert** — merged in #59, has to come back out (A.1) |
-| 1.6 API key validation on save | **deleted** — nothing to validate |
-| Groq key row (General → Transcription) | remove |
-| Gemini + Composio rows (Connectors → Keys) | remove; the whole Keys group goes |
-| Onboarding key step (`Onboarding.tsx:107-120`) | remove — one of the 4 steps is entirely this |
-| README "Bringing Cerebras back" step 3 (add a UI row) | rewrite — a restored Cerebras key comes from `.env`, not a row |
+| 0.1 Gemini key field | ✅ reverted — shipped in #59, removed again in #66 |
+| 1.6 API key validation on save | ✅ deleted — nothing to validate |
+| Groq key row (General → Transcription) | ✅ removed |
+| Gemini + Composio rows (Connectors → Keys) | ✅ removed; the whole Keys group went |
+| Onboarding key step | ✅ removed — onboarding is now 3 steps, and ungated |
+| README "Bringing Cerebras back" step 3 (add a UI row) | ✅ rewritten — a restored Cerebras key comes from `.env`, not a row |
+| "add one in Settings" error messages | ✅ reworded — they pointed at a field that no longer exists |
 
 ### What this does *not* remove
 
@@ -44,35 +47,42 @@ resolves. Deleting the fields would break that. Only the inputs go.
 
 ---
 
-## Phase A — Remove the key surfaces
+## Phase A — Remove the key surfaces · ✅ **complete (#66)**
 
-**Decided: keys come from `.env` for now.** `fill_keys_from_env`
-(`settings.rs:212`) walks up from the working directory, so running from the
-repo picks up the repo's `.env` and every key resolves without a single input
-field. That is the whole mechanism until there is a release to ship.
+**Decided: keys come from `.env` for now.** `fill_keys_from_env` walks up from
+the working directory, so running from the repo picks up the repo's `.env` and
+every key resolves without a single input field. That is the whole mechanism
+until there is a release to ship. Provisioning for *shipped* builds is
+**Phase 12**, deliberately late.
 
-This unblocks the UI removal — it is no longer gated on anything. Provisioning
-for *shipped* builds moves out to **Phase 12**, deliberately late.
-
-### A.1 — Remove the key surfaces · S
+### A.1 — Remove the key surfaces · S · ✅ **done**
 - **Scope** — the table above: the Groq row in General → Transcription, the
   whole `Group title="Keys"` in Connectors (Gemini + Composio), and the
-  onboarding key step (`Onboarding.tsx:107-120`, which is one of only four
-  steps and also carries the `blocked` save-gate on an empty cloud key).
-- **Keep the Rust fields.** `Settings` still holds them and
-  `fill_keys_from_env` still fills them; only the inputs go. Removing the
-  fields would break the `.env` path this phase depends on.
-- **Done** — no key input anywhere in the app, and a dev run from the repo
-  still transcribes on cloud because `.env` supplied the key.
+  onboarding key step, which was one of only four steps and also carried the
+  `blocked` save-gate on an empty cloud key. Onboarding is now three steps and
+  cannot be blocked.
+- **Kept the Rust fields.** `Settings` still holds them and
+  `fill_keys_from_env` still fills them; only the inputs went. Removing the
+  fields would have broken the `.env` path this phase depends on.
+- **Done** — no `type="password"` input remains anywhere in
+  `apps/desktop/src`, and a dev run from the repo still transcribes on cloud
+  because `.env` supplied the key.
 
-### A.2 — Local as the guaranteed floor · S
-- **Scope** — local whisper already needs no key and `engine` already defaults
-  to `Local`. Make it a *fallback*, not just a default: with no credential
-  resolvable, dictate on-device instead of erroring.
-- **Why it matters more now** — with the key UI gone, a user whose cloud call
-  fails has no field to go fix it. Local is the only recovery, so it has to be
-  automatic. Overlaps with 6.2.
-- **Done** — a launch with no `.env` and no env vars still dictates.
+### A.2 — Local as the guaranteed floor · S · ✅ **done**
+- **Scope** — `build_transcriber` bailed with "cloud transcription needs an API
+  key". `effective_engine()` (`pipeline.rs`) now degrades an unconfigured cloud
+  engine to on-device instead of erroring.
+- **Why it was one shared helper** — the local-model cache in `transcriber()`
+  keys on the engine too. Keyed on the raw setting while the build path fell
+  back, whisper would reload (~200ms) on every dictation down that path.
+- **Done** — verified with `transcribe_local` on real hardware with every key
+  env var unset: model loaded in 304ms, transcribed in 136ms, correct output.
+- **Still open, deliberately** — a *rejected* key (401) does not fall back, as
+  the key is non-empty so `effective_engine` keeps Cloud. The user's recovery is
+  the Engine dropdown, and the error message says so. Automatic
+  fallback-on-failure is **6.2**, not this phase.
+- **Also dropped** — `is_configured`, which had no production caller and is
+  meaningless once local is a guaranteed floor.
 
 ---
 
@@ -153,10 +163,10 @@ from the frontend.
 
 Small, independent, no design decisions. Good first branch.
 
-### 0.1 — ~~Gemini API key field~~ · **shipped in #59, now to be reverted**
-Superseded by the no-BYOK decision before it was ever used. The row comes out
-in A.1. The Rust field stays — `fill_keys_from_env` still needs it for dev
-builds; only the input goes.
+### 0.1 — ~~Gemini API key field~~ · **shipped in #59, reverted in #66**
+Superseded by the no-BYOK decision before it was ever used. The row came out in
+A.1. The Rust field stays — `fill_keys_from_env` still needs it for dev builds;
+only the input went.
 
 ### 0.2 — ~~Fix the Cerebras/Gemini label~~ → **delete `cerebras_api_key`** · S
 Relabelling was the wrong fix. `grep` finds exactly three references to
@@ -503,9 +513,9 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 - **Done** — a pane showing an in-progress meeting and past ones.
 
 ### 11.2 — Onboarding expansion · L
-- **Scope** — 4 steps vs voice-dict's 14, but one of the current 4 is the API
-  key step (`Onboarding.tsx:107-120`), which **goes away** with no-BYOK — so
-  the real starting point is 3. Missing: screen recording (blocked on 9.1), all
+- **Scope** — **3 steps** vs voice-dict's 14. It was 4; the API key step went
+  in A.1, so 3 is the real starting point. Missing: screen recording
+  (blocked on 9.1), all
   three shortcut-capture steps (unblocked by 2.1, shipped in #61), edit mode
   config (2.2), vocabulary, overlay style + mic pick (7.1), launch-at-login (the
   command exists at `commands.rs:135`), and a live test-transcription step.
@@ -532,7 +542,7 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 
 | Phase | State |
 |---|---|
-| 0 — Corrections and free wins | ✅ **merged** (#59). 0.1 now to be reverted by A.1 |
+| 0 — Corrections and free wins | ✅ **merged** (#59). 0.1 reverted by A.1 in #66 |
 | 1.1 — Clipboard toggles | ✅ **merged** (#63) — `preserve_clipboard`. Transient marking deferred (needs `objc2-app-kit`) |
 | 1.2 — Shortcut start delay | ⚠️ attempted, backed out — resized to M, see above |
 | 1.5 — History retention | ✅ already existed |
@@ -540,8 +550,9 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 | 2.1 — Hotkey recorder | ✅ PR #61, open |
 | 4.1 — Run Log pane | ✅ PR #62, open |
 | 2.2 — Command mode settings | ◐ in progress |
-| **A.1 — Remove key surfaces** | ✅ done — no key input anywhere; keys come from `.env` |
-| **A.2 — Local as the floor** | ✅ done — cloud without a key falls back to on-device |
+| **A — Remove key surfaces** | ✅ **merged** (#66) — both A.1 and A.2 |
+| **A.1 — Remove key surfaces** | ✅ no key input anywhere; keys come from `.env` |
+| **A.2 — Local as the floor** | ✅ cloud without a key falls back to on-device |
 | **12 — Cloud key provisioning** | deferred until there is a shipped build |
 | everything else | not started |
 
@@ -549,6 +560,12 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 jobs report `steps=0` with no logs, meaning no runner is ever allocated. Every
 merge so far landed on local verification only, and every Windows path in the
 repo remains unexecuted.
+
+Re-confirmed on #66: all three checks reported `FAILURE`, but each job had
+`steps: []`, a 3-second duration, and `log not found`. That is a runner never
+being allocated, not a test failing. **Check for that signature before reading a
+red check here as a real failure — and before merging on the assumption that it
+is not one.**
 
 ## Suggested order
 
