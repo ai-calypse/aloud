@@ -124,7 +124,18 @@ mod macos {
             return None;
         }
 
-        let out = std::env::temp_dir().join(format!("aloud-screen-{}.png", std::process::id()));
+        // Unique per capture, not per process: two dictations can overlap (the
+        // capture is spawned at recording start and takes ~200ms), and a shared
+        // path means one run's `screencapture` overwrites while the other's
+        // `sips` reads — a truncated JPEG sent to the model as "what the user
+        // is looking at".
+        let out = std::env::temp_dir().join(format!(
+            "aloud-screen-{}-{}.png",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
         // -x: no shutter sound. -t png: sips reads it and it is lossless
         //  going in, so the only quality loss is the downscale below.
         let captured = std::process::Command::new("screencapture")
@@ -135,6 +146,9 @@ mod macos {
             .is_some_and(|o| o.status.success());
         if !captured {
             tracing::warn!("screencapture failed");
+            // It may have created the file before failing, and a full-screen
+            // PNG left in temp is not something to leave lying around.
+            let _ = std::fs::remove_file(&out);
             return None;
         }
 
@@ -183,7 +197,7 @@ mod macos {
 
 #[cfg(test)]
 mod tests {
-    use super::{capture, compose, screenshot_data_uri};
+    use super::{capture, compose};
 
     /// The failure this guards: a summary of "unknown" or "— " reads to the
     /// model as a fact about the screen. Nothing known must mean nothing sent.
@@ -207,11 +221,16 @@ mod tests {
         );
     }
 
-    /// Denial must be a None, not a panic and not a wallpaper photograph — the
-    /// app has never requested this grant, so denied is the common case.
+    /// Asking for no screenshot must produce none, whatever the permission
+    /// says — that is the flag the settings toggle drives.
+    ///
+    /// It deliberately does NOT call `screenshot_data_uri`. On a machine where
+    /// Screen Recording *is* granted — a developer's, or CI on real hardware —
+    /// that spawns `screencapture` and writes a full-screen PNG of whatever is
+    /// on screen. `cargo test` must not photograph the person running it. The
+    /// denial path is covered by the `status` example, which is opt-in.
     #[test]
-    fn a_missing_permission_is_a_none_not_a_panic() {
-        let _ = screenshot_data_uri(256);
+    fn asking_for_no_screenshot_takes_none() {
         assert!(capture(false).screenshot.is_none());
     }
 }
