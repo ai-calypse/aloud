@@ -516,7 +516,17 @@ impl Pipeline {
                 None
             }
         };
-        let wav = keep.clone().unwrap_or_else(temp_wav_path);
+        // Armed *before* the file can exist, not after transcription succeeds.
+        // Every `?` below — a failed write, no API key, no network, a Groq 5xx,
+        // a failed model download — used to return `Err` with the recording
+        // already on disk and nothing left holding it. Those files are the
+        // worst kind: they live in the media directory rather than the OS temp
+        // dir so nothing reaps them, no history row points at them so the size
+        // budget cannot see them, and `clear()` selects paths from the table so
+        // "Clear all history" leaves them behind. A recording of every
+        // dictation that failed to transcribe, invisible and permanent.
+        let mut guard = KeptWav(keep);
+        let wav = guard.0.clone().unwrap_or_else(temp_wav_path);
         // Draining the capture buffer and writing the WAV is invisible latency
         // between the key release and the first byte the transcriber sees.
         {
@@ -553,6 +563,9 @@ impl Pipeline {
             chars = tracing::field::Empty,
         ))
         .await?;
+        let keep = guard.keep();
+        // The non-persisted modes (ask, agent, rewrite) wrote to the temp dir,
+        // which the guard does not own — delete it here as before.
         if keep.is_none() {
             let _ = std::fs::remove_file(&wav);
         }

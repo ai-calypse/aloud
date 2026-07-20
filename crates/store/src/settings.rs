@@ -196,10 +196,17 @@ impl Default for Settings {
             overlay_display: OverlayDisplay::Active,
             preserve_clipboard: true,
             history_retention: 50,
-            // 16 kHz mono 16-bit is ~1 MB a minute, so this is roughly four
-            // hours of speech — comfortably more than the 50 kept runs, and
-            // small enough that nobody notices it on a modern disk.
-            audio_retention_mb: 250,
+            // **Off by default, and deliberately.** `#[serde(default)]` means
+            // an existing settings.json inherits whatever this says, so a
+            // non-zero default would silently start writing raw audio of every
+            // dictation to disk for every current user, on upgrade, with no
+            // prompt. That is a strictly larger disclosure than the window
+            // title two fields up, which this file already argues is "an
+            // opt-in, not something to turn on behind the user's back".
+            //
+            // 250 MB is roughly four hours at 16 kHz mono — the number to type
+            // in when turning it on, and what the settings row suggests.
+            audio_retention_mb: 0,
             audio_retention_days: 30,
             // A fresh install has not been through the wizard; a migrated one
             // is handled below, since the Swift users are already set up.

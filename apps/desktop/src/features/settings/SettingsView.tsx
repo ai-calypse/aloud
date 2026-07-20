@@ -540,7 +540,7 @@ export function SettingsView({ section }: { section: SettingsSection }) {
 
             <Row
               label="Recordings kept"
-              hint="Disk the saved audio may use. 0 keeps none — the Run Log's player and its transcription retry go with it."
+              hint="Megabytes of dictation audio to keep on disk. Off by default; 250 is about four hours. 0 keeps none, and the Run Log's player and its transcription retry go with it."
             >
               <Value className="w-24">
                 <Input
@@ -549,7 +549,7 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                   max={10000}
                   step={50}
                   className={rowInput}
-                  value={settings.audioRetentionMb ?? 250}
+                  value={settings.audioRetentionMb ?? 0}
                   onChange={(e) =>
                     update({
                       audioRetentionMb: Math.max(0, Number(e.target.value) || 0),
