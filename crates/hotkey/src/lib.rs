@@ -11,6 +11,7 @@
 //! The interesting logic lives in [`matcher`], which is pure and runs its
 //! tests on any platform.
 
+pub mod capture;
 pub mod matcher;
 pub mod model;
 
@@ -26,8 +27,16 @@ use windows as backend;
 
 use anyhow::Result;
 use matcher::{Consume, Input, State};
-use model::{Config, Event};
+use model::{Binding, Config, Event};
 use std::sync::{Arc, Mutex};
+
+/// Shared slot that arms binding capture from another thread.
+///
+/// `Some(sender)` puts the listener into capture mode: the next complete key
+/// gesture is sent back and every event is swallowed until it commits. The
+/// listener clears the slot itself, so capture is always one-shot — a UI that
+/// crashes mid-recording cannot leave the keyboard permanently swallowed.
+pub type CaptureSlot = Arc<Mutex<Option<std::sync::mpsc::Sender<Binding>>>>;
 
 /// Whether the OS will let us listen for keys.
 ///
@@ -48,14 +57,23 @@ pub fn is_permitted() -> bool {
 pub fn listen<F>(
     config: Arc<Mutex<Config>>,
     busy: Arc<std::sync::atomic::AtomicBool>,
+    capture: CaptureSlot,
     mut on_event: F,
 ) -> Result<()>
 where
     F: FnMut(Event) + Send + 'static,
 {
     let mut state = State::default();
+    let mut recorder = capture::Recorder::default();
 
     let handler = move |raw: backend::RawEvent| -> bool {
+        // Capture runs ahead of the matcher and swallows everything: recording
+        // a new hotkey must not also fire the hotkey being replaced, and the
+        // keys pressed to record it must not reach the app underneath.
+        if capture_event(&capture, &mut recorder, raw.key, raw.down) {
+            return true;
+        }
+
         let input = if raw.down {
             Input::KeyDown(raw.key)
         } else {
@@ -88,4 +106,41 @@ where
         let _ = handler;
         anyhow::bail!("hotkeys are only supported on macOS and Windows")
     }
+}
+
+/// Feeds one raw event to the capture recorder while capture is armed.
+///
+/// Returns whether the event was consumed by capture. Disarms itself the moment
+/// a gesture commits, so the caller never has to — a settings window that dies
+/// mid-recording cannot leave the keyboard swallowed.
+fn capture_event(
+    capture: &CaptureSlot,
+    recorder: &mut capture::Recorder,
+    key: model::Key,
+    down: bool,
+) -> bool {
+    // A poisoned lock must not wedge the keyboard: fall through to the matcher.
+    let Ok(mut slot) = capture.lock() else {
+        tracing::error!("hotkey capture lock poisoned");
+        return false;
+    };
+    if slot.is_none() {
+        // Not capturing. Clear any half-finished gesture so keys held when
+        // capture was cancelled cannot become modifiers on the next recording.
+        recorder.reset();
+        return false;
+    }
+
+    if down {
+        recorder.key_down(key);
+        return true;
+    }
+    if let Some(binding) = recorder.key_up(key) {
+        // Take the sender before sending: capture is one-shot, and a UI that
+        // has gone away just drops the value.
+        if let Some(tx) = slot.take() {
+            let _ = tx.send(binding);
+        }
+    }
+    true
 }

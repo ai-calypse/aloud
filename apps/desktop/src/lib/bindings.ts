@@ -37,6 +37,24 @@ export const commands = {
 	 */
 	recentTimings: (utterances: number) => typedError<Span[], string>(__TAURI_INVOKE("recent_timings", { utterances })),
 	/**
+	 *  Records the next key gesture and returns it as a binding.
+	 * 
+	 *  Async because it blocks until the user presses something: capture swallows
+	 *  keys while armed, so this owns a `spawn_blocking` thread rather than the
+	 *  main one. Cancelling is `cancel_hotkey_capture`, or simply waiting out
+	 *  [`CAPTURE_TIMEOUT`].
+	 */
+	captureHotkey: () => typedError<{ kind: "disabled" } | 
+/**  A regular key, optionally with modifiers held (e.g. Cmd+Shift+D). */
+{ kind: "key"; key: Key; modifiers: Modifier[] } | 
+/**
+ *  A modifier held on its own (e.g. hold Right Option) — the case Tauri's
+ *  global-shortcut plugin cannot express, and why this crate exists.
+ */
+{ kind: "modifierKey"; key: Key; modifiers: Modifier[] } | null, string>(__TAURI_INVOKE("capture_hotkey")),
+	/**  Disarms a recording the user backed out of. */
+	cancelHotkeyCapture: () => typedError<null, string>(__TAURI_INVOKE("cancel_hotkey_capture")),
+	/**
 	 *  Plays the start chime, so the volume slider can be judged by ear rather
 	 *  than by guessing at a number.
 	 */

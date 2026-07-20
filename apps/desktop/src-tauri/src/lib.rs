@@ -39,6 +39,9 @@ pub struct AppState {
     /// The live hotkey config the listener reads. Shared with the listener
     /// thread so a rebind from Settings applies without a restart.
     pub hotkey_config: Arc<Mutex<aloud_hotkey::model::Config>>,
+    /// Arms binding capture in the listener thread. The recorder pane sets it;
+    /// the listener clears it as soon as a gesture commits.
+    pub hotkey_capture: aloud_hotkey::CaptureSlot,
     /// Composio reads held across opens of the Connectors pane, so it paints
     /// from memory instead of a round-trip. See `aloud_agent::ResponseCache`.
     pub connectors: commands::ConnectorCache,
@@ -83,6 +86,8 @@ pub fn run() {
             commands::installed_apps,
             commands::hotkeys_permitted,
             commands::recent_timings,
+            commands::capture_hotkey,
+            commands::cancel_hotkey_capture,
             commands::preview_sound,
             commands::launch_at_login,
             commands::set_launch_at_login,
@@ -163,11 +168,13 @@ pub fn run() {
                     .map(|s| s.hotkeys.clone())
                     .unwrap_or_default(),
             ));
+            let hotkey_capture: aloud_hotkey::CaptureSlot = Default::default();
             app.manage(AppState {
                 settings: settings.clone(),
                 pipeline: pipeline.clone(),
                 meeting: meeting.clone(),
                 hotkey_config: hotkey_config.clone(),
+                hotkey_capture: hotkey_capture.clone(),
                 connectors: Default::default(),
                 timings: timings.clone(),
             });
@@ -193,6 +200,7 @@ pub fn run() {
                 pipeline,
                 meeting,
                 hotkey_config,
+                hotkey_capture,
             );
 
             // Closing the window must hide it, not destroy it. This is a
@@ -283,6 +291,7 @@ fn spawn_hotkey_listener(
     pipeline: Arc<pipeline::Pipeline>,
     meeting: Arc<Mutex<Option<meeting::Meeting>>>,
     config: Arc<Mutex<aloud_hotkey::model::Config>>,
+    capture: aloud_hotkey::CaptureSlot,
 ) {
     // `config` is the same Arc AppState holds, so a rebind from Settings is
     // seen here on the next key event — no restart needed.
@@ -305,7 +314,7 @@ fn spawn_hotkey_listener(
         }
 
         let busy = pipeline.busy_flag();
-        let result = aloud_hotkey::listen(config, busy, move |event| {
+        let result = aloud_hotkey::listen(config, busy, capture, move |event| {
             handle_hotkey(&app, &pipeline, &settings, &meeting, event);
         });
         if let Err(e) = result {
