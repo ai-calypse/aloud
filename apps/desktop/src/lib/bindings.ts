@@ -123,6 +123,14 @@ export const commands = {
 	 */
 	connectConnector: (toolkit: string) => typedError<null, string>(__TAURI_INVOKE("connect_connector", { toolkit })),
 	disconnectConnector: (connectionId: string) => typedError<null, string>(__TAURI_INVOKE("disconnect_connector", { connectionId })),
+	/**
+	 *  Answers a question the user typed into the panel.
+	 * 
+	 *  `answer` already took a plain `String`, so it is the seam: the typed and
+	 *  spoken paths differ only in where the string came from, and nothing about
+	 *  streaming, the panel or the credential check is duplicated to serve one.
+	 */
+	askText: (question: string) => typedError<null, string>(__TAURI_INVOKE("ask_text", { question })),
 	/**  Lets the panel dismiss itself on Escape or a click outside. */
 	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
 	/**  Resolves the pending confirmation. Called by the panel's Yes/No buttons. */
@@ -411,6 +419,13 @@ export type Settings = {
 	 *  [`language`]: Settings::language
 	 */
 	outputLanguage?: string,
+	/**
+	 *  Reject a cleanup that *answered* the transcript instead of tidying it —
+	 *  see [`aloud_llm::guard`]. On by default, matching the Swift app: the
+	 *  failure it catches pastes text the user never dictated, and the worst
+	 *  a false positive costs is the raw transcript.
+	 */
+	instructionGuardEnabled?: boolean,
 	/**  Proper nouns and jargon fed to the model as a spelling reference. */
 	vocabulary?: string[],
 	/**  Spoken shorthand that expands to canned text after cleanup. */

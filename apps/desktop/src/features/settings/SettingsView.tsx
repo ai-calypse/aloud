@@ -334,6 +334,17 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                   </Value>
                 </Row>
                 <Row
+                  label="Guard against answered dictations"
+                  hint="If the model replies to what you said instead of tidying it, retry once and otherwise paste exactly what you dictated."
+                  className="py-[11px]"
+                >
+                  <Toggle
+                    checked={settings.instructionGuardEnabled ?? true}
+                    label="Guard against answered dictations"
+                    onChange={(c) => update({ instructionGuardEnabled: c })}
+                  />
+                </Row>
+                <Row
                   label="Vocabulary"
                   hint="Names the model should spell correctly"
                 >

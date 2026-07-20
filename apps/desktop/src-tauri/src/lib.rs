@@ -101,6 +101,7 @@ pub fn run() {
             commands::search_connectors,
             commands::connect_connector,
             commands::disconnect_connector,
+            ask::ask_text,
             ask::close_ask,
             agent::confirm_agent,
             agent::close_agent,

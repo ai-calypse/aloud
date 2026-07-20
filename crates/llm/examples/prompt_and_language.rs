@@ -30,6 +30,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt,
         vocabulary: &[],
         output_language,
+        instruction_guard: true,
     };
 
     let default = cleanup::clean(options("", ""), SAMPLE).await?;

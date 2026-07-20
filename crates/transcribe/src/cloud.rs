@@ -4,7 +4,7 @@
 //! URL is configurable so OpenAI or a self-hosted endpoint work unchanged.
 
 use crate::{hallucination, Transcriber};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::{path::Path, time::Duration};
@@ -48,6 +48,16 @@ fn shared_http() -> Result<reqwest::Client> {
             Ok(HTTP.get_or_init(|| client).clone())
         }
     }
+}
+
+/// A non-2xx from the provider. Typed rather than a formatted `bail!` so a
+/// caller can tell an expired credential or a provider outage from a request
+/// this crate got wrong — see [`crate::is_recoverable_locally`].
+#[derive(Debug, thiserror::Error)]
+#[error("transcription failed ({status}): {body}")]
+pub struct HttpError {
+    pub status: u16,
+    pub body: String,
 }
 
 #[derive(Deserialize)]
@@ -128,7 +138,11 @@ impl Transcriber for CloudTranscriber {
         let status = response.status();
         let body = response.text().await.context("reading response")?;
         if !status.is_success() {
-            bail!("transcription failed ({status}): {body}");
+            return Err(HttpError {
+                status: status.as_u16(),
+                body,
+            }
+            .into());
         }
 
         let parsed: Response =

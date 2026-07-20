@@ -6,7 +6,7 @@
 //! slightly off. That is why they live in a crate with tests rather than in
 //! the app.
 
-use crate::{prompts, LlmClient, Message, EMPTY_SENTINEL};
+use crate::{guard, prompts, LlmClient, Message, EMPTY_SENTINEL};
 use anyhow::Result;
 use tracing::Instrument;
 
@@ -40,6 +40,9 @@ pub struct Options<'a> {
     /// conclusion: `outputLanguage` threads through `PostProcessingService`
     /// and nowhere near the transcriber.
     pub output_language: &'a str,
+    /// Whether to check that the model *cleaned* the transcript rather than
+    /// answering it. See [`crate::guard`].
+    pub instruction_guard: bool,
 }
 
 /// Cleans `raw`, or returns it unchanged when there is nothing worth spending
@@ -80,7 +83,61 @@ pub async fn clean(options: Options<'_>, raw: &str) -> Result<String> {
         ))
         .await?;
 
-    Ok(interpret(&cleaned))
+    let cleaned = interpret(&cleaned);
+    if !options.instruction_guard
+        || !guard::appears_to_have_executed_instruction(raw, &cleaned, options.output_language)
+    {
+        return Ok(cleaned);
+    }
+
+    // A second model is worth a request here where it would not be for a plain
+    // failure: executing the instruction is a property of *this* model reading
+    // *this* transcript, so a different one often just cleans it. A fallback
+    // that is absent, blank or the same model is not a second opinion.
+    //
+    // Via `complete_with_fallback` rather than `complete` so the retry still
+    // consults the cooldown breaker — calling `complete` directly would happily
+    // spend a full timeout on a model already recorded as rate-limited, which
+    // is the exact cost the breaker exists to avoid.
+    //
+    // ponytail: this cannot tell whether the *first* response already came from
+    // the fallback, which `complete_with_fallback` does silently on a rate
+    // limit. In that case the second opinion is the same model and will answer
+    // the same way, costing one wasted request before the raw transcript is
+    // returned. Threading the model that actually answered back out of the
+    // client is the upgrade path.
+    tracing::warn!("cleanup answered the transcript instead of cleaning it");
+    let second_opinion = options
+        .fallback
+        .map(str::trim)
+        .filter(|f| !f.is_empty() && *f != options.model);
+    if let Some(model) = second_opinion {
+        match client
+            .complete_with_fallback(model, None, &messages, Some(0.0))
+            .instrument(tracing::info_span!("instruction_guard_retry", model))
+            .await
+        {
+            Ok(retried) => {
+                let retried = interpret(&retried);
+                if !guard::appears_to_have_executed_instruction(
+                    raw,
+                    &retried,
+                    options.output_language,
+                ) {
+                    return Ok(retried);
+                }
+                tracing::warn!("the second opinion answered it too; pasting the transcript");
+            }
+            // Logged rather than swallowed: this branch is how a rate-limited
+            // or unreachable fallback shows up, and silence here reads as the
+            // guard simply preferring the raw transcript.
+            Err(e) => tracing::warn!(%e, "instruction-guard retry failed"),
+        }
+    }
+
+    // The literal transcript is always a defensible paste; an answer the user
+    // never asked for is not.
+    Ok(raw.trim().to_string())
 }
 
 /// Whether the transcript is too short to be worth a cleanup request.
@@ -235,6 +292,7 @@ mod tests {
             custom_prompt: "",
             vocabulary: &[],
             output_language: "",
+            instruction_guard: true,
         };
         assert_eq!(clean(options, "one sec").await.unwrap(), "one sec");
     }

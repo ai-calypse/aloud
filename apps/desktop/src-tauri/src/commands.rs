@@ -161,6 +161,7 @@ pub async fn test_prompt(
         custom_prompt: &prompt,
         vocabulary: &settings.vocabulary,
         output_language: &settings.output_language,
+        instruction_guard: settings.instruction_guard_enabled,
     };
     // An empty result is returned as an empty string, not as prose explaining
     // it. This command has two callers — the Prompts pane, which explains the

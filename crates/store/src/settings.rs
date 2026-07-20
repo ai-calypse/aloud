@@ -58,6 +58,11 @@ pub struct Settings {
     ///
     /// [`language`]: Settings::language
     pub output_language: String,
+    /// Reject a cleanup that *answered* the transcript instead of tidying it —
+    /// see [`aloud_llm::guard`]. On by default, matching the Swift app: the
+    /// failure it catches pastes text the user never dictated, and the worst
+    /// a false positive costs is the raw transcript.
+    pub instruction_guard_enabled: bool,
     /// Proper nouns and jargon fed to the model as a spelling reference.
     pub vocabulary: Vec<String>,
     /// Spoken shorthand that expands to canned text after cleanup.
@@ -131,6 +136,7 @@ impl Default for Settings {
             custom_system_prompt: String::new(),
             seen_prompt_version: String::new(),
             output_language: String::new(),
+            instruction_guard_enabled: true,
             vocabulary: Vec::new(),
             macros: Vec::new(),
             app_rules: Vec::new(),

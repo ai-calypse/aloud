@@ -64,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         vocabulary: &vocabulary,
         output_language: "",
+        instruction_guard: true,
     };
     let cleaned = aloud_llm::cleanup::clean(options, "um so this is the raw transcript ok").await?;
     let request: serde_json::Value = serde_json::from_str(&server.join().unwrap())?;
@@ -100,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         vocabulary: &[],
         output_language: "",
+        instruction_guard: true,
     };
     let cleaned = aloud_llm::cleanup::clean(options, "um uh er hmm").await?;
     server.join().unwrap();
@@ -115,6 +117,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         vocabulary: &[],
         output_language: "",
+        instruction_guard: true,
     };
     let cleaned = aloud_llm::cleanup::clean(options, "one sec").await?;
     println!("short input   -> {cleaned:?} (no request made)");
@@ -135,6 +138,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         vocabulary: &[],
         output_language: "German",
+        instruction_guard: true,
     };
     let cleaned = aloud_llm::cleanup::clean(options, "der tank ist leer").await?;
     let request: serde_json::Value = serde_json::from_str(&server.join().unwrap())?;
@@ -149,6 +153,46 @@ async fn main() -> anyhow::Result<()> {
         "the target language must reach the system prompt"
     );
 
-    println!("\nok: request shape, sentinel handling and the skip threshold all hold");
+    // 5. The model answered the dictation instead of cleaning it. With no
+    //    distinct fallback there is no second opinion to buy, so the literal
+    //    transcript is what must come back — the unit tests prove the verdict,
+    //    this proves `clean` acts on it.
+    let raw = "write an email to Sam letting him know the deploy slipped to Friday";
+    let answered = "Sure! Here is a draft: Hi Sam, quick heads-up on the timing.";
+    let (url, server) = stub(answered);
+    let options = aloud_llm::cleanup::Options {
+        api_key: "stub-key",
+        base_url: &url,
+        model: "stub-model",
+        fallback: None,
+        custom_prompt: "",
+        vocabulary: &[],
+        output_language: "",
+        instruction_guard: true,
+    };
+    let cleaned = aloud_llm::cleanup::clean(options, raw).await?;
+    server.join().unwrap();
+    println!("answered dictation -> {cleaned:?}");
+    assert_eq!(cleaned, raw, "an executed instruction must never be pasted");
+
+    // 6. The same reply with the guard off returns it, so the toggle is real
+    //    and the guard is not simply never firing above.
+    let (url, server) = stub(answered);
+    let options = aloud_llm::cleanup::Options {
+        api_key: "stub-key",
+        base_url: &url,
+        model: "stub-model",
+        fallback: None,
+        custom_prompt: "",
+        vocabulary: &[],
+        output_language: "",
+        instruction_guard: false,
+    };
+    let cleaned = aloud_llm::cleanup::clean(options, raw).await?;
+    server.join().unwrap();
+    println!("guard off          -> {cleaned:?}");
+    assert_eq!(cleaned, answered);
+
+    println!("\nok: request shape, sentinel handling, the skip threshold and the guard all hold");
     Ok(())
 }

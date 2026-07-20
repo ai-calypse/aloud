@@ -8,6 +8,7 @@
 pub mod ask;
 pub mod cleanup;
 pub mod cooldown;
+pub mod guard;
 pub mod prompts;
 pub mod trigger;
 

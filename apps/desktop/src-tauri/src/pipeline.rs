@@ -507,14 +507,19 @@ impl Pipeline {
         // The first local run pays for the model load inside this span, which
         // is right: it is time the user spends waiting for a transcript.
         let text = async {
-            let transcriber = self.transcriber(&settings).await?;
-            let text = transcriber.transcribe(&wav).await?;
-            tracing::Span::current().record("chars", text.len());
+            let (text, engine) = self.transcribe_with_local_fallback(&settings, &wav).await?;
+            // The engine that *ran*, not the one configured — the span is the
+            // only record of a silent fallback, and it costs no new storage:
+            // the Run Log already renders `Span.fields`, so "which engine ran"
+            // shows up under the transcribe stage for free.
+            let span = tracing::Span::current();
+            span.record("engine", tracing::field::debug(engine));
+            span.record("chars", text.len());
             anyhow::Ok(text)
         }
         .instrument(tracing::info_span!(
             "transcribe",
-            engine = ?settings.engine,
+            engine = tracing::field::Empty,
             chars = tracing::field::Empty,
         ))
         .await?;
@@ -610,6 +615,7 @@ impl Pipeline {
                     custom_prompt: &settings.custom_system_prompt,
                     vocabulary: &settings.vocabulary,
                     output_language: &settings.output_language,
+                    instruction_guard: settings.instruction_guard_enabled,
                 };
                 match aloud_llm::cleanup::clean(options, raw).await {
                     Ok(text) => text,
@@ -655,6 +661,40 @@ impl Pipeline {
                 Err(e) => tracing::warn!(%e, "could not warm the local model"),
             }
         });
+    }
+
+    /// Transcribes, retrying on-device once if the cloud call failed for a
+    /// reason on-device would not, and reports which engine produced the text.
+    ///
+    /// The catch is here, at the call, rather than behind a network monitor —
+    /// see [`aloud_transcribe::is_recoverable_locally`] for why. Once, not in a
+    /// loop: the user is holding a pill open, and the on-device engine either
+    /// works or is broken in a way a second attempt will not fix.
+    async fn transcribe_with_local_fallback(
+        &self,
+        settings: &Settings,
+        wav: &std::path::Path,
+    ) -> Result<(String, Engine)> {
+        let engine = effective_engine(settings);
+        let error = match self.transcriber(settings).await?.transcribe(wav).await {
+            Ok(text) => return Ok((text, engine)),
+            Err(e) if engine == Engine::Cloud && aloud_transcribe::is_recoverable_locally(&e) => e,
+            Err(e) => return Err(e),
+        };
+
+        tracing::warn!(%error, "cloud transcription failed; retrying on-device");
+        let mut local = settings.clone();
+        local.engine = Engine::Local;
+        let text = self
+            .transcriber(&local)
+            .await?
+            .transcribe(wav)
+            .await
+            // The cloud error is the interesting half of the story: without it
+            // the user is told the local model failed and never learns why it
+            // was reached for.
+            .with_context(|| format!("after the cloud engine failed: {error:#}"))?;
+        Ok((text, Engine::Local))
     }
 
     /// The configured engine. The local model is cached after first load.

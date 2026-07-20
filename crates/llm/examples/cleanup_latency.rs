@@ -41,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
             custom_prompt: "",
             vocabulary: &[],
             output_language: "",
+            instruction_guard: true,
         };
 
         let started = Instant::now();
