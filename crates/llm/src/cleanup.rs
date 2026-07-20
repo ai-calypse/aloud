@@ -72,6 +72,11 @@ pub async fn clean(options: Options<'_>, raw: &str) -> Result<String> {
             "cleanup",
             model = %options.model,
             words = raw.split_whitespace().count(),
+            // Which terms were in play, for the Run Log to show per run. A
+            // mis-spelled proper noun is usually a vocabulary that did not
+            // contain it *at the time*, and the list has been edited since —
+            // the span is the only record of what the prompt actually saw.
+            vocabulary = %options.vocabulary.join(", "),
         ))
         .await?;
 

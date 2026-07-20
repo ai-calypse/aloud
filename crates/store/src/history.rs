@@ -91,6 +91,10 @@ impl History {
     }
 
     /// Records one dictation and prunes to `retention` newest entries.
+    // One argument per column, and the columns are what they are. A params
+    // struct would be an `Entry` without its id, which the sole caller would
+    // then have to build just to take apart again.
+    #[allow(clippy::too_many_arguments)]
     pub fn insert(
         &self,
         created_at: i64,

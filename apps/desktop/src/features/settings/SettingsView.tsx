@@ -10,6 +10,7 @@ import { HotkeyEditor } from "./HotkeyEditor";
 import { MacroEditor } from "./MacroEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
 import { ConnectorEditor } from "./ConnectorEditor";
+import { RunLogView } from "./RunLogView";
 import { AUTO_DETECT, LANGUAGES, SAME_AS_SPOKEN } from "./languages";
 import {
   Group,
@@ -39,7 +40,8 @@ export type SettingsSection =
   | "macros"
   | "rules"
   | "prompts"
-  | "connectors";
+  | "connectors"
+  | "runlog";
 
 /**
  * Settings forms bound to the Rust `Settings` struct, laid out as macOS System
@@ -687,6 +689,10 @@ export function SettingsView({ section }: { section: SettingsSection }) {
           onChange={(appRules) => update({ appRules })}
         />
       )}
+
+      {/* Owns its own data and its own title: it reads history and timings,
+          not `settings`, so nothing above is of any use to it. */}
+      {section === "runlog" && <RunLogView />}
 
       <p
         className={`text-xs text-ink-2 transition-opacity duration-150 ${

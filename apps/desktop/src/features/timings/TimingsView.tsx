@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { commands, events, type Span } from "@/lib/bindings";
-import { covered, percentile } from "@/lib/waterfall";
+import { covered, percentile, spanFields as fields } from "@/lib/waterfall";
 import { cn } from "@/lib/utils";
 
 /** Runs fetched for the aggregates. The waterfall renders far fewer. */
@@ -33,14 +33,6 @@ type Utterance = {
   /** Every stage except the root, which is the track the others sit on. */
   stages: Span[];
 };
-
-function fields(span: Span): Record<string, unknown> {
-  try {
-    return JSON.parse(span.fields);
-  } catch {
-    return {};
-  }
-}
 
 /** Rows arrive flat and newest-first; the waterfall needs them grouped. */
 function group(rows: Span[]): Utterance[] {

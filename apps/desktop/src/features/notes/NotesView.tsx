@@ -5,6 +5,7 @@ import { or } from "../../lib/result";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Group } from "@/components/ui/rows";
 import { SearchField } from "@/components/ui/search-field";
+import { formatDate } from "@/lib/format";
 import "./notes.css";
 
 /**
@@ -141,10 +142,4 @@ function Reader({ note, onBack }: { note: Note; onBack: () => void }) {
       )}
     </div>
   );
-}
-
-/** `date` is unix seconds from Rust. Middot separator, as in the design. */
-function formatDate(date: number) {
-  const at = new Date(date * 1000);
-  return `${at.toLocaleDateString(undefined, { dateStyle: "medium" })} · ${at.toLocaleTimeString(undefined, { timeStyle: "short" })}`;
 }

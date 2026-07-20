@@ -4,7 +4,7 @@
 //! resembling logic belongs in a crate where it can be tested.
 
 use crate::AppState;
-use aloud_store::{timings::Span, Settings, Stats};
+use aloud_store::{history::Entry, timings::Span, Settings, Stats};
 use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
@@ -140,9 +140,12 @@ pub async fn test_prompt(
         return Err("Type a sample transcript to run the prompt against.".into());
     }
     if aloud_llm::cleanup::is_too_short(&sample) {
+        // Worded for both callers: the Prompts pane runs a sample the user can
+        // lengthen, the Run Log retries a stored transcript it cannot. Telling
+        // the second one to "add a few more words" was advice it cannot take.
         return Err(format!(
-            "Sample is too short. Dictations of {} words or fewer skip cleanup entirely \
-             and are pasted as spoken, so the prompt would never run. Add a few more words.",
+            "Too short to clean up. Dictations of {} words or fewer skip cleanup entirely \
+             and are pasted as spoken, so the prompt never runs on them.",
             aloud_llm::cleanup::MIN_WORDS
         ));
     }
@@ -438,6 +441,49 @@ pub fn recent_timings(state: State<'_, AppState>, utterances: u32) -> CmdResult<
         .lock()
         .map_err(|_| "timings lock poisoned".to_string())?;
     to_string_err(timings.recent(utterances as usize))
+}
+
+/// The newest `limit` dictations, for the Run Log pane.
+#[tauri::command]
+#[specta::specta]
+pub fn history_recent(state: State<'_, AppState>, limit: u32) -> CmdResult<Vec<Entry>> {
+    to_string_err(state.pipeline.history(limit as usize))
+}
+
+/// Row ids cross the boundary as i32 because specta refuses to export i64
+/// (see [`Entry`]). SQLite hands out ids by insertion count and retention caps
+/// the table in the hundreds, so 2^31 is not a reachable ceiling.
+#[tauri::command]
+#[specta::specta]
+pub fn history_delete(state: State<'_, AppState>, id: i32) -> CmdResult<()> {
+    to_string_err(
+        state
+            .pipeline
+            .history_db()
+            .and_then(|h| h.delete(id as i64)),
+    )
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn history_clear(state: State<'_, AppState>) -> CmdResult<()> {
+    to_string_err(state.pipeline.history_db().and_then(|h| h.clear()))
+}
+
+/// Writes back the output of a cleanup re-run.
+///
+/// Separate from [`test_prompt`], which produces the text: a retry is that
+/// same call plus this one, so there is no second cleanup path to keep in
+/// step with the real pipeline's.
+#[tauri::command]
+#[specta::specta]
+pub fn history_update_final(state: State<'_, AppState>, id: i32, text: String) -> CmdResult<()> {
+    to_string_err(
+        state
+            .pipeline
+            .history_db()
+            .and_then(|h| h.update_final(id as i64, &text)),
+    )
 }
 
 /// How long a recording waits for the user before giving up. Long enough to

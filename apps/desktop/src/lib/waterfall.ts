@@ -10,6 +10,19 @@
 import type { Span } from "./bindings";
 
 /**
+ * A span's recorded fields. Free-form JSON written by whatever the call site
+ * chose to record, so a parse failure is a plausible outcome and must not take
+ * the pane down — both the waterfall and the Run Log render around it.
+ */
+export function spanFields(span: Span): Record<string, unknown> {
+  try {
+    return JSON.parse(span.fields);
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Wall-clock the stages actually cover.
  *
  * Spans nest — `llm_fallback` runs inside `cleanup` — so summing durations

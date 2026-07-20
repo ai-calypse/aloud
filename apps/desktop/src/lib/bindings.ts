@@ -51,6 +51,23 @@ export const commands = {
 	 *  waterfall. Newest utterance first; stages in start order within one.
 	 */
 	recentTimings: (utterances: number) => typedError<Span[], string>(__TAURI_INVOKE("recent_timings", { utterances })),
+	/**  The newest `limit` dictations, for the Run Log pane. */
+	historyRecent: (limit: number) => typedError<Entry[], string>(__TAURI_INVOKE("history_recent", { limit })),
+	/**
+	 *  Row ids cross the boundary as i32 because specta refuses to export i64
+	 *  (see [`Entry`]). SQLite hands out ids by insertion count and retention caps
+	 *  the table in the hundreds, so 2^31 is not a reachable ceiling.
+	 */
+	historyDelete: (id: number) => typedError<null, string>(__TAURI_INVOKE("history_delete", { id })),
+	historyClear: () => typedError<null, string>(__TAURI_INVOKE("history_clear")),
+	/**
+	 *  Writes back the output of a cleanup re-run.
+	 * 
+	 *  Separate from [`test_prompt`], which produces the text: a retry is that
+	 *  same call plus this one, so there is no second cleanup path to keep in
+	 *  step with the real pipeline's.
+	 */
+	historyUpdateFinal: (id: number, text: string) => typedError<null, string>(__TAURI_INVOKE("history_update_final", { id, text })),
 	/**
 	 *  Records the next key gesture and returns it as a binding.
 	 * 
@@ -254,6 +271,32 @@ export type Engine =
 "local" | 
 /**  An OpenAI-compatible endpoint (Groq by default). */
 "cloud";
+
+/**
+ *  Specta forbids exporting i64 by default, since JS loses precision past
+ *  2^53. These are row ids, unix seconds and millisecond durations — all
+ *  many orders of magnitude below that — so `number` is exact here and
+ *  BigInt would only make the frontend painful.
+ */
+export type Entry = {
+	id: number,
+	/**  Unix seconds. */
+	createdAt: number,
+	/**  What the transcriber returned. */
+	rawTranscript: string,
+	/**  What was actually pasted, after cleanup. */
+	finalTranscript: string,
+	/**  Which app had focus, for per-app rules and debugging. */
+	appName: string | null,
+	durationMs: number,
+	/**
+	 *  Joins this row to its `timings` spans. Null on every row written
+	 *  before the column existed — those runs simply have no breakdown, which
+	 *  is why the Run Log has to treat its absence as normal rather than as
+	 *  missing data.
+	 */
+	utteranceId: number | null,
+};
 
 /**
  *  Emitted once hotkeys are live, so the UI can clear its permission banner

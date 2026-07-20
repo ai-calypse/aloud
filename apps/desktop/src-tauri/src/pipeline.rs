@@ -960,14 +960,23 @@ impl Pipeline {
     }
 
     pub fn history(&self, limit: usize) -> Result<Vec<aloud_store::history::Entry>> {
-        // The tray builds its History submenu from this on the main thread, so
-        // a poisoned lock here would panic the menu build rather than just
-        // showing an empty submenu. `record` already degrades on this same
-        // mutex; this was the one place that did not.
+        self.history_db()?.recent(limit)
+    }
+
+    /// The history store, for the Run Log's row-level edits.
+    ///
+    /// Handing out the guard rather than forwarding each statement: delete,
+    /// clear and update-final are one line apiece, and three wrappers around
+    /// them is more code than the leak costs.
+    ///
+    /// The tray builds its History submenu from this on the main thread, so a
+    /// poisoned lock here would panic the menu build rather than just showing
+    /// an empty submenu. `record` already degrades on this same mutex; this
+    /// was the one place that did not.
+    pub fn history_db(&self) -> Result<std::sync::MutexGuard<'_, History>> {
         self.history
             .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?
-            .recent(limit)
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))
     }
 }
 
