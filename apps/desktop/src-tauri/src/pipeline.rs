@@ -370,7 +370,14 @@ impl Pipeline {
         // Apply the focused app's rule (if any) to a working copy, so every
         // downstream step just reads the effective settings. History still
         // records against the real config; only cleanup behaviour changes.
-        let (effective, app_name) = apply_app_rule(settings.clone());
+        // Off-thread for the same reason `capture_selection` is: an
+        // Accessibility read waits on the *target* app, so a busy app would
+        // stall a tokio worker here.
+        let app_name = tauri::async_runtime::spawn_blocking(aloud_selection::frontmost_app)
+            .await
+            .ok()
+            .flatten();
+        let effective = apply_app_rule(settings.clone(), app_name.as_deref());
 
         let final_text = self.post_process(&raw, &effective).await;
         if final_text.trim().is_empty() {
@@ -874,7 +881,14 @@ impl Pipeline {
     }
 
     pub fn history(&self, limit: usize) -> Result<Vec<aloud_store::history::Entry>> {
-        self.history.lock().unwrap().recent(limit)
+        // The tray builds its History submenu from this on the main thread, so
+        // a poisoned lock here would panic the menu build rather than just
+        // showing an empty submenu. `record` already degrades on this same
+        // mutex; this was the one place that did not.
+        self.history
+            .lock()
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?
+            .recent(limit)
     }
 }
 
@@ -912,18 +926,18 @@ pub async fn build_transcriber(
     }
 }
 
-/// Overrides `settings` with the rule for the currently focused app, if one
-/// matches. Reads the frontmost app once; a None app or no matching rule
-/// leaves the settings untouched.
-fn apply_app_rule(mut settings: Settings) -> (Settings, Option<String>) {
-    // Read once and hand the name back: history records it too, and this is an
-    // Accessibility round-trip we do not want to pay for twice per dictation.
-    let app = aloud_selection::frontmost_app();
+/// Overrides `settings` with the rule for `app`, if one matches. A None app or
+/// no matching rule leaves the settings untouched.
+///
+/// Takes the app name rather than reading it: the Accessibility call blocks on
+/// the target app, so the caller does it off-thread and also reuses the name
+/// for the history record.
+fn apply_app_rule(mut settings: Settings, app: Option<&str>) -> Settings {
     if settings.app_rules.is_empty() {
-        return (settings, app);
+        return settings;
     }
-    let Some(rule) = aloud_store::rules::matching(&settings.app_rules, app.as_deref()) else {
-        return (settings, app);
+    let Some(rule) = aloud_store::rules::matching(&settings.app_rules, app) else {
+        return settings;
     };
     tracing::info!(app = ?app, matcher = %rule.app_matches, "applying app rule");
 
@@ -938,7 +952,7 @@ fn apply_app_rule(mut settings: Settings) -> (Settings, Option<String>) {
         settings.custom_system_prompt =
             prompt_with_hint(&settings.custom_system_prompt, &rule.custom_prompt);
     }
-    (settings, app)
+    settings
 }
 
 /// The effective cleanup prompt for an app rule: the rule's text is a style
@@ -1007,6 +1021,31 @@ mod tests {
         // Anything unrecognised must survive intact rather than be guessed at.
         let other = anyhow::anyhow!("no microphone found");
         assert_eq!(user_message(&other), "no microphone found");
+    }
+
+    /// Only testable since the Accessibility read moved out to the caller —
+    /// before that, this function could not run without a focused app.
+    #[test]
+    fn app_rule_applies_only_to_the_app_it_matches() {
+        let settings = Settings {
+            post_processing_enabled: true,
+            app_rules: vec![aloud_store::rules::AppRule {
+                app_matches: "slack".into(),
+                post_processing_enabled: Some(false),
+                custom_prompt: String::new(),
+            }],
+            ..Default::default()
+        };
+
+        let matched = apply_app_rule(settings.clone(), Some("Slack"));
+        assert!(!matched.post_processing_enabled, "the rule must apply");
+
+        let other = apply_app_rule(settings.clone(), Some("Xcode"));
+        assert!(other.post_processing_enabled, "a non-match must not apply");
+
+        // No focused app at all — the read can legitimately return None.
+        let none = apply_app_rule(settings, None);
+        assert!(none.post_processing_enabled, "None must not apply a rule");
     }
 
     /// An app rule's prompt is a style hint, not a replacement. Replacing the
