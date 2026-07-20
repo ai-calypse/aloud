@@ -46,6 +46,7 @@ dependencies = [
  "aloud-audio",
  "aloud-hotkey",
  "aloud-llm",
+ "aloud-meeting",
  "aloud-notes",
  "aloud-paste",
  "aloud-selection",
@@ -133,6 +134,17 @@ dependencies = [
  "serde_json",
  "specta",
  "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "aloud-meeting"
+version = "0.1.0"
+dependencies = [
+ "aloud-llm",
+ "aloud-notes",
+ "anyhow",
  "tokio",
  "tracing",
 ]

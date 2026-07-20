@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 aloud-agent = { path = "../../../crates/agent" }
 aloud-audio = { path = "../../../crates/audio" }
+aloud-meeting = { path = "../../../crates/meeting" }
 aloud-hotkey = { path = "../../../crates/hotkey" }
 aloud-llm = { path = "../../../crates/llm" }
 aloud-notes = { path = "../../../crates/notes" }

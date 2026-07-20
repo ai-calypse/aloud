@@ -245,9 +245,145 @@ pub fn write_wav(path: &Path, samples: &[f32], rate: u32) -> Result<()> {
     Ok(())
 }
 
+/// Writes raw realtime-tap bytes (24 kHz mono PCM16) as a 16 kHz WAV.
+///
+/// The rate change is the point, not a detail: the transcriber contract is
+/// 16 kHz mono, and local whisper hard-rejects anything else. Handing it the
+/// tap's native 24 kHz silently dropped every chunk it was given.
+pub fn write_pcm16_wav(path: &Path, pcm16: &[u8]) -> Result<()> {
+    let samples: Vec<f32> = pcm16
+        .chunks_exact(2)
+        .map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / f32::from(i16::MAX))
+        .collect();
+    let samples = resample::resample_mono(&samples, REALTIME_RATE, TRANSCRIBE_RATE)?;
+    write_wav(path, &samples, TRANSCRIBE_RATE)
+}
+
+/// Cuts a continuous byte stream into fixed-size chunks, numbered in order.
+///
+/// The realtime tap delivers whatever the OS hands it — buffer sizes vary by
+/// device and are never a whole chunk — so the leftover has to be carried
+/// across calls. Each chunk carries its index because chunks are transcribed
+/// concurrently and finish out of order; the index is the only thing that puts
+/// a meeting's timeline back together.
+#[derive(Debug)]
+pub struct Chunker {
+    pending: Vec<u8>,
+    next_index: usize,
+    chunk_bytes: usize,
+}
+
+impl Chunker {
+    pub fn new(chunk_bytes: usize) -> Self {
+        Self {
+            pending: Vec::new(),
+            next_index: 0,
+            chunk_bytes,
+        }
+    }
+
+    /// Adds bytes and returns every whole chunk they completed.
+    ///
+    /// Returns a Vec rather than an Option: one oversized buffer can complete
+    /// more than one chunk, and returning only the first would strand the rest
+    /// in `pending` until the next call — which, at the end of a meeting,
+    /// means losing them.
+    pub fn push(&mut self, bytes: &[u8]) -> Vec<(usize, Vec<u8>)> {
+        self.pending.extend_from_slice(bytes);
+        let mut chunks = Vec::new();
+        while self.pending.len() >= self.chunk_bytes {
+            let chunk: Vec<u8> = self.pending.drain(..self.chunk_bytes).collect();
+            chunks.push((self.next_index, chunk));
+            self.next_index += 1;
+        }
+        chunks
+    }
+
+    /// The unfinished remainder and the index it would occupy, for the end of
+    /// a stream. Leaves the chunker empty.
+    pub fn take_tail(&mut self) -> (usize, Vec<u8>) {
+        (self.next_index, std::mem::take(&mut self.pending))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The tap hands over arbitrary buffer sizes, so the leftover must survive
+    /// between calls. Dropping it loses audio; double-counting it repeats it.
+    #[test]
+    fn chunker_carries_the_remainder_across_pushes() {
+        let mut chunker = Chunker::new(10);
+        assert!(chunker.push(&[0; 4]).is_empty(), "4 of 10 is not a chunk");
+        assert!(chunker.push(&[0; 5]).is_empty(), "9 of 10 is not a chunk");
+
+        let chunks = chunker.push(&[0; 3]); // 12 total
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].0, 0);
+        assert_eq!(chunks[0].1.len(), 10);
+
+        // The 2 bytes past the boundary must still be there.
+        assert_eq!(chunker.take_tail(), (1, vec![0; 2]));
+    }
+
+    /// One oversized buffer can complete several chunks. Emitting only the
+    /// first would strand the rest until the next push — at the end of a
+    /// meeting, that means losing them.
+    #[test]
+    fn chunker_emits_every_chunk_a_single_push_completes() {
+        let mut chunker = Chunker::new(4);
+        let chunks = chunker.push(&[7; 14]);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(
+            chunks.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![0, 1, 2],
+            "indexes must be consecutive and start at zero"
+        );
+        assert_eq!(chunker.take_tail(), (3, vec![7; 2]));
+    }
+
+    /// An exact multiple must not leave a phantom empty tail behind, and must
+    /// not consume the boundary byte twice.
+    #[test]
+    fn chunker_handles_an_exact_multiple() {
+        let mut chunker = Chunker::new(8);
+        assert_eq!(chunker.push(&[1; 16]).len(), 2);
+        assert_eq!(chunker.take_tail(), (2, Vec::new()));
+    }
+
+    #[test]
+    fn chunker_preserves_byte_order_across_the_boundary() {
+        let mut chunker = Chunker::new(4);
+        let chunks = chunker.push(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(chunks[0].1, vec![1, 2, 3, 4]);
+        assert_eq!(chunks[1].1, vec![5, 6, 7, 8]);
+    }
+
+    /// The staged chunk WAV must be 16 kHz mono — local whisper hard-rejects
+    /// the tap's native 24 kHz, which silently dropped every meeting chunk.
+    #[test]
+    fn pcm16_wav_is_16k_mono_and_not_silent() {
+        let rate = REALTIME_RATE as usize;
+        let samples: Vec<f32> = (0..rate) // 1s of 440 Hz at 24 kHz
+            .map(|i| (i as f32 * 440.0 * 2.0 * std::f32::consts::PI / rate as f32).sin())
+            .collect();
+        let pcm16 = resample::to_pcm16_bytes(&samples);
+
+        let path = std::env::temp_dir().join("aloud-test-pcm16-chunk.wav");
+        write_pcm16_wav(&path, &pcm16).unwrap();
+
+        let mut reader = hound::WavReader::open(&path).unwrap();
+        let spec = reader.spec();
+        assert_eq!((spec.sample_rate, spec.channels), (16_000, 1));
+        let peak = reader
+            .samples::<i16>()
+            .map(|s| s.unwrap().unsigned_abs())
+            .max()
+            .unwrap();
+        assert!(peak > 8000, "resampled audio must not be near-silence");
+        let _ = std::fs::remove_file(&path);
+    }
 
     /// The overlay's waveform is only honest if this tracks real input:
     /// silence must read near zero and speech must not peg the meter.
