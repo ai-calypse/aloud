@@ -507,12 +507,17 @@ impl Pipeline {
         // The first local run pays for the model load inside this span, which
         // is right: it is time the user spends waiting for a transcript.
         let text = async {
-            let (text, engine) = self.transcribe_with_local_fallback(&settings, &wav).await?;
-            // The engine that *ran*, not the one configured — the span is the
-            // only record of a silent fallback, and it costs no new storage:
-            // the Run Log already renders `Span.fields`, so "which engine ran"
-            // shows up under the transcribe stage for free.
+            // The configured engine is recorded up front so a *failed*
+            // transcription still names one. Recording it only on success left
+            // the one row where "which engine was this?" matters most — the
+            // failure — with no engine at all.
             let span = tracing::Span::current();
+            span.record("engine", tracing::field::debug(effective_engine(&settings)));
+
+            let (text, engine) = self.transcribe_with_local_fallback(&settings, &wav).await?;
+            // Overwritten with the engine that actually *ran*, which differs
+            // from the configured one after a silent fallback. This costs no
+            // new storage: the Run Log already renders `Span.fields`.
             span.record("engine", tracing::field::debug(engine));
             span.record("chars", text.len());
             anyhow::Ok(text)
@@ -663,6 +668,36 @@ impl Pipeline {
         });
     }
 
+    /// Downloads the on-device model in the background so the *next* cloud
+    /// failure has something to fall back to.
+    ///
+    /// Fire-and-forget, and deliberately not awaited by the dictation that
+    /// triggered it: the point is to keep a 150MB fetch out of the utterance
+    /// the user is waiting on. A second call while one is in flight is
+    /// harmless — `ensure_model` returns early once the file exists, and the
+    /// worst case is a duplicate download nobody sees.
+    fn fetch_local_model_soon(&self) {
+        tauri::async_runtime::spawn(async move {
+            let Ok(dir) = aloud_transcribe::local::model_dir() else {
+                return;
+            };
+            tracing::info!("fetching the on-device model so the next fallback can use it");
+            // No progress to the overlay: no dictation is waiting on this, and
+            // a progress bar for work the user did not ask for reads as the app
+            // doing something to them.
+            match aloud_transcribe::download::ensure_model(
+                &dir,
+                aloud_transcribe::local::DEFAULT_MODEL,
+                |_| {},
+            )
+            .await
+            {
+                Ok(_) => tracing::info!("on-device model ready for the next fallback"),
+                Err(e) => tracing::warn!(%e, "could not fetch the on-device model"),
+            }
+        });
+    }
+
     /// Transcribes, retrying on-device once if the cloud call failed for a
     /// reason on-device would not, and reports which engine produced the text.
     ///
@@ -681,6 +716,22 @@ impl Pipeline {
             Err(e) if engine == Engine::Cloud && aloud_transcribe::is_recoverable_locally(&e) => e,
             Err(e) => return Err(e),
         };
+
+        // Only when the model is already on disk. `ensure_model` downloads a
+        // missing one, and a user on the cloud engine has never had a reason to
+        // hold it — so falling back blind would put a 150MB download inside the
+        // dictation they are waiting on. On the transport-error case it is
+        // worse: the network is what just broke, so the download fails too and
+        // the user gets a download error wrapped in a transcription error.
+        //
+        // Fetching it in the background instead means the *next* failure is
+        // covered, which is the one that matters: an outage rarely lasts one
+        // utterance.
+        if !aloud_transcribe::local::model_is_present() {
+            self.fetch_local_model_soon();
+            return Err(error
+                .context("cloud transcription failed and no on-device model is downloaded yet"));
+        }
 
         tracing::warn!(%error, "cloud transcription failed; retrying on-device");
         let mut local = settings.clone();

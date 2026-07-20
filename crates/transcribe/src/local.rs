@@ -173,6 +173,17 @@ fn read_wav_16k_mono(path: &Path) -> Result<Vec<f32>> {
         .context("reading samples")
 }
 
+/// Whether the default model is already on disk.
+///
+/// The offline fallback needs this: `ensure_model` *downloads* a missing
+/// model, and a user on the cloud engine has never had one, so falling back
+/// blind would put a 150MB download inside the dictation the user is waiting
+/// on — and on the transport-error case the download fails too, because the
+/// network is exactly what just broke.
+pub fn model_is_present() -> bool {
+    model_dir().is_ok_and(|dir| dir.join(DEFAULT_MODEL).exists())
+}
+
 /// Where models live: `<app-data>/Aloud/models`.
 pub fn model_dir() -> Result<PathBuf> {
     Ok(aloud_notes::data_dir()?.join("models"))

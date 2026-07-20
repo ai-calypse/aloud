@@ -95,14 +95,28 @@ function Ask() {
         <Input
           ref={inputRef}
           className="h-8 flex-1 rounded-full text-ui"
-          placeholder="Ask a follow-up…"
+          // Not "Ask a follow-up": `stream_answer` builds a fresh
+          // [system, user] pair with no prior turn, so there is no
+          // conversation to follow up on. Promising one and then answering
+          // "and what about Friday?" with no context is worse than not
+          // offering it.
+          placeholder="Ask a question…"
           value={typed}
+          // Disabled mid-answer: two streams write Delta into the same window,
+          // and the second one's Question event resets `answer` to "" while the
+          // first keeps appending — the two answers splice together.
+          disabled={state === "streaming"}
           onChange={(e) => setTyped(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key !== "Enter" || !typed.trim()) return;
+            if (e.key !== "Enter" || !typed.trim() || state === "streaming") return;
+            // Cleared here rather than waiting for the backend's `question`
+            // event to echo back: until that lands the text sits in the field
+            // and is trivially re-submittable.
+            const question = typed;
+            setTyped("");
             // The same backend entry point the spoken trigger uses, so the
             // two paths cannot answer differently.
-            void commands.askText(typed);
+            void commands.askText(question);
           }}
         />
       }
