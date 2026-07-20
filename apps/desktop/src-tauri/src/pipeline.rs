@@ -434,7 +434,7 @@ impl Pipeline {
                 chars = final_text.len(),
             )
             .entered();
-            aloud_paste::paste_text(&final_text, false)?;
+            aloud_paste::paste_text(&final_text, false, settings.preserve_clipboard)?;
         }
         self.record(
             &raw,
@@ -651,7 +651,7 @@ impl Pipeline {
         {
             let _e = tracing::info_span!("paste", chars = transformed.len()).entered();
             // Paste over the still-selected text, replacing it.
-            aloud_paste::paste_text(&transformed, false)?;
+            aloud_paste::paste_text(&transformed, false, self.settings().preserve_clipboard)?;
         }
         Ok(())
     }
@@ -771,7 +771,7 @@ impl Pipeline {
             .ok()
             .and_then(|s| s.last_transcript.clone());
         match last {
-            Some(text) => aloud_paste::paste_text(&text, false),
+            Some(text) => aloud_paste::paste_text(&text, false, self.settings().preserve_clipboard),
             None => Ok(()),
         }
     }

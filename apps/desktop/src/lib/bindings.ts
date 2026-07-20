@@ -324,6 +324,11 @@ export type Settings = {
 	 */
 	soundVolume?: number | null,
 	pressEnterCommand?: boolean,
+	/**
+	 *  Put the previous clipboard back after pasting. Off leaves the dictated
+	 *  text on the clipboard so it can be pasted again.
+	 */
+	preserveClipboard?: boolean,
 	/**  Whether the first-run wizard has been completed. False shows it. */
 	onboarded?: boolean,
 	/**

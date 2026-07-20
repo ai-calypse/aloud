@@ -277,6 +277,18 @@ export function SettingsView({ section }: { section: SettingsSection }) {
               />
             </Row>
 
+            <Row
+              label="Keep my clipboard after pasting"
+              hint="Off leaves the dictated text there to paste again."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={settings.preserveClipboard ?? true}
+                label="Keep my clipboard after pasting"
+                onChange={(c) => update({ preserveClipboard: c })}
+              />
+            </Row>
+
             <Row label="Sound on start / stop" className="py-[11px]">
               <Toggle
                 checked={sounds}
