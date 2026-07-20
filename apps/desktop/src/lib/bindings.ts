@@ -9,7 +9,7 @@ export const commands = {
 	getSettings: () => __TAURI_INVOKE<Settings>("get_settings"),
 	/**  Persists settings and applies them to the running app. */
 	updateSettings: (settings: Settings) => typedError<null, string>(__TAURI_INVOKE("update_settings", { settings })),
-	getStats: () => __TAURI_INVOKE<Stats>("get_stats"),
+	getStats: () => __TAURI_INVOKE<StatsView>("get_stats"),
 	getHistory: (limit: number) => typedError<Entry[], string>(__TAURI_INVOKE("get_history", { limit })),
 	searchNotes: (query: string) => typedError<SearchResult[], string>(__TAURI_INVOKE("search_notes", { query })),
 	/**  Newest notes, for the empty-query state. */
@@ -392,6 +392,22 @@ export type Stats = {
 	 */
 	lastDictationDay?: string | null,
 };
+
+/**
+ *  [`Stats`] plus the values derived from it.
+ * 
+ *  Derived rather than stored: `Stats` is written to disk after every
+ *  dictation, and persisting a computed field would let the file disagree
+ *  with the formula the moment the formula changed.
+ * 
+ *  It crosses the boundary at all so the frontend does not re-derive it. The
+ *  40 wpm rule lived in both `stats.rs` and `App.tsx`, with the constant
+ *  inlined on the TS side — changing it in Rust would have silently left the
+ *  main window disagreeing with the tray menu.
+ */
+export type StatsView = {
+	timeSavedSeconds: number | null,
+} & Stats;
 
 /**
  *  An AG-UI tool call: the action name, the app it targets, and the parsed
