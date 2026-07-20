@@ -1,0 +1,11 @@
+<!doctype html><html data-surface="floating"><head>
+<link rel="stylesheet" href="./styles/overlay.css">
+</head><body style="background:#333">
+<div class="overlay-root"><div class="pill pill--recording">
+<span class="bars" id="bars">
+</span><span class="label">Listening…</span>
+</div></div>
+<script>
+const peaks=Array.from({length:14},(_,i)=>0.45+0.55*Math.sin(Math.PI*(i/13)));
+document.getElementById('bars').innerHTML=peaks.map((p,i)=>`<i style="--i:${i};--peak:${p}"></i>`).join('');
+</script></body></html>

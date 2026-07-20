@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { events, type Phase } from "./lib/bindings";
 import "./styles/overlay.css";
@@ -45,6 +45,21 @@ function Overlay() {
   const [phase, setPhase] = useState<Phase>(preview ?? "idle");
   const [error, setError] = useState<string | null>(null);
   const [download, setDownload] = useState<number | null>(null);
+  const bars = useRef<HTMLSpanElement>(null);
+
+  // Levels land every 50ms. Writing --level straight onto the node keeps them
+  // out of React entirely: at 20 renders a second the pill would rebuild its
+  // subtree while the compositor is mid-wave, which is exactly the stutter the
+  // CSS-owned animation exists to avoid. Null (no signal yet) reads as silence.
+  useEffect(() => {
+    const unlisten = events.audioLevel.listen((e) => {
+      const level = Math.min(1, Math.max(0, e.payload ?? 0));
+      bars.current?.style.setProperty("--level", String(level));
+    });
+    return () => {
+      unlisten.then((off) => off());
+    };
+  }, []);
 
   useEffect(() => {
     const unlistenPhase = events.dictationPhase.listen((e) => {
@@ -103,10 +118,10 @@ function Overlay() {
       {/* Warped glass highlight sitting over the real backdrop blur. */}
       <span className="pill__refraction" aria-hidden />
       {phase === "recording" ? (
-        // A continuous wave, deliberately not driven by the microphone. The
-        // CSS owns the motion; these two custom properties only give each bar
-        // its place in the row and its height ceiling.
-        <span className="bars" aria-hidden>
+        // A continuous wave the voice scales rather than drives. CSS owns the
+        // motion; these two custom properties only give each bar its place in
+        // the row and its height ceiling.
+        <span className="bars" ref={bars} aria-hidden>
           {BAR_PEAKS.map((peak, i) => (
             <i
               key={i}

@@ -105,9 +105,9 @@
 
 /* The listening wave.
  *
- * A continuous travelling wave, not a reaction to the microphone. Each bar
- * runs the same keyframe with a small NEGATIVE delay, so it is already part
- * way through its cycle when the row appears: the phase offset between
+ * A continuous travelling wave that the voice scales but never drives. Each
+ * bar runs the same keyframe with a small NEGATIVE delay, so it is already
+ * part way through its cycle when the row appears: the phase offset between
  * neighbours is what makes a wave travel, and starting mid-cycle means it is
  * fully formed on the first frame rather than rippling up from flat.
  *
@@ -129,6 +129,17 @@
   align-items: center;
   gap: 2.5px;
   height: 20px;
+
+  /* The voice sets the wave's amplitude, not its motion — the same split the
+     Swift app used. At silence the row still travels at 42% height, so the
+     pill never looks frozen; a loud syllable opens it to full. JS only writes
+     --level, so the wave itself stays entirely on the compositor.
+
+     The transition is the meter ballistics: levels land every 50ms, and
+     crossfading between them over --dur-fast is what stops the row strobing
+     between syllables. It replaces the old attack/release buffer. */
+  transform: scaleY(calc(0.42 + 0.58 * var(--level, 0)));
+  transition: transform var(--dur-fast) var(--ease-out);
 }
 
 .bars i {
