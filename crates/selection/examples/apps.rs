@@ -24,13 +24,22 @@ fn main() {
             .as_deref()
             .map(|s| format!("{}…", &s[..s.len().min(40)]));
         println!(
-            "  {:<28} icon: {}",
+            "  {:<28} {:<40} icon: {}",
             a.name,
+            a.bundle_id.as_deref().unwrap_or("—"),
             icon.unwrap_or_else(|| "—".into())
         );
     }
     assert!(!apps.is_empty(), "expected at least one installed app");
     let with_icons = apps.iter().filter(|a| a.icon.is_some()).count();
+    let with_ids = apps.iter().filter(|a| a.bundle_id.is_some()).count();
     println!("\n{}/{} have icons", with_icons, apps.len());
+    println!("{}/{} have bundle ids", with_ids, apps.len());
     assert!(with_icons > 0, "expected at least one icon to extract");
+    // App rules key on this; a scan that reads none means every rule written
+    // from the picker falls back to name matching without saying so.
+    assert!(
+        with_ids > apps.len() / 2,
+        "most bundles declare an identifier"
+    );
 }

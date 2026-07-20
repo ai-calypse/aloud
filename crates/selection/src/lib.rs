@@ -50,12 +50,26 @@ pub fn selected_text() -> Result<String> {
     aloud_paste::copy_selection()
 }
 
-/// The name of the app that currently has focus, e.g. "Slack", "Code".
+/// The app that currently has focus.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FocusedApp {
+    /// Display name, e.g. "Slack".
+    pub name: String,
+    /// `CFBundleIdentifier`, when the process lives in an `.app`. None for a
+    /// plain binary and everywhere off macOS.
+    pub bundle_id: Option<String>,
+}
+
+/// The app that currently has focus, e.g. "Slack", "Code".
 ///
 /// Used by app rules to vary behaviour per app. Returns None when it can't be
 /// determined (no focus, permission denied, or the Windows path, which is not
 /// yet implemented). A None means "no app matched", so rules simply don't fire.
-pub fn frontmost_app() -> Option<String> {
+///
+/// The bundle id costs one extra `Info.plist` read on a path already resolved
+/// for the name, so it is read unconditionally rather than on demand — the
+/// expensive half is the Accessibility call, and that happens either way.
+pub fn frontmost_app() -> Option<FocusedApp> {
     #[cfg(target_os = "macos")]
     {
         macos::frontmost_app()
@@ -116,8 +130,12 @@ pub mod debug {
 /// An installed application, for the App Rules picker.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct InstalledApp {
-    /// Display name, e.g. "Slack". This is what app rules match against.
+    /// Display name, e.g. "Slack".
     pub name: String,
+    /// `CFBundleIdentifier`, so a rule created from the picker can be keyed on
+    /// something that survives the app being renamed. None when the bundle does
+    /// not declare one.
+    pub bundle_id: Option<String>,
     /// A `data:image/png;base64,…` URI for the app icon, or None if it could
     /// not be read. Lets the picker show icons without a second round-trip.
     pub icon: Option<String>,
@@ -230,10 +248,13 @@ mod macos {
     ///
     /// The `.app` stem is also exactly the string `installed_apps` puts in the
     /// picker, so a rule created by picking an app still matches.
-    pub fn frontmost_app() -> Option<String> {
+    pub fn frontmost_app() -> Option<super::FocusedApp> {
         let pid = frontmost_pid()?;
         let path = executable_path(pid)?;
-        bundle_name(&path)
+        Some(super::FocusedApp {
+            name: bundle_name(&path)?,
+            bundle_id: bundle_path(&path).as_deref().and_then(bundle_id),
+        })
     }
 
     /// The focused application's process id.
@@ -299,15 +320,50 @@ mod macos {
     /// focus is in a helper, which is most of the time.
     pub(super) fn bundle_name(exec_path: &str) -> Option<String> {
         let path = Path::new(exec_path);
-        // `ancestors()` walks deepest-first and is not double-ended, so the
-        // outermost match is simply the last one it yields.
-        path.ancestors()
-            .filter(|a| a.extension().is_some_and(|e| e == "app"))
-            .last()
+        bundle_path(exec_path)
+            .as_deref()
             .and_then(|a| a.file_stem())
             .or_else(|| path.file_name())
             .map(|s| s.to_string_lossy().into_owned())
             .filter(|s| !s.is_empty())
+    }
+
+    /// The outermost `.app` directory containing `exec_path`, or None for a
+    /// plain binary. See [`bundle_name`] for why outermost.
+    pub(super) fn bundle_path(exec_path: &str) -> Option<PathBuf> {
+        // `ancestors()` walks deepest-first and is not double-ended, so the
+        // outermost match is simply the last one it yields.
+        Path::new(exec_path)
+            .ancestors()
+            .filter(|a| a.extension().is_some_and(|e| e == "app"))
+            .last()
+            .map(Path::to_path_buf)
+    }
+
+    /// A bundle's `CFBundleIdentifier`, e.g. `com.tinyspeck.slackmacgap`.
+    ///
+    /// Same string-slice read as [`find_icns`] rather than a plist parser, and
+    /// a failure is survivable: the caller falls back to name matching, which
+    /// is what every rule did before this field existed.
+    ///
+    /// ponytail: binary plists read as None. Measured on this machine, that is
+    /// 1 app in 71 — Xcode. `plutil -convert xml1 -o -` (or the `plist` crate)
+    /// is the upgrade path if that list ever grows.
+    pub(super) fn bundle_id(app: &Path) -> Option<String> {
+        let plist = std::fs::read_to_string(app.join("Contents/Info.plist")).ok()?;
+        plist_string(&plist, "CFBundleIdentifier")
+    }
+
+    /// The `<string>` following `<key>{key}</key>` in an XML plist.
+    pub(super) fn plist_string(plist: &str, key: &str) -> Option<String> {
+        plist
+            .split(&format!("<key>{key}</key>"))
+            .nth(1)
+            .and_then(|s| s.split("<string>").nth(1))
+            .and_then(|s| s.split("</string>").next())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
     }
 
     use super::InstalledApp;
@@ -395,6 +451,7 @@ mod macos {
                 .map(|(name, path)| {
                     s.spawn(move || InstalledApp {
                         name: name.clone(),
+                        bundle_id: bundle_id(path),
                         icon: icon_data_uri(path),
                     })
                 })
@@ -448,15 +505,8 @@ mod macos {
         let resources = app.join("Contents/Resources");
         // The declared icon, if the plist names one (may lack the extension).
         if let Ok(plist) = std::fs::read_to_string(app.join("Contents/Info.plist")) {
-            if let Some(name) = plist
-                .split("<key>CFBundleIconFile</key>")
-                .nth(1)
-                .and_then(|s| s.split("<string>").nth(1))
-                .and_then(|s| s.split("</string>").next())
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-            {
-                let named = resources.join(name);
+            if let Some(name) = plist_string(&plist, "CFBundleIconFile") {
+                let named = resources.join(&name);
                 if named.exists() {
                     return Some(named);
                 }
@@ -539,5 +589,51 @@ mod cache_tests {
         // A plain binary with no bundle still gets a usable name.
         assert_eq!(bundle_name("/usr/bin/vim").as_deref(), Some("vim"));
         assert_eq!(bundle_name(""), None);
+    }
+
+    /// App rules key on the bundle id, so reading the wrong `<string>` out of
+    /// Info.plist silently mis-keys every rule the picker writes. The keys
+    /// nearby are the ones that would be grabbed by a looser slice.
+    #[test]
+    fn the_bundle_id_key_is_read_and_not_a_neighbouring_one() {
+        use super::macos::plist_string;
+        let plist = r#"<plist><dict>
+            <key>CFBundleIconFile</key><string>AppIcon</string>
+            <key>CFBundleIdentifier</key><string>com.tinyspeck.slackmacgap</string>
+            <key>CFBundleName</key><string>Slack</string>
+        </dict></plist>"#;
+
+        assert_eq!(
+            plist_string(plist, "CFBundleIdentifier").as_deref(),
+            Some("com.tinyspeck.slackmacgap")
+        );
+        assert_eq!(
+            plist_string(plist, "CFBundleIconFile").as_deref(),
+            Some("AppIcon")
+        );
+        // An absent key must be None, not the first string in the file.
+        assert_eq!(plist_string(plist, "CFBundleVersion"), None);
+        // A binary plist reads as garbage rather than XML; None is the answer
+        // that lets the caller fall back to name matching.
+        assert_eq!(
+            plist_string("bplist00\u{0}\u{1}", "CFBundleIdentifier"),
+            None
+        );
+    }
+
+    /// The bundle id is read from the *outermost* bundle, for the same reason
+    /// the name is: focus usually sits in an Electron helper, whose own
+    /// Info.plist declares a different id from the app the user picked.
+    #[test]
+    fn the_bundle_path_is_the_outermost_app_not_the_helper() {
+        use super::macos::bundle_path;
+        assert_eq!(
+            bundle_path(
+                "/Applications/Cursor.app/Contents/Frameworks/Cursor Helper.app/Contents/MacOS/Helper"
+            )
+            .as_deref(),
+            Some(std::path::Path::new("/Applications/Cursor.app"))
+        );
+        assert_eq!(bundle_path("/usr/bin/vim"), None);
     }
 }

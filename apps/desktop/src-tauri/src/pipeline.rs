@@ -609,8 +609,13 @@ impl Pipeline {
         // downstream step just reads the effective settings. History still
         // records against the real config; only cleanup behaviour changes.
         // By here the read started above has almost always finished.
-        let app_name = app_name.await.ok().flatten();
-        let effective = apply_app_rule(settings.clone(), app_name.as_deref());
+        let focused = app_name.await.ok().flatten();
+        let app_name = focused.as_ref().map(|f| f.name.clone());
+        let effective = apply_app_rule(
+            settings.clone(),
+            app_name.as_deref(),
+            focused.as_ref().and_then(|f| f.bundle_id.as_deref()),
+        );
 
         let final_text = self.post_process(&raw, &effective).await;
         if final_text.trim().is_empty() {
@@ -1213,11 +1218,11 @@ pub async fn build_transcriber(
 /// Takes the app name rather than reading it: the Accessibility call blocks on
 /// the target app, so the caller does it off-thread and also reuses the name
 /// for the history record.
-fn apply_app_rule(mut settings: Settings, app: Option<&str>) -> Settings {
+fn apply_app_rule(mut settings: Settings, app: Option<&str>, bundle_id: Option<&str>) -> Settings {
     if settings.app_rules.is_empty() {
         return settings;
     }
-    let Some(rule) = aloud_store::rules::matching(&settings.app_rules, app) else {
+    let Some(rule) = aloud_store::rules::matching(&settings.app_rules, app, bundle_id) else {
         return settings;
     };
     tracing::info!(app = ?app, matcher = %rule.app_matches, "applying app rule");
@@ -1342,20 +1347,21 @@ mod tests {
             post_processing_enabled: true,
             app_rules: vec![aloud_store::rules::AppRule {
                 app_matches: "slack".into(),
+                bundle_id: None,
                 post_processing_enabled: Some(false),
                 custom_prompt: String::new(),
             }],
             ..Default::default()
         };
 
-        let matched = apply_app_rule(settings.clone(), Some("Slack"));
+        let matched = apply_app_rule(settings.clone(), Some("Slack"), None);
         assert!(!matched.post_processing_enabled, "the rule must apply");
 
-        let other = apply_app_rule(settings.clone(), Some("Xcode"));
+        let other = apply_app_rule(settings.clone(), Some("Xcode"), None);
         assert!(other.post_processing_enabled, "a non-match must not apply");
 
         // No focused app at all — the read can legitimately return None.
-        let none = apply_app_rule(settings, None);
+        let none = apply_app_rule(settings, None, None);
         assert!(none.post_processing_enabled, "None must not apply a rule");
     }
 

@@ -10,7 +10,9 @@
 
 use aloud_store::Settings;
 use anyhow::{Context, Result};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tauri::AppHandle;
 use tauri_specta::Event;
 use tokio::sync::mpsc;
@@ -32,26 +34,54 @@ pub struct Meeting {
     tx: Option<mpsc::UnboundedSender<(usize, Vec<u8>)>>,
     /// The background transcriber, joined on stop.
     worker: tauri::async_runtime::JoinHandle<Vec<(usize, String)>>,
+    /// When capture began, so elapsed time is one subtraction rather than a
+    /// counter the frontend and the tray could disagree about.
+    started_at: Instant,
+    /// Words transcribed so far, written by the worker as each chunk lands.
+    /// Shared rather than returned because the window can open mid-meeting and
+    /// has to be told the total without waiting for the next chunk.
+    words: Arc<AtomicU32>,
 }
 
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize, specta::Type, Event)]
-#[serde(rename_all = "camelCase")]
+#[serde(tag = "phase", rename_all = "camelCase")]
 #[tauri_specta(event_name = "meeting-phase")]
 pub enum MeetingPhase {
-    Recording,
+    /// Re-emitted as each chunk finishes, roughly once a minute, so the
+    /// readout re-syncs instead of drifting off a single start event.
+    #[serde(rename_all = "camelCase")]
+    Recording {
+        elapsed_secs: u32,
+        words: u32,
+    },
     Saving,
     Idle,
 }
 
 impl Meeting {
+    /// The live readout for a running meeting.
+    pub fn phase(&self) -> MeetingPhase {
+        MeetingPhase::Recording {
+            elapsed_secs: self.started_at.elapsed().as_secs() as u32,
+            words: self.words.load(Ordering::Relaxed),
+        }
+    }
+
     /// Starts capturing. Chunks transcribe in the background as they fill, so
     /// stopping a long meeting does not stall while an hour of audio is sent
     /// off one minute at a time.
     pub fn start(app: AppHandle, settings: Settings) -> Result<Self> {
         let chunker = Arc::new(Mutex::new(aloud_audio::Chunker::new(CHUNK_BYTES)));
         let (tx, rx) = mpsc::unbounded_channel();
-        let worker =
-            tauri::async_runtime::spawn(transcribe_chunks(app.clone(), settings.clone(), rx));
+        let started_at = Instant::now();
+        let words = Arc::new(AtomicU32::new(0));
+        let worker = tauri::async_runtime::spawn(transcribe_chunks(
+            app.clone(),
+            settings.clone(),
+            rx,
+            started_at,
+            words.clone(),
+        ));
 
         // The realtime tap hands us 24 kHz PCM16 as it arrives; accumulate it
         // and hand off a chunk every 60 seconds.
@@ -71,7 +101,13 @@ impl Meeting {
         )
         .context("starting meeting recorder")?;
 
-        emit(&app, MeetingPhase::Recording);
+        emit(
+            &app,
+            MeetingPhase::Recording {
+                elapsed_secs: 0,
+                words: 0,
+            },
+        );
         Ok(Self {
             app,
             recorder,
@@ -79,6 +115,8 @@ impl Meeting {
             settings,
             tx: Some(tx),
             worker,
+            started_at,
+            words,
         })
     }
 
@@ -92,6 +130,7 @@ impl Meeting {
             settings,
             tx,
             worker,
+            ..
         } = self;
         emit(&app, MeetingPhase::Saving);
 
@@ -141,6 +180,8 @@ async fn transcribe_chunks(
     app: AppHandle,
     settings: Settings,
     mut rx: mpsc::UnboundedReceiver<(usize, Vec<u8>)>,
+    started_at: Instant,
+    words: Arc<AtomicU32>,
 ) -> Vec<(usize, String)> {
     let mut segments = Vec::new();
     // Built on the first chunk, not at start: the local model costs ~200ms and
@@ -164,6 +205,18 @@ async fn transcribe_chunks(
             Some(text) => segments.push((index, text)),
             None => segments.push((index, "[inaudible]".to_string())),
         }
+
+        // Counted off the segments, not the assembled transcript — see
+        // `aloud_meeting::word_count`.
+        let counted = aloud_meeting::word_count(&aloud_meeting::in_order(segments.clone())) as u32;
+        words.store(counted, Ordering::Relaxed);
+        emit(
+            &app,
+            MeetingPhase::Recording {
+                elapsed_secs: started_at.elapsed().as_secs() as u32,
+                words: counted,
+            },
+        );
     }
     segments
 }

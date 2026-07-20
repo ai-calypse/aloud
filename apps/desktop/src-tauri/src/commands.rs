@@ -630,3 +630,44 @@ pub fn cancel_hotkey_capture(state: State<'_, AppState>) -> CmdResult<()> {
     *slot = None;
     Ok(())
 }
+
+/// The running meeting's elapsed time and word count, or None when idle.
+///
+/// The `meeting-phase` event carries the same payload, but it only fires on a
+/// state change and on each finished chunk — up to a minute apart. A window
+/// opened mid-meeting would show nothing until the next chunk without this.
+#[tauri::command]
+#[specta::specta]
+pub fn meeting_status(state: State<'_, AppState>) -> Option<crate::meeting::MeetingPhase> {
+    state.meeting.lock().ok()?.as_ref().map(|m| m.phase())
+}
+
+/// Starts or stops meeting capture — the same toggle the tray and the hotkey
+/// use, so all three cannot disagree about whether a session is open.
+#[tauri::command]
+#[specta::specta]
+pub fn toggle_meeting(app: AppHandle, state: State<'_, AppState>) {
+    crate::toggle_meeting(&app, &state.settings, &state.meeting);
+}
+
+/// Draws the overlay in `phase` without a real dictation, for the Debug pane.
+///
+/// Behind `developer_tools` in the UI only — a command cannot be hidden, but
+/// the worst this can do is show and hide a click-through window.
+///
+/// ponytail: no update-overlay preview. There is no updater UI to preview
+/// until Phase 8 lands a signing keypair; add the case here when it does.
+#[tauri::command]
+#[specta::specta]
+pub fn debug_overlay(app: AppHandle, phase: crate::pipeline::Phase) {
+    match phase {
+        crate::pipeline::Phase::Idle => crate::overlay::hide(&app),
+        crate::pipeline::Phase::Error => {
+            crate::overlay::show(&app, phase);
+            // The pill renders an error with no text as a blank bar, which
+            // looks like a bug rather than the state being previewed.
+            crate::overlay::send_error(&app, "Preview: something went wrong");
+        }
+        _ => crate::overlay::show(&app, phase),
+    }
+}

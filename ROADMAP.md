@@ -528,34 +528,56 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 
 ## Phase 11 — Surfacing what exists
 
-### 11.1 — Meeting notes in the main window · M
+### 11.1 — Meeting notes in the main window · M ✅
 - **Scope** — meeting notes are tray-only. No in-progress elapsed time or word
   count anywhere in the app window, despite `crates/meeting` having the data.
-- **Done** — a pane showing an in-progress meeting and past ones.
+- **Correction** — `MeetingPhase` was *already* registered in `collect_events!`,
+  so no new event plumbing was needed. And `crates/meeting` did **not** have the
+  data: it exposes transcript assembly only, with neither elapsed time nor a
+  word count. Both were added.
+- **Done** — ✅ a `meetings` pane: a live card (elapsed, running word count,
+  start/stop) plus past meetings, which are `recent_notes` — `write_note` has
+  exactly one caller, so every note *is* a meeting note.
 
 ### 11.2 — Onboarding expansion · L
 - **Scope** — **3 steps** vs voice-dict's 14. It was 4; the API key step went
-  in A.1, so 3 is the real starting point. Missing: screen recording
-  (blocked on 9.1), all
-  three shortcut-capture steps (unblocked by 2.1, shipped in #61), edit mode
-  config (2.2), vocabulary, overlay style + mic pick (7.1), launch-at-login (the
-  command exists at `commands.rs:135`), and a live test-transcription step.
+  in A.1, so 3 is the real starting point. Missing: screen recording, all three
+  shortcut-capture steps, edit mode config, vocabulary, overlay style + mic
+  pick, launch-at-login, and a live test-transcription step.
+- **Blocked on 9.1 only.** Everything else on that list is callable today:
+  shortcut capture (`capture_hotkey`, 2.1, #61), edit-mode config (2.2),
+  launch-at-login (`set_launch_at_login`), mic selection (`input_devices`),
+  overlay style (7.1, landed) and vocabulary (Phase 3, #70). Screen recording
+  is the one genuine gate — it needs a TCC permission the app has never asked
+  for.
 - **Note** — voice-dict's 14 steps included key entry too. Parity here means
   matching the *useful* steps, not the count.
 - **Done** — a new user reaches a working dictation without opening settings.
   **Sequence this last** — it is a wrapper around features from Phases 2, 7 and
   9, and building it first means building it twice.
 
-### 11.3 — App rules keyed on bundle ID · M
+### 11.3 — App rules keyed on bundle ID · M ✅
 - **Scope** — Aloud matches on app name (`PROGRESS.md:53`); voice-dict keys on
   bundle ID, which survives renames and localisation.
-- **Done** — rules key on bundle ID with a migration carrying existing
-  name-based rules across. The migration is the work, not the matching.
+- **Correction — there is no migration.** The frontmost read was rewritten in
+  the latency PR (#69) and already resolves pid → `proc_pidpath` → the outermost
+  `.app`, so the bundle *path* is in hand; `CFBundleIdentifier` is one
+  string-slice out of the `Info.plist` at that path, next to the
+  `CFBundleIconFile` read that was already there. Making `bundle_id` an
+  **additive** `Option<String>` that falls back to name matching means old rules
+  keep working untouched and upgrade lazily when the user next edits them.
+- **Done** — ✅ rules key on bundle ID when they have one, on name otherwise.
+  `InstalledApp` carries the id so the picker writes it. A keyed rule still
+  falls back to the name where the OS reports no bundle id (Windows, plain
+  binaries) — otherwise upgrading a rule would break it off macOS.
 
-### 11.4 — Debug pane · S
+### 11.4 — Debug pane · S ✅
 - **Scope** — overlay simulator, update-overlay preview. Pairs with 0.3's
   developer-tools setting; both live behind the same switch.
-- **Done** — overlay states are inspectable without triggering real dictation.
+- **Done** — ✅ a `debug` pane behind `Settings::developer_tools`, alongside
+  Timings, with one `debug_overlay` command that draws any `pipeline::Phase`.
+  **The update-overlay preview is skipped** — there is no updater UI to preview
+  until Phase 8 lands a signing keypair, so it would be a preview of nothing.
 
 ---
 
@@ -583,7 +605,7 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 | **8 — Updates** | blocked on a signing keypair, which is a decision, not code |
 | **9 — Screen context** | not started (XL, and needs a TCC permission the app has never asked for) |
 | **10 — Realtime streaming** | not started. Smaller than the roadmap says — see the note below |
-| **11 — Surfacing what exists** | not started |
+| **11 — Surfacing what exists** | 11.1, 11.3, 11.4 ✅ done on `feat/phase-11-surfacing`. 11.2 still blocked on 9.1 |
 | **12 — Cloud key provisioning** | deferred until there is a shipped build |
 
 ### Corrections found while building the above
@@ -605,7 +627,11 @@ against the code. Listed because a plan built on them plans the wrong work.
 - **11.2's blocked list is mostly wrong.** Shortcut capture, edit-mode config,
   launch-at-login and mic selection are all callable today. Only screen
   recording (9.1) and overlay style (7.1) genuinely gated it, and 7.1 has
-  landed.
+  landed — so **9.1 is now the only thing blocking 11.2**.
+- **11.3's migration does not exist.** The roadmap called it "the work". Making
+  the field additive with a name fallback removes it entirely; see 11.3.
+- **`MeetingPhase` was already a registered event.** 11.1 was described as
+  needing new plumbing for it; it needed a payload, not a pipe.
 - **`frontmost_app` returned None for every app**, so no app rule had ever
   fired. Fixed in #69.
 

@@ -35,7 +35,11 @@ fn main() {
     }
 
     match aloud_selection::frontmost_app() {
-        Some(app) => println!("frontmost app: {app}"),
+        Some(app) => println!(
+            "frontmost app: {}  bundle id: {}",
+            app.name,
+            app.bundle_id.as_deref().unwrap_or("<none>")
+        ),
         None => println!("frontmost app: <none>"),
     }
 }

@@ -120,6 +120,34 @@ export const commands = {
 	/**  Disarms a recording the user backed out of. */
 	cancelHotkeyCapture: () => typedError<null, string>(__TAURI_INVOKE("cancel_hotkey_capture")),
 	/**
+	 *  The running meeting's elapsed time and word count, or None when idle.
+	 * 
+	 *  The `meeting-phase` event carries the same payload, but it only fires on a
+	 *  state change and on each finished chunk — up to a minute apart. A window
+	 *  opened mid-meeting would show nothing until the next chunk without this.
+	 */
+	meetingStatus: () => __TAURI_INVOKE<
+/**
+ *  Re-emitted as each chunk finishes, roughly once a minute, so the
+ *  readout re-syncs instead of drifting off a single start event.
+ */
+{ phase: "recording"; elapsedSecs: number; words: number } | { phase: "saving" } | { phase: "idle" } | null>("meeting_status"),
+	/**
+	 *  Starts or stops meeting capture — the same toggle the tray and the hotkey
+	 *  use, so all three cannot disagree about whether a session is open.
+	 */
+	toggleMeeting: () => __TAURI_INVOKE<void>("toggle_meeting"),
+	/**
+	 *  Draws the overlay in `phase` without a real dictation, for the Debug pane.
+	 * 
+	 *  Behind `developer_tools` in the UI only — a command cannot be hidden, but
+	 *  the worst this can do is show and hide a click-through window.
+	 * 
+	 *  ponytail: no update-overlay preview. There is no updater UI to preview
+	 *  until Phase 8 lands a signing keypair; add the case here when it does.
+	 */
+	debugOverlay: (phase: Phase) => __TAURI_INVOKE<void>("debug_overlay", { phase }),
+	/**
 	 *  Plays the start chime, so the volume slider can be judged by ear rather
 	 *  than by guessing at a number.
 	 */
@@ -225,6 +253,18 @@ export type AppRule = {
 	 *  matches.
 	 */
 	app_matches: string,
+	/**
+	 *  The app's `CFBundleIdentifier`, when the rule was written by picking an
+	 *  app rather than typing a name.
+	 * 
+	 *  Additive on purpose: every rule written before this field existed
+	 *  deserialises with None and keeps matching on [`app_matches`], so there
+	 *  is no migration to run and nothing to get wrong. Rules acquire a bundle
+	 *  id lazily, the next time the user edits one.
+	 * 
+	 *  [`app_matches`]: AppRule::app_matches
+	 */
+	bundle_id?: string | null,
 	/**  Override cleanup on/off for this app. None leaves the global setting. */
 	post_processing_enabled: boolean | null,
 	/**  A prompt to use instead of the global one. Empty leaves the global. */
@@ -367,8 +407,14 @@ export type HotkeysPermitted = boolean;
 
 /**  An installed application, for the App Rules picker. */
 export type InstalledApp = {
-	/**  Display name, e.g. "Slack". This is what app rules match against. */
+	/**  Display name, e.g. "Slack". */
 	name: string,
+	/**
+	 *  `CFBundleIdentifier`, so a rule created from the picker can be keyed on
+	 *  something that survives the app being renamed. None when the bundle does
+	 *  not declare one.
+	 */
+	bundle_id: string | null,
 	/**
 	 *  A `data:image/png;base64,…` URI for the app icon, or None if it could
 	 *  not be read. Lets the picker show icons without a second round-trip.
@@ -392,7 +438,12 @@ export type Macro = {
 	expansion: string,
 };
 
-export type MeetingPhase = "recording" | "saving" | "idle";
+export type MeetingPhase = 
+/**
+ *  Re-emitted as each chunk finishes, roughly once a minute, so the
+ *  readout re-syncs instead of drifting off a single start event.
+ */
+{ phase: "recording"; elapsedSecs: number; words: number } | { phase: "saving" } | { phase: "idle" };
 
 /**
  *  Model download progress, 0.0–1.0. First use of the local engine fetches

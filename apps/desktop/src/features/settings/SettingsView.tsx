@@ -13,6 +13,8 @@ import { MacroEditor } from "./MacroEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
 import { ConnectorEditor } from "./ConnectorEditor";
 import { RunLogView } from "./RunLogView";
+import { MeetingsView } from "./MeetingsView";
+import { DebugView } from "./DebugView";
 import { PermissionsCard } from "./PermissionsCard";
 import { AUTO_DETECT, LANGUAGES, SAME_AS_SPOKEN } from "./languages";
 import {
@@ -61,7 +63,10 @@ export type SettingsSection =
   | "rules"
   | "prompts"
   | "connectors"
-  | "runlog";
+  | "runlog"
+  | "meetings"
+  /** Behind `developer_tools`; the sidebar hides the row when it is off. */
+  | "debug";
 
 /**
  * Settings forms bound to the Rust `Settings` struct, laid out as macOS System
@@ -877,6 +882,10 @@ export function SettingsView({ section }: { section: SettingsSection }) {
       {/* Owns its own data and its own title: it reads history and timings,
           not `settings`, so nothing above is of any use to it. */}
       {section === "runlog" && <RunLogView />}
+
+      {/* Both own their data and their own titles, like the Run Log. */}
+      {section === "meetings" && <MeetingsView />}
+      {section === "debug" && <DebugView />}
 
       <p
         className={`text-xs text-ink-2 transition-opacity duration-150 ${

@@ -33,7 +33,7 @@ export function NotesView() {
     refresh();
     window.addEventListener("focus", refresh);
     const unlisten = events.meetingPhase.listen(({ payload }) => {
-      if (payload === "idle") refresh();
+      if (payload.phase === "idle") refresh();
     });
     return () => {
       window.removeEventListener("focus", refresh);
@@ -53,7 +53,7 @@ export function NotesView() {
     return () => clearTimeout(timer);
   }, [query, terms.length]);
 
-  if (open) return <Reader note={open} onBack={() => setOpen(null)} />;
+  if (open) return <NoteReader note={open} onBack={() => setOpen(null)} />;
 
   const showing = terms.length > 0;
   const notes = showing ? results.map((r) => r.note) : recent;
@@ -104,7 +104,16 @@ export function NotesView() {
   );
 }
 
-function Reader({ note, onBack }: { note: Note; onBack: () => void }) {
+/** Exported so the Meetings pane can read a note without a second reader. */
+export function NoteReader({
+  note,
+  onBack,
+  backLabel = "Search",
+}: {
+  note: Note;
+  onBack: () => void;
+  backLabel?: string;
+}) {
   // Reading is the common case; the source is there for copying a section out
   // or checking what the summarizer actually wrote.
   const [source, setSource] = useState(false);
@@ -113,7 +122,7 @@ function Reader({ note, onBack }: { note: Note; onBack: () => void }) {
     <div className="flex h-full flex-col gap-[0.4rem]">
       <div className="flex items-center justify-between gap-2">
         <button className="py-[0.3rem] text-brand" onClick={onBack}>
-          ← Search
+          ← {backLabel}
         </button>
         <button
           className="rounded-full border border-border px-[0.6rem] py-1 text-[0.78rem] text-ink-2 hover:text-inherit"

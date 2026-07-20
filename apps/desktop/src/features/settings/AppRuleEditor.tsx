@@ -40,6 +40,9 @@ function summary(r: AppRule): string {
 }
 
 // Starting points, never auto-applied. Mirrors AppRule.suggestions in Swift.
+// No bundle ids here: a suggestion is a name the user may not even have
+// installed, and guessing an id that turns out to be wrong would key the rule
+// on something that can never match.
 const SUGGESTIONS: AppRule[] = [
   { app_matches: "Terminal", post_processing_enabled: false, custom_prompt: "" },
   {
@@ -214,6 +217,11 @@ function RuleDialog({
     if (!canSave) return;
     onSave({
       app_matches: match.trim(),
+      // Only when the name came from the picker: a bundle id is the exact
+      // identity of *that* app, so attaching one to hand-typed free text would
+      // key the rule on an app the user never chose. Typed rules keep matching
+      // on the name, which is what they have always done.
+      bundle_id: picked?.bundle_id ?? null,
       post_processing_enabled: !verbatim,
       custom_prompt: verbatim ? "" : hint.trim(),
     });
@@ -272,6 +280,9 @@ function RuleDialog({
                   <img src={picked.icon} alt="" className="size-4 rounded" />
                 )}
                 Selected: {picked.name}
+                {picked.bundle_id && (
+                  <span className="truncate">· {picked.bundle_id}</span>
+                )}
               </p>
             )}
           </div>
