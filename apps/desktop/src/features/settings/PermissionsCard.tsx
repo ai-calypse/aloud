@@ -44,7 +44,13 @@ export function PermissionsCard() {
   const [statuses, setStatuses] = useState<PermissionStatus[]>([]);
 
   const refresh = useCallback(() => {
-    commands.permissions().then(setStatuses);
+    // These commands return a bare value rather than a Result, so `or` does
+    // not apply — but a transport-layer rejection still has to land somewhere
+    // other than an unhandled promise.
+    commands
+      .permissions()
+      .then(setStatuses)
+      .catch((e) => console.error(`reading permissions: ${e}`));
   }, []);
 
   useEffect(() => {

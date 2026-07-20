@@ -75,11 +75,15 @@ pub fn open_settings(permission: Permission) -> anyhow::Result<()> {
             Permission::Microphone => "Privacy_Microphone",
             Permission::ScreenRecording => "Privacy_ScreenCapture",
         };
+        // `spawn`, not `status`: this reaches Tauri as a non-async command, so
+        // it runs on the main thread, and waiting for LaunchServices to open
+        // System Settings freezes the window for as long as that takes — a
+        // cold launch is very visible. The exit status was discarded anyway.
         std::process::Command::new("open")
             .arg(format!(
                 "x-apple.systempreferences:com.apple.preference.security?{anchor}"
             ))
-            .status()?;
+            .spawn()?;
         Ok(())
     }
 }

@@ -99,18 +99,20 @@ pub fn show(app: &AppHandle, phase: Phase) {
     if let Err(e) = position_top_center(&window, margin) {
         tracing::warn!(%e, "could not position overlay");
     }
-    if let Err(e) = OverlayStyleChanged(style).emit_to(app, LABEL) {
-        tracing::warn!(%e, "could not send overlay style");
-    }
-
     // Click-through: the pill must never steal focus or clicks from the app
     // the user is dictating into.
     let _ = window.set_ignore_cursor_events(true);
     let _ = window.show();
 
-    // Re-send the phase to this window specifically. A hidden window's webview
-    // is created lazily, so it can miss the app-wide event that triggered the
-    // show and stay stuck rendering its initial idle state — invisible.
+    // Both sent *after* `show`, for the reason the phase re-send already
+    // documented: a hidden window's webview is created lazily, so an event
+    // emitted before the show can land before anything is listening. The style
+    // event was emitted above the show and is exactly the one that would be
+    // dropped — leaving the overlay drawing a pill on first appearance despite
+    // wings being configured.
+    if let Err(e) = OverlayStyleChanged(style).emit_to(app, LABEL) {
+        tracing::warn!(%e, "could not send overlay style");
+    }
     if let Err(e) = phase.emit_to(app, LABEL) {
         tracing::warn!(%e, "could not send phase to overlay");
     }
@@ -132,27 +134,55 @@ fn named_monitor(names: &[Option<String>], wanted: &str) -> Option<usize> {
     names.iter().position(|n| n.as_deref() == Some(wanted))
 }
 
+/// Which monitor index to place the overlay on, given what is plugged in.
+///
+/// Pure, so the case that cannot be staged on one machine — the chosen display
+/// unplugged between two dictations — is actually testable. `primary` is the
+/// index the OS calls primary; `cursor` is the monitor holding the pointer.
+///
+/// Returning `None` means "leave the window where it is", which only happens
+/// with no monitors at all.
+fn chosen_monitor(
+    display: &OverlayDisplay,
+    names: &[Option<String>],
+    primary: Option<usize>,
+    cursor: Option<usize>,
+) -> Option<usize> {
+    let picked = match display {
+        OverlayDisplay::Active => cursor,
+        OverlayDisplay::Primary => primary,
+        OverlayDisplay::Named(wanted) => named_monitor(names, wanted),
+    };
+    // The fallback that keeps the overlay on screen: a display that is gone,
+    // or a cursor the OS will not locate, resolves to the primary rather than
+    // to coordinates on a monitor that no longer exists.
+    picked.or(primary)
+}
+
 /// Top-centres `window` on the monitor the user picked. Shared with the
 /// ask/agent panels, which drop from the top the way the Swift app's answer
 /// panel does — and follow the same display, so the three never split up.
 pub fn position_top_center(window: &WebviewWindow, top_margin: f64) -> tauri::Result<()> {
-    let monitor = match settings(window.app_handle()).overlay_display {
-        // The cursor's monitor, not the primary one: on a multi-monitor desk
-        // the user is looking at the screen they are working on.
-        OverlayDisplay::Active => match window.cursor_position() {
-            Ok(cursor) => window.monitor_from_point(cursor.x, cursor.y)?,
-            Err(_) => window.primary_monitor()?,
-        },
-        OverlayDisplay::Primary => window.primary_monitor()?,
-        OverlayDisplay::Named(wanted) => {
-            let mut monitors = window.available_monitors()?;
-            let names: Vec<_> = monitors.iter().map(|m| m.name().cloned()).collect();
-            named_monitor(&names, &wanted).map(|i| monitors.swap_remove(i))
-        }
+    // Everything the decision needs, resolved once, so the decision itself is
+    // a pure function with a test rather than three OS calls in a match.
+    let mut monitors = window.available_monitors()?;
+    let names: Vec<_> = monitors.iter().map(|m| m.name().cloned()).collect();
+    let index_of = |target: Option<tauri::Monitor>| {
+        // Compared by position: `Monitor` is not `PartialEq`, and two monitors
+        // cannot share an origin.
+        target.and_then(|t| monitors.iter().position(|m| m.position() == t.position()))
     };
-    let Some(monitor) = monitor.or(window.primary_monitor()?) else {
+    let primary = index_of(window.primary_monitor()?);
+    let cursor = match window.cursor_position() {
+        Ok(at) => index_of(window.monitor_from_point(at.x, at.y)?),
+        Err(_) => None,
+    };
+
+    let display = settings(window.app_handle()).overlay_display;
+    let Some(index) = chosen_monitor(&display, &names, primary, cursor) else {
         return Ok(()); // headless; leave it wherever it is
     };
+    let monitor = monitors.swap_remove(index);
 
     let scale = monitor.scale_factor();
     let screen = monitor.size().to_logical::<f64>(scale);
@@ -187,22 +217,51 @@ pub fn send_download(app: &AppHandle, fraction: f32) {
 mod tests {
     use super::*;
 
-    /// The failure this prevents: a display picked by name is unplugged, the
-    /// lookup finds nothing, and the overlay is positioned against a monitor
-    /// that is no longer there — i.e. off-screen. None here is what makes the
-    /// caller's `.or(primary_monitor())` fire.
+    /// The failure this prevents, and the one ROADMAP 7.2 names as *the* test:
+    /// a display picked by name is unplugged, and the overlay is positioned
+    /// against a monitor that is no longer there — i.e. off-screen.
+    ///
+    /// This exercises the fallback itself, not just the name lookup. An
+    /// earlier version asserted only `named_monitor`, which is a one-line
+    /// wrapper over `Iterator::position` — it proved the stdlib works and left
+    /// the actual `.or(primary)` decision uncovered.
     #[test]
-    fn unplugging_the_chosen_display_falls_back_instead_of_matching() {
-        let plugged = [
-            Some("Built-in Retina Display".to_string()),
-            Some("DELL U2720Q".to_string()),
-        ];
-        assert_eq!(named_monitor(&plugged, "DELL U2720Q"), Some(1));
+    fn unplugging_the_chosen_display_falls_back_to_primary() {
+        let built_in = Some("Built-in Retina Display".to_string());
+        let dell = Some("DELL U2720Q".to_string());
 
-        let unplugged = [Some("Built-in Retina Display".to_string())];
-        assert_eq!(named_monitor(&unplugged, "DELL U2720Q"), None);
+        let plugged = [built_in.clone(), dell];
+        let named = OverlayDisplay::Named("DELL U2720Q".into());
+        assert_eq!(chosen_monitor(&named, &plugged, Some(0), Some(0)), Some(1));
+
+        // Unplugged: the chosen name resolves to nothing and must land on the
+        // primary rather than on the index it used to occupy.
+        let unplugged = [built_in];
+        assert_eq!(
+            chosen_monitor(&named, &unplugged, Some(0), Some(0)),
+            Some(0),
+            "a display that is gone must fall back, not render off-screen"
+        );
 
         // A monitor the OS gives no name to must never win a lookup by name.
-        assert_eq!(named_monitor(&[None], "DELL U2720Q"), None);
+        assert_eq!(chosen_monitor(&named, &[None], Some(0), None), Some(0));
+
+        // The other two modes, including a cursor the OS will not locate.
+        assert_eq!(
+            chosen_monitor(&OverlayDisplay::Active, &unplugged, Some(0), Some(1)),
+            Some(1)
+        );
+        assert_eq!(
+            chosen_monitor(&OverlayDisplay::Active, &unplugged, Some(0), None),
+            Some(0),
+            "no cursor monitor still has to put the overlay somewhere"
+        );
+        assert_eq!(
+            chosen_monitor(&OverlayDisplay::Primary, &unplugged, Some(0), Some(1)),
+            Some(0)
+        );
+
+        // Headless: nothing to position against, and no panic.
+        assert_eq!(chosen_monitor(&named, &[], None, None), None);
     }
 }

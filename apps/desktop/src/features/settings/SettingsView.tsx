@@ -105,7 +105,10 @@ export function SettingsView({ section }: { section: SettingsSection }) {
     or(commands.inputDevices(), [], "listing microphones").then(setDevices);
     or(commands.launchAtLogin(), false, "reading launch-at-login").then(setAtLogin);
     or(commands.overlayDisplays(), [], "listing displays").then(setDisplays);
-    commands.buildInfo().then(setBuild);
+    commands
+      .buildInfo()
+      .then(setBuild)
+      .catch((e) => console.error(`reading build info: ${e}`));
   }, []);
 
   if (!settings) return <p className="text-ink-2">Loading…</p>;
@@ -134,6 +137,12 @@ export function SettingsView({ section }: { section: SettingsSection }) {
   // #[serde(default)]), and repeating the fallback per row is how one of them
   // ends up with a different default from the rest.
   const commandMode = settings.commandModeEnabled ?? true;
+  // The display name the user picked, if they picked one by name at all.
+  const overlayDisplay = settings.overlayDisplay;
+  const chosenDisplay =
+    overlayDisplay && typeof overlayDisplay === "object" && "named" in overlayDisplay
+      ? overlayDisplay.named
+      : null;
   const sounds = settings.playSounds ?? true;
 
   /** Applies one field and persists immediately — no Save button to forget. */
@@ -588,6 +597,16 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                   <SelectContent>
                     <SelectItem value="active">Active window</SelectItem>
                     <SelectItem value="primary">Primary display</SelectItem>
+                    {/* The configured display first, even when it is not
+                        currently plugged in. Without a matching item Radix
+                        renders the trigger *blank*, so the user could not see
+                        what was set or that Rust had fallen back to primary —
+                        which is exactly the state the row is meant to explain. */}
+                    {chosenDisplay && !displays.includes(chosenDisplay) && (
+                      <SelectItem value={NAMED + chosenDisplay}>
+                        {chosenDisplay} (not connected)
+                      </SelectItem>
+                    )}
                     {displays.map((name) => (
                       <SelectItem key={name} value={NAMED + name}>
                         {name}
