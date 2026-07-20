@@ -20,7 +20,7 @@ pub struct RawEvent {
     pub down: bool,
 }
 
-type Handler = Box<dyn FnMut(RawEvent) -> bool>;
+type Handler = Box<dyn FnMut(Option<RawEvent>) -> bool>;
 
 thread_local! {
     static HANDLER: RefCell<Option<Handler>> = const { RefCell::new(None) };
@@ -89,14 +89,11 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
     let swallow = if is_key_event {
         const LLKHF_EXTENDED: u32 = 0x01;
         let extended = info.flags.0 & LLKHF_EXTENDED != 0;
-        match key_from_vk(info.vkCode as u16, extended) {
-            Some(key) => HANDLER.with(|h| {
-                h.borrow_mut()
-                    .as_mut()
-                    .is_some_and(|handler| handler(RawEvent { key, down }))
-            }),
-            None => false,
-        }
+        // `None` for a key with no `Key` variant. The handler still decides:
+        // while a binding is being recorded every key must be swallowed, even
+        // one that can never be recorded.
+        let raw = key_from_vk(info.vkCode as u16, extended).map(|key| RawEvent { key, down });
+        HANDLER.with(|h| h.borrow_mut().as_mut().is_some_and(|handler| handler(raw)))
     } else {
         false
     };
@@ -115,7 +112,7 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
 /// one Windows silently stops delivering events.
 pub fn run_hook<F>(on_event: F) -> Result<()>
 where
-    F: FnMut(RawEvent) -> bool + 'static,
+    F: FnMut(Option<RawEvent>) -> bool + 'static,
 {
     HANDLER.with(|h| *h.borrow_mut() = Some(Box::new(on_event)));
 

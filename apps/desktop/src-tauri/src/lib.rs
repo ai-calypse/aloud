@@ -349,41 +349,6 @@ fn spawn_hotkey_listener(
     });
 }
 
-/// Whether this dictation should look at the selection at all — which is what
-/// decides between rewriting the selection and dictating over it.
-///
-/// Ported from Swift's `resolveSessionIntent`. The awkward case is Manual with
-/// a marker modifier the dictate key *is*: the modifier's press is the
-/// binding's own press, so it carries no extra signal and the only sane
-/// reading is plain dictation.
-fn command_mode_wants_selection(
-    settings: &Arc<Mutex<Settings>>,
-    held: &aloud_hotkey::model::Modifiers,
-) -> bool {
-    use aloud_store::CommandModeStyle;
-
-    let Ok(settings) = settings.lock() else {
-        return true; // the behaviour before the setting existed
-    };
-    if !settings.command_mode_enabled {
-        return false;
-    }
-    match settings.command_mode_style {
-        CommandModeStyle::Automatic => true,
-        CommandModeStyle::Manual => {
-            let marker = settings.command_mode_manual_modifier;
-            let binding_is_the_marker = settings
-                .hotkeys
-                .hold
-                .as_ref()
-                .and_then(|b| b.key())
-                .and_then(|k| k.logical_modifier())
-                == Some(marker);
-            !binding_is_the_marker && held.contains(&marker)
-        }
-    }
-}
-
 fn handle_hotkey(
     app: &tauri::AppHandle,
     pipeline: &Arc<pipeline::Pipeline>,
@@ -400,7 +365,13 @@ fn handle_hotkey(
             // the utterance rewrites it, without one it is dictated. Command
             // mode decides whether to look at all — under Manual, a selection
             // only counts when the user also held the marker modifier.
-            if command_mode_wants_selection(settings, held) {
+            // Decision lives in `Settings` so it is testable without Tauri;
+            // a poisoned lock falls back to the behaviour that predates the
+            // setting rather than dropping the selection silently.
+            if settings
+                .lock()
+                .map_or(true, |s| s.command_mode_wants_selection(held))
+            {
                 pipeline.note_selection_if_any();
             }
             if let Err(e) = pipeline.start() {

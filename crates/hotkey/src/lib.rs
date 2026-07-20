@@ -30,13 +30,24 @@ use matcher::{Consume, Input, State};
 use model::{Binding, Config, Event};
 use std::sync::{Arc, Mutex};
 
+/// One armed recording: where to send the gesture, and which request it is.
+///
+/// The id exists so a request that gives up can tell whether the slot is still
+/// its own. Retargeting to a second row drops the first sender, which wakes
+/// its task as if it had timed out — and clearing then would disarm the
+/// recording that just replaced it.
+pub struct Capture {
+    pub id: u64,
+    pub tx: std::sync::mpsc::Sender<Binding>,
+}
+
 /// Shared slot that arms binding capture from another thread.
 ///
-/// `Some(sender)` puts the listener into capture mode: the next complete key
+/// `Some(..)` puts the listener into capture mode: the next complete key
 /// gesture is sent back and every event is swallowed until it commits. The
 /// listener clears the slot itself, so capture is always one-shot — a UI that
 /// crashes mid-recording cannot leave the keyboard permanently swallowed.
-pub type CaptureSlot = Arc<Mutex<Option<std::sync::mpsc::Sender<Binding>>>>;
+pub type CaptureSlot = Arc<Mutex<Option<Capture>>>;
 
 /// Whether the OS will let us listen for keys.
 ///
@@ -69,10 +80,16 @@ where
     let mut state = State::default();
     let mut recorder = capture::Recorder::default();
 
-    let handler = move |raw: backend::RawEvent| -> bool {
+    let handler = move |raw: Option<backend::RawEvent>| -> bool {
         // Capture runs ahead of the matcher and swallows everything: recording
         // a new hotkey must not also fire the hotkey being replaced, and the
         // keys pressed to record it must not reach the app underneath.
+        //
+        // A key with no `Key` variant — a digit, Return, an arrow — still has
+        // to be swallowed while armed, even though it can never be recorded.
+        let Some(raw) = raw else {
+            return capture_is_armed(&capture);
+        };
         if capture_event(&capture, &mut recorder, raw.key, raw.down) {
             return true;
         }
@@ -94,13 +111,16 @@ where
         let outcome = state.reduce(input, &config);
         drop(config);
 
-        // Read once, after the reduce, so every event from this input sees the
-        // same key state. Manual command mode is decided from it: the extra
-        // modifier is held at the moment the dictate key activates, and there
-        // is no later point at which it can still be observed.
-        let held = state.held_modifiers();
-        for event in outcome.events {
-            on_event(event, &held);
+        // Only when something fired: this allocates a set, and it runs on the
+        // event tap for every keystroke on the machine, almost none of which
+        // produce an event. Read once, after the reduce, so every event from
+        // this input sees the same key state — manual command mode reads the
+        // marker here, and there is no later point at which it still exists.
+        if !outcome.events.is_empty() {
+            let held = state.modifiers();
+            for event in outcome.events {
+                on_event(event, &held);
+            }
         }
         outcome.consume == Consume::Yes
     };
@@ -114,6 +134,12 @@ where
         let _ = handler;
         anyhow::bail!("hotkeys are only supported on macOS and Windows")
     }
+}
+
+/// Whether a recording is in progress, so an unrecordable key is still
+/// swallowed rather than reaching the app underneath.
+fn capture_is_armed(capture: &CaptureSlot) -> bool {
+    capture.lock().map(|s| s.is_some()).unwrap_or(false)
 }
 
 /// Feeds one raw event to the capture recorder while capture is armed.
@@ -146,8 +172,8 @@ fn capture_event(
     if let Some(binding) = recorder.key_up(key) {
         // Take the sender before sending: capture is one-shot, and a UI that
         // has gone away just drops the value.
-        if let Some(tx) = slot.take() {
-            let _ = tx.send(binding);
+        if let Some(capture) = slot.take() {
+            let _ = capture.tx.send(binding);
         }
     }
     true

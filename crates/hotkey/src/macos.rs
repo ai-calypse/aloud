@@ -89,16 +89,41 @@ pub fn key_from_keycode(code: i64) -> Option<Key> {
 
 /// Whether a modifier key is down, read from the event flags — flagsChanged
 /// reports the key that moved but not its direction.
+///
+/// **Side-specific masks, as the Swift original used.** The public
+/// `CGEventFlagShift` is set while *either* Shift is down, so releasing Left
+/// Shift with Right Shift still held reads as "Left Shift is down". The
+/// matcher tolerated that because it recomputes from scratch on every event,
+/// but the capture recorder cannot: it commits only when every key has been
+/// released, so one phantom key-down leaves it armed — swallowing the whole
+/// keyboard — until its ten-second timeout.
+///
+/// These are the `NX_DEVICE*` masks from IOKit's `ev_keymap.h`. They occupy
+/// the low bits of the same flags word and have no `CGEventFlags` constants.
 fn modifier_is_down(key: Key, flags: CGEventFlags) -> bool {
+    const L_CONTROL: u64 = 0x0000_0001;
+    const L_SHIFT: u64 = 0x0000_0002;
+    const R_SHIFT: u64 = 0x0000_0004;
+    const L_COMMAND: u64 = 0x0000_0008;
+    const R_COMMAND: u64 = 0x0000_0010;
+    const L_OPTION: u64 = 0x0000_0020;
+    const R_OPTION: u64 = 0x0000_0040;
+    const R_CONTROL: u64 = 0x0000_2000;
+
     let mask = match key {
-        Key::LeftCommand | Key::RightCommand => CGEventFlags::CGEventFlagCommand,
-        Key::LeftShift | Key::RightShift => CGEventFlags::CGEventFlagShift,
-        Key::LeftOption | Key::RightOption => CGEventFlags::CGEventFlagAlternate,
-        Key::LeftControl | Key::RightControl => CGEventFlags::CGEventFlagControl,
-        Key::Fn => CGEventFlags::CGEventFlagSecondaryFn,
+        Key::LeftCommand => L_COMMAND,
+        Key::RightCommand => R_COMMAND,
+        Key::LeftShift => L_SHIFT,
+        Key::RightShift => R_SHIFT,
+        Key::LeftOption => L_OPTION,
+        Key::RightOption => R_OPTION,
+        Key::LeftControl => L_CONTROL,
+        Key::RightControl => R_CONTROL,
+        // Fn has no side, so the public flag is already exact.
+        Key::Fn => return flags.contains(CGEventFlags::CGEventFlagSecondaryFn),
         _ => return false,
     };
-    flags.contains(mask)
+    flags.bits() & mask != 0
 }
 
 /// Decoded event: the key and whether it went down.
@@ -134,7 +159,7 @@ pub fn is_trusted() -> bool {
 /// Runs a CGEventTap on the current thread's run loop. Blocks forever.
 pub fn run_tap<F>(on_event: F) -> Result<()>
 where
-    F: FnMut(RawEvent) -> bool + 'static,
+    F: FnMut(Option<RawEvent>) -> bool + 'static,
 {
     // The tap callback is `Fn`, but the handler owns the matcher state and so
     // must be `FnMut`. The run loop calls it on one thread, serially.
@@ -191,7 +216,12 @@ where
                 return Some(event.to_owned());
             }
 
-            let swallow = decode(event_type, event).is_some_and(|raw| (on_event.borrow_mut())(raw));
+            // `None` for a key this crate has no `Key` for — a digit, Return,
+            // an arrow. The handler still gets a say, because while a binding
+            // is being recorded *every* key must be swallowed: forwarding the
+            // Return of a Cmd+Return the user was trying to record submits
+            // whatever is focused underneath, having swallowed only the Cmd.
+            let swallow = (on_event.borrow_mut())(decode(event_type, event));
             // Returning None swallows the event.
             if swallow {
                 None

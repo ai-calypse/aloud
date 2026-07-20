@@ -382,6 +382,10 @@ pub async fn capture_hotkey(
     state: State<'_, AppState>,
 ) -> CmdResult<Option<aloud_hotkey::model::Binding>> {
     let (tx, rx) = std::sync::mpsc::channel();
+    // Identifies this request, so its give-up path can tell whether the slot is
+    // still its own rather than a later recording's.
+    static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     {
         let mut slot = state
             .hotkey_capture
@@ -389,7 +393,7 @@ pub async fn capture_hotkey(
             .map_err(|_| "hotkey capture lock poisoned".to_string())?;
         // Replacing an in-flight recording is intentional: opening a second
         // recorder should retarget, not deadlock behind the first.
-        *slot = Some(tx);
+        *slot = Some(aloud_hotkey::Capture { id, tx });
     }
 
     let capture = state.hotkey_capture.clone();
@@ -398,9 +402,17 @@ pub async fn capture_hotkey(
         // Disarm on timeout. The listener clears the slot itself on a commit,
         // so this only matters for the give-up path — but leaving it armed
         // would swallow the keyboard indefinitely.
+        //
+        // Only if the slot is still *ours*. Retargeting drops this task's
+        // sender, waking it with Disconnected, which reads as "gave up" — and
+        // clearing then disarms the recording that just replaced us. The
+        // second row would sit on "Press keys…" while the keys it captured
+        // fell through to the matcher and started a real dictation.
         if captured.is_none() {
             if let Ok(mut slot) = capture.lock() {
-                *slot = None;
+                if slot.as_ref().is_some_and(|c| c.id == id) {
+                    *slot = None;
+                }
             }
         }
         captured

@@ -81,6 +81,13 @@ export function SettingsView({ section }: { section: SettingsSection }) {
   const macros = settings.macros ?? [];
   const appRules = settings.appRules ?? [];
   const tidy = settings.postProcessingEnabled ?? true;
+  // Read once: specta types every field optional (the Rust struct is
+  // #[serde(default)]), and repeating the fallback per row is how one of them
+  // ends up with a different default from the rest.
+  const commandMode = settings.commandModeEnabled ?? true;
+  const commandStyle = settings.commandModeStyle ?? "automatic";
+  const commandMarker = settings.commandModeManualModifier ?? "option";
+  const manualCommand = commandMode && commandStyle === "manual";
   const sounds = settings.playSounds ?? true;
 
   /** Applies one field and persists immediately — no Save button to forget. */
@@ -468,17 +475,17 @@ export function SettingsView({ section }: { section: SettingsSection }) {
               className="py-[11px]"
             >
               <Toggle
-                checked={settings.commandModeEnabled ?? true}
+                checked={commandMode}
                 label="Rewrite the selection"
                 onChange={(c) => update({ commandModeEnabled: c })}
               />
             </Row>
 
-            {(settings.commandModeEnabled ?? true) && (
+            {commandMode && (
               <Row label="Invoke it">
                 <Value>
                   <Select
-                    value={settings.commandModeStyle ?? "automatic"}
+                    value={commandStyle}
                     onValueChange={(v) =>
                       update({
                         commandModeStyle: v as Settings["commandModeStyle"],
@@ -501,15 +508,14 @@ export function SettingsView({ section }: { section: SettingsSection }) {
               </Row>
             )}
 
-            {(settings.commandModeEnabled ?? true) &&
-              settings.commandModeStyle === "manual" && (
+            {manualCommand && (
                 <Row
                   label="Extra key"
                   hint="Hold this with the dictate key to rewrite. Without it, a selection is ignored."
                 >
                   <Value>
                     <Select
-                      value={settings.commandModeManualModifier ?? "option"}
+                      value={commandMarker}
                       onValueChange={(v) =>
                         update({
                           commandModeManualModifier:
@@ -535,10 +541,8 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                 dictate key already is leaves nothing to detect — its press is
                 the binding's own press — so the setting would silently never
                 fire, which is the worst way for it to fail. */}
-            {(settings.commandModeEnabled ?? true) &&
-              settings.commandModeStyle === "manual" &&
-              bindingModifier(hotkeys.hold ?? null) ===
-                (settings.commandModeManualModifier ?? "option") && (
+            {manualCommand &&
+              bindingModifier(hotkeys.hold ?? null) === commandMarker && (
                 <Row label="">
                   <p className="text-warning">
                     Your dictate key is already this modifier, so there is no

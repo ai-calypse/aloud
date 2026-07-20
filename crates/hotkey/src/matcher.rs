@@ -58,7 +58,9 @@ impl State {
         self.busy = busy;
     }
 
-    fn modifiers(&self) -> Modifiers {
+    /// The modifiers held right now, so the app can tell a plain dictation
+    /// from one the user marked as a rewrite.
+    pub fn modifiers(&self) -> Modifiers {
         self.pressed
             .iter()
             .filter_map(|k| k.logical_modifier())
@@ -198,12 +200,6 @@ impl State {
             }
             _ => required.is_subset(&held),
         }
-    }
-
-    /// The modifiers held right now, so the app can tell a plain dictation
-    /// from one the user marked as a rewrite.
-    pub fn held_modifiers(&self) -> Modifiers {
-        self.modifiers()
     }
 
     /// Whether `key` participates in any configured binding — used to decide

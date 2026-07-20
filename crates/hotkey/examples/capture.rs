@@ -32,7 +32,7 @@ fn main() -> anyhow::Result<()> {
         ];
         for (i, prompt) in prompts.iter().enumerate() {
             let (tx, rx) = mpsc::channel();
-            *slot.lock().unwrap() = Some(tx);
+            *slot.lock().unwrap() = Some(aloud_hotkey::Capture { id: 0, tx });
             println!("\n[{}/3] Press {prompt}…", i + 1);
 
             match rx.recv() {

@@ -158,10 +158,63 @@ impl Settings {
     /// the gesture — and that is invisible until someone tries manual mode.
     pub fn hotkey_config(&self) -> aloud_hotkey::model::Config {
         let mut config = self.hotkeys.clone();
+        // Not set when the marker conflicts with a binding: loosening the
+        // exact-match rule for a modifier that signals nothing would only make
+        // unrelated chords start dictations.
         config.permitted_extra = (self.command_mode_enabled
-            && self.command_mode_style == CommandModeStyle::Manual)
-            .then_some(self.command_mode_manual_modifier);
+            && self.command_mode_style == CommandModeStyle::Manual
+            && self.command_mode_marker_conflict().is_none())
+        .then_some(self.command_mode_manual_modifier);
         config
+    }
+
+    /// The binding whose existence makes the manual marker undetectable, if
+    /// any, named for a message.
+    ///
+    /// Two ways a marker is dead, both ported from Swift's
+    /// `commandModeManualModifierCollisionMessage`:
+    /// - the binding *requires* the marker (a ⌘⇧D dictate key and a Command
+    ///   marker), so it is held on every press and signals nothing;
+    /// - the binding *is* the marker (a Right Option dictate key and an Option
+    ///   marker), so its press is the binding's own press.
+    ///
+    /// Toggle and Paste Again are checked as well as Hold: the matcher
+    /// tolerates the marker on every modifier-only binding, so a marker shared
+    /// with one of those changes which role fires rather than marking a rewrite.
+    pub fn command_mode_marker_conflict(&self) -> Option<&'static str> {
+        let marker = self.command_mode_manual_modifier;
+        let roles = [
+            ("dictate", &self.hotkeys.hold),
+            ("tap-to-dictate", &self.hotkeys.toggle),
+            ("Paste Again", &self.hotkeys.copy_again),
+        ];
+
+        roles.into_iter().find_map(|(name, binding)| {
+            let binding = binding.as_ref()?;
+            let required = binding.modifiers().is_some_and(|m| m.contains(&marker));
+            let is_itself = binding.key().and_then(|k| k.logical_modifier()) == Some(marker)
+                && matches!(binding, aloud_hotkey::model::Binding::ModifierKey { .. });
+            (required || is_itself).then_some(name)
+        })
+    }
+
+    /// Whether this dictation should read the selection — which is what decides
+    /// between rewriting the selection and dictating over it.
+    ///
+    /// Ported from Swift's `resolveSessionIntent`. Where Swift rejects a manual
+    /// press with no selection, this simply dictates: dictating is the
+    /// forgiving failure, and there is no modal surface here to reject into.
+    pub fn command_mode_wants_selection(&self, held: &aloud_hotkey::model::Modifiers) -> bool {
+        if !self.command_mode_enabled {
+            return false;
+        }
+        match self.command_mode_style {
+            CommandModeStyle::Automatic => true,
+            // A marker that cannot be detected must not silently rewrite
+            // everything: with no usable signal, plain dictation is the answer.
+            CommandModeStyle::Manual if self.command_mode_marker_conflict().is_some() => false,
+            CommandModeStyle::Manual => held.contains(&self.command_mode_manual_modifier),
+        }
     }
 
     pub fn path() -> Result<PathBuf> {
@@ -326,6 +379,115 @@ fn restrict_permissions(_path: &std::path::Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use aloud_hotkey::model::{Binding, Key, Modifier, Modifiers};
+
+    fn held(mods: &[Modifier]) -> Modifiers {
+        mods.iter().copied().collect()
+    }
+
+    fn manual_with(hold: Binding, marker: Modifier) -> Settings {
+        let mut settings = Settings {
+            command_mode_style: CommandModeStyle::Manual,
+            command_mode_manual_modifier: marker,
+            ..Default::default()
+        };
+        settings.hotkeys.hold = Some(hold);
+        settings
+    }
+
+    fn right_option() -> Binding {
+        Binding::ModifierKey {
+            key: Key::RightOption,
+            modifiers: Modifiers::new(),
+        }
+    }
+
+    #[test]
+    fn command_mode_off_never_reads_the_selection() {
+        let settings = Settings {
+            command_mode_enabled: false,
+            ..Default::default()
+        };
+        assert!(!settings.command_mode_wants_selection(&held(&[])));
+    }
+
+    #[test]
+    fn automatic_reads_the_selection_with_no_modifier_held() {
+        let settings = Settings::default();
+        assert_eq!(settings.command_mode_style, CommandModeStyle::Automatic);
+        assert!(settings.command_mode_wants_selection(&held(&[])));
+    }
+
+    #[test]
+    fn manual_reads_the_selection_only_while_the_marker_is_held() {
+        let settings = manual_with(right_option(), Modifier::Command);
+        assert!(!settings.command_mode_wants_selection(&held(&[])));
+        assert!(settings.command_mode_wants_selection(&held(&[Modifier::Command])));
+    }
+
+    /// The failure: a marker that is a *required* modifier of the dictate
+    /// chord is held on every single press, so every dictation would silently
+    /// become a rewrite — with no way to get plain dictation at all. The first
+    /// port of this checked only whether the binding *was* the marker, which
+    /// misses ⌘⇧D entirely.
+    #[test]
+    fn a_marker_required_by_the_dictate_chord_falls_back_to_dictation() {
+        let chord = Binding::Key {
+            key: Key::Char('d'),
+            modifiers: held(&[Modifier::Command, Modifier::Shift]),
+        };
+        let settings = manual_with(chord, Modifier::Command);
+
+        assert_eq!(settings.command_mode_marker_conflict(), Some("dictate"));
+        assert!(
+            !settings.command_mode_wants_selection(&held(&[Modifier::Command, Modifier::Shift])),
+            "Command is held on every press of this binding, so it marks nothing"
+        );
+        assert_eq!(
+            settings.hotkey_config().permitted_extra,
+            None,
+            "a dead marker must not loosen the matcher"
+        );
+    }
+
+    /// The other half of the same rule: the marker *is* the dictate key, so
+    /// its press is the binding's own press and carries no extra signal.
+    #[test]
+    fn a_marker_that_is_the_dictate_key_falls_back_to_dictation() {
+        let settings = manual_with(right_option(), Modifier::Option);
+
+        assert_eq!(settings.command_mode_marker_conflict(), Some("dictate"));
+        assert!(!settings.command_mode_wants_selection(&held(&[Modifier::Option])));
+    }
+
+    /// Toggle and Paste Again are checked too: the matcher tolerates the marker
+    /// on every modifier-only binding, so sharing it changes which role fires.
+    #[test]
+    fn a_marker_shared_with_another_role_is_a_conflict() {
+        let mut settings = manual_with(right_option(), Modifier::Control);
+        settings.hotkeys.copy_again = Some(Binding::ModifierKey {
+            key: Key::LeftControl,
+            modifiers: Modifiers::new(),
+        });
+        assert_eq!(settings.command_mode_marker_conflict(), Some("Paste Again"));
+    }
+
+    #[test]
+    fn a_usable_marker_reaches_the_matcher() {
+        let settings = manual_with(right_option(), Modifier::Command);
+        assert_eq!(settings.command_mode_marker_conflict(), None);
+        assert_eq!(
+            settings.hotkey_config().permitted_extra,
+            Some(Modifier::Command)
+        );
+    }
+
+    /// Automatic mode must not loosen the exact-match rule at all.
+    #[test]
+    fn automatic_mode_permits_no_extra_modifier() {
+        assert_eq!(Settings::default().hotkey_config().permitted_extra, None);
+    }
 
     #[test]
     fn dotenv_value_is_parsed_and_unquoted() {

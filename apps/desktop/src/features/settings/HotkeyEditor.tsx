@@ -87,6 +87,12 @@ export function HotkeyEditor({
   // the keyboard. This ref is only to ignore a result that arrives after the
   // user has already moved on to recording a different role.
   const generation = useRef(0);
+  // The live config, for `record` to spread onto. Capture takes up to ten
+  // seconds, and other rows stay editable throughout: spreading the `config`
+  // captured when Record was clicked would undo anything cleared or rebound in
+  // the meantime.
+  const latest = useRef(config);
+  latest.current = config;
 
   // Recording swallows every key, so leaving the pane must not strand it.
   useEffect(() => {
@@ -108,7 +114,7 @@ export function HotkeyEditor({
       return;
     }
     // null is a timeout or a cancel — leave the existing binding alone.
-    if (result.data) onChange({ ...config, [role]: result.data });
+    if (result.data) onChange({ ...latest.current, [role]: result.data });
   }
 
   function cancel() {
