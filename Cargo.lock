@@ -127,6 +127,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "futures-util",
+ "http",
  "reqwest",
  "serde",
  "serde_json",

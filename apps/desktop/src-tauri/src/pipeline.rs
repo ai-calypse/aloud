@@ -318,12 +318,41 @@ impl Pipeline {
         result.map(|_| ())
     }
 
-    async fn transcribe_and_paste(
-        &self,
-        recorder: aloud_audio::Recorder,
-        started_at: Option<std::time::Instant>,
-        generation: u64,
-    ) -> Result<Outcome> {
+    /// Finalizes the recording and transcribes it, returning the text and the
+    /// settings snapshot the rest of the stage runs against.
+    ///
+    /// Every mode starts this way. Written out four times it had already
+    /// drifted: only the dictation copy recorded `wav_bytes`, so three of the
+    /// four waterfalls were missing a stage field for no reason anyone chose.
+    /// The shared shape of a stop: take the recorder, show Transcribing, run
+    /// the mode's work, then settle the pill on `done` or the error.
+    ///
+    /// The public `stop_and_*` keep their own `#[tracing::instrument]` — the
+    /// `mode` field differs per mode and is the one thing that must not be
+    /// shared.
+    async fn run_stage<F, Fut>(&self, done: Phase, work: F) -> Result<()>
+    where
+        F: FnOnce(aloud_audio::Recorder) -> Fut,
+        Fut: std::future::Future<Output = Result<()>>,
+    {
+        let recorder = self.session.lock().unwrap().recorder.take();
+        let Some(recorder) = recorder else {
+            return Ok(());
+        };
+
+        self.emit(Phase::Transcribing);
+        let result = work(recorder).await;
+        if result.is_err() {
+            tracing::Span::current().record("ok", false);
+        }
+        match &result {
+            Ok(()) => self.emit(done),
+            Err(e) => self.emit_error(e),
+        }
+        result
+    }
+
+    async fn capture(&self, recorder: aloud_audio::Recorder) -> Result<(String, Settings)> {
         let wav = temp_wav_path();
         // Draining the capture buffer and writing the WAV is invisible latency
         // between the key release and the first byte the transcriber sees.
@@ -339,11 +368,11 @@ impl Pipeline {
         let settings = self.settings();
         // The first local run pays for the model load inside this span, which
         // is right: it is time the user spends waiting for a transcript.
-        let raw = async {
+        let text = async {
             let transcriber = self.transcriber(&settings).await?;
-            let raw = transcriber.transcribe(&wav).await?;
-            tracing::Span::current().record("chars", raw.len());
-            anyhow::Ok(raw)
+            let text = transcriber.transcribe(&wav).await?;
+            tracing::Span::current().record("chars", text.len());
+            anyhow::Ok(text)
         }
         .instrument(tracing::info_span!(
             "transcribe",
@@ -352,6 +381,16 @@ impl Pipeline {
         ))
         .await?;
         let _ = std::fs::remove_file(&wav);
+        Ok((text, settings))
+    }
+
+    async fn transcribe_and_paste(
+        &self,
+        recorder: aloud_audio::Recorder,
+        started_at: Option<std::time::Instant>,
+        generation: u64,
+    ) -> Result<Outcome> {
+        let (raw, settings) = self.capture(recorder).await?;
 
         // Whisper returns nothing for silence, and the cleanup prompt maps
         // filler-only speech to its EMPTY sentinel. Neither is an error.
@@ -630,20 +669,8 @@ impl Pipeline {
         )
     )]
     async fn finish_rewrite(&self, selection: String) -> Result<()> {
-        let Some(recorder) = self.session.lock().unwrap().recorder.take() else {
-            return Ok(());
-        };
-
-        self.emit(Phase::Transcribing);
-        let result = self.transcribe_and_rewrite(recorder, &selection).await;
-        if result.is_err() {
-            tracing::Span::current().record("ok", false);
-        }
-        match &result {
-            Ok(()) => self.emit(Phase::Done),
-            Err(e) => self.emit_error(e),
-        }
-        result
+        self.run_stage(Phase::Done, |r| self.transcribe_and_rewrite(r, &selection))
+            .await
     }
 
     async fn transcribe_and_rewrite(
@@ -651,26 +678,7 @@ impl Pipeline {
         recorder: aloud_audio::Recorder,
         selection: &str,
     ) -> Result<()> {
-        let wav = temp_wav_path();
-        {
-            let _e = tracing::info_span!("finalize_audio").entered();
-            recorder.stop_to_wav(&wav)?;
-        }
-
-        let settings = self.settings();
-        let command = async {
-            let transcriber = self.transcriber(&settings).await?;
-            let command = transcriber.transcribe(&wav).await?;
-            tracing::Span::current().record("chars", command.len());
-            anyhow::Ok(command)
-        }
-        .instrument(tracing::info_span!(
-            "transcribe",
-            engine = ?settings.engine,
-            chars = tracing::field::Empty,
-        ))
-        .await?;
-        let _ = std::fs::remove_file(&wav);
+        let (command, settings) = self.capture(recorder).await?;
 
         if command.trim().is_empty() {
             return Ok(()); // no command spoken; leave the selection alone
@@ -733,46 +741,14 @@ impl Pipeline {
         )
     )]
     pub async fn stop_and_ask(&self) -> Result<()> {
-        let recorder = self.session.lock().unwrap().recorder.take();
-        let Some(recorder) = recorder else {
-            return Ok(());
-        };
-
-        self.emit(Phase::Transcribing);
-        let result = self.transcribe_and_ask(recorder).await;
-        if result.is_err() {
-            tracing::Span::current().record("ok", false);
-        }
-        match &result {
-            // Ask and Agent show their own panel; the pill just gets out of
-            // the way unless there is an error worth reading.
-            Ok(()) => self.emit(Phase::Idle),
-            Err(e) => self.emit_error(e),
-        }
-        result
+        // Ask and Agent show their own panel; the pill just gets out of the
+        // way unless there is an error worth reading.
+        self.run_stage(Phase::Idle, |r| self.transcribe_and_ask(r))
+            .await
     }
 
     async fn transcribe_and_ask(&self, recorder: aloud_audio::Recorder) -> Result<()> {
-        let wav = temp_wav_path();
-        {
-            let _e = tracing::info_span!("finalize_audio").entered();
-            recorder.stop_to_wav(&wav)?;
-        }
-
-        let settings = self.settings();
-        let question = async {
-            let transcriber = self.transcriber(&settings).await?;
-            let question = transcriber.transcribe(&wav).await?;
-            tracing::Span::current().record("chars", question.len());
-            anyhow::Ok(question)
-        }
-        .instrument(tracing::info_span!(
-            "transcribe",
-            engine = ?settings.engine,
-            chars = tracing::field::Empty,
-        ))
-        .await?;
-        let _ = std::fs::remove_file(&wav);
+        let (question, settings) = self.capture(recorder).await?;
 
         if question.trim().is_empty() {
             return Ok(());
@@ -797,46 +773,14 @@ impl Pipeline {
         )
     )]
     pub async fn stop_and_agent(&self) -> Result<()> {
-        let recorder = self.session.lock().unwrap().recorder.take();
-        let Some(recorder) = recorder else {
-            return Ok(());
-        };
-
-        self.emit(Phase::Transcribing);
-        let result = self.transcribe_and_agent(recorder).await;
-        if result.is_err() {
-            tracing::Span::current().record("ok", false);
-        }
-        match &result {
-            // Ask and Agent show their own panel; the pill just gets out of
-            // the way unless there is an error worth reading.
-            Ok(()) => self.emit(Phase::Idle),
-            Err(e) => self.emit_error(e),
-        }
-        result
+        // Ask and Agent show their own panel; the pill just gets out of the
+        // way unless there is an error worth reading.
+        self.run_stage(Phase::Idle, |r| self.transcribe_and_agent(r))
+            .await
     }
 
     async fn transcribe_and_agent(&self, recorder: aloud_audio::Recorder) -> Result<()> {
-        let wav = temp_wav_path();
-        {
-            let _e = tracing::info_span!("finalize_audio").entered();
-            recorder.stop_to_wav(&wav)?;
-        }
-
-        let settings = self.settings();
-        let command = async {
-            let transcriber = self.transcriber(&settings).await?;
-            let command = transcriber.transcribe(&wav).await?;
-            tracing::Span::current().record("chars", command.len());
-            anyhow::Ok(command)
-        }
-        .instrument(tracing::info_span!(
-            "transcribe",
-            engine = ?settings.engine,
-            chars = tracing::field::Empty,
-        ))
-        .await?;
-        let _ = std::fs::remove_file(&wav);
+        let (command, settings) = self.capture(recorder).await?;
 
         if command.trim().is_empty() {
             return Ok(());
