@@ -313,6 +313,54 @@ export function SettingsView({ section }: { section: SettingsSection }) {
               </Row>
             )}
 
+            <Row
+              label="Show menu bar icon"
+              hint="Hotkeys keep working when hidden. Open Aloud again to get back here."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={settings.showMenuBarIcon ?? true}
+                label="Show menu bar icon"
+                onChange={(c) => update({ showMenuBarIcon: c })}
+              />
+            </Row>
+
+            <Row
+              label="Mute while dictating"
+              hint="Silences system audio so music does not reach the microphone."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={settings.muteSystemAudio ?? false}
+                label="Mute while dictating"
+                onChange={(c) => update({ muteSystemAudio: c })}
+              />
+            </Row>
+
+            <Row
+              label="Start delay"
+              hint="Wait before capturing, so a slow key press does not clip the first word"
+            >
+              <Value className="w-24">
+                <Input
+                  type="number"
+                  min={0}
+                  max={2000}
+                  step={50}
+                  className={rowInput}
+                  value={settings.shortcutStartDelayMs ?? 0}
+                  onChange={(e) =>
+                    update({
+                      shortcutStartDelayMs: Math.max(
+                        0,
+                        Number(e.target.value) || 0,
+                      ),
+                    })
+                  }
+                />
+              </Value>
+            </Row>
+
             <Row label="History kept">
               <Value className="w-24">
                 <Input

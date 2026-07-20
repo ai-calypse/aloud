@@ -222,10 +222,30 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            // If the app died mid-dictation with the output muted, the saved
+            // level is still on disk and this is the only thing that will put
+            // it back — the user has no in-app control that would.
+            if let Err(e) = aloud_volume::restore() {
+                tracing::warn!(%e, "could not restore the system volume from a previous run");
+            }
+
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {
+            // Reopening the app — double-clicking it in Finder while it is
+            // already running — raises the window. This is the recovery path
+            // that makes hiding the menu-bar icon safe: with no dock icon and
+            // no status item, it is otherwise the only way back to settings.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                if let Some(window) = _app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        });
 }
 
 /// Checks for an update on launch and installs one if the user agrees.

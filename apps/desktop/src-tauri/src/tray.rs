@@ -22,13 +22,53 @@ const HISTORY_ITEMS: usize = 10;
 const SNIPPET_CHARS: usize = 48;
 
 pub fn init(app: &App) -> tauri::Result<()> {
+    let settings = app.state::<AppState>();
+    let visible = settings
+        .settings
+        .lock()
+        .map(|s| s.show_menu_bar_icon)
+        .unwrap_or(true);
+    if visible {
+        create(app.handle())?;
+    }
+    Ok(())
+}
+
+fn create(app: &AppHandle) -> tauri::Result<()> {
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(app.default_window_icon().unwrap().clone())
-        .menu(&build(app.handle())?)
+        .menu(&build(app)?)
         .show_menu_on_left_click(true)
         .on_menu_event(on_menu_event)
         .build(app)?;
     Ok(())
+}
+
+/// Shows or hides the menu-bar icon without a restart.
+///
+/// Hiding it is safe only because reopening the app (double-clicking it in
+/// Finder) raises the window — macOS turns that into `applicationShouldHandle
+/// Reopen` rather than a second instance, and `lib.rs` listens for it. Without
+/// that hook this would be a one-way door: no dock icon, no menu bar, and no
+/// way back to the settings that would turn it on again.
+pub fn set_visible(app: &AppHandle, visible: bool) {
+    let handle = app.clone();
+    // Creating and destroying a status item is main-thread-only on macOS, and
+    // this arrives on whichever thread saved the settings.
+    let _ = app.run_on_main_thread(move || {
+        let exists = handle.tray_by_id(TRAY_ID).is_some();
+        match (visible, exists) {
+            (true, false) => {
+                if let Err(e) = create(&handle) {
+                    tracing::warn!(%e, "could not show the menu bar icon");
+                }
+            }
+            (false, true) => {
+                handle.remove_tray_by_id(TRAY_ID);
+            }
+            _ => {}
+        }
+    });
 }
 
 /// Rebuilds the menu against current state. Cheap enough to call on every

@@ -25,7 +25,11 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 /// Persists settings and applies them to the running app.
 #[tauri::command]
 #[specta::specta]
-pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> CmdResult<()> {
+pub fn update_settings(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    settings: Settings,
+) -> CmdResult<()> {
     to_string_err(settings.save())?;
 
     // Push the hotkey slice into the live config the listener reads, so a
@@ -33,6 +37,10 @@ pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> CmdRes
     if let Ok(mut config) = state.hotkey_config.lock() {
         *config = settings.hotkeys.clone();
     }
+
+    // Applied live rather than at next launch: a toggle that appears to do
+    // nothing reads as broken, and the user would toggle it again.
+    crate::tray::set_visible(&app, settings.show_menu_bar_icon);
 
     let mut current = state
         .settings
