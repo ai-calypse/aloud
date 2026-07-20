@@ -1,18 +1,26 @@
-import { type Binding, type Config, type Key } from "../../lib/bindings";
+import { useEffect, useRef, useState } from "react";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  commands,
+  type Binding,
+  type Config,
+  type Key,
+  type Modifier,
+} from "../../lib/bindings";
 import { GridRow, Group } from "@/components/ui/rows";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { describeBinding } from "./binding-label";
 
 /**
- * A compact hotkey binder, one row per role. A full keystroke recorder is the
- * eventual upgrade; this offers the modifier-only holds that actually work on
- * both platforms (the ones `Config::defaults` and the Swift app used), which is
- * enough to bind and test every mode. "Disabled" turns a role off.
+ * One row per role, each bound by recording a real key gesture.
+ *
+ * This used to be a <select> of six modifier-only holds, which meant
+ * `Binding::Key` — a normal key with modifiers — existed in Rust and could not
+ * be reached from the app; anything else showed as "Custom (edit file)".
+ * Recording happens in the Rust event tap rather than from DOM keydowns: the
+ * browser cannot see a modifier-only press reliably, cannot tell Right Option
+ * from Left, never sees Fn at all, and could not stop the hotkey being
+ * *replaced* from firing while you record over it.
  *
  * The Config keys are snake_case (copy_again, meeting_notes) because they come
  * straight from the Rust struct, unlike the camelCase Settings fields.
@@ -29,33 +37,41 @@ const ROLES: { key: keyof Config; label: string; mode: string; hint: string }[] 
   { key: "copy_again", label: "Paste again", mode: "tap", hint: "Re-paste the last transcript" },
 ];
 
-/** The modifier-only holds offered, keyed by a stable id for the <select>. */
-const CHOICES: { id: string; label: string; binding: Binding }[] = [
-  { id: "disabled", label: "Off", binding: { kind: "disabled" } },
-  { id: "rightOption", label: "Right Option", binding: modKey("rightOption") },
-  { id: "leftOption", label: "Left Option", binding: modKey("leftOption") },
-  { id: "rightCommand", label: "Right Command", binding: modKey("rightCommand") },
-  { id: "rightControl", label: "Right Control", binding: modKey("rightControl") },
-  { id: "rightShift", label: "Right Shift", binding: modKey("rightShift") },
-  { id: "fn", label: "Fn", binding: modKey("fn") },
-];
+const DISABLED: Binding = { kind: "disabled" };
 
-function modKey(key: Key): Binding {
-  return { kind: "modifierKey", key, modifiers: [] };
+/**
+ * Whether another role is bound to the same gesture.
+ *
+ * Advisory only — `matcher.rs` orders simultaneous activations by specificity,
+ * so a clash is resolved rather than broken. But two roles on one key is almost
+ * always a mistake, and silently letting the more specific one win is how you
+ * end up with a hotkey that "stopped working".
+ */
+function conflictsWith(config: Config, role: keyof Config): boolean {
+  const mine = config[role];
+  if (!mine || mine.kind === "disabled") return false;
+  return ROLES.some((other) => {
+    if (other.key === role) return false;
+    const theirs = config[other.key];
+    if (!theirs || theirs.kind === "disabled") return false;
+    return (
+      theirs.kind === mine.kind &&
+      sameKey(theirs.key, mine.key) &&
+      sameModifiers(theirs.modifiers, mine.modifiers)
+    );
+  });
 }
 
-/** Maps a stored binding back to a choice id, so the <select> shows it. */
-function choiceId(binding: Binding | null): string {
-  if (!binding || binding.kind === "disabled") return "disabled";
-  if (binding.kind === "modifierKey") {
-    const hit = CHOICES.find(
-      (c) => c.binding.kind === "modifierKey" && c.binding.key === binding.key,
-    );
-    if (hit) return hit.id;
-  }
-  // A key-combo binding set elsewhere (e.g. hand-edited) has no preset; show it
-  // as a custom row rather than silently resetting it.
-  return "custom";
+/** Key is a string union plus two object variants, so `===` is not enough. */
+function sameKey(a: Key, b: Key): boolean {
+  if (typeof a === "string" || typeof b === "string") return a === b;
+  if ("char" in a && "char" in b) return a.char === b.char;
+  if ("f" in a && "f" in b) return a.f === b.f;
+  return false;
+}
+
+function sameModifiers(a: Modifier[], b: Modifier[]): boolean {
+  return a.length === b.length && a.every((m) => b.includes(m));
 }
 
 export function HotkeyEditor({
@@ -65,16 +81,50 @@ export function HotkeyEditor({
   config: Config;
   onChange: (config: Config) => void;
 }) {
-  function setRole(role: keyof Config, id: string) {
-    const choice = CHOICES.find((c) => c.id === id);
-    if (!choice) return;
-    onChange({ ...config, [role]: choice.binding });
+  /** Which role is recording, if any. Only one at a time. */
+  const [recording, setRecording] = useState<keyof Config | null>(null);
+  // Rust times capture out on its own, so an abandoned recording cannot hold
+  // the keyboard. This ref is only to ignore a result that arrives after the
+  // user has already moved on to recording a different role.
+  const generation = useRef(0);
+
+  // Recording swallows every key, so leaving the pane must not strand it.
+  useEffect(() => {
+    return () => {
+      commands.cancelHotkeyCapture();
+    };
+  }, []);
+
+  async function record(role: keyof Config) {
+    const mine = ++generation.current;
+    setRecording(role);
+
+    const result = await commands.captureHotkey();
+    if (generation.current !== mine) return;
+    setRecording(null);
+
+    if (result.status === "error") {
+      console.error(`capturing hotkey: ${result.error}`);
+      return;
+    }
+    // null is a timeout or a cancel — leave the existing binding alone.
+    if (result.data) onChange({ ...config, [role]: result.data });
+  }
+
+  function cancel() {
+    generation.current++;
+    setRecording(null);
+    commands.cancelHotkeyCapture();
   }
 
   return (
     <Group>
       {ROLES.map((role) => {
-        const current = choiceId(config[role.key]);
+        const binding = config[role.key] ?? DISABLED;
+        const isRecording = recording === role.key;
+        const bound = binding.kind !== "disabled";
+        const clash = conflictsWith(config, role.key);
+
         return (
           <GridRow key={role.key} columns="150px 1fr auto">
             <div className="whitespace-nowrap text-row font-medium">
@@ -84,28 +134,49 @@ export function HotkeyEditor({
               </span>
             </div>
             <span className="text-hint text-ink-2">
-              {role.hint}
+              {clash ? (
+                <span className="text-warning">
+                  Same key as another role — the more specific one wins
+                </span>
+              ) : (
+                role.hint
+              )}
             </span>
-            {/* The trigger is styled as a keycap — the binding is the value of
-                the row, so it reads as a key, not as a form field. */}
-            <Select
-              value={current === "custom" ? "custom" : current}
-              onValueChange={(v) => setRole(role.key, v)}
-            >
-              <SelectTrigger className="h-auto gap-1.5 rounded-row border-[0.5px] border-keycap-border bg-keycap px-3 py-[5px] font-mono text-xs shadow-none data-[size=default]:h-auto [&_svg]:text-chevron">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {current === "custom" && (
-                  <SelectItem value="custom">Custom (edit file)</SelectItem>
+
+            <div className="flex items-center gap-2.5">
+              {/* Styled as a keycap: the binding is the value of the row, so it
+                  should read as a key rather than as a form field. */}
+              <button
+                type="button"
+                onClick={() => (isRecording ? cancel() : record(role.key))}
+                className={cn(
+                  "rounded-row border-[0.5px] px-3 py-[5px] font-mono text-xs",
+                  "transition-colors duration-[var(--dur-fast)]",
+                  isRecording
+                    ? "animate-pulse border-brand bg-brand/10 text-brand"
+                    : "border-keycap-border bg-keycap hover:border-brand",
+                  !bound && !isRecording && "text-ink-3",
                 )}
-                {CHOICES.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              >
+                {isRecording ? "Press keys…" : describeBinding(binding)}
+              </button>
+
+              {isRecording ? (
+                <Button variant="plain" size="text" onClick={cancel}>
+                  Cancel
+                </Button>
+              ) : (
+                // Reserves the column so keycaps stay aligned down the list.
+                <Button
+                  variant="plain"
+                  size="text"
+                  className={cn(!bound && "invisible")}
+                  onClick={() => onChange({ ...config, [role.key]: DISABLED })}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
           </GridRow>
         );
       })}

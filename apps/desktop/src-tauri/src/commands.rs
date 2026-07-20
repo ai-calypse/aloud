@@ -363,3 +363,60 @@ pub fn recent_timings(state: State<'_, AppState>, utterances: u32) -> CmdResult<
         .map_err(|_| "timings lock poisoned".to_string())?;
     to_string_err(timings.recent(utterances as usize))
 }
+
+/// How long a recording waits for the user before giving up. Long enough to
+/// find the key, short enough that a forgotten dialog frees the keyboard —
+/// capture swallows every key while armed, so it must never be indefinite.
+const CAPTURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Records the next key gesture and returns it as a binding.
+///
+/// Async because it blocks until the user presses something: capture swallows
+/// keys while armed, so this owns a `spawn_blocking` thread rather than the
+/// main one. Cancelling is `cancel_hotkey_capture`, or simply waiting out
+/// [`CAPTURE_TIMEOUT`].
+#[tauri::command]
+#[specta::specta]
+pub async fn capture_hotkey(
+    state: State<'_, AppState>,
+) -> CmdResult<Option<aloud_hotkey::model::Binding>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    {
+        let mut slot = state
+            .hotkey_capture
+            .lock()
+            .map_err(|_| "hotkey capture lock poisoned".to_string())?;
+        // Replacing an in-flight recording is intentional: opening a second
+        // recorder should retarget, not deadlock behind the first.
+        *slot = Some(tx);
+    }
+
+    let capture = state.hotkey_capture.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let captured = rx.recv_timeout(CAPTURE_TIMEOUT).ok();
+        // Disarm on timeout. The listener clears the slot itself on a commit,
+        // so this only matters for the give-up path — but leaving it armed
+        // would swallow the keyboard indefinitely.
+        if captured.is_none() {
+            if let Ok(mut slot) = capture.lock() {
+                *slot = None;
+            }
+        }
+        captured
+    })
+    .await
+    .map_err(|e| format!("capture task failed: {e}"))
+}
+
+/// Disarms a recording the user backed out of.
+#[tauri::command]
+#[specta::specta]
+pub fn cancel_hotkey_capture(state: State<'_, AppState>) -> CmdResult<()> {
+    let mut slot = state
+        .hotkey_capture
+        .lock()
+        .map_err(|_| "hotkey capture lock poisoned".to_string())?;
+    // Dropping the sender wakes the waiting task, which returns None.
+    *slot = None;
+    Ok(())
+}
