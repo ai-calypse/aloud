@@ -61,8 +61,10 @@ pub struct Session {
     recorder: Option<aloud_audio::Recorder>,
     /// The last transcript, for "paste again".
     last_transcript: Option<String>,
-    /// Text selected when a command-mode session began.
-    selection: Option<String>,
+    /// The in-flight read of the text selected when a command-mode session
+    /// began. A handle rather than a value because reading it can take a
+    /// clipboard round-trip, which must not happen on the hotkey thread.
+    selection: Option<tauri::async_runtime::JoinHandle<Option<String>>>,
     started_at: Option<std::time::Instant>,
 }
 
@@ -468,27 +470,47 @@ impl Pipeline {
     ///
     /// Called on the *leading* edge of the command hotkey, before recording:
     /// starting dictation moves focus and loses the selection.
+    /// Starts reading the selection, without waiting for it.
+    ///
+    /// Called from the hotkey thread, which must never block: a stalled event
+    /// tap stops delivering key events system-wide, and macOS eventually
+    /// disables it outright. Reading a selection can be slow — where the
+    /// Accessibility API cannot answer, `aloud_selection` falls back to typing
+    /// Cmd+C and waiting for the clipboard to settle — so it happens on a
+    /// blocking worker and `stop_and_command` awaits the result.
     pub fn capture_selection(&self) {
-        match aloud_selection::selected_text() {
-            Ok(text) if !text.trim().is_empty() => {
-                if let Ok(mut session) = self.session.lock() {
-                    session.selection = Some(text);
+        let handle =
+            tauri::async_runtime::spawn_blocking(|| match aloud_selection::selected_text() {
+                Ok(text) if !text.trim().is_empty() => Some(text),
+                Ok(_) => {
+                    tracing::info!("command mode: nothing selected");
+                    None
                 }
-            }
-            Ok(_) => tracing::info!("command mode: nothing selected"),
-            Err(e) => tracing::warn!(%e, "could not read selection"),
+                Err(e) => {
+                    tracing::warn!(%e, "could not read selection");
+                    None
+                }
+            });
+        if let Ok(mut session) = self.session.lock() {
+            session.selection = Some(handle);
         }
     }
 
     /// Stops capturing, transforms the captured selection per the spoken
     /// command, and pastes the result over it.
     pub async fn stop_and_command(&self) -> Result<()> {
-        let (recorder, selection) = {
+        let (recorder, reading) = {
             let mut session = self.session.lock().unwrap();
             (session.recorder.take(), session.selection.take())
         };
         let Some(recorder) = recorder else {
             return Ok(());
+        };
+        // The read was started when the key went down; by the time it comes up
+        // it has almost always finished.
+        let selection = match reading {
+            Some(handle) => handle.await.ok().flatten(),
+            None => None,
         };
         let Some(selection) = selection else {
             // No selection was captured; treat the utterance as plain dictation

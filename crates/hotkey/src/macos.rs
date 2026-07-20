@@ -170,6 +170,27 @@ where
                 return Some(event.to_owned());
             }
 
+            // Never let our own synthetic keystrokes drive our own hotkeys.
+            //
+            // `aloud_paste` types Cmd+C to read a selection and Cmd+V to paste,
+            // and a Session-level tap sees those exactly as it sees the user's
+            // keyboard. That fed back: holding Left Option for command mode
+            // fired Activated, which read the selection, which typed Cmd+C,
+            // which the matcher read as Cmd+Option — not the bound Option — so
+            // it fired Deactivated. Releasing the synthetic Cmd re-fired
+            // Activated, which read the selection again. The pair repeated for
+            // as long as the key was held, and all the user heard was the start
+            // chime stuttering.
+            //
+            // Comparing the source pid is the reliable discriminator: real
+            // hardware reports 0, and a posted event carries its poster's pid.
+            // Hardware reports 0 here; a posted event carries its poster's pid.
+            if event.get_integer_value_field(EventField::EVENT_SOURCE_UNIX_PROCESS_ID)
+                == i64::from(std::process::id())
+            {
+                return Some(event.to_owned());
+            }
+
             let swallow = decode(event_type, event).is_some_and(|raw| (on_event.borrow_mut())(raw));
             // Returning None swallows the event.
             if swallow {
