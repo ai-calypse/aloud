@@ -16,8 +16,14 @@ const LABEL: Record<Phase, string> = {
 /** A long error still has to fit one line on a small pill. */
 const ERROR_CHARS = 90;
 
-/** Bars in the listening wave. */
-const BAR_COUNT = 14;
+/**
+ * Bars in the listening wave.
+ *
+ * Five, as the Swift app used. The count and the per-bar phase step together
+ * set how much of a wave fits across the row (see the delay in overlay.css) —
+ * change this and that has to move with it.
+ */
+const BAR_COUNT = 5;
 
 /**
  * Per-bar height ceiling: a raised cosine, tallest in the middle.
@@ -25,10 +31,15 @@ const BAR_COUNT = 14;
  * Without it every bar reaches the same height and the row reads as a ribbon
  * rather than a waveform. Computed rather than hand-tuned so the shape holds
  * if BAR_COUNT changes.
+ *
+ * The floor is 0.6, not 0, because this multiplies through the wave's trough
+ * and the silent-level scale as well: a shallower envelope crushed the outer
+ * bars to a 1px dash at rest, which read as a broken row of dots rather than
+ * as short bars.
  */
 const BAR_PEAKS = Array.from({ length: BAR_COUNT }, (_, i) => {
   const position = i / (BAR_COUNT - 1); // 0…1 across the row
-  return 0.45 + 0.55 * Math.sin(Math.PI * position);
+  return 0.6 + 0.4 * Math.sin(Math.PI * position);
 });
 
 

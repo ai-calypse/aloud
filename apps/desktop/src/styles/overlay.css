@@ -111,46 +111,47 @@
  * neighbours is what makes a wave travel, and starting mid-cycle means it is
  * fully formed on the first frame rather than rippling up from flat.
  *
- * The delay step and the cycle length together set the wavelength. At 14 bars,
- * -185ms a bar over a 1.6s cycle spreads about 1.5 wavelengths across the row,
- * so a crest and a trough are visible at once and the row reads as a wave. At
- * -95ms (0.8 of a wavelength) only part of one crest fits, which looked like a
- * ramp sliding back and forth rather than something travelling.
+ * The bar count and the delay step together set how much wave fits across the
+ * row, and the right answer depends on the count. -185ms a bar over a 1.6s
+ * cycle is 0.58 of a wavelength across five bars: neighbours sit ~52 degrees
+ * apart, so one crest sweeps through and the row reads as a wave. The Swift
+ * app landed in the same place (0.78 rad a bar over its ~1s cycle, 0.62 of a
+ * wavelength) from a completely different implementation.
  *
- * An earlier version of this looked like a spinner. It was not because it
- * ignored the voice: it was six chunky bars with a 0.1s stagger on a 0.9s
- * cycle, which is a big enough jump per bar to read as blinking rather than
- * as one wave moving.
+ * More than about one wavelength is wrong at this count — neighbouring bars
+ * approach antiphase and the row reads as blinking rather than travelling,
+ * which is what made an earlier six-bar version look like a spinner. Fourteen
+ * thin bars tolerated 1.5 wavelengths precisely because each step was small.
  *
  * Pure CSS, so nothing re-renders and the compositor owns every frame.
  */
 .bars {
   display: flex;
   align-items: center;
-  gap: 2.5px;
-  height: 20px;
+  gap: 3px;
+  height: 22px;
 
   /* The voice sets the wave's amplitude, not its motion — the same split the
-     Swift app used. At silence the row still travels at 42% height, so the
+     Swift app used. At silence the row still travels at half height, so the
      pill never looks frozen; a loud syllable opens it to full. JS only writes
      --level, so the wave itself stays entirely on the compositor.
 
      The transition is the meter ballistics: levels land every 50ms, and
      crossfading between them over --dur-fast is what stops the row strobing
      between syllables. It replaces the old attack/release buffer. */
-  transform: scaleY(calc(0.42 + 0.58 * var(--level, 0)));
+  transform: scaleY(calc(0.5 + 0.5 * var(--level, 0)));
   transition: transform var(--dur-fast) var(--ease-out);
 }
 
 .bars i {
-  width: 2.5px;
+  width: 3.5px;
   height: 100%;
   border-radius: var(--radius-pill);
   background: var(--pill-ink);
   transform-origin: center;
   /* --peak is a per-bar envelope set in the TSX: taller in the middle, so the
      row reads as a waveform rather than a uniform ribbon. */
-  transform: scaleY(calc(var(--peak, 1) * 0.28));
+  transform: scaleY(calc(var(--peak, 1) * 0.45));
   animation: wave 1.6s ease-in-out infinite;
   animation-delay: calc(var(--i, 0) * -185ms);
 }
@@ -158,7 +159,7 @@
 @keyframes wave {
   0%,
   100% {
-    transform: scaleY(calc(var(--peak, 1) * 0.28));
+    transform: scaleY(calc(var(--peak, 1) * 0.45));
   }
   50% {
     transform: scaleY(var(--peak, 1));
