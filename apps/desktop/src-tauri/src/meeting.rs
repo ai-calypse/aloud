@@ -41,6 +41,10 @@ pub struct Meeting {
     /// Shared rather than returned because the window can open mid-meeting and
     /// has to be told the total without waiting for the next chunk.
     words: Arc<AtomicU32>,
+    /// Set the moment `stop` begins, so the worker stops announcing
+    /// `Recording`. Without it the tail chunk's emit lands *after* `Saving`
+    /// and the UI re-arms mid-save — see the comment on the emit itself.
+    stopping: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize, specta::Type, Event)]
@@ -75,12 +79,14 @@ impl Meeting {
         let (tx, rx) = mpsc::unbounded_channel();
         let started_at = Instant::now();
         let words = Arc::new(AtomicU32::new(0));
+        let stopping = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker = tauri::async_runtime::spawn(transcribe_chunks(
             app.clone(),
             settings.clone(),
             rx,
             started_at,
             words.clone(),
+            stopping.clone(),
         ));
 
         // The realtime tap hands us 24 kHz PCM16 as it arrives; accumulate it
@@ -117,6 +123,7 @@ impl Meeting {
             worker,
             started_at,
             words,
+            stopping,
         })
     }
 
@@ -130,8 +137,11 @@ impl Meeting {
             settings,
             tx,
             worker,
+            stopping,
             ..
         } = self;
+        // Before `Saving`, so the worker cannot race between the two.
+        stopping.store(true, std::sync::atomic::Ordering::Relaxed);
         emit(&app, MeetingPhase::Saving);
 
         // Stop capture first, so no further chunks can be queued behind us.
@@ -182,6 +192,7 @@ async fn transcribe_chunks(
     mut rx: mpsc::UnboundedReceiver<(usize, Vec<u8>)>,
     started_at: Instant,
     words: Arc<AtomicU32>,
+    stopping: Arc<std::sync::atomic::AtomicBool>,
 ) -> Vec<(usize, String)> {
     let mut segments = Vec::new();
     // Built on the first chunk, not at start: the local model costs ~200ms and
@@ -207,9 +218,29 @@ async fn transcribe_chunks(
         }
 
         // Counted off the segments, not the assembled transcript — see
-        // `aloud_meeting::word_count`.
-        let counted = aloud_meeting::word_count(&aloud_meeting::in_order(segments.clone())) as u32;
-        words.store(counted, Ordering::Relaxed);
+        // `aloud_meeting::word_count`. Summed incrementally rather than
+        // recomputed: the previous version cloned every transcript string on
+        // every chunk, so a two-hour meeting deep-copied a growing Vec 120
+        // times for a number that is a running total.
+        let counted = words.fetch_add(
+            segments
+                .last()
+                .map_or(0, |(_, text)| text.split_whitespace().count() as u32),
+            Ordering::Relaxed,
+        ) + segments
+            .last()
+            .map_or(0, |(_, text)| text.split_whitespace().count() as u32);
+
+        // Not while stopping. `stop` emits `Saving` and *then* sends the tail
+        // chunk, so this emit would land after it and flip the UI back to
+        // "recording" for the whole summarisation — where the still-enabled
+        // "Stop and Save" button opens a brand-new meeting, because `stop`
+        // has already taken the session out of the slot. The tail is long
+        // enough to be sent on almost every meeting, so this is the common
+        // path, not an edge.
+        if stopping.load(Ordering::Relaxed) {
+            continue;
+        }
         emit(
             &app,
             MeetingPhase::Recording {

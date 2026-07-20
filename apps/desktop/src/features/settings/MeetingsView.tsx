@@ -31,9 +31,27 @@ export function MeetingsView() {
     const arrive = (phase: MeetingPhase | null) =>
       setLive(phase && phase.phase !== "idle" ? { phase, at: Date.now() } : null);
 
+    // A poll must never *clear* a saving state. `toggle_meeting` takes the
+    // session out of the slot before `stop` runs, so `meeting_status` answers
+    // null for the whole summarisation — and focusing this window then would
+    // replace "Saving…" with an enabled Start button, which opens a second
+    // recorder. The event stream is the authority while saving; polling only
+    // fills the gap for a window opened mid-meeting.
+    const poll = (phase: MeetingPhase | null) =>
+      setLive((current) =>
+        current?.phase.phase === "saving" && !phase
+          ? current
+          : phase && phase.phase !== "idle"
+            ? { phase, at: Date.now() }
+            : null,
+      );
+
     const refresh = () => {
       or(commands.recentNotes(20), [], "loading meeting notes").then(setPast);
-      commands.meetingStatus().then(arrive);
+      commands
+        .meetingStatus()
+        .then(poll)
+        .catch((e) => console.error(`reading meeting status: ${e}`));
     };
     refresh();
     window.addEventListener("focus", refresh);
