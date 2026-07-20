@@ -9,8 +9,8 @@ function Lead({ children }: { children: React.ReactNode }) {
 
 /**
  * First-run wizard. Shown once, when `settings.onboarded` is false, in place of
- * the main window's tabs. Walks the four things a new user must decide:
- * permission, engine, an optional key, and the hold-to-talk key.
+ * the main window's tabs. Walks the things a new user must decide: permission
+ * and engine. Keys are never asked for — the app supplies its own.
  *
  * It reuses the same commands the Settings panel does — this is a guided view
  * over existing settings, not a parallel config path. On finish it flips
@@ -25,7 +25,6 @@ export function Onboarding({
 }) {
   const [step, setStep] = useState(0);
   const [engine, setEngine] = useState<Settings["engine"]>(settings.engine);
-  const [apiKey, setApiKey] = useState(settings.groqApiKey ?? "");
   const [permitted, setPermitted] = useState(true);
 
   // Re-check the permission each time the permission step is shown, so granting
@@ -35,12 +34,7 @@ export function Onboarding({
   }, [step]);
 
   async function finish() {
-    const next: Settings = {
-      ...settings,
-      engine,
-      groqApiKey: apiKey,
-      onboarded: true,
-    };
+    const next: Settings = { ...settings, engine, onboarded: true };
     const result = await commands.updateSettings(next);
     if (result.status === "error") {
       console.error(`saving onboarding: ${result.error}`);
@@ -79,8 +73,8 @@ export function Onboarding({
       body: (
         <>
           <Lead>
-            On-device whisper works offline with no key. Cloud is faster and
-            needs an API key.
+            On-device whisper works offline. Cloud is faster, and falls back to
+            on-device if it is unavailable.
           </Lead>
           <label className="flex cursor-pointer items-center gap-2 py-[0.4rem]">
             <input
@@ -103,31 +97,10 @@ export function Onboarding({
         </>
       ),
     },
-    {
-      title: engine === "cloud" ? "Add your API key" : "Optional: API key",
-      body: (
-        <>
-          <Lead>
-            {engine === "cloud"
-              ? "Cloud transcription needs a key."
-              : "Add a key now to enable cleanup, Ask, and Agent — or skip and add it later in Settings."}
-          </Lead>
-          <input
-            className="w-full rounded-[8px] border-[0.5px] border-surface-border bg-field px-[0.7rem] py-[0.55rem]"
-            type="password"
-            placeholder="API key"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-        </>
-      ),
-    },
   ];
 
   const current = steps[step];
   const isLast = step === steps.length - 1;
-  // The only hard gate: cloud without a key can't transcribe at all.
-  const blocked = isLast && engine === "cloud" && apiKey.trim() === "";
 
   return (
     <div className="flex min-h-screen items-center justify-center p-8">
@@ -151,7 +124,7 @@ export function Onboarding({
             </Button>
           )}
           {isLast ? (
-            <Button variant="accent" size="row" onClick={finish} disabled={blocked}>
+            <Button variant="accent" size="row" onClick={finish}>
               Finish
             </Button>
           ) : (

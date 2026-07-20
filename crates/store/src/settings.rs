@@ -160,11 +160,16 @@ impl Settings {
         serde_json::from_value(raw)
     }
 
-    /// Fills any *empty* key from the environment, so a `.env` at the repo root
-    /// (or an exported var) configures a dev build without touching the UI. A
-    /// key already set in the settings file always wins — this is a fallback,
-    /// never an override. Each var is checked in the process environment first,
+    /// Fills any *empty* key from the environment. Since the key inputs were
+    /// removed (no BYOK), this is the *only* way a key is ever supplied: a
+    /// `.env` at the repo root, or an exported var, configures a dev build. A
+    /// key already in the settings file still wins, so a migrated Swift install
+    /// keeps its own. Each var is checked in the process environment first,
     /// then in a `.env` found by walking up from the working directory.
+    ///
+    /// This does not survive bundling — `current_dir()` is `/` for a `.app`
+    /// launched from Finder, so a shipped build resolves nothing and falls back
+    /// to on-device whisper. Provisioning for release is Phase 12.
     fn fill_keys_from_env(&mut self) {
         for (var, field) in [
             ("GROQ_API_KEY", &mut self.groq_api_key),
@@ -193,14 +198,6 @@ impl Settings {
         restrict_permissions(&temp)?;
         fs::rename(&temp, &path).context("replacing settings file")?;
         Ok(())
-    }
-
-    /// Whether transcription can run: local needs nothing, cloud needs a key.
-    pub fn is_configured(&self) -> bool {
-        match self.engine {
-            aloud_transcribe::Engine::Local => true,
-            aloud_transcribe::Engine::Cloud => !self.groq_api_key.trim().is_empty(),
-        }
     }
 }
 
@@ -267,27 +264,6 @@ fn restrict_permissions(_path: &std::path::Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn defaults_work_without_a_key() {
-        let settings = Settings::default();
-        assert!(settings.is_configured(), "local engine needs no key");
-    }
-
-    #[test]
-    fn cloud_engine_requires_a_key() {
-        let mut settings = Settings {
-            engine: aloud_transcribe::Engine::Cloud,
-            ..Default::default()
-        };
-        assert!(!settings.is_configured());
-
-        settings.groq_api_key = "   ".into();
-        assert!(!settings.is_configured(), "whitespace is not a key");
-
-        settings.groq_api_key = "gsk_real".into();
-        assert!(settings.is_configured());
-    }
 
     #[test]
     fn dotenv_value_is_parsed_and_unquoted() {

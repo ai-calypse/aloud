@@ -125,17 +125,6 @@ export function SettingsView({ section }: { section: SettingsSection }) {
 
             {engine === "cloud" && (
               <>
-                <Row label="API key">
-                  <Value className="flex-1">
-                    <Input
-                      type="password"
-                      className={rowInput}
-                      value={settings.groqApiKey ?? ""}
-                      placeholder="gsk_…"
-                      onChange={(e) => update({ groqApiKey: e.target.value })}
-                    />
-                  </Value>
-                </Row>
                 <Row label="Model">
                   <Value className="flex-1">
                     <Input
@@ -390,36 +379,6 @@ export function SettingsView({ section }: { section: SettingsSection }) {
           {/* Owns the pane title: the design puts the search box on the same
               row as it. Remounts when the key changes so the list reloads. */}
           <ConnectorEditor key={settings.composioApiKey ?? ""} />
-
-          {/* Setup, not the point of the pane — so it sits under the list. The
-              connector list names the missing key in its own error when unset. */}
-          <Group title="Keys">
-            {/* Gemini first: agent.rs reaches for this key before Cerebras,
-                because Groq's tokens-per-minute limit throttles a multi-round
-                tool loop and Cerebras was rate-limiting mid-command. */}
-            <Row label="Gemini key" hint="Understands a spoken command">
-              <Value className="flex-1">
-                <Input
-                  type="password"
-                  className={rowInput}
-                  placeholder="AIza…"
-                  value={settings.geminiApiKey ?? ""}
-                  onChange={(e) => update({ geminiApiKey: e.target.value })}
-                />
-              </Value>
-            </Row>
-            <Row label="Composio key" hint="Reaches the services above">
-              <Value className="flex-1">
-                <Input
-                  type="password"
-                  className={rowInput}
-                  placeholder="ak_…"
-                  value={settings.composioApiKey ?? ""}
-                  onChange={(e) => update({ composioApiKey: e.target.value })}
-                />
-              </Value>
-            </Row>
-          </Group>
         </>
       )}
 

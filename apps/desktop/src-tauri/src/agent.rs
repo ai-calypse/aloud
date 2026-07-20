@@ -129,10 +129,10 @@ const GEMINI_MODEL: &str = "gemini-3.1-flash-lite";
 )]
 async fn execute(app: &AppHandle, transcript: &str, settings: &Settings) -> Result<String> {
     if settings.gemini_api_key.trim().is_empty() {
-        bail!("Agent mode needs a Gemini API key to understand commands — add one in Settings");
+        bail!("Agent mode is unavailable — no Gemini credential is configured");
     }
     if settings.composio_api_key.trim().is_empty() {
-        bail!("Agent mode needs a Composio API key to reach your connected apps — add one in Settings");
+        bail!("Agent mode is unavailable — no Composio credential is configured");
     }
 
     let llm = aloud_llm::LlmClient::new(&settings.gemini_api_key, Some(GEMINI_BASE_URL))?;

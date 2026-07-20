@@ -166,7 +166,7 @@ fn api_key(state: &State<'_, AppState>) -> CmdResult<String> {
         .map(|s| s.composio_api_key.clone())
         .unwrap_or_default();
     if key.trim().is_empty() {
-        return Err("Add a Composio API key first".into());
+        return Err("Connectors are unavailable — no Composio credential is configured".into());
     }
     Ok(key)
 }
