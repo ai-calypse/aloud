@@ -96,6 +96,7 @@ pub fn run() {
             commands::history_delete,
             commands::history_clear,
             commands::history_update_final,
+            commands::history_retry_transcription,
             commands::capture_hotkey,
             commands::cancel_hotkey_capture,
             commands::preview_sound,

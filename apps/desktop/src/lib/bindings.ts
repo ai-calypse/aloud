@@ -89,6 +89,19 @@ export const commands = {
 	 */
 	historyUpdateFinal: (id: number, text: string) => typedError<null, string>(__TAURI_INVOKE("history_update_final", { id, text })),
 	/**
+	 *  Re-runs transcription against the run's stored recording, optionally on a
+	 *  different engine, and writes both transcripts back.
+	 * 
+	 *  Returns the new pasted text so the Run Log can repaint the row without a
+	 *  refetch. Everything it does lives on the pipeline, which is what makes the
+	 *  retry match the dictation that produced the row.
+	 */
+	historyRetryTranscription: (id: number, engine: 
+/**  On-device whisper.cpp. No network, no API key. */
+"local" | 
+/**  An OpenAI-compatible endpoint (Groq by default). */
+"cloud" | null) => typedError<string, string>(__TAURI_INVOKE("history_retry_transcription", { id, engine })),
+	/**
 	 *  Records the next key gesture and returns it as a binding.
 	 * 
 	 *  Async because it blocks until the user presses something: capture swallows
@@ -337,6 +350,13 @@ export type Entry = {
 	 *  missing data.
 	 */
 	utteranceId: number | null,
+	/**
+	 *  The recording this run was transcribed from, while it survives the
+	 *  audio budget. Null on runs from before recordings were kept, on the
+	 *  modes that deliberately do not keep one, and on every run whose audio
+	 *  has since been evicted — the transcript outlives the WAV.
+	 */
+	audioPath: string | null,
 };
 
 /**
@@ -568,6 +588,17 @@ export type Settings = {
 	 */
 	developerTools?: boolean,
 	historyRetention?: number,
+	/**
+	 *  Disk the kept recordings may use, in megabytes. 0 keeps none, which
+	 *  also removes the Run Log's player and its transcription retry — both
+	 *  read the WAV.
+	 */
+	audioRetentionMb?: number,
+	/**
+	 *  Evict recordings older than this many days whatever the size budget
+	 *  says. 0 leaves size as the only limit.
+	 */
+	audioRetentionDays?: number,
 };
 
 /**  One closed span. */

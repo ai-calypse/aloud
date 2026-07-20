@@ -40,7 +40,11 @@ specta-typescript = "0.0.12"
 # macos-private-api: required for a genuinely transparent window on macOS,
 # which the recording overlay depends on. It rules out Mac App Store
 # distribution, which this app does not use (it ships as a notarized DMG).
-tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+# `protocol-asset` is what serves the Run Log's kept recordings to the webview.
+# It is gated by `app.security.assetProtocol.scope` in tauri.conf.json, not by
+# a capability: Tauri v2 ships no `core:asset` permission, so the scope list is
+# the only thing standing between a window and the filesystem.
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "protocol-asset"] }
 tokio = { version = "1", features = ["time", "sync"] }
 # Native NSVisualEffectView vibrancy behind the main window (macOS Liquid Glass).
 window-vibrancy = "0.5"

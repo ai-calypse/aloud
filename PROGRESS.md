@@ -133,6 +133,17 @@ traps found so far.
   busy rendering the thing that is arriving.
 - **Reduced motion collapses durations to 1ms** rather than `animation: none`,
   which can strand an element on its opening frame.
+- **Only dictation keeps its recording.** Ask, agent and rewrite share the same
+  capture helper and deliberately write to the OS temp directory: they keep no
+  history row, so a kept WAV would be invisible to the retention budget and a
+  permanent copy of a question nobody chose to store.
+- **Pruning unlinks the file before it forgets the path.** An orphaned file is
+  findable by a sweep of the media directory; an orphaned row points at audio
+  that is gone with no record of where it was.
+- **The asset protocol is scoped, not permissioned.** Tauri v2 ships no
+  `core:asset` permission, so `app.security.assetProtocol.scope` in
+  `tauri.conf.json` is the only thing limiting what a window can read — it
+  names `$DATA/Aloud/media/*` and nothing wider.
 
 ---
 

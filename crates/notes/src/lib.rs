@@ -68,6 +68,30 @@ pub fn directory() -> Result<PathBuf> {
     Ok(data_dir()?.join("Notes"))
 }
 
+/// `<app-data>/Aloud/media`, where kept recordings live.
+///
+/// Its own folder rather than a subfolder of Notes because the asset-protocol
+/// scope in `tauri.conf.json` points the WebView at exactly this path: widening
+/// it to the whole data directory would expose the settings file, the history
+/// database and every note to any script running in a window.
+pub fn media_dir() -> Result<PathBuf> {
+    Ok(data_dir()?.join("media"))
+}
+
+/// A unique path for one recording, with the media directory created.
+///
+/// Nanoseconds rather than a counter: two windows of the app, or a restart
+/// mid-second, must not be able to hand out the same name and have one
+/// dictation overwrite another's audio.
+pub fn media_wav_path() -> Result<PathBuf> {
+    let dir = media_dir()?;
+    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    Ok(dir.join(format!("aloud-{unique}.wav")))
+}
+
 /// All notes on disk, newest first.
 pub fn all_notes(dir: &Path) -> Vec<Note> {
     let Ok(entries) = fs::read_dir(dir) else {

@@ -539,6 +539,50 @@ export function SettingsView({ section }: { section: SettingsSection }) {
             </Row>
 
             <Row
+              label="Recordings kept"
+              hint="Disk the saved audio may use. 0 keeps none — the Run Log's player and its transcription retry go with it."
+            >
+              <Value className="w-24">
+                <Input
+                  type="number"
+                  min={0}
+                  max={10000}
+                  step={50}
+                  className={rowInput}
+                  value={settings.audioRetentionMb ?? 250}
+                  onChange={(e) =>
+                    update({
+                      audioRetentionMb: Math.max(0, Number(e.target.value) || 0),
+                    })
+                  }
+                />
+              </Value>
+            </Row>
+
+            <Row
+              label="Recordings expire after"
+              hint="Days. 0 leaves the size limit as the only one."
+            >
+              <Value className="w-24">
+                <Input
+                  type="number"
+                  min={0}
+                  max={365}
+                  className={rowInput}
+                  value={settings.audioRetentionDays ?? 30}
+                  onChange={(e) =>
+                    update({
+                      audioRetentionDays: Math.max(
+                        0,
+                        Number(e.target.value) || 0,
+                      ),
+                    })
+                  }
+                />
+              </Value>
+            </Row>
+
+            <Row
               label="Developer tools"
               hint="Shows the latency waterfall in the sidebar."
               className="py-[11px]"

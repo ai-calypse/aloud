@@ -493,8 +493,30 @@ impl Pipeline {
         result
     }
 
-    async fn capture(&self, recorder: aloud_audio::Recorder) -> Result<(String, Settings)> {
-        let wav = temp_wav_path();
+    /// Finalizes the recording, transcribes it, and returns the WAV only when
+    /// the caller is going to write a history row pointing at it.
+    ///
+    /// Ask, agent and rewrite share this helper and deliberately pass `false`.
+    /// That is a privacy call, not a technical one: those modes keep no history
+    /// row, so a kept recording would be an orphan by construction — invisible
+    /// to the budget, unreachable from the Run Log, and a permanent copy of a
+    /// question the user asked out loud and never chose to store. Their audio
+    /// goes to the OS temp directory and is unlinked here, exactly as before.
+    async fn capture(
+        &self,
+        recorder: aloud_audio::Recorder,
+        persist: bool,
+    ) -> Result<(String, Settings, Option<PathBuf>)> {
+        // A media directory we cannot create must not take dictation down with
+        // it — the recording is a nicety, the transcript is the product.
+        let keep = match persist.then(aloud_notes::media_wav_path).transpose() {
+            Ok(path) => path,
+            Err(e) => {
+                tracing::warn!(%e, "no media directory; this recording will not be kept");
+                None
+            }
+        };
+        let wav = keep.clone().unwrap_or_else(temp_wav_path);
         // Draining the capture buffer and writing the WAV is invisible latency
         // between the key release and the first byte the transcriber sees.
         {
@@ -531,8 +553,10 @@ impl Pipeline {
             chars = tracing::field::Empty,
         ))
         .await?;
-        let _ = std::fs::remove_file(&wav);
-        Ok((text, settings))
+        if keep.is_none() {
+            let _ = std::fs::remove_file(&wav);
+        }
+        Ok((text, settings, keep))
     }
 
     async fn transcribe_and_paste(
@@ -551,7 +575,8 @@ impl Pipeline {
         // the focused app is whatever the paste chord left in front.
         let app_name = tauri::async_runtime::spawn_blocking(aloud_selection::frontmost_app);
 
-        let (raw, settings) = self.capture(recorder).await?;
+        let (raw, settings, wav) = self.capture(recorder, true).await?;
+        let mut wav = KeptWav(wav);
 
         // Whisper returns nothing for silence, and the cleanup prompt maps
         // filler-only speech to its EMPTY sentinel. Neither is an error.
@@ -603,6 +628,7 @@ impl Pipeline {
             &settings,
             app_name.as_deref(),
             utterance_id,
+            wav.keep(),
         );
         Ok(Outcome::Pasted)
     }
@@ -771,6 +797,10 @@ impl Pipeline {
 
     /// Records the dictation for history and stats. Never fails the paste:
     /// the text is already in the user's document.
+    // Same reasoning as `History::insert`: these are the columns of one row,
+    // and a params struct would be an `Entry` the sole caller builds only to
+    // have it taken apart again.
+    #[allow(clippy::too_many_arguments)]
     fn record(
         &self,
         raw: &str,
@@ -779,6 +809,7 @@ impl Pipeline {
         settings: &Settings,
         app_name: Option<&str>,
         utterance_id: i64,
+        audio_path: Option<PathBuf>,
     ) {
         let duration_ms = started_at.map_or(0, |s| s.elapsed().as_millis() as i64);
 
@@ -794,7 +825,12 @@ impl Pipeline {
                 app_name,
                 duration_ms,
                 Some(utterance_id),
-                settings.history_retention,
+                // Lossy paths are dropped rather than mangled: a path that
+                // does not round-trip through UTF-8 cannot be handed to the
+                // asset protocol either, so storing an approximation of it
+                // would only produce a play button that 404s.
+                audio_path.as_deref().and_then(|p| p.to_str()),
+                settings.retention(),
             ) {
                 tracing::warn!(%e, "could not record history");
             }
@@ -908,7 +944,7 @@ impl Pipeline {
         recorder: aloud_audio::Recorder,
         selection: &str,
     ) -> Result<()> {
-        let (command, settings) = self.capture(recorder).await?;
+        let (command, settings, _) = self.capture(recorder, false).await?;
 
         if command.trim().is_empty() {
             return Ok(()); // no command spoken; leave the selection alone
@@ -978,7 +1014,7 @@ impl Pipeline {
     }
 
     async fn transcribe_and_ask(&self, recorder: aloud_audio::Recorder) -> Result<()> {
-        let (question, settings) = self.capture(recorder).await?;
+        let (question, settings, _) = self.capture(recorder, false).await?;
 
         if question.trim().is_empty() {
             return Ok(());
@@ -1010,7 +1046,7 @@ impl Pipeline {
     }
 
     async fn transcribe_and_agent(&self, recorder: aloud_audio::Recorder) -> Result<()> {
-        let (command, settings) = self.capture(recorder).await?;
+        let (command, settings, _) = self.capture(recorder, false).await?;
 
         if command.trim().is_empty() {
             return Ok(());
@@ -1071,6 +1107,50 @@ impl Pipeline {
         self.history
             .lock()
             .map_err(|_| anyhow::anyhow!("history lock poisoned"))
+    }
+
+    /// Re-transcribes a stored recording and rewrites the run with the result.
+    ///
+    /// Reuses the live pipeline's own `transcriber` and `post_process` rather
+    /// than a second path: a retry that cleans up differently from the real
+    /// dictation would be worse than no retry, because the user would trust it.
+    ///
+    /// `engine` overrides the configured one for this run only. Note that
+    /// `transcriber` caches the on-device model keyed on the effective engine,
+    /// so retrying local after a cloud run pays a model load — a few hundred
+    /// milliseconds, or a 150MB download on a machine that has never held one.
+    /// It looks like a hang and is not one.
+    pub async fn retry_transcription(&self, id: i64, engine: Option<Engine>) -> Result<String> {
+        let entry = self
+            .history_db()?
+            .get(id)?
+            .context("that run is no longer in the history")?;
+        let wav = entry
+            .audio_path
+            .context("no recording was kept for this run, so there is nothing to re-transcribe")?;
+        let wav = PathBuf::from(wav);
+        // The row can outlive the file: the budget nulls the column when it
+        // evicts, but a hand-deleted file leaves the path behind.
+        if !wav.exists() {
+            bail!("the recording for this run is no longer on disk");
+        }
+
+        let mut settings = self.settings();
+        if let Some(engine) = engine {
+            settings.engine = engine;
+        }
+        let raw = self.transcriber(&settings).await?.transcribe(&wav).await?;
+        if raw.trim().is_empty() {
+            bail!("the recording transcribed to nothing — it may be silence");
+        }
+
+        let final_text = self.post_process(&raw, &settings).await;
+        // Both halves, unlike a cleanup retry: this run really does have a new
+        // transcriber output, and leaving the old "Heard" next to the new
+        // "Pasted" would describe two different runs.
+        self.history_db()?
+            .update_transcripts(id, Some(&raw), &final_text)?;
+        Ok(final_text)
     }
 }
 
@@ -1178,6 +1258,33 @@ fn user_message(error: &anyhow::Error) -> String {
         return "Timed out — check your connection".to_string();
     }
     full
+}
+
+/// Owns a kept recording until a history row takes it, and deletes it if none
+/// does.
+///
+/// Every early return between transcription and the insert — silence, filler
+/// only, a spoken Ask trigger, a cancel that raced the paste — leaves a WAV in
+/// the media directory that no row points at. A row can be orphaned once and
+/// noticed; a file orphaned on every silent key press accumulates forever,
+/// because the size budget only ever looks at recordings the history knows
+/// about. A guard rather than a delete in each branch so the next early return
+/// added here is covered without anyone remembering to.
+struct KeptWav(Option<PathBuf>);
+
+impl KeptWav {
+    /// Hands the recording to the caller and disarms the delete.
+    fn keep(&mut self) -> Option<PathBuf> {
+        self.0.take()
+    }
+}
+
+impl Drop for KeptWav {
+    fn drop(&mut self) {
+        if let Some(path) = &self.0 {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 /// A unique temp path per dictation, so overlapping sessions cannot collide.

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { commands, events, type Entry, type Span } from "@/lib/bindings";
 import { or } from "@/lib/result";
 import { formatDate, formatDuration } from "@/lib/format";
@@ -155,6 +156,36 @@ export function RunLogView() {
   }
 
   /**
+   * Re-transcribes the stored recording, then cleans it up — the whole
+   * pipeline from the WAV down, unlike `retry` above which starts from the
+   * words already in the row.
+   *
+   * A null engine means "whatever Settings says". Switching engines here makes
+   * the pipeline load the other model, which on a machine that has never run
+   * on-device is a 150MB download: the button stays busy for a while and that
+   * is not a hang, hence the wording below.
+   */
+  async function retryTranscription(entry: Entry, engine: "local" | "cloud" | null) {
+    setRetrying(entry.id);
+    setNote({
+      id: entry.id,
+      text: "Re-transcribing. Switching engines loads the other model first, which can take a while the first time.",
+    });
+    const run = await commands.historyRetryTranscription(entry.id, engine);
+    setRetrying(null);
+
+    if (run.status === "error") {
+      setNote({ id: entry.id, text: run.error });
+      return;
+    }
+    // The command rewrote both transcripts, so the row is refetched rather
+    // than patched: `rawTranscript` changed too, and a half-updated row would
+    // show the old "Heard" beside the new "Pasted".
+    refresh();
+    setNote({ id: entry.id, text: "Re-transcribed." });
+  }
+
+  /**
    * ponytail: export is a clipboard write, not a file. A `<a download>` blob
    * needs a download handler the webview does not have, and a Save dialog
    * means `tauri-plugin-dialog` + `-fs` for one button. Add them if anyone
@@ -248,6 +279,9 @@ export function RunLogView() {
                     busy={retrying === entry.id}
                     note={note?.id === entry.id ? note.text : null}
                     onRetry={() => retry(entry)}
+                    onRetryTranscription={(engine) =>
+                      retryTranscription(entry, engine)
+                    }
                   />
                 )}
               </div>
@@ -266,6 +300,7 @@ function RunDetail({
   busy,
   note,
   onRetry,
+  onRetryTranscription,
 }: {
   entry: Entry;
   /** Undefined when the run predates `utteranceId`, or its spans were pruned. */
@@ -275,6 +310,7 @@ function RunDetail({
   busy: boolean;
   note: string | null;
   onRetry: () => void;
+  onRetryTranscription: (engine: "local" | "cloud" | null) => void;
 }) {
   const cleanup = stages?.find((s) => s.stage === "cleanup");
   // Recorded by the cleanup span as a joined string, because that is what the
@@ -292,6 +328,24 @@ function RunDetail({
         <Transcript title="Heard" text={entry.rawTranscript} />
         <Transcript title="Pasted" text={entry.finalTranscript} />
       </div>
+
+      {entry.audioPath && (
+        <div>
+          <Label>Recording</Label>
+          {/* Served over Tauri's asset protocol, which is scoped in
+              tauri.conf.json to the media directory and nothing else. Note the
+              failure mode: an out-of-scope path is refused by the protocol
+              handler with a 403 the element reports as a generic media error,
+              so a widened path that stops matching the scope looks like a
+              corrupt file rather than a permission problem. */}
+          <audio
+            controls
+            preload="none"
+            className="h-8 w-full max-w-md"
+            src={convertFileSrc(entry.audioPath)}
+          />
+        </div>
+      )}
 
       {vocabulary && (
         <div>
@@ -348,10 +402,42 @@ function RunDetail({
         )}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button variant="plain" size="text" onClick={onRetry} disabled={busy}>
           {busy ? "Re-running…" : "Re-run cleanup"}
         </Button>
+        {entry.audioPath && (
+          <>
+            <Button
+              variant="plain"
+              size="text"
+              onClick={() => onRetryTranscription(null)}
+              disabled={busy}
+            >
+              Re-transcribe
+            </Button>
+            {/* A native select rather than the app's Select: two options in a
+                details row do not justify a popover, and this one is keyboard
+                and screen-reader correct for free. */}
+            <select
+              aria-label="Re-transcribe using a different engine"
+              className="rounded-[7px] bg-field px-2 py-[3px] text-hint"
+              disabled={busy}
+              value=""
+              onChange={(e) => {
+                const engine = e.target.value;
+                e.target.value = "";
+                if (engine === "local" || engine === "cloud") {
+                  onRetryTranscription(engine);
+                }
+              }}
+            >
+              <option value="">Other engine…</option>
+              <option value="local">On-device</option>
+              <option value="cloud">Cloud</option>
+            </select>
+          </>
+        )}
         {note && <span className="text-hint text-ink-2">{note}</span>}
       </div>
     </div>

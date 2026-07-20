@@ -546,6 +546,22 @@ pub fn history_update_final(state: State<'_, AppState>, id: i32, text: String) -
     )
 }
 
+/// Re-runs transcription against the run's stored recording, optionally on a
+/// different engine, and writes both transcripts back.
+///
+/// Returns the new pasted text so the Run Log can repaint the row without a
+/// refetch. Everything it does lives on the pipeline, which is what makes the
+/// retry match the dictation that produced the row.
+#[tauri::command]
+#[specta::specta]
+pub async fn history_retry_transcription(
+    state: State<'_, AppState>,
+    id: i32,
+    engine: Option<aloud_transcribe::Engine>,
+) -> CmdResult<String> {
+    to_string_err(state.pipeline.retry_transcription(id as i64, engine).await)
+}
+
 /// How long a recording waits for the user before giving up. Long enough to
 /// find the key, short enough that a forgotten dialog frees the keyboard —
 /// capture swallows every key while armed, so it must never be indefinite.

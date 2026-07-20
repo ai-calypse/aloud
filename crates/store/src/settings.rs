@@ -149,6 +149,14 @@ pub struct Settings {
     pub developer_tools: bool,
     #[specta(type = specta_typescript::Number)]
     pub history_retention: usize,
+    /// Disk the kept recordings may use, in megabytes. 0 keeps none, which
+    /// also removes the Run Log's player and its transcription retry — both
+    /// read the WAV.
+    #[specta(type = specta_typescript::Number)]
+    pub audio_retention_mb: u64,
+    /// Evict recordings older than this many days whatever the size budget
+    /// says. 0 leaves size as the only limit.
+    pub audio_retention_days: u32,
 }
 
 impl Default for Settings {
@@ -188,6 +196,11 @@ impl Default for Settings {
             overlay_display: OverlayDisplay::Active,
             preserve_clipboard: true,
             history_retention: 50,
+            // 16 kHz mono 16-bit is ~1 MB a minute, so this is roughly four
+            // hours of speech — comfortably more than the 50 kept runs, and
+            // small enough that nobody notices it on a modern disk.
+            audio_retention_mb: 250,
+            audio_retention_days: 30,
             // A fresh install has not been through the wizard; a migrated one
             // is handled below, since the Swift users are already set up.
             onboarded: false,
@@ -197,6 +210,17 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// The three retention numbers as the history store wants them, so the
+    /// megabyte-to-byte conversion lives in one place rather than at every
+    /// call site that inserts a row.
+    pub fn retention(&self) -> crate::history::Retention {
+        crate::history::Retention {
+            entries: self.history_retention,
+            audio_bytes: self.audio_retention_mb.saturating_mul(1024 * 1024),
+            audio_days: self.audio_retention_days.into(),
+        }
+    }
+
     pub fn path() -> Result<PathBuf> {
         Ok(aloud_notes::data_dir()?.join("settings.json"))
     }

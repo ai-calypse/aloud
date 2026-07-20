@@ -374,17 +374,18 @@ which matters more now, because a user with no key field has no way to fix it.
 - **Scope** — the real work behind "an audio player in the Run Log". Touches:
   drop the `remove_file` at `pipeline.rs:379`; write into a media dir under
   `aloud_notes::data_dir()`; add a path column to `history` (schema is a bare
-  `CREATE TABLE IF NOT EXISTS` at `history.rs:54`, and `crates/store/src/migrate.rs`
-  is a Swift-app importer, **not** schema versioning — so schema migration
-  machinery has to exist first); teach `prune()` (`history.rs:109`) to unlink
-  files; add a size/age budget and its setting.
+  `CREATE TABLE IF NOT EXISTS`, and `crates/store/src/migrate.rs` is a Swift-app
+  importer, **not** schema versioning — but Phase 4 landed the missing machinery,
+  so this is one more `PRAGMA user_version`-guarded ALTER, not a new mechanism);
+  teach `prune()` to unlink files; add a size/age budget and its setting.
 - **Done** — recordings survive, disk usage is bounded and visible, and pruning
   never orphans a file or a row. Verify by filling the budget and watching it
   evict. Compression (WAV → Opus) is the obvious follow-up, not part of this.
 
 ### 5.2 — Audio player in the expanded run · M
 - **Scope** — trivial once 5.1 lands: a Tauri asset-protocol URL into an
-  `<audio>` element.
+  `<audio>` element. Note it needs the `protocol-asset` Cargo feature and a
+  `media-src` in the CSP; there is no capability to grant, only a scope.
 - **Done** — playback from the Run Log. **Strictly blocked on 5.1.**
 
 ### 5.3 — Retry transcription from audio · S
