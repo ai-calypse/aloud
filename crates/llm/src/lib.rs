@@ -179,11 +179,6 @@ impl LlmClient {
         })
     }
 
-    /// Shared with callers that want to check a model before using it.
-    pub fn cooldowns(&self) -> Arc<CooldownTracker> {
-        self.cooldowns.clone()
-    }
-
     /// One chat completion.
     ///
     /// A 429 registers the model's cooldown before returning

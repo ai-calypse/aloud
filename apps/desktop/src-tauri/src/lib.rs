@@ -74,17 +74,14 @@ pub fn run() {
 
     let builder = Builder::<tauri::Wry>::new()
         .commands(collect_commands![
-            commands::app_version,
             commands::get_settings,
             commands::update_settings,
             commands::get_stats,
-            commands::get_history,
             commands::search_notes,
             commands::recent_notes,
             commands::input_devices,
             commands::installed_apps,
             commands::hotkeys_permitted,
-            commands::paste_again,
             commands::recent_timings,
             commands::preview_sound,
             commands::launch_at_login,
