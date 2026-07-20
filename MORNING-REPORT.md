@@ -1,6 +1,6 @@
 # Morning Report — 20 July 2026
 
-Six open PRs, stacked. Nothing merged into `main`, as asked.
+Ten open PRs, stacked. Nothing merged into `main`, as asked.
 
 ---
 
