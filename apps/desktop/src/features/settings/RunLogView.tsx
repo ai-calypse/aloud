@@ -27,6 +27,11 @@ export function RunLogView() {
   // than per row: `recent_timings` has no by-id form, and one call covers
   // every row the pane can expand.
   const [spans, setSpans] = useState<Map<number, Span[]>>(new Map());
+  /** The oldest utterance the spans fetch reached. Rows older than this were
+      not loaded, which is a different thing from having been pruned — and the
+      two need different words, because one of them is not the user's data
+      going missing. */
+  const [spansFrom, setSpansFrom] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
   const [retrying, setRetrying] = useState<number | null>(null);
@@ -49,6 +54,7 @@ export function RunLogView() {
           else byId.set(row.utteranceId, [row]);
         }
         setSpans(byId);
+        setSpansFrom(rows.length ? Math.min(...rows.map((r) => r.utteranceId)) : null);
       },
     );
   }, []);
@@ -115,6 +121,17 @@ export function RunLogView() {
       // transcript, so a retry there returns the same words and reads as a
       // button that does nothing. The command says so in words.
       setNote({ id: entry.id, text: run.error });
+      return;
+    }
+
+    // An empty result means the prompt asked for a blank paste — the EMPTY
+    // sentinel doing its job. Writing that back would replace the user's
+    // transcript with nothing, and there is no undo.
+    if (run.data.trim() === "") {
+      setNote({
+        id: entry.id,
+        text: "The prompt judged this to be filler and asked for an empty paste, so the transcript was left alone.",
+      });
       return;
     }
 
@@ -227,6 +244,7 @@ export function RunLogView() {
                         ? undefined
                         : spans.get(entry.utteranceId)
                     }
+                    spansFrom={spansFrom}
                     busy={retrying === entry.id}
                     note={note?.id === entry.id ? note.text : null}
                     onRetry={() => retry(entry)}
@@ -244,6 +262,7 @@ export function RunLogView() {
 function RunDetail({
   entry,
   stages,
+  spansFrom,
   busy,
   note,
   onRetry,
@@ -251,6 +270,8 @@ function RunDetail({
   entry: Entry;
   /** Undefined when the run predates `utteranceId`, or its spans were pruned. */
   stages: Span[] | undefined;
+  /** Oldest utterance the spans fetch covered; null when none were read. */
+  spansFrom: number | null;
   busy: boolean;
   note: string | null;
   onRetry: () => void;
@@ -298,8 +319,9 @@ function RunDetail({
         <Label>Pipeline</Label>
         {stages === undefined || stages.length === 0 ? (
           <p className="text-hint text-ink-2">
-            No breakdown for this run — either it predates per-run timings, or
-            its spans have since been pruned.
+            {spansFrom !== null && entry.utteranceId !== null && entry.utteranceId < spansFrom
+              ? `No breakdown loaded — this pane reads the ${FETCH} most recent runs' spans, and this one is older than that.`
+              : "No breakdown for this run — either it predates per-run timings, or its spans have since been pruned."}
           </p>
         ) : (
           <div className="flex flex-col gap-1">

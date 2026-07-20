@@ -162,16 +162,11 @@ pub async fn test_prompt(
         vocabulary: &settings.vocabulary,
         output_language: &settings.output_language,
     };
-    let cleaned = to_string_err(aloud_llm::cleanup::clean(options, &sample).await)?;
-
-    if cleaned.trim().is_empty() {
-        return Ok(
-            "(nothing — the prompt judged the sample to be filler and asked for an \
-             empty paste. That is the EMPTY sentinel doing its job, not a failure.)"
-                .into(),
-        );
-    }
-    Ok(cleaned)
+    // An empty result is returned as an empty string, not as prose explaining
+    // it. This command has two callers — the Prompts pane, which explains the
+    // blank, and the Run Log's retry, which *writes the result back into the
+    // user's transcript*. A sentence here becomes their dictation.
+    to_string_err(aloud_llm::cleanup::clean(options, &sample).await)
 }
 
 #[tauri::command]
@@ -455,19 +450,26 @@ pub fn history_recent(state: State<'_, AppState>, limit: u32) -> CmdResult<Vec<E
 /// the table in the hundreds, so 2^31 is not a reachable ceiling.
 #[tauri::command]
 #[specta::specta]
-pub fn history_delete(state: State<'_, AppState>, id: i32) -> CmdResult<()> {
+pub fn history_delete(app: tauri::AppHandle, state: State<'_, AppState>, id: i32) -> CmdResult<()> {
     to_string_err(
         state
             .pipeline
             .history_db()
             .and_then(|h| h.delete(id as i64)),
-    )
+    )?;
+    // The tray builds its History submenu from the same table. Without this a
+    // transcript deleted here — plausibly *because* it was sensitive — stays
+    // listed and one click from being pasted until the next dictation.
+    crate::tray::refresh(&app);
+    Ok(())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn history_clear(state: State<'_, AppState>) -> CmdResult<()> {
-    to_string_err(state.pipeline.history_db().and_then(|h| h.clear()))
+pub fn history_clear(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    to_string_err(state.pipeline.history_db().and_then(|h| h.clear()))?;
+    crate::tray::refresh(&app);
+    Ok(())
 }
 
 /// Writes back the output of a cleanup re-run.
