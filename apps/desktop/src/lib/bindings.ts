@@ -5,12 +5,10 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 
 /** Commands */
 export const commands = {
-	appVersion: () => __TAURI_INVOKE<string>("app_version"),
 	getSettings: () => __TAURI_INVOKE<Settings>("get_settings"),
 	/**  Persists settings and applies them to the running app. */
 	updateSettings: (settings: Settings) => typedError<null, string>(__TAURI_INVOKE("update_settings", { settings })),
 	getStats: () => __TAURI_INVOKE<StatsView>("get_stats"),
-	getHistory: (limit: number) => typedError<Entry[], string>(__TAURI_INVOKE("get_history", { limit })),
 	searchNotes: (query: string) => typedError<SearchResult[], string>(__TAURI_INVOKE("search_notes", { query })),
 	/**  Newest notes, for the empty-query state. */
 	recentNotes: (limit: number) => typedError<Note[], string>(__TAURI_INVOKE("recent_notes", { limit })),
@@ -33,7 +31,6 @@ export const commands = {
 	 *  grants Accessibility permission.
 	 */
 	hotkeysPermitted: () => __TAURI_INVOKE<boolean>("hotkeys_permitted"),
-	pasteAgain: () => typedError<null, string>(__TAURI_INVOKE("paste_again")),
 	/**
 	 *  The last `utterances` dictations, every stage of each, for the dev panel's
 	 *  waterfall. Newest utterance first; stages in start order within one.
@@ -212,25 +209,6 @@ export type Engine =
 "local" | 
 /**  An OpenAI-compatible endpoint (Groq by default). */
 "cloud";
-
-/**
- *  Specta forbids exporting i64 by default, since JS loses precision past
- *  2^53. These are row ids, unix seconds and millisecond durations — all
- *  many orders of magnitude below that — so `number` is exact here and
- *  BigInt would only make the frontend painful.
- */
-export type Entry = {
-	id: number,
-	/**  Unix seconds. */
-	createdAt: number,
-	/**  What the transcriber returned. */
-	rawTranscript: string,
-	/**  What was actually pasted, after cleanup. */
-	finalTranscript: string,
-	/**  Which app had focus, for per-app rules and debugging. */
-	appName: string | null,
-	durationMs: number,
-};
 
 /**
  *  Emitted once hotkeys are live, so the UI can clear its permission banner

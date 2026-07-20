@@ -181,11 +181,6 @@ impl LlmClient {
         })
     }
 
-    /// Shared with callers that want to check a model before using it.
-    pub fn cooldowns(&self) -> Arc<CooldownTracker> {
-        self.cooldowns.clone()
-    }
-
     /// Turns a non-2xx response into the right [`LlmError`], registering a
     /// 429's cooldown on the way through so the breaker learns from every
     /// attempt. A success passes straight back.
