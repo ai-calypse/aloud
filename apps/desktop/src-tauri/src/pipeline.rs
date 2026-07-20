@@ -484,14 +484,16 @@ impl Pipeline {
     /// The configured engine. The local model is cached after first load.
     async fn transcriber(&self, settings: &Settings) -> Result<Arc<dyn Transcriber>> {
         // The local model is cached on self, since loading it costs ~200ms and
-        // memory. The cloud client is cheap, so it is never cached.
-        if settings.engine == Engine::Local {
+        // memory. The cloud client is cheap, so it is never cached. Keyed on
+        // the *effective* engine so a cloud-to-local fallback caches too.
+        let engine = effective_engine(settings);
+        if engine == Engine::Local {
             if let Some(local) = self.local.lock().unwrap().clone() {
                 return Ok(local);
             }
         }
         let transcriber = build_transcriber(&self.app, settings).await?;
-        if settings.engine == Engine::Local {
+        if engine == Engine::Local {
             *self.local.lock().unwrap() = Some(transcriber.clone());
         }
         Ok(transcriber)
@@ -664,7 +666,7 @@ impl Pipeline {
         settings: &Settings,
     ) -> Result<String> {
         if settings.groq_api_key.trim().is_empty() {
-            bail!("Rewriting a selection needs an API key — add one in Settings");
+            bail!("Rewriting a selection is unavailable — no credential is configured");
         }
         let client = aloud_llm::LlmClient::new(&settings.groq_api_key, Some(&settings.base_url))?;
         let messages = [
@@ -792,6 +794,17 @@ impl Pipeline {
     }
 }
 
+/// The engine that will actually run. Local is the floor, not just the
+/// default: with no key resolvable there is no UI left to go fix it, so an
+/// unconfigured cloud engine dictates on-device rather than erroring.
+pub fn effective_engine(settings: &Settings) -> Engine {
+    if settings.engine == Engine::Cloud && settings.groq_api_key.trim().is_empty() {
+        tracing::warn!("no cloud key resolved; falling back to on-device whisper");
+        return Engine::Local;
+    }
+    settings.engine
+}
+
 /// Builds the configured transcription engine. Shared by the pipeline and
 /// meeting notes; the pipeline caches the local model, this does not.
 /// `app` is only used to report model-download progress; the transcriber
@@ -800,18 +813,13 @@ pub async fn build_transcriber(
     app: &AppHandle,
     settings: &Settings,
 ) -> Result<Arc<dyn Transcriber>> {
-    match settings.engine {
-        Engine::Cloud => {
-            if settings.groq_api_key.trim().is_empty() {
-                bail!("cloud transcription needs an API key");
-            }
-            Ok(Arc::new(CloudTranscriber::new(
-                &settings.groq_api_key,
-                Some(&settings.base_url),
-                Some(&settings.transcription_model),
-                Some(&settings.language),
-            )?))
-        }
+    match effective_engine(settings) {
+        Engine::Cloud => Ok(Arc::new(CloudTranscriber::new(
+            &settings.groq_api_key,
+            Some(&settings.base_url),
+            Some(&settings.transcription_model),
+            Some(&settings.language),
+        )?)),
         Engine::Local => {
             let dir = aloud_transcribe::local::model_dir()?;
             let model = aloud_transcribe::download::ensure_model(
@@ -881,7 +889,10 @@ fn user_message(error: &anyhow::Error) -> String {
         return "Rate limited — wait a moment and try again".to_string();
     }
     if full.contains("401") || full.contains("invalid_api_key") {
-        return "API key rejected — check it in Settings".to_string();
+        // Not a fallback case: the key is present, just rejected, so
+        // `effective_engine` still picks Cloud and the next call fails too.
+        // Switching to on-device is the user's only recovery.
+        return "Credential rejected — switch to on-device in Settings".to_string();
     }
     if full.contains("timed out") || full.contains("operation timed out") {
         return "Timed out — check your connection".to_string();
@@ -965,5 +976,31 @@ mod tests {
         let on_custom = prompt_with_hint("MY CUSTOM PROMPT", hint);
         assert!(on_custom.starts_with("MY CUSTOM PROMPT"));
         assert!(on_custom.ends_with(hint));
+    }
+
+    /// With the key UI gone, a user whose cloud key does not resolve has no
+    /// field to go fix it — erroring would leave dictation dead with no
+    /// recovery. Cloud without a key must degrade to on-device instead.
+    #[test]
+    fn cloud_without_a_key_falls_back_to_local() {
+        let mut settings = Settings {
+            engine: Engine::Cloud,
+            ..Default::default()
+        };
+        assert_eq!(effective_engine(&settings), Engine::Local);
+
+        settings.groq_api_key = "   ".into();
+        assert_eq!(
+            effective_engine(&settings),
+            Engine::Local,
+            "whitespace is not a key"
+        );
+
+        settings.groq_api_key = "gsk_real".into();
+        assert_eq!(
+            effective_engine(&settings),
+            Engine::Cloud,
+            "a real key must still reach the cloud"
+        );
     }
 }

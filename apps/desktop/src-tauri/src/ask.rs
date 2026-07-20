@@ -48,7 +48,7 @@ pub async fn answer(app: &AppHandle, question: String, settings: &Settings) -> R
 
 async fn stream_answer(app: &AppHandle, question: &str, settings: &Settings) -> Result<()> {
     if settings.groq_api_key.trim().is_empty() {
-        bail!("Ask needs an API key — add one in Settings");
+        bail!("Ask is unavailable — no credential is configured");
     }
 
     let client = aloud_llm::LlmClient::new(&settings.groq_api_key, Some(&settings.base_url))?;

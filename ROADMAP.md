@@ -540,7 +540,8 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 | 2.1 — Hotkey recorder | ✅ PR #61, open |
 | 4.1 — Run Log pane | ✅ PR #62, open |
 | 2.2 — Command mode settings | ◐ in progress |
-| **A — Remove key surfaces** | not started, unblocked (keys come from `.env`) |
+| **A.1 — Remove key surfaces** | ✅ done — no key input anywhere; keys come from `.env` |
+| **A.2 — Local as the floor** | ✅ done — cloud without a key falls back to on-device |
 | **12 — Cloud key provisioning** | deferred until there is a shipped build |
 | everything else | not started |
 
@@ -557,7 +558,7 @@ Revised for no-BYOK:
 
 **A.1 → A.2 → 2.2 → 3 → 6 → 5 → 7 → 11.1/11.3 → 8 → 9 → 10 → 11.2 → 12**
 
-(0, 1.1, 2.1 and 4.1 are done.)
+(0, 1.1, 2.1, 4.1 and A are done. Next up: 2.2.)
 
 Rationale for the non-obvious moves:
 

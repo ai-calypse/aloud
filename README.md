@@ -65,9 +65,9 @@ code goes stale without anyone noticing. To restore it as a *working* provider:
    Note the model name changes too: `GEMINI_MODEL` is a Gemini id and will 404
    against Cerebras. Pick a model per provider, not one constant.
 
-3. **UI** — add a `Row` to the Keys group in
-   `apps/desktop/src/features/settings/SettingsView.tsx`, next to Gemini and
-   Composio. Copy the Gemini row; the placeholder is `csk-…`.
+3. **No UI.** Users do not supply keys — every input was removed in Phase A.
+   A restored `CEREBRAS_API_KEY` resolves from `.env` like every other key,
+   via `fill_keys_from_env`. Step 1 is the whole of it.
 
 4. **Bindings** — run the app once (`pnpm dev`) so `tauri-specta` regenerates
    `src/lib/bindings.ts`. Never hand-edit it.
