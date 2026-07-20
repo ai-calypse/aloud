@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { commands, events, type Span } from "@/lib/bindings";
+import { covered, percentile } from "@/lib/waterfall";
 import { cn } from "@/lib/utils";
 
 /** Runs fetched for the aggregates. The waterfall renders far fewer. */
@@ -64,31 +65,6 @@ function group(rows: Span[]): Utterance[] {
     })
     .filter((u): u is Utterance => u !== null)
     .sort((a, b) => b.id - a.id);
-}
-
-/**
- * Wall-clock the stages actually cover. Spans nest — `llm_fallback` runs
- * inside `cleanup` — so summing durations double-counts and makes the
- * unaccounted remainder come out negative.
- */
-function covered(stages: Span[]): number {
-  const spans = [...stages].sort((a, b) => a.startedAt - b.startedAt);
-  let total = 0;
-  let end = -Infinity;
-  for (const s of spans) {
-    const start = Math.max(s.startedAt, end);
-    end = Math.max(end, s.startedAt + s.durationMs);
-    total += Math.max(end - start, 0);
-  }
-  return total;
-}
-
-/** Nearest-rank percentile. Averages hide the tail; this is what to read. */
-function percentile(values: number[], p: number): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const rank = Math.ceil((p / 100) * sorted.length) - 1;
-  return sorted[Math.min(Math.max(rank, 0), sorted.length - 1)];
 }
 
 const mean = (values: number[]) =>

@@ -5,7 +5,7 @@ import {
   events,
   type Phase,
   type Settings,
-  type Stats,
+  type StatsView,
 } from "./lib/bindings";
 import { NotesView } from "./features/notes/NotesView";
 import {
@@ -63,16 +63,14 @@ const SETTINGS_IDS: SettingsSection[] = [
 ];
 
 /**
- * Mirrors `Stats::time_saved_seconds` (crates/store/src/stats.rs): typing at
- * 40 wpm minus time actually spent speaking, clamped at zero. Formatted as in
- * voice-dict's MenuBarView: minutes under an hour, tenths of hours above.
+ * Formatting only — the 40 wpm rule and the clamp live in
+ * `Stats::time_saved_seconds`, and arrive as `timeSavedSeconds`. Reimplemented
+ * here, changing the rule in Rust left this window disagreeing with the tray.
+ *
+ * The min/h switchover stays presentation, as in voice-dict's MenuBarView.
  */
-function timeSavedText(stats: Stats): string {
-  const seconds = Math.max(
-    ((stats.totalWords ?? 0) / 40) * 60 - (stats.totalSpokenSeconds ?? 0),
-    0,
-  );
-  const minutes = seconds / 60;
+function timeSavedText(stats: StatsView): string {
+  const minutes = (stats.timeSavedSeconds ?? 0) / 60;
   if (minutes < 60) return `~${Math.round(minutes)} min`;
   return `~${(minutes / 60).toFixed(1)} h`;
 }
@@ -86,7 +84,7 @@ export default function App() {
   // not just the id — the sidebar's group divider makes row pitch uneven.
   const [activeRow, setActiveRow] = useState<HTMLElement | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [stats, setStats] = useState<Stats | null>(null);
+  const [stats, setStats] = useState<StatsView | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [hotkeysReady, setHotkeysReady] = useState(true);
 
