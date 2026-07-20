@@ -109,13 +109,9 @@ are all clean, but that is not the same thing.
 
 The consequence worth naming: **the Windows path has never been executed.**
 `WH_KEYBOARD_LL`, WASAPI capture and `Ctrl+V` paste are written and unproven,
-and the CI matrix is what would prove them. `ci/ci.yml` is also still outside
-`.github/workflows/`; moving it needs a token with the `workflow` scope:
-
-```sh
-gh auth refresh -s workflow
-mkdir -p .github/workflows && git mv ci/ci.yml .github/workflows/ci.yml
-```
+and the CI matrix is what would prove them. The workflow file itself is in
+place at `.github/workflows/ci.yml` — it is billing that is blocking it, not
+the file's location.
 
 **No Composio key on this machine.** The connector caching, the
 stale-while-revalidate push and the disconnect flow are unit-tested and driven

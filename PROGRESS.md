@@ -13,15 +13,10 @@ increased."* Nothing has run server-side since #34. Local checks are clean —
 `cargo test --workspace`, `cargo clippy --workspace --all-targets`, `tsc`,
 `oxlint`, `vitest`, `vite build` — but that is not the same as CI.
 
-**CI still cannot be pushed.** `ci/ci.yml` holds the macOS + Windows matrix but
-lives outside `.github/workflows/`, because the `gh` token lacks the `workflow`
-scope. Every Windows path here (`WH_KEYBOARD_LL`, WASAPI, `Ctrl+V`) is written
-and never executed; the matrix is what would prove it.
-
-```sh
-gh auth refresh -s workflow
-mkdir -p .github/workflows && git mv ci/ci.yml .github/workflows/ci.yml
-```
+**The workflow file is in place** — `.github/workflows/ci.yml` holds the macOS
++ Windows matrix. It is blocked on billing, not on the token scope this
+section used to describe. Every Windows path here (`WH_KEYBOARD_LL`, WASAPI,
+`Ctrl+V`) is written and never executed; that matrix is what would prove it.
 
 **No Composio API key on this machine.** Connector caching, the
 stale-while-revalidate push and the disconnect flow are unit-tested and driven
