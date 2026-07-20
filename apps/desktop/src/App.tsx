@@ -42,10 +42,10 @@ const NAV: {
 }[] = [
   { id: "notes", title: "Notes", group: "app", tint: "var(--sys-orange)", icon: "M4 4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4ZM14 2v6h6M8 13h8M8 17h8" },
   { id: "status", title: "Status", group: "app", tint: "var(--sys-green)", icon: "M3 12h4l3 8 4-16 3 8h4" },
-  // Dev only: the latency waterfall is a debugging tool, not a feature.
-  ...(import.meta.env.DEV
-    ? ([{ id: "timings", title: "Timings", group: "app", tint: "var(--sys-pink)", icon: "M12 8v4l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z" }] as const)
-    : []),
+  // Hidden unless "Developer tools" is on: the latency waterfall is a
+  // debugging tool, not a feature. It used to be gated on import.meta.env.DEV,
+  // which meant no release build could reach a finished, registered view.
+  { id: "timings", title: "Timings", group: "app", tint: "var(--sys-pink)", icon: "M12 8v4l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z" },
   { id: "general", title: "General", group: "settings", tint: "var(--sys-grey)", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" },
   { id: "hotkeys", title: "Hotkeys", group: "settings", tint: "var(--sys-indigo)", icon: "M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" },
   { id: "macros", title: "Voice Macros", group: "settings", tint: "var(--sys-green)", icon: "M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3ZM5 11a7 7 0 0 0 14 0M12 18v4" },
@@ -140,7 +140,14 @@ export default function App() {
     );
   }
 
-  const active = NAV.find((n) => n.id === nav)!;
+  // Timings is the only conditional row. Filtering here rather than at module
+  // scope keeps the pill's index and the sidebar's group divider agreeing with
+  // what is actually rendered.
+  const rows = NAV.filter((n) => n.id !== "timings" || settings.developerTools);
+  // Turning developer tools off while Timings is open would otherwise strand
+  // the shell on a row that is no longer rendered.
+  const current: Nav = rows.some((n) => n.id === nav) ? nav : "notes";
+  const active = rows.find((n) => n.id === current)!;
 
   return (
     <main className="grid h-screen grid-cols-[214px_1fr] box-border">
@@ -153,17 +160,17 @@ export default function App() {
         {/* Sits behind the rows, inset to match the nav's own padding. */}
         <SlidingPill
           target={activeRow}
-          deps={[nav]}
+          deps={[current]}
           className="left-2.5 right-2.5"
         />
 
-        {NAV.map((n, i) => (
+        {rows.map((n, i) => (
           <div key={n.id} className="contents">
-            {n.group === "settings" && NAV[i - 1]?.group === "app" && (
+            {n.group === "settings" && rows[i - 1]?.group === "app" && (
               <div className="my-2 mx-2 h-px bg-separator" />
             )}
             <button
-              ref={nav === n.id ? setActiveRow : undefined}
+              ref={current === n.id ? setActiveRow : undefined}
               onClick={() => setNav(n.id)}
               className={cn(
                 // Colour swaps under the arriving pill rather than with it, so
@@ -171,7 +178,7 @@ export default function App() {
                 "relative flex h-[30px] w-full items-center gap-2.5 rounded-row px-2 text-left text-ui font-medium",
                 "transition-[color,font-weight,background-color] duration-[var(--dur-fast)]",
                 "active:scale-[0.98]",
-                nav === n.id
+                current === n.id
                   ? "font-semibold text-white"
                   : "hover:bg-field",
               )}
@@ -216,10 +223,10 @@ export default function App() {
       {/* Solid canvas: the grouped setting cards need an opaque backdrop for
           their hairline separators to read. */}
       <Materialize
-        index={NAV.findIndex((n) => n.id === nav)}
+        index={rows.findIndex((n) => n.id === current)}
         className="flex flex-col gap-5 overflow-y-auto border-l border-separator bg-canvas px-[30px] pb-9 pt-7"
       >
-        {!isSettings(nav) && (
+        {!isSettings(current) && (
           <PaneTitle title={active.title} />
         )}
 
@@ -230,10 +237,10 @@ export default function App() {
           </p>
         )}
 
-        {nav === "notes" && <NotesView />}
-        {nav === "timings" && <TimingsView />}
-        {isSettings(nav) && <SettingsView section={nav} />}
-        {nav === "status" && (
+        {current === "notes" && <NotesView />}
+        {current === "timings" && <TimingsView />}
+        {isSettings(current) && <SettingsView section={current} />}
+        {current === "status" && (
           <Surface className="p-5">
             <p
               className={cn(

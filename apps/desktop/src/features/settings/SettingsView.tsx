@@ -326,6 +326,18 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                 />
               </Value>
             </Row>
+
+            <Row
+              label="Developer tools"
+              hint="Shows the latency waterfall in the sidebar."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={settings.developerTools ?? false}
+                label="Developer tools"
+                onChange={(c) => update({ developerTools: c })}
+              />
+            </Row>
           </Group>
         </>
       )}
@@ -370,14 +382,17 @@ export function SettingsView({ section }: { section: SettingsSection }) {
           {/* Setup, not the point of the pane — so it sits under the list. The
               connector list names the missing key in its own error when unset. */}
           <Group title="Keys">
-            <Row label="Cerebras key" hint="Understands a spoken command">
+            {/* Gemini first: agent.rs reaches for this key before Cerebras,
+                because Groq's tokens-per-minute limit throttles a multi-round
+                tool loop and Cerebras was rate-limiting mid-command. */}
+            <Row label="Gemini key" hint="Understands a spoken command">
               <Value className="flex-1">
                 <Input
                   type="password"
                   className={rowInput}
-                  placeholder="csk-…"
-                  value={settings.cerebrasApiKey ?? ""}
-                  onChange={(e) => update({ cerebrasApiKey: e.target.value })}
+                  placeholder="AIza…"
+                  value={settings.geminiApiKey ?? ""}
+                  onChange={(e) => update({ geminiApiKey: e.target.value })}
                 />
               </Value>
             </Row>
