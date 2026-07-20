@@ -8,7 +8,6 @@ description = "Agent mode: turn a spoken command into an executed action"
 [dependencies]
 aloud-llm = { path = "../llm" }
 anyhow.workspace = true
-async-trait = "0.1"
 chrono = "0.4"
 futures-util = "0.3"
 iana-time-zone = "0.1"
@@ -20,7 +19,7 @@ serde.workspace = true
 serde_json.workspace = true
 specta.workspace = true
 tracing.workspace = true
-tokio = { version = "1", features = ["time", "process", "macros"] }
+tokio = { version = "1", features = ["time", "macros"] }
 
 [dev-dependencies]
 aloud-store = { path = "../store" }

@@ -42,12 +42,6 @@ impl LocalTranscriber {
                 .map(str::to_string),
         })
     }
-
-    /// Transcribes 16 kHz mono f32 samples. Blocking — callers on an async
-    /// runtime should go through [`Transcriber::transcribe`], which offloads it.
-    pub fn transcribe_samples(&self, samples: &[f32]) -> Result<String> {
-        run_whisper(&self.context, self.language.as_deref(), samples)
-    }
 }
 
 /// The blocking inference itself, free-standing so it can run on the blocking

@@ -5,7 +5,7 @@ import {
   events,
   type Phase,
   type Settings,
-  type Stats,
+  type StatsView,
 } from "./lib/bindings";
 import { NotesView } from "./features/notes/NotesView";
 import {
@@ -13,6 +13,7 @@ import {
   type SettingsSection,
 } from "./features/settings/SettingsView";
 import { Onboarding } from "./features/onboarding/Onboarding";
+import { PaneTitle, Surface } from "@/components/ui/rows";
 import { Materialize, SlidingPill } from "@/components/ui/motion";
 import { TimingsView } from "./features/timings/TimingsView";
 import { cn } from "@/lib/utils";
@@ -39,18 +40,18 @@ const NAV: {
   tint: string;
   group: "app" | "settings";
 }[] = [
-  { id: "notes", title: "Notes", group: "app", tint: "#ff9f0a", icon: "M4 4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4ZM14 2v6h6M8 13h8M8 17h8" },
-  { id: "status", title: "Status", group: "app", tint: "#34c759", icon: "M3 12h4l3 8 4-16 3 8h4" },
+  { id: "notes", title: "Notes", group: "app", tint: "var(--sys-orange)", icon: "M4 4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4ZM14 2v6h6M8 13h8M8 17h8" },
+  { id: "status", title: "Status", group: "app", tint: "var(--sys-green)", icon: "M3 12h4l3 8 4-16 3 8h4" },
   // Dev only: the latency waterfall is a debugging tool, not a feature.
   ...(import.meta.env.DEV
-    ? ([{ id: "timings", title: "Timings", group: "app", tint: "#ff375f", icon: "M12 8v4l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z" }] as const)
+    ? ([{ id: "timings", title: "Timings", group: "app", tint: "var(--sys-pink)", icon: "M12 8v4l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z" }] as const)
     : []),
-  { id: "general", title: "General", group: "settings", tint: "#8e8e93", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" },
-  { id: "hotkeys", title: "Hotkeys", group: "settings", tint: "#5856d6", icon: "M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" },
-  { id: "macros", title: "Voice Macros", group: "settings", tint: "#34c759", icon: "M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3ZM5 11a7 7 0 0 0 14 0M12 18v4" },
-  { id: "rules", title: "App Rules", group: "settings", tint: "#007aff", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM4 9h16M8 6h.01" },
-  { id: "prompts", title: "Prompts", group: "settings", tint: "#ff375f", icon: "M4 4h16v12H7l-3 3V4ZM8 9h8M8 12h5" },
-  { id: "connectors", title: "Connectors", group: "settings", tint: "#64d2ff", icon: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" },
+  { id: "general", title: "General", group: "settings", tint: "var(--sys-grey)", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" },
+  { id: "hotkeys", title: "Hotkeys", group: "settings", tint: "var(--sys-indigo)", icon: "M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" },
+  { id: "macros", title: "Voice Macros", group: "settings", tint: "var(--sys-green)", icon: "M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3ZM5 11a7 7 0 0 0 14 0M12 18v4" },
+  { id: "rules", title: "App Rules", group: "settings", tint: "var(--sys-blue)", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM4 9h16M8 6h.01" },
+  { id: "prompts", title: "Prompts", group: "settings", tint: "var(--sys-pink)", icon: "M4 4h16v12H7l-3 3V4ZM8 9h8M8 12h5" },
+  { id: "connectors", title: "Connectors", group: "settings", tint: "var(--sys-teal)", icon: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" },
 ];
 
 const SETTINGS_IDS: SettingsSection[] = [
@@ -63,16 +64,14 @@ const SETTINGS_IDS: SettingsSection[] = [
 ];
 
 /**
- * Mirrors `Stats::time_saved_seconds` (crates/store/src/stats.rs): typing at
- * 40 wpm minus time actually spent speaking, clamped at zero. Formatted as in
- * voice-dict's MenuBarView: minutes under an hour, tenths of hours above.
+ * Formatting only — the 40 wpm rule and the clamp live in
+ * `Stats::time_saved_seconds`, and arrive as `timeSavedSeconds`. Reimplemented
+ * here, changing the rule in Rust left this window disagreeing with the tray.
+ *
+ * The min/h switchover stays presentation, as in voice-dict's MenuBarView.
  */
-function timeSavedText(stats: Stats): string {
-  const seconds = Math.max(
-    ((stats.totalWords ?? 0) / 40) * 60 - (stats.totalSpokenSeconds ?? 0),
-    0,
-  );
-  const minutes = seconds / 60;
+function timeSavedText(stats: StatsView): string {
+  const minutes = (stats.timeSavedSeconds ?? 0) / 60;
   if (minutes < 60) return `~${Math.round(minutes)} min`;
   return `~${(minutes / 60).toFixed(1)} h`;
 }
@@ -86,7 +85,7 @@ export default function App() {
   // not just the id — the sidebar's group divider makes row pitch uneven.
   const [activeRow, setActiveRow] = useState<HTMLElement | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [stats, setStats] = useState<Stats | null>(null);
+  const [stats, setStats] = useState<StatsView | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [hotkeysReady, setHotkeysReady] = useState(true);
 
@@ -221,9 +220,7 @@ export default function App() {
         className="flex flex-col gap-5 overflow-y-auto border-l border-separator bg-canvas px-[30px] pb-9 pt-7"
       >
         {!isSettings(nav) && (
-          <h1 className="text-2xl font-bold leading-[1.1] tracking-[-0.02em]">
-            {active.title}
-          </h1>
+          <PaneTitle title={active.title} />
         )}
 
         {!hotkeysReady && (
@@ -237,7 +234,7 @@ export default function App() {
         {nav === "timings" && <TimingsView />}
         {isSettings(nav) && <SettingsView section={nav} />}
         {nav === "status" && (
-          <section className="rounded-card border-[0.5px] border-surface-border bg-surface p-5 shadow-card">
+          <Surface className="p-5">
             <p
               className={cn(
                 "text-lg",
@@ -272,7 +269,7 @@ export default function App() {
               Engine:{" "}
               {settings.engine === "cloud" ? "cloud" : "on-device whisper"}
             </p>
-          </section>
+          </Surface>
         )}
       </Materialize>
     </main>

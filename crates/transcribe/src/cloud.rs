@@ -69,29 +69,6 @@ impl CloudTranscriber {
             "json"
         }
     }
-
-    /// Whether the key works, for the onboarding flow.
-    pub async fn validate_key(api_key: &str, base_url: Option<&str>) -> bool {
-        if api_key.trim().is_empty() {
-            return false;
-        }
-        let url = format!(
-            "{}/models",
-            normalize_base_url(base_url.unwrap_or(DEFAULT_BASE_URL))
-        );
-        let Ok(client) = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()
-        else {
-            return false;
-        };
-        client
-            .get(url)
-            .bearer_auth(api_key.trim())
-            .send()
-            .await
-            .is_ok_and(|r| r.status().is_success())
-    }
 }
 
 #[async_trait]

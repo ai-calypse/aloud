@@ -1,0 +1,15 @@
+[package]
+name = "aloud-meeting"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Meeting transcript assembly and note composition"
+
+[dependencies]
+aloud-llm = { path = "../llm" }
+aloud-notes = { path = "../notes" }
+anyhow.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

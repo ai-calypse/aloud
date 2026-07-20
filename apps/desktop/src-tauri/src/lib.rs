@@ -74,17 +74,14 @@ pub fn run() {
 
     let builder = Builder::<tauri::Wry>::new()
         .commands(collect_commands![
-            commands::app_version,
             commands::get_settings,
             commands::update_settings,
             commands::get_stats,
-            commands::get_history,
             commands::search_notes,
             commands::recent_notes,
             commands::input_devices,
             commands::installed_apps,
             commands::hotkeys_permitted,
-            commands::paste_again,
             commands::recent_timings,
             commands::preview_sound,
             commands::launch_at_login,
@@ -422,8 +419,15 @@ pub(crate) fn toggle_meeting(
     settings: &Arc<Mutex<Settings>>,
     meeting: &Arc<Mutex<Option<meeting::Meeting>>>,
 ) {
-    let running = meeting.lock().unwrap().take();
-    match running {
+    // One guard across the whole toggle. Taking the lock, dropping it, and
+    // re-taking it to store the new session let two toggles land in the gap:
+    // the tray fires this on the main thread and the hotkey fires it on the
+    // event-tap thread, so both could see None, both open a recorder, and the
+    // second store would orphan the first with no way to stop it. Nothing here
+    // awaits, so holding the guard costs nothing — `Pipeline::start` already
+    // does it this way, which is why it has never had the same race.
+    let mut slot = meeting.lock().unwrap();
+    match slot.take() {
         Some(session) => {
             // Stop and save off-thread: summarizing is a network round-trip.
             tauri::async_runtime::spawn(async move {
@@ -436,7 +440,7 @@ pub(crate) fn toggle_meeting(
         None => {
             let settings_snapshot = settings.lock().map(|s| s.clone()).unwrap_or_default();
             match meeting::Meeting::start(app.clone(), settings_snapshot) {
-                Ok(session) => *meeting.lock().unwrap() = Some(session),
+                Ok(session) => *slot = Some(session),
                 Err(e) => tracing::error!(%e, "starting meeting failed"),
             }
         }

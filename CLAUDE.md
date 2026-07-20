@@ -19,6 +19,7 @@ crates/
   audio/               mic capture (cpal), resampling
   hotkey/              global hotkeys: CGEventTap / WH_KEYBOARD_LL
   llm/                 OpenAI-compatible chat, prompts, rate limits
+  meeting/             meeting transcript assembly, note composition
   notes/               markdown notes + search, app data paths
   paste/               clipboard snapshot/restore, synthetic paste
   selection/           reading the focused app and its selected text

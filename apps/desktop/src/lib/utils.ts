@@ -60,6 +60,10 @@ const twMerge = extendTailwindMerge({
       "border-color": [
         { border: ["surface-border", "separator", "brand", "keycap-border"] },
       ],
+      // Must stay in step with any `ring-<token>` used in a component: without
+      // it tailwind-merge files ring-brand alongside ring-2 and ring-offset-2
+      // and drops one of the three.
+      "ring-color": [{ ring: ["brand"] }],
       rounded: [{ rounded: ["card", "field", "row", "chip"] }],
       "shadow-color": [{ shadow: ["card", "field", "accent", "knob"] }],
     },

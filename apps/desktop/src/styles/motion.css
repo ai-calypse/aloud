@@ -100,3 +100,24 @@
 .motion-materialize {
   animation: materialize var(--dur-slow) var(--ease-out) both;
 }
+
+/* A highlight sweeping across text while the agent is thinking.
+ *
+ * The gradient is a moving window over the text's own background, clipped to
+ * the glyphs. CSS rather than a JS animation loop: the compositor owns every
+ * frame, and — the reason it changed — the reduced-motion switch above
+ * reaches it. Driven from JS it ran regardless of the user's setting, which
+ * is exactly the case that setting exists for.
+ */
+@keyframes shimmer {
+  from {
+    background-position: 100% center;
+  }
+  to {
+    background-position: 0% center;
+  }
+}
+
+.motion-shimmer {
+  animation: shimmer 2s linear infinite;
+}

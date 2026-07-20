@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
 import { commands, type Settings } from "../../lib/bindings";
 
-// Repeated on every nav button; the "go" button layers onto it.
-const BTN =
-  "rounded-[8px] border-[0.5px] border-surface-border bg-field px-4 py-[0.45rem] disabled:opacity-40";
-const GO =
-  "border-transparent bg-brand font-semibold hover:bg-[color-mix(in_srgb,var(--accent)_80%,white)]";
+import { Button } from "@/components/ui/button";
 
 function Lead({ children }: { children: React.ReactNode }) {
   return <p className="mb-4 leading-[1.55] text-ink-2">{children}</p>;
@@ -150,18 +146,18 @@ export function Onboarding({
 
         <div className="mt-6 flex justify-end gap-2">
           {step > 0 && (
-            <button className={BTN} onClick={() => setStep((s) => s - 1)}>
+            <Button variant="field" size="row" onClick={() => setStep((s) => s - 1)}>
               Back
-            </button>
+            </Button>
           )}
           {isLast ? (
-            <button className={`${BTN} ${GO}`} onClick={finish} disabled={blocked}>
+            <Button variant="accent" size="row" onClick={finish} disabled={blocked}>
               Finish
-            </button>
+            </Button>
           ) : (
-            <button className={`${BTN} ${GO}`} onClick={() => setStep((s) => s + 1)}>
+            <Button variant="accent" size="row" onClick={() => setStep((s) => s + 1)}>
               Next
-            </button>
+            </Button>
           )}
         </div>
       </div>

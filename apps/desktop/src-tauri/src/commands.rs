@@ -4,7 +4,7 @@
 //! resembling logic belongs in a crate where it can be tested.
 
 use crate::AppState;
-use aloud_store::{history::Entry, timings::Span, Settings, Stats};
+use aloud_store::{timings::Span, Settings, Stats};
 use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
@@ -14,12 +14,6 @@ type CmdResult<T> = Result<T, String>;
 
 fn to_string_err<T>(result: anyhow::Result<T>) -> CmdResult<T> {
     result.map_err(|e| format!("{e:#}"))
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
 }
 
 #[tauri::command]
@@ -50,14 +44,30 @@ pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> CmdRes
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_stats(state: State<'_, AppState>) -> Stats {
-    state.pipeline.stats()
+pub fn get_stats(state: State<'_, AppState>) -> StatsView {
+    let stats = state.pipeline.stats();
+    StatsView {
+        time_saved_seconds: stats.time_saved_seconds(),
+        stats,
+    }
 }
 
-#[tauri::command]
-#[specta::specta]
-pub fn get_history(state: State<'_, AppState>, limit: u32) -> CmdResult<Vec<Entry>> {
-    to_string_err(state.pipeline.history(limit as usize))
+/// [`Stats`] plus the values derived from it.
+///
+/// Derived rather than stored: `Stats` is written to disk after every
+/// dictation, and persisting a computed field would let the file disagree
+/// with the formula the moment the formula changed.
+///
+/// It crosses the boundary at all so the frontend does not re-derive it. The
+/// 40 wpm rule lived in both `stats.rs` and `App.tsx`, with the constant
+/// inlined on the TS side — changing it in Rust would have silently left the
+/// main window disagreeing with the tray menu.
+#[derive(serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StatsView {
+    #[serde(flatten)]
+    pub stats: Stats,
+    pub time_saved_seconds: f64,
 }
 
 #[tauri::command]
@@ -107,12 +117,6 @@ pub async fn installed_apps() -> CmdResult<Vec<aloud_selection::InstalledApp>> {
 #[specta::specta]
 pub fn hotkeys_permitted() -> bool {
     aloud_hotkey::is_permitted()
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn paste_again(state: State<'_, AppState>) -> CmdResult<()> {
-    to_string_err(state.pipeline.paste_again())
 }
 
 /// Plays the start chime, so the volume slider can be judged by ear rather

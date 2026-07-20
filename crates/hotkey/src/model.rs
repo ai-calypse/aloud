@@ -31,21 +31,6 @@ pub enum Key {
 }
 
 impl Key {
-    pub const fn is_modifier(self) -> bool {
-        matches!(
-            self,
-            Key::LeftCommand
-                | Key::RightCommand
-                | Key::LeftShift
-                | Key::RightShift
-                | Key::LeftOption
-                | Key::RightOption
-                | Key::LeftControl
-                | Key::RightControl
-                | Key::Fn
-        )
-    }
-
     /// The side-agnostic modifier this key contributes, if any.
     pub const fn logical_modifier(self) -> Option<Modifier> {
         match self {
