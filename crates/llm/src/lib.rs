@@ -6,6 +6,7 @@
 //! the Swift app hit the same Groq endpoint for all four.
 
 pub mod ask;
+pub mod cleanup;
 pub mod cooldown;
 pub mod prompts;
 

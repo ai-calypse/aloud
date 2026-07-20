@@ -22,10 +22,6 @@ const OVERLAY_LINGER: Duration = Duration::from_millis(900);
 /// How long a failure stays up. Long enough to actually read: 900ms was tuned
 /// for "Pasted", and left a rate-limit message unreadable.
 const ERROR_LINGER: Duration = Duration::from_secs(4);
-/// Transcripts this short skip cleanup entirely. Whisper punctuates a short
-/// utterance correctly on its own, and the prompt costs far more than the
-/// words it is fixing.
-const CLEANUP_MIN_WORDS: usize = 3;
 /// Correlates every stage of one dictation. A counter rather than a UUID: it
 /// is only ever read back on this machine, and it sorts by time for free —
 /// which is only true because the store seeds it from disk on open.
@@ -412,7 +408,15 @@ impl Pipeline {
             if !settings.post_processing_enabled || settings.groq_api_key.trim().is_empty() {
                 raw.to_string()
             } else {
-                match self.clean_up(raw, settings).await {
+                let options = aloud_llm::cleanup::Options {
+                    api_key: &settings.groq_api_key,
+                    base_url: &settings.base_url,
+                    model: &settings.post_processing_model,
+                    fallback: Some(settings.fallback_model.as_str()),
+                    custom_prompt: &settings.custom_system_prompt,
+                    vocabulary: &settings.vocabulary,
+                };
+                match aloud_llm::cleanup::clean(options, raw).await {
                     Ok(text) => text,
                     Err(e) => {
                         tracing::warn!(%e, "post-processing failed; pasting raw transcript");
@@ -429,54 +433,6 @@ impl Pipeline {
         } else {
             aloud_store::macros::expand(&cleaned, &settings.macros)
         }
-    }
-
-    async fn clean_up(&self, raw: &str, settings: &Settings) -> Result<String> {
-        // The cleanup prompt is ~1,500 tokens and is spent on every dictation,
-        // against a free-tier budget of 8,000 per minute — about five
-        // dictations before a 429. On "yes", "one sec", "send it" there is
-        // nothing to clean, so skipping those is most of the spend for none of
-        // the benefit.
-        if raw.split_whitespace().count() <= CLEANUP_MIN_WORDS {
-            return Ok(raw.to_string());
-        }
-
-        let client = aloud_llm::LlmClient::new(&settings.groq_api_key, Some(&settings.base_url))?;
-
-        let system = if settings.custom_system_prompt.trim().is_empty() {
-            aloud_llm::prompts::CLEANUP.to_string()
-        } else {
-            settings.custom_system_prompt.clone()
-        };
-
-        let mut user = raw.to_string();
-        if !settings.vocabulary.is_empty() {
-            user = format!("VOCABULARY: {}\n\n{user}", settings.vocabulary.join(", "));
-        }
-
-        let messages = [
-            aloud_llm::Message::system(system),
-            aloud_llm::Message::user(user),
-        ];
-        let cleaned = client
-            .complete_with_fallback(
-                &settings.post_processing_model,
-                Some(settings.fallback_model.as_str()).filter(|f| !f.trim().is_empty()),
-                &messages,
-                Some(0.0), // deterministic: this is cleanup, not writing
-            )
-            .instrument(tracing::info_span!(
-                "cleanup",
-                model = %settings.post_processing_model,
-                words = raw.split_whitespace().count(),
-            ))
-            .await?;
-
-        // The prompt specifies this sentinel for filler-only input.
-        if cleaned.trim() == aloud_llm::EMPTY_SENTINEL {
-            return Ok(String::new());
-        }
-        Ok(cleaned)
     }
 
     /// The configured engine. The local model is cached after first load.
