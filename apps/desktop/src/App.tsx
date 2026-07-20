@@ -13,6 +13,7 @@ import {
   type SettingsSection,
 } from "./features/settings/SettingsView";
 import { Onboarding } from "./features/onboarding/Onboarding";
+import { PaneTitle, Surface } from "@/components/ui/rows";
 import { Materialize, SlidingPill } from "@/components/ui/motion";
 import { TimingsView } from "./features/timings/TimingsView";
 import { cn } from "@/lib/utils";
@@ -221,9 +222,7 @@ export default function App() {
         className="flex flex-col gap-5 overflow-y-auto border-l border-separator bg-canvas px-[30px] pb-9 pt-7"
       >
         {!isSettings(nav) && (
-          <h1 className="text-2xl font-bold leading-[1.1] tracking-[-0.02em]">
-            {active.title}
-          </h1>
+          <PaneTitle title={active.title} />
         )}
 
         {!hotkeysReady && (
@@ -237,7 +236,7 @@ export default function App() {
         {nav === "timings" && <TimingsView />}
         {isSettings(nav) && <SettingsView section={nav} />}
         {nav === "status" && (
-          <section className="rounded-card border-[0.5px] border-surface-border bg-surface p-5 shadow-card">
+          <Surface className="p-5">
             <p
               className={cn(
                 "text-lg",
@@ -272,7 +271,7 @@ export default function App() {
               Engine:{" "}
               {settings.engine === "cloud" ? "cloud" : "on-device whisper"}
             </p>
-          </section>
+          </Surface>
         )}
       </Materialize>
     </main>
