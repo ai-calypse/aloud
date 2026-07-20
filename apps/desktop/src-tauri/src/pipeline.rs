@@ -1023,21 +1023,19 @@ mod tests {
         assert_eq!(user_message(&other), "no microphone found");
     }
 
-    /// An app rule's prompt is a style hint, not a replacement. Replacing the
-    /// base prompt made a "keep it casual" Slack rule silently discard every
-    /// cleanup instruction (punctuation, filler removal, the EMPTY sentinel).
-    #[test]
     /// Only testable since the Accessibility read moved out to the caller —
     /// before that, this function could not run without a focused app.
     #[test]
     fn app_rule_applies_only_to_the_app_it_matches() {
-        let mut settings = Settings::default();
-        settings.post_processing_enabled = true;
-        settings.app_rules = vec![aloud_store::rules::AppRule {
-            app_matches: "slack".into(),
-            post_processing_enabled: Some(false),
-            custom_prompt: String::new(),
-        }];
+        let settings = Settings {
+            post_processing_enabled: true,
+            app_rules: vec![aloud_store::rules::AppRule {
+                app_matches: "slack".into(),
+                post_processing_enabled: Some(false),
+                custom_prompt: String::new(),
+            }],
+            ..Default::default()
+        };
 
         let matched = apply_app_rule(settings.clone(), Some("Slack"));
         assert!(!matched.post_processing_enabled, "the rule must apply");
@@ -1050,6 +1048,9 @@ mod tests {
         assert!(none.post_processing_enabled, "None must not apply a rule");
     }
 
+    /// An app rule's prompt is a style hint, not a replacement. Replacing the
+    /// base prompt made a "keep it casual" Slack rule silently discard every
+    /// cleanup instruction (punctuation, filler removal, the EMPTY sentinel).
     #[test]
     fn app_rule_prompt_appends_to_the_base_instead_of_replacing_it() {
         let hint = "Keep it casual, no punctuation.";
