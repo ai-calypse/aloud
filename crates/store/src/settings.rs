@@ -23,12 +23,8 @@ pub struct Settings {
     // Keys. In the same file as the rest, matching the Swift app.
     pub groq_api_key: String,
     pub composio_api_key: String,
-    /// Cerebras key. Kept for existing installs and as the agent's fallback;
-    /// [`Self::gemini_api_key`] is what agent mode reaches for first.
-    pub cerebras_api_key: String,
     /// Gemini key. Agent tool-call parsing runs here — Groq's tokens-per-minute
-    /// limit is too low for the agent's heavier calls, and Cerebras was
-    /// rate-limiting mid-command.
+    /// limit is too low for the agent's heavier calls.
     pub gemini_api_key: String,
 
     // Transcription
@@ -61,6 +57,10 @@ pub struct Settings {
     pub press_enter_command: bool,
     /// Whether the first-run wizard has been completed. False shows it.
     pub onboarded: bool,
+    /// Reveals the latency waterfall. A debugging tool, not a feature — but it
+    /// was built and then hidden behind a build-time flag, which made it
+    /// unreachable in every release the users actually run.
+    pub developer_tools: bool,
     #[specta(type = specta_typescript::Number)]
     pub history_retention: usize,
 }
@@ -70,7 +70,6 @@ impl Default for Settings {
         Self {
             groq_api_key: String::new(),
             composio_api_key: String::new(),
-            cerebras_api_key: String::new(),
             gemini_api_key: String::new(),
             // Local by default: works with no key and no network.
             engine: aloud_transcribe::Engine::Local,
@@ -93,6 +92,7 @@ impl Default for Settings {
             // A fresh install has not been through the wizard; a migrated one
             // is handled below, since the Swift users are already set up.
             onboarded: false,
+            developer_tools: false,
         }
     }
 }
@@ -165,7 +165,6 @@ impl Settings {
         for (var, field) in [
             ("GROQ_API_KEY", &mut self.groq_api_key),
             ("COMPOSIO_API_KEY", &mut self.composio_api_key),
-            ("CEREBRAS_API_KEY", &mut self.cerebras_api_key),
             ("GEMINI_API_KEY", &mut self.gemini_api_key),
         ] {
             if !field.trim().is_empty() {

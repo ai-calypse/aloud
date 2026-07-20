@@ -48,11 +48,12 @@ unaffected; cloud transcription and LLM cleanup need a new key in settings.
 | Ask panel | ✅ |
 | Command mode | ✅ core flow; no enable toggle or invocation style |
 | Meeting notes | ✅ chunks transcribe serially on stop, not in the background |
-| Onboarding | ✅ 4 steps, vs the Swift wizard's 14; no way to re-run it |
+| Onboarding | ✅ 4 steps, vs the Swift wizard's 14; re-runnable from the tray |
 | Voice macros | ✅ inline expansion (the Swift feature matched whole utterances) |
 | App rules | ✅ matched on app name, where Swift keyed on bundle ID |
 | Agent Mode + Composio | ✅ tool loop lands; API keys have a settings pane |
 | Frontend design system | ✅ tokens, primitives, motion — see below |
+| Menu bar | ✅ history, stats, meeting notes, Re-run Setup…, Settings… |
 
 clippy clean · typecheck clean · 150 Rust tests · 14 frontend tests.
 
@@ -60,7 +61,12 @@ clippy clean · typecheck clean · 150 Rust tests · 14 frontend tests.
 
 Realtime streaming · app context/screenshot · updater (registered but inert —
 no signing pubkey) · signing/notarization · network monitoring and the offline
-fallback · typed ask · menu bar beyond Open/Quit · the Run Log settings pane.
+fallback · typed ask · the Run Log settings pane · hotkey recorder (the UI can
+only author the six modifier-only holds; `Binding::Key` is unreachable) ·
+Instruction Guard · output-language translation · overlay style and display
+picker · prompt test runner.
+
+See [ROADMAP.md](ROADMAP.md) for these broken into phased, sized tasks.
 
 ---
 

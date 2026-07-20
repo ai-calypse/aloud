@@ -4,7 +4,6 @@ import { or } from "../../lib/result";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +18,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { GridRow, Group } from "@/components/ui/rows";
+import { GridRow, Group, Row, Surface, Toggle } from "@/components/ui/rows";
 
 /**
  * Per-app rules, modelled on the Swift app. A rule pins how dictation behaves
@@ -28,17 +27,16 @@ import { GridRow, Group } from "@/components/ui/rows";
  * searchable Command list of installed apps, and the search box doubles as a
  * free-text field so a rule can match any app-name substring, running or not.
  *
- * The two modes map onto the Rust `AppRule` fields:
- *  - Verbatim    → post_processing_enabled: false, custom_prompt: ""
- *  - Style hint  → post_processing_enabled: true,  custom_prompt: <hint>
+ * The two `AppRule` fields are edited independently rather than collapsed into
+ * a mode: a rule that cleans up *without* a style hint is a real combination
+ * the model allows, and a single Verbatim/Style radio made it unreachable.
  */
 
 const isVerbatim = (r: AppRule) => r.post_processing_enabled === false;
 
 function summary(r: AppRule): string {
-  return isVerbatim(r)
-    ? "Verbatim — no LLM cleanup"
-    : `Style: ${r.custom_prompt || "…"}`;
+  if (isVerbatim(r)) return "Verbatim — no LLM cleanup";
+  return r.custom_prompt ? `Style: ${r.custom_prompt}` : "Cleanup, no style hint";
 }
 
 // Starting points, never auto-applied. Mirrors AppRule.suggestions in Swift.
@@ -208,7 +206,9 @@ function RuleDialog({
   }, [open, rule]);
 
   const picked = apps.find((a) => a.name === match);
-  const canSave = match.trim() !== "" && (verbatim || hint.trim() !== "");
+  // Only the app matcher is required. A hint is optional now that cleanup is
+  // its own switch — "clean up, no style hint" is a valid rule.
+  const canSave = match.trim() !== "";
 
   function submit() {
     if (!canSave) return;
@@ -276,29 +276,28 @@ function RuleDialog({
             )}
           </div>
 
-          <div className="flex flex-col gap-2">
-            <Label>Mode</Label>
-            <RadioGroup
-              value={verbatim ? "verbatim" : "style"}
-              onValueChange={(v) => setVerbatim(v === "verbatim")}
+          <Surface className="px-[15px]">
+            <Row
+              label="Clean up with the LLM"
+              hint="Off pastes the raw transcript verbatim."
             >
-              <label className="flex items-center gap-2 text-sm">
-                <RadioGroupItem value="verbatim" />
-                Verbatim (no LLM cleanup)
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <RadioGroupItem value="style" />
-                Style hint
-              </label>
-            </RadioGroup>
-          </div>
+              <Toggle
+                checked={!verbatim}
+                onChange={(on) => setVerbatim(!on)}
+                label="Clean up with the LLM"
+              />
+            </Row>
+          </Surface>
 
           {!verbatim && (
-            <Input
-              placeholder="e.g. Keep the tone casual and brief"
-              value={hint}
-              onChange={(e) => setHint(e.target.value)}
-            />
+            <div className="flex flex-col gap-1.5">
+              <Label>Style hint (optional)</Label>
+              <Input
+                placeholder="e.g. Keep the tone casual and brief"
+                value={hint}
+                onChange={(e) => setHint(e.target.value)}
+              />
+            </div>
           )}
         </div>
 

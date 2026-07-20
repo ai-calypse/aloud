@@ -295,14 +295,8 @@ export type Settings = {
 	groqApiKey?: string,
 	composioApiKey?: string,
 	/**
-	 *  Cerebras key. Kept for existing installs and as the agent's fallback;
-	 *  [`Self::gemini_api_key`] is what agent mode reaches for first.
-	 */
-	cerebrasApiKey?: string,
-	/**
 	 *  Gemini key. Agent tool-call parsing runs here — Groq's tokens-per-minute
-	 *  limit is too low for the agent's heavier calls, and Cerebras was
-	 *  rate-limiting mid-command.
+	 *  limit is too low for the agent's heavier calls.
 	 */
 	geminiApiKey?: string,
 	engine?: Engine,
@@ -332,6 +326,12 @@ export type Settings = {
 	pressEnterCommand?: boolean,
 	/**  Whether the first-run wizard has been completed. False shows it. */
 	onboarded?: boolean,
+	/**
+	 *  Reveals the latency waterfall. A debugging tool, not a feature — but it
+	 *  was built and then hidden behind a build-time flag, which made it
+	 *  unreachable in every release the users actually run.
+	 */
+	developerTools?: boolean,
 	historyRetention?: number,
 };
 
