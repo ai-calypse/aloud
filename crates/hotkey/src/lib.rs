@@ -66,8 +66,8 @@ pub fn is_permitted() -> bool {
 /// released. Escape only cancels — and is only swallowed — while a role is held
 /// or `busy` is set, so Escape keeps working everywhere else.
 ///
-/// `on_event` also receives the modifiers held when the event fired, which is
-/// the only place manual command mode can read them.
+/// `on_event` also receives the modifiers held when the event fired — the only
+/// point at which that key state still exists.
 pub fn listen<F>(
     config: Arc<Mutex<Config>>,
     busy: Arc<std::sync::atomic::AtomicBool>,
@@ -79,6 +79,11 @@ where
 {
     let mut state = State::default();
     let mut recorder = capture::Recorder::default();
+    // Capture swallows every key while armed, key-ups included, so anything the
+    // user was holding when they clicked Record stays `pressed` in the matcher
+    // forever. One phantom modifier fails the exact-match rule on every
+    // modifier-only binding, and the dictate key is dead until relaunch.
+    let mut was_armed = false;
 
     let handler = move |raw: Option<backend::RawEvent>| -> bool {
         // Capture runs ahead of the matcher and swallows everything: recording
@@ -88,9 +93,11 @@ where
         // A key with no `Key` variant — a digit, Return, an arrow — still has
         // to be swallowed while armed, even though it can never be recorded.
         let Some(raw) = raw else {
-            return capture_is_armed(&capture);
+            was_armed |= capture_poison_if_armed(&capture, &mut recorder);
+            return was_armed;
         };
         if capture_event(&capture, &mut recorder, raw.key, raw.down) {
+            was_armed = true;
             return true;
         }
 
@@ -108,14 +115,26 @@ where
             return false;
         };
 
+        // Resync on the armed→disarmed edge, before this event is reduced, and
+        // forward what it tears down: a hold whose key-up capture ate is still
+        // active, and the app is still recording against it.
+        if std::mem::take(&mut was_armed) {
+            let out = state.reduce(Input::Reset, &config);
+            if !out.events.is_empty() {
+                let held = state.modifiers();
+                for event in out.events {
+                    on_event(event, &held);
+                }
+            }
+        }
+
         let outcome = state.reduce(input, &config);
         drop(config);
 
         // Only when something fired: this allocates a set, and it runs on the
         // event tap for every keystroke on the machine, almost none of which
         // produce an event. Read once, after the reduce, so every event from
-        // this input sees the same key state — manual command mode reads the
-        // marker here, and there is no later point at which it still exists.
+        // this input sees the same key state.
         if !outcome.events.is_empty() {
             let held = state.modifiers();
             for event in outcome.events {
@@ -136,10 +155,24 @@ where
     }
 }
 
-/// Whether a recording is in progress, so an unrecordable key is still
-/// swallowed rather than reaching the app underneath.
-fn capture_is_armed(capture: &CaptureSlot) -> bool {
-    capture.lock().map(|s| s.is_some()).unwrap_or(false)
+/// Discards the in-flight gesture when a key that cannot be recorded arrives,
+/// and reports whether it was swallowed.
+///
+/// The failure this prevents: `key_from_keycode` has no mapping for digits,
+/// Return, Tab or punctuation, so recording Cmd+Return dropped the Return and
+/// still committed on the Command key-up — binding a bare "hold Command",
+/// which then fires a dictation on every plain Cmd press. Poisoning the
+/// gesture means nothing commits and the row keeps asking.
+fn capture_poison_if_armed(capture: &CaptureSlot, recorder: &mut capture::Recorder) -> bool {
+    let Ok(slot) = capture.lock() else {
+        tracing::error!("hotkey capture lock poisoned");
+        return false;
+    };
+    if slot.is_none() {
+        return false;
+    }
+    recorder.reset();
+    true
 }
 
 /// Feeds one raw event to the capture recorder while capture is armed.
@@ -165,6 +198,20 @@ fn capture_event(
         return false;
     }
 
+    // Escape is the bail-out, not a recordable key. Two problems, one guard:
+    // capture swallows the whole keyboard while armed — Cmd+Tab and Cmd+Q
+    // included — so without this the only ways out are the mouse and a
+    // ten-second timeout; and the matcher handles Escape ahead of all binding
+    // matching, so a binding containing it cancels its own session on the first
+    // auto-repeat and can never fire. Keyed on the key-down alone, which also
+    // blocks Cmd+Escape — equally broken, since that branch ignores modifiers.
+    if down && key == model::Key::Escape {
+        recorder.reset();
+        // Dropping the sender is what wakes `capture_hotkey` with None.
+        *slot = None;
+        return true;
+    }
+
     if down {
         recorder.key_down(key);
         return true;
@@ -177,4 +224,63 @@ fn capture_event(
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use model::Key;
+
+    fn armed() -> (CaptureSlot, std::sync::mpsc::Receiver<Binding>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        (Arc::new(Mutex::new(Some(Capture { id: 0, tx }))), rx)
+    }
+
+    /// The failure: while capture is armed every key is swallowed, so Escape
+    /// recorded *as a binding* instead of cancelling — and there was no
+    /// keyboard way out at all, since Cmd+Tab and Cmd+Q are swallowed too.
+    /// An Escape binding could never fire anyway: the matcher handles Escape
+    /// ahead of all binding matching, so it cancels its own session.
+    #[test]
+    fn escape_cancels_capture_instead_of_recording() {
+        let (capture, rx) = armed();
+        let mut recorder = capture::Recorder::default();
+
+        assert!(capture_event(&capture, &mut recorder, Key::Escape, true));
+        assert!(
+            capture.lock().unwrap().is_none(),
+            "Escape must disarm the capture"
+        );
+        assert!(
+            matches!(
+                rx.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Disconnected)
+            ),
+            "the dropped sender is what wakes capture_hotkey with None"
+        );
+    }
+
+    /// The failure: `key_from_keycode` has no variant for Return, so recording
+    /// Cmd+Return dropped the Return and still committed on the Command
+    /// key-up — silently binding "hold Command", which then fires a dictation
+    /// on every plain Cmd press.
+    #[test]
+    fn an_unrecordable_key_commits_nothing() {
+        let (capture, rx) = armed();
+        let mut recorder = capture::Recorder::default();
+
+        capture_event(&capture, &mut recorder, Key::LeftCommand, true);
+        // Return has no `Key`, so it arrives as None and poisons the gesture.
+        assert!(capture_poison_if_armed(&capture, &mut recorder));
+        capture_event(&capture, &mut recorder, Key::LeftCommand, false);
+
+        assert!(
+            rx.try_recv().is_err(),
+            "a gesture containing an unrecordable key must bind nothing"
+        );
+        assert!(
+            capture.lock().unwrap().is_some(),
+            "and the row keeps asking rather than committing garbage"
+        );
+    }
 }

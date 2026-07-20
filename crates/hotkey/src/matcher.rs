@@ -39,6 +39,20 @@ pub struct State {
     /// exactly when the slow part begins, and a Toggle recording is never in
     /// `active` at all.
     busy: bool,
+    /// Roles Escape cancelled whose keys are still physically down.
+    ///
+    /// Clearing `active` is not enough on its own: the binding is still
+    /// satisfied, so the very next event re-derives it and starts a second
+    /// recording. The gesture that hits this is the obvious one — keep holding
+    /// the dictate key, tap Escape to abort.
+    suppressed: BTreeSet<Role>,
+    /// Key-downs that were swallowed, so the matching key-up is swallowed too.
+    ///
+    /// The halves are not symmetric on their own: for a Cmd+D binding the Cmd
+    /// key-down passes through (nothing is armed yet) while its key-up is
+    /// swallowed (the binding is armed by then), leaving the focused app
+    /// holding a Command it never saw released.
+    consumed: BTreeSet<Key>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +87,9 @@ impl State {
             Input::Reset => {
                 self.pressed.clear();
                 self.fired.clear();
+                // A key held when the tap desynced would otherwise leave an
+                // entry here that swallows some unrelated later key-up.
+                self.consumed.clear();
                 let events = self.sync_active(config);
                 Outcome {
                     events,
@@ -88,7 +105,12 @@ impl State {
                     let events = std::iter::once(Event::Cancelled)
                         .chain(self.active.iter().copied().map(Event::Deactivated))
                         .collect();
-                    self.active.clear();
+                    // Moved rather than cleared: the keys are still down, so
+                    // these roles must stay suppressed until a real release.
+                    self.suppressed.append(&mut self.active);
+                    // The Escape key-up has to be swallowed too, or the app
+                    // below sees an Escape it never saw pressed.
+                    self.consumed.insert(key);
                     return Outcome {
                         events,
                         consume: Consume::Yes,
@@ -107,14 +129,23 @@ impl State {
                 let armed_after = self.relevant(key, config);
 
                 let events = self.sync_active(config);
-                Outcome {
-                    events,
-                    consume: if armed_before || armed_after {
+                // A key-up is swallowed if and only if its key-down was, so
+                // every modifier the app saw pressed is one it also sees
+                // released. A key-up with no recorded key-down (the tap
+                // started mid-press) passes through, which is correct.
+                let consume = if down {
+                    if armed_before || armed_after {
+                        self.consumed.insert(key);
                         Consume::Yes
                     } else {
                         Consume::No
-                    },
-                }
+                    }
+                } else if self.consumed.remove(&key) {
+                    Consume::Yes
+                } else {
+                    Consume::No
+                };
+                Outcome { events, consume }
             }
         }
     }
@@ -128,8 +159,14 @@ impl State {
         let mut activated: Vec<(Role, usize)> = Vec::new();
         let mut deactivated: Vec<(Role, usize)> = Vec::new();
 
-        for (role, binding) in config.roles() {
-            let now = self.binding_is_active(binding, config.permitted_extra);
+        // Every role, not just the bound ones. A role whose binding was cleared
+        // mid-hold is absent from `config.roles()`, so it was never visited and
+        // never deactivated: the recording stayed active with nothing left to
+        // stop it, the mic stayed open, and rebinding left the role one edge
+        // out of phase forever.
+        for role in Role::ALL {
+            let binding = config.binding(role);
+            let now = self.binding_is_active(binding);
 
             if role.is_one_shot() {
                 // Fire on the leading edge only; no deactivation edge. `fired`
@@ -148,6 +185,10 @@ impl State {
             }
 
             match (self.active.contains(&role), now) {
+                // Escape cancelled this role and its key is still down. Stay
+                // out until the binding actually goes inactive, or the Escape
+                // key-up alone starts a second recording.
+                (false, true) if self.suppressed.contains(&role) => {}
                 (false, true) => {
                     activated.push((role, binding.specificity()));
                     self.active.insert(role);
@@ -155,6 +196,11 @@ impl State {
                 (true, false) => {
                     deactivated.push((role, binding.specificity()));
                     self.active.remove(&role);
+                }
+                // The real release: re-arm. This is the only arm a suppressed
+                // role can reach, so clearing anywhere else would latch it.
+                (false, false) => {
+                    self.suppressed.remove(&role);
                 }
                 _ => {}
             }
@@ -170,7 +216,7 @@ impl State {
             .collect()
     }
 
-    fn binding_is_active(&self, binding: &Binding, permitted_extra: Option<Modifier>) -> bool {
+    fn binding_is_active(&self, binding: &Binding) -> bool {
         let Some(key) = binding.key() else {
             return false;
         };
@@ -185,20 +231,22 @@ impl State {
         // tolerated for plain-key bindings; a modifier-only binding demands an
         // exact match, so Right Option alone fires but Cmd+Right Option does
         // not — otherwise every Cmd chord would start dictation.
-        //
-        // `permitted_extra` is the one exception, and it is why manual command
-        // mode works: that modifier is a message to us, not a different chord.
         match binding {
             Binding::ModifierKey { .. } => {
                 let extra: Modifiers = held
                     .difference(&required)
                     .copied()
                     .filter(|m| Some(*m) != key.logical_modifier())
-                    .filter(|m| Some(*m) != permitted_extra)
                     .collect();
                 required.is_subset(&held) && extra.is_empty()
             }
-            _ => required.is_subset(&held),
+            // A plain key that requires no modifier is a bare keystroke, and
+            // tolerating extras there swallows every chord containing it — a
+            // Space binding would eat Cmd+Space before Spotlight saw it. Where
+            // the binding does require a modifier, extras still pass, so
+            // Cmd+Shift+D can activate a Cmd+D binding and the specificity
+            // ordering above resolves the two.
+            _ => required.is_subset(&held) && (!required.is_empty() || held.is_empty()),
         }
     }
 
@@ -207,14 +255,14 @@ impl State {
     fn relevant(&self, key: Key, config: &Config) -> bool {
         config.roles().any(|(_, binding)| {
             if binding.key() == Some(key) {
-                return self.binding_is_active(binding, config.permitted_extra);
+                return self.binding_is_active(binding);
             }
             // A modifier that a binding requires is only swallowed while that
             // binding is actually firing.
             match key.logical_modifier() {
                 Some(m) => {
                     binding.modifiers().is_some_and(|mods| mods.contains(&m))
-                        && self.binding_is_active(binding, config.permitted_extra)
+                        && self.binding_is_active(binding)
                 }
                 None => false,
             }
@@ -249,65 +297,6 @@ mod tests {
             }),
             ..Default::default()
         }
-    }
-
-    /// The failure this guards: manual command mode marks a rewrite by holding
-    /// an extra modifier with the dictate key. The exact-match rule for
-    /// modifier-only bindings rejects any extra, so without `permitted_extra`
-    /// the gesture fires *nothing* — not a rewrite, not even a dictation — and
-    /// the user sees the hotkey simply stop working whenever they hold Option.
-    /// The marker has to be a *different* logical modifier from the binding's
-    /// own, or the test proves nothing: Left and Right Option both reduce to
-    /// `Modifier::Option`, which the exact-match rule already excludes as the
-    /// binding's own modifier. Cmd is genuinely extra.
-    #[test]
-    fn a_permitted_extra_modifier_does_not_block_a_modifier_only_hold() {
-        let mut config = hold_right_option();
-        config.permitted_extra = Some(Modifier::Command);
-        let mut state = State::default();
-
-        state.reduce(Input::KeyDown(Key::LeftCommand), &config);
-        let outcome = state.reduce(Input::KeyDown(Key::RightOption), &config);
-
-        assert_eq!(
-            outcome.events,
-            vec![Event::Activated(Role::Hold)],
-            "the marker modifier must not suppress the binding"
-        );
-    }
-
-    /// The tolerance is for one named modifier only. Anything else must still
-    /// be rejected, or every chord in every app would start a dictation.
-    #[test]
-    fn an_unpermitted_extra_modifier_still_blocks_a_modifier_only_hold() {
-        let mut config = hold_right_option();
-        config.permitted_extra = Some(Modifier::Command);
-        let mut state = State::default();
-
-        state.reduce(Input::KeyDown(Key::LeftShift), &config);
-        let outcome = state.reduce(Input::KeyDown(Key::RightOption), &config);
-
-        assert!(
-            outcome.events.is_empty(),
-            "Shift is not the marker, so Shift+Right Option must stay inert"
-        );
-    }
-
-    /// With no marker configured — automatic mode, or command mode off — the
-    /// same chord that fires above must go back to being inert.
-    #[test]
-    fn without_a_permitted_extra_the_exact_match_rule_is_unchanged() {
-        let config = hold_right_option();
-        assert_eq!(config.permitted_extra, None);
-        let mut state = State::default();
-
-        state.reduce(Input::KeyDown(Key::LeftCommand), &config);
-        let outcome = state.reduce(Input::KeyDown(Key::RightOption), &config);
-
-        assert!(
-            outcome.events.is_empty(),
-            "Cmd+Right Option fires only because the marker permits it"
-        );
     }
 
     #[test]
@@ -553,5 +542,133 @@ mod tests {
         let out = state.reduce(Input::KeyDown(Key::RightOption), &Config::default());
         assert!(out.events.is_empty());
         assert_eq!(out.consume, Consume::No);
+    }
+
+    /// The bug: `active` was cleared but `pressed` was not, and the early
+    /// return skipped `sync_active`. The dictate key was still physically
+    /// down, so the Escape *key-up* re-derived it and started a second
+    /// recording — which then dictated on release. The user's cancel produced
+    /// a cancel plus an utterance they never asked for.
+    #[test]
+    fn escape_does_not_restart_while_the_hold_key_is_still_down() {
+        let config = hold_right_option();
+        let mut state = State::default();
+        state.reduce(Input::KeyDown(Key::RightOption), &config);
+        state.reduce(Input::KeyDown(Key::Escape), &config);
+
+        let esc_up = state.reduce(Input::KeyUp(Key::Escape), &config);
+        assert!(esc_up.events.is_empty(), "cancel must not start a session");
+
+        let opt_up = state.reduce(Input::KeyUp(Key::RightOption), &config);
+        assert!(opt_up.events.is_empty(), "and the release must not dictate");
+
+        // A real release re-arms: cancelling must not disable the key.
+        let again = state.reduce(Input::KeyDown(Key::RightOption), &config);
+        assert_eq!(again.events, vec![Event::Activated(Role::Hold)]);
+    }
+
+    /// The bug: `sync_active` iterated only *bound* roles, so clearing a
+    /// binding mid-hold meant the role was never visited again. It stayed
+    /// active with nothing left to stop it — the mic ran until relaunch — and
+    /// rebinding left it one edge out of phase.
+    #[test]
+    fn clearing_a_binding_mid_hold_still_deactivates() {
+        let config = hold_right_option();
+        let mut state = State::default();
+        state.reduce(Input::KeyDown(Key::RightOption), &config);
+
+        let cleared = Config {
+            hold: Some(Binding::Disabled),
+            ..Default::default()
+        };
+        let up = state.reduce(Input::KeyUp(Key::RightOption), &cleared);
+        assert_eq!(up.events, vec![Event::Deactivated(Role::Hold)]);
+        assert!(!state.is_active(Role::Hold));
+
+        // ...and rebinding is back in phase rather than one edge behind.
+        let re = state.reduce(Input::KeyDown(Key::RightOption), &config);
+        assert_eq!(re.events, vec![Event::Activated(Role::Hold)]);
+    }
+
+    /// The bug: an empty `required` set made the subset test vacuously true, so
+    /// a bare-key binding matched every chord containing it *and* swallowed it.
+    /// Recording Space meant Cmd+Space no longer reached Spotlight — and a
+    /// single tap of a letter during recording is exactly what commits one.
+    #[test]
+    fn a_bare_key_binding_ignores_chords() {
+        let config = Config {
+            hold: Some(Binding::Key {
+                key: Key::Space,
+                modifiers: Modifiers::new(),
+            }),
+            ..Default::default()
+        };
+        let mut state = State::default();
+        state.reduce(Input::KeyDown(Key::LeftCommand), &config);
+
+        let out = state.reduce(Input::KeyDown(Key::Space), &config);
+        assert!(out.events.is_empty(), "Cmd+Space must not start dictation");
+        assert_eq!(
+            out.consume,
+            Consume::No,
+            "and Spotlight must still see Cmd+Space"
+        );
+    }
+
+    /// The bug: for a Cmd+D binding the Cmd key-down passed through (nothing
+    /// was armed yet) while its key-up was swallowed (the binding was armed by
+    /// then). The focused app was left holding a Command it never saw released.
+    #[test]
+    fn a_modifier_the_app_saw_pressed_is_not_swallowed_on_release() {
+        let config = hold_cmd_d();
+        let mut state = State::default();
+
+        let cmd_down = state.reduce(Input::KeyDown(Key::LeftCommand), &config);
+        assert_eq!(cmd_down.consume, Consume::No, "the app saw Command pressed");
+        state.reduce(Input::KeyDown(Key::Char('d')), &config);
+
+        let cmd_up = state.reduce(Input::KeyUp(Key::LeftCommand), &config);
+        assert_eq!(cmd_up.events, vec![Event::Deactivated(Role::Hold)]);
+        assert_eq!(
+            cmd_up.consume,
+            Consume::No,
+            "...so it must also see Command released"
+        );
+
+        let d_up = state.reduce(Input::KeyUp(Key::Char('d')), &config);
+        assert_eq!(
+            d_up.consume,
+            Consume::Yes,
+            "d's key-down was swallowed, so its key-up must be too"
+        );
+    }
+
+    /// The bug: capture swallows every key while armed, so a modifier held when
+    /// the user clicked Record never delivered its key-up to the matcher. The
+    /// phantom key then failed the exact-match rule on every modifier-only
+    /// binding, and the dictate key was dead until relaunch. `Reset` is the
+    /// resync, and before this it was constructed nowhere outside a test.
+    #[test]
+    fn reset_clears_a_key_capture_swallowed() {
+        let config = hold_right_option();
+        let mut state = State::default();
+        state.reduce(Input::KeyDown(Key::LeftShift), &config); // key-up never arrives
+        assert!(
+            state
+                .reduce(Input::KeyDown(Key::RightOption), &config)
+                .events
+                .is_empty(),
+            "the phantom Shift blocks the binding"
+        );
+        state.reduce(Input::KeyUp(Key::RightOption), &config);
+
+        state.reduce(Input::Reset, &config);
+        assert_eq!(
+            state
+                .reduce(Input::KeyDown(Key::RightOption), &config)
+                .events,
+            vec![Event::Activated(Role::Hold)],
+            "a resync must bring the dictate key back"
+        );
     }
 }

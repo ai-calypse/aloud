@@ -57,6 +57,15 @@ pub fn key_from_keycode(code: i64) -> Option<Key> {
         109 => Key::F(10),
         103 => Key::F(11),
         111 => Key::F(12),
+        // These are physical positions, not legends: keycode 12 is the key at
+        // US-QWERTY's Q, which AZERTY labels A. Bindings still fire on the key
+        // the user actually pressed — only the settings keycap prints the US
+        // letter. Windows differs: its VK codes are layout-mapped, so `Char`
+        // there follows the legend.
+        // ponytail: fixed US table — the upgrade is UCKeyTranslate against the
+        // current TIS layout, which must run on the main thread and be cached
+        // (TIS/TSM aborts the process off the main queue) and re-read on layout
+        // change. Not worth it for a keycap letter.
         0 => Key::Char('a'),
         11 => Key::Char('b'),
         8 => Key::Char('c'),

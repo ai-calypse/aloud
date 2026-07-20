@@ -207,11 +207,14 @@ mod tests {
         r.key_down(Key::RightOption);
         r.key_up(Key::RightOption);
 
-        r.key_down(Key::Escape);
+        // Any key that stays recordable — Escape is intercepted as the capture
+        // bail-out before it ever reaches the recorder. The subject here is
+        // reuse across gestures, not which keys are legal.
+        r.key_down(Key::F(5));
         assert_eq!(
-            r.key_up(Key::Escape),
+            r.key_up(Key::F(5)),
             Some(Binding::Key {
-                key: Key::Escape,
+                key: Key::F(5),
                 modifiers: Modifiers::new(),
             })
         );

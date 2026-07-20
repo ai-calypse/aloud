@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { commands, type AudioDevice, type Settings } from "../../lib/bindings";
 import { or } from "../../lib/result";
 import { HotkeyEditor } from "./HotkeyEditor";
@@ -46,6 +46,12 @@ export type SettingsSection =
  */
 export function SettingsView({ section }: { section: SettingsSection }) {
   const [settings, setSettings] = useState<Settings | null>(null);
+  // Long-lived closures call `update` from an older render: a hotkey capture
+  // waits up to ten seconds, and everything on this pane stays clickable
+  // throughout. Spreading that render's `settings` silently reverted anything
+  // changed by mouse in the meantime.
+  const live = useRef(settings);
+  live.current = settings;
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [saved, setSaved] = useState(false);
   // Owned by the OS (a login item / registry key), not settings.json, so it is
@@ -88,7 +94,9 @@ export function SettingsView({ section }: { section: SettingsSection }) {
 
   /** Applies one field and persists immediately — no Save button to forget. */
   async function update(patch: Partial<Settings>) {
-    const next = { ...settings!, ...patch };
+    const next = { ...live.current!, ...patch };
+    // Written here too, so two updates in one React batch cannot lose a field.
+    live.current = next;
     setSettings(next);
 
     const result = await commands.updateSettings(next);
@@ -457,7 +465,7 @@ export function SettingsView({ section }: { section: SettingsSection }) {
         <>
           <PaneTitle
             title="Hotkeys"
-            subtitle="Two roles on the same key will clash — give each its own."
+            subtitle="Two roles on the same key both fire — give each its own. Escape cancels a recording."
           />
           <HotkeyEditor
             config={hotkeys}

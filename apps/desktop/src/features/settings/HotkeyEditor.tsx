@@ -40,12 +40,17 @@ const ROLES: { key: keyof Config; label: string; mode: string; hint: string }[] 
 const DISABLED: Binding = { kind: "disabled" };
 
 /**
- * Whether another role is bound to the same gesture.
+ * Whether another role's gesture overlaps this one.
  *
- * Advisory only — `matcher.rs` orders simultaneous activations by specificity,
- * so a clash is resolved rather than broken. But two roles on one key is almost
- * always a mistake, and silently letting the more specific one win is how you
- * end up with a hotkey that "stopped working".
+ * Advisory only — nothing stops the save. But note that ordering is not
+ * exclusion: `matcher.rs` sorts simultaneous activations by specificity and
+ * then fires *all* of them, so two roles on one key both start against the
+ * same recording and the extra stop paths silently no-op on `take_recorder`.
+ *
+ * Overlap, not equality, is the test: `binding_is_active` matches a Cmd+D
+ * binding while Cmd+Shift+D is held, so those two clash even though the
+ * gestures differ. The `kind` guard came out for the same reason — the two
+ * kinds can share a physical key.
  */
 function conflictsWith(config: Config, role: keyof Config): boolean {
   const mine = config[role];
@@ -55,9 +60,9 @@ function conflictsWith(config: Config, role: keyof Config): boolean {
     const theirs = config[other.key];
     if (!theirs || theirs.kind === "disabled") return false;
     return (
-      theirs.kind === mine.kind &&
       sameKey(theirs.key, mine.key) &&
-      sameModifiers(theirs.modifiers, mine.modifiers)
+      (isSubset(theirs.modifiers, mine.modifiers) ||
+        isSubset(mine.modifiers, theirs.modifiers))
     );
   });
 }
@@ -70,8 +75,8 @@ function sameKey(a: Key, b: Key): boolean {
   return false;
 }
 
-function sameModifiers(a: Modifier[], b: Modifier[]): boolean {
-  return a.length === b.length && a.every((m) => b.includes(m));
+function isSubset(a: Modifier[], b: Modifier[]): boolean {
+  return a.every((m) => b.includes(m));
 }
 
 export function HotkeyEditor({
@@ -142,7 +147,8 @@ export function HotkeyEditor({
             <span className="text-hint text-ink-2">
               {clash ? (
                 <span className="text-warning">
-                  Same key as another role — the more specific one wins
+                  Same key as another role — both fire, and only one gets the
+                  recording
                 </span>
               ) : (
                 role.hint
