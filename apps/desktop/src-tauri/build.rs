@@ -13,7 +13,31 @@ fn main() {
         println!("cargo:rustc-link-lib=static=clang_rt.osx");
     }
 
+    // Build stamp for the About row, so a bug report names the exact build.
+    // Both fall back rather than fail: a release tarball has no `.git`, and a
+    // build that dies because `git` is missing would be a worse outcome than
+    // an unknown hash.
+    // ponytail: tauri-build emits its own rerun-if-changed rules, which stop
+    // cargo from re-running this on every source change — so the hash can lag
+    // a commit until something in `src-tauri` forces a rebuild. `touch
+    // build.rs` is the workaround; a `.git/HEAD` rerun rule is the fix.
+    println!("cargo:rustc-env=GIT_HASH={}", git_hash());
+    println!(
+        "cargo:rustc-env=BUILD_DATE={}",
+        chrono::Utc::now().format("%Y-%m-%d")
+    );
+
     tauri_build::build()
+}
+
+fn git_hash() -> String {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map_or_else(|| "unknown".into(), |hash| hash.trim().to_string())
 }
 
 /// The directory holding `libclang_rt.osx.a`, from `clang -print-runtime-dir`.

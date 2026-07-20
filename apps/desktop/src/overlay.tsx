@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { events, type Phase } from "./lib/bindings";
+import { events, type OverlayStyle, type Phase } from "./lib/bindings";
 import "./styles/overlay.css";
 
 const LABEL: Record<Phase, string> = {
@@ -54,9 +54,16 @@ function Overlay() {
   // real app there is no query string, so this is idle until Rust drives it.
   const preview = new URLSearchParams(location.search).get("phase") as Phase | null;
   const [phase, setPhase] = useState<Phase>(preview ?? "idle");
+  // Rust picks the style and pushes it on every show — including the swap back
+  // to the pill for an error, which no wing is wide enough to show.
+  const [style, setStyle] = useState<OverlayStyle>(
+    (new URLSearchParams(location.search).get("style") as OverlayStyle) ?? "pill",
+  );
   const [error, setError] = useState<string | null>(null);
   const [download, setDownload] = useState<number | null>(null);
-  const bars = useRef<HTMLSpanElement>(null);
+  // The root, not the bar row: --level inherits, so the wings style can draw
+  // two waves off one write.
+  const root = useRef<HTMLDivElement>(null);
 
   // Levels land every 50ms. Writing --level straight onto the node keeps them
   // out of React entirely: at 20 renders a second the pill would rebuild its
@@ -65,7 +72,7 @@ function Overlay() {
   useEffect(() => {
     const unlisten = events.audioLevel.listen((e) => {
       const level = Math.min(1, Math.max(0, e.payload ?? 0));
-      bars.current?.style.setProperty("--level", String(level));
+      root.current?.style.setProperty("--level", String(level));
     });
     return () => {
       unlisten.then((off) => off());
@@ -81,6 +88,7 @@ function Overlay() {
       }
     });
     const unlistenError = events.overlayError.listen((e) => setError(e.payload));
+    const unlistenStyle = events.overlayStyle.listen((e) => setStyle(e.payload));
     // First use of the local engine fetches ~150MB; without this the pill sits
     // on "Transcribing…" for minutes and the app looks hung.
     const unlistenDownload = events.modelDownload.listen((e) =>
@@ -89,6 +97,7 @@ function Overlay() {
     return () => {
       unlistenPhase.then((off) => off());
       unlistenError.then((off) => off());
+      unlistenStyle.then((off) => off());
       unlistenDownload.then((off) => off());
     };
   }, []);
@@ -101,7 +110,7 @@ function Overlay() {
         : LABEL[phase];
 
   return (
-    <div className="overlay-root">
+    <div className="overlay-root" ref={root}>
     {/* Refraction filter: turbulence drives a displacement map that warps the
         glass highlight layer. WebKit renders this on an element's own content
         (unlike backdrop-filter: url(), which Safari does not support), so it
@@ -125,34 +134,46 @@ function Overlay() {
         />
       </filter>
     </svg>
+    {style === "wings" ? (
+      // Two tabs flanking the notch, the way voice-dict's compact overlay
+      // does. Symmetric on purpose: Rust cannot measure the notch, so the pair
+      // reads as deliberate on a screen that has none.
+      <div className={`wings wings--${phase}`}>
+        <span className="wing">
+          <Indicator phase={phase} />
+        </span>
+        <span className="wing">
+          <Indicator phase={phase} />
+        </span>
+      </div>
+    ) : (
     <div className={`pill pill--${phase}`}>
       {/* Warped glass highlight sitting over the real backdrop blur. */}
       <span className="pill__refraction" aria-hidden />
-      {phase === "recording" ? (
-        // A continuous wave the voice scales rather than drives. CSS owns the
-        // motion; these two custom properties only give each bar its place in
-        // the row and its height ceiling.
-        <span className="bars" ref={bars} aria-hidden>
-          {BAR_PEAKS.map((peak, i) => (
-            <i
-              key={i}
-              style={
-                {
-                  "--i": i,
-                  "--peak": peak,
-                } as React.CSSProperties
-              }
-            />
-          ))}
-        </span>
-      ) : (
-        <span className={`dot dot--${phase}`} aria-hidden />
-      )}
+      <Indicator phase={phase} />
       <span className="label" title={error ?? undefined}>
         {label}
       </span>
     </div>
+    )}
     </div>
+  );
+}
+
+/** The wave while recording, a status dot otherwise. Shared by both styles. */
+function Indicator({ phase }: { phase: Phase }) {
+  if (phase !== "recording") {
+    return <span className={`dot dot--${phase}`} aria-hidden />;
+  }
+  // A continuous wave the voice scales rather than drives. CSS owns the
+  // motion; these two custom properties only give each bar its place in the
+  // row and its height ceiling.
+  return (
+    <span className="bars" aria-hidden>
+      {BAR_PEAKS.map((peak, i) => (
+        <i key={i} style={{ "--i": i, "--peak": peak } as React.CSSProperties} />
+      ))}
+    </span>
   );
 }
 

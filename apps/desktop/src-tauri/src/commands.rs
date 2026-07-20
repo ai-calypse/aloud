@@ -194,12 +194,69 @@ pub async fn installed_apps() -> CmdResult<Vec<aloud_selection::InstalledApp>> {
         .map_err(|e| format!("listing installed apps: {e}"))
 }
 
+/// Monitor names, to fill the overlay's "Show on" picker.
+///
+/// Unnamed monitors are dropped rather than given a placeholder: the setting
+/// stores a name, so an entry with no name could never be matched back to a
+/// screen and would be a row that silently does nothing.
+#[tauri::command]
+#[specta::specta]
+pub fn overlay_displays(app: AppHandle) -> CmdResult<Vec<String>> {
+    Ok(app
+        .available_monitors()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter_map(|m| m.name().cloned())
+        .collect())
+}
+
 /// Whether the OS lets us listen for keys. False on macOS until the user
 /// grants Accessibility permission.
 #[tauri::command]
 #[specta::specta]
 pub fn hotkeys_permitted() -> bool {
     aloud_hotkey::is_permitted()
+}
+
+/// Every OS permission the app needs, with its current answer. Empty off
+/// macOS, which the Permissions card reads as "nothing to show".
+///
+/// One command for all of them rather than one per permission: the card asks
+/// for the whole set every time it refreshes, and three round-trips to answer
+/// one question is three chances for the rows to disagree.
+#[tauri::command]
+#[specta::specta]
+pub fn permissions() -> Vec<aloud_permissions::PermissionStatus> {
+    aloud_permissions::all()
+}
+
+/// Opens the System Settings pane that grants `permission`.
+#[tauri::command]
+#[specta::specta]
+pub fn open_permission_settings(permission: aloud_permissions::Permission) -> CmdResult<()> {
+    to_string_err(aloud_permissions::open_settings(permission))
+}
+
+/// Version, commit and build date, for pasting into a bug report.
+///
+/// The commit and the date are baked in by `build.rs`; a build from a tarball
+/// with no `.git` reports "unknown" rather than failing to compile.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildInfo {
+    pub version: String,
+    pub commit: String,
+    pub date: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn build_info() -> BuildInfo {
+    BuildInfo {
+        version: env!("CARGO_PKG_VERSION").into(),
+        commit: env!("GIT_HASH").into(),
+        date: env!("BUILD_DATE").into(),
+    }
 }
 
 /// Plays the start chime, so the volume slider can be judged by ear rather

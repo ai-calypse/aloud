@@ -425,23 +425,28 @@ which matters more now, because a user with no key field has no way to fix it.
 
 ### 7.1 — Overlay style choice · L
 - **Scope** — minimalist menu-bar wings vs the current drop-down pill. Aloud's
-  overlay is fixed bottom-centre by decision (`PROGRESS.md:96`), because no
-  cross-platform API finds a notch. The wings style is macOS-only; scope it
+  overlay is fixed top-centre of the focused monitor by decision
+  (`PROGRESS.md:101`), because no cross-platform API finds a notch — it has
+  never been bottom-centre. The wings style is macOS-only; scope it
   behind `#[cfg]` and accept that Windows keeps the pill.
 - **Done** — both styles selectable on macOS, with the decision note in
   `PROGRESS.md` updated rather than contradicted.
 
 ### 7.2 — "Show on" display picker · M
 - **Scope** — active window / primary / named monitor, refreshing as monitors
-  come and go. Tauri exposes monitor enumeration.
+  come and go. Tauri exposes monitor enumeration. Note that `position_top_center`
+  already implemented the active-window mode *and* the primary fallback below;
+  what was missing was the setting, the picker, and matching by name.
 - **Done** — the overlay follows the chosen display, and unplugging the chosen
   monitor falls back to primary instead of rendering off-screen. That fallback
   is the test.
 
 ### 7.3 — Permissions card · M
 - **Scope** — per-permission status with Grant buttons. `hotkeys_permitted`
-  exists (`commands.rs:118`); microphone, accessibility and (with Phase 9)
-  screen recording need the same treatment.
+  exists (`commands.rs:118`); microphone and (with Phase 9) screen recording
+  need the same treatment. Accessibility does not: `hotkeys_permitted` *is*
+  `AXIsProcessTrusted`, so hotkeys and accessibility are one TCC bucket and one
+  row. Input Monitoring is a genuinely separate bucket, and nothing needs it.
 - **Done** — every permission the app needs shows live status and a button that
   opens the right System Settings pane. macOS-only; Windows shows nothing.
 

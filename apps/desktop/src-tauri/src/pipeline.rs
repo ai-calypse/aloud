@@ -199,8 +199,11 @@ impl Pipeline {
 
         match phase {
             Phase::Recording | Phase::Transcribing => crate::overlay::show(&self.app, phase),
-            // Leave the result on screen briefly, then dismiss.
+            // Leave the result on screen briefly, then dismiss. Re-shown, not
+            // merely left visible: an error in the wings style has to move
+            // back down to the pill's anchor, and only `show` repositions.
             Phase::Done | Phase::Error => {
+                crate::overlay::show(&self.app, phase);
                 let app = self.app.clone();
                 let linger = if matches!(phase, Phase::Error) {
                     ERROR_LINGER

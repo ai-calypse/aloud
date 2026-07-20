@@ -13,6 +13,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Only for the build date. Already a dependency of this crate, so it costs
+# nothing to compile that was not being compiled anyway.
+chrono = "0.4"
 
 [dependencies]
 aloud-agent = { path = "../../../crates/agent" }
@@ -22,6 +25,7 @@ aloud-hotkey = { path = "../../../crates/hotkey" }
 aloud-llm = { path = "../../../crates/llm" }
 aloud-notes = { path = "../../../crates/notes" }
 aloud-paste = { path = "../../../crates/paste" }
+aloud-permissions = { path = "../../../crates/permissions" }
 aloud-volume = { path = "../../../crates/volume" }
 aloud-selection = { path = "../../../crates/selection" }
 aloud-store = { path = "../../../crates/store" }

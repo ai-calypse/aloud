@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import {
   commands,
   type AudioDevice,
+  type BuildInfo,
   type DefaultPrompt,
+  type OverlayDisplay,
   type Settings,
 } from "../../lib/bindings";
 import { or } from "../../lib/result";
@@ -11,6 +13,7 @@ import { MacroEditor } from "./MacroEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
 import { ConnectorEditor } from "./ConnectorEditor";
 import { RunLogView } from "./RunLogView";
+import { PermissionsCard } from "./PermissionsCard";
 import { AUTO_DETECT, LANGUAGES, SAME_AS_SPOKEN } from "./languages";
 import {
   Group,
@@ -32,6 +35,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
+/**
+ * The wings overlay is macOS-only (no menu bar to weld to on Windows), and the
+ * backend forces the pill there regardless — so the row is hidden rather than
+ * offering a choice that does nothing.
+ */
+const IS_MAC = navigator.userAgent.includes("Mac");
+
+/** The `named:` prefix keeps a monitor called "primary" from colliding. */
+const NAMED = "named:";
+
+function displayValue(display: OverlayDisplay | undefined): string {
+  if (display === undefined || display === "active" || display === "primary") {
+    return display ?? "active";
+  }
+  return NAMED + display.named;
+}
 
 /** One settings pane, selected from the app-level sidebar. */
 export type SettingsSection =
@@ -61,6 +81,9 @@ export function SettingsView({ section }: { section: SettingsSection }) {
   const live = useRef(settings);
   live.current = settings;
   const [devices, setDevices] = useState<AudioDevice[]>([]);
+  const [displays, setDisplays] = useState<string[]>([]);
+  const [build, setBuild] = useState<BuildInfo | null>(null);
+  const [copied, setCopied] = useState(false);
   // The shipped prompt and its version, for the Prompts pane's banner and its
   // View Default button. Null until it loads; both surfaces hide until then.
   const [builtIn, setBuiltIn] = useState<DefaultPrompt | null>(null);
@@ -81,6 +104,8 @@ export function SettingsView({ section }: { section: SettingsSection }) {
     commands.defaultPrompt().then(setBuiltIn);
     or(commands.inputDevices(), [], "listing microphones").then(setDevices);
     or(commands.launchAtLogin(), false, "reading launch-at-login").then(setAtLogin);
+    or(commands.overlayDisplays(), [], "listing displays").then(setDisplays);
+    commands.buildInfo().then(setBuild);
   }, []);
 
   if (!settings) return <p className="text-ink-2">Loading…</p>;
@@ -516,6 +541,91 @@ export function SettingsView({ section }: { section: SettingsSection }) {
               />
             </Row>
           </Group>
+
+          <Group title="Overlay">
+            {IS_MAC && (
+              <Row
+                label="Style"
+                hint="Wings tuck into the menu bar; the pill drops below it. An error always uses the pill — a wing is too small to read one in."
+              >
+                <Value>
+                  <Select
+                    value={settings.overlayStyle ?? "pill"}
+                    onValueChange={(v) =>
+                      update({ overlayStyle: v as Settings["overlayStyle"] })
+                    }
+                  >
+                    <SelectTrigger className={rowSelect}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pill">Pill</SelectItem>
+                      <SelectItem value="wings">Menu bar wings</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Value>
+              </Row>
+            )}
+
+            <Row
+              label="Show on"
+              hint="A named display that is unplugged falls back to the primary one."
+            >
+              <Value>
+                <Select
+                  value={displayValue(settings.overlayDisplay)}
+                  onValueChange={(v) =>
+                    update({
+                      overlayDisplay: v.startsWith(NAMED)
+                        ? { named: v.slice(NAMED.length) }
+                        : (v as OverlayDisplay),
+                    })
+                  }
+                >
+                  <SelectTrigger className={rowSelect}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active window</SelectItem>
+                    <SelectItem value="primary">Primary display</SelectItem>
+                    {displays.map((name) => (
+                      <SelectItem key={name} value={NAMED + name}>
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Value>
+            </Row>
+          </Group>
+
+          <PermissionsCard />
+
+          {build && (
+            <Group title="About">
+              <Row
+                label="Version"
+                hint={`${build.commit} · built ${build.date}`}
+              >
+                <Button
+                  variant="plain"
+                  size="text"
+                  onClick={() =>
+                    navigator.clipboard
+                      .writeText(
+                        `Aloud ${build.version} (${build.commit}) built ${build.date}`,
+                      )
+                      .then(() => {
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1200);
+                      })
+                  }
+                >
+                  {copied ? "Copied" : build.version}
+                </Button>
+              </Row>
+            </Group>
+          )}
         </>
       )}
 

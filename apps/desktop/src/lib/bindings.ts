@@ -47,6 +47,26 @@ export const commands = {
 	 */
 	hotkeysPermitted: () => __TAURI_INVOKE<boolean>("hotkeys_permitted"),
 	/**
+	 *  Every OS permission the app needs, with its current answer. Empty off
+	 *  macOS, which the Permissions card reads as "nothing to show".
+	 * 
+	 *  One command for all of them rather than one per permission: the card asks
+	 *  for the whole set every time it refreshes, and three round-trips to answer
+	 *  one question is three chances for the rows to disagree.
+	 */
+	permissions: () => __TAURI_INVOKE<PermissionStatus[]>("permissions"),
+	/**  Opens the System Settings pane that grants `permission`. */
+	openPermissionSettings: (permission: Permission) => typedError<null, string>(__TAURI_INVOKE("open_permission_settings", { permission })),
+	buildInfo: () => __TAURI_INVOKE<BuildInfo>("build_info"),
+	/**
+	 *  Monitor names, to fill the overlay's "Show on" picker.
+	 * 
+	 *  Unnamed monitors are dropped rather than given a placeholder: the setting
+	 *  stores a name, so an entry with no name could never be matched back to a
+	 *  screen and would be a row that silently does nothing.
+	 */
+	overlayDisplays: () => typedError<string[], string>(__TAURI_INVOKE("overlay_displays")),
+	/**
 	 *  The last `utterances` dictations, every stage of each, for the dev panel's
 	 *  waterfall. Newest utterance first; stages in start order within one.
 	 */
@@ -150,6 +170,7 @@ export const events = {
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
 	overlayError: makeEvent<OverlayError>("overlay-error"),
+	overlayStyle: makeEvent<OverlayStyleChanged>("overlay-style"),
 };
 
 /* Types */
@@ -226,6 +247,18 @@ export type Binding = { kind: "disabled" } |
  *  global-shortcut plugin cannot express, and why this crate exists.
  */
 { kind: "modifierKey"; key: Key; modifiers: Modifier[] };
+
+/**
+ *  Version, commit and build date, for pasting into a bug report.
+ * 
+ *  The commit and the date are baked in by `build.rs`; a build from a tarball
+ *  with no `.git` reports "unknown" rather than failing to compile.
+ */
+export type BuildInfo = {
+	version: string,
+	commit: string,
+	date: string,
+};
 
 export type Config = {
 	hold: Binding | null,
@@ -364,10 +397,53 @@ export type Note = {
 };
 
 /**
+ *  Which monitor the overlay appears on.
+ * 
+ *  `Named` stores the OS monitor name rather than an index: indices are
+ *  reassigned when a display is unplugged, so a saved index silently starts
+ *  meaning a different screen. A name that no longer resolves falls back to
+ *  the primary, which is what stops the overlay rendering off-screen.
+ */
+export type OverlayDisplay = 
+/**  The monitor holding the cursor — the screen the user is working on. */
+"active" | "primary" | { named: string };
+
+/**
  *  Why a dictation failed, in words the user can act on. `Phase::Error` says
  *  only that something broke, which the pill used to render as "Failed".
  */
 export type OverlayError = string;
+
+/**
+ *  How the recording overlay draws itself.
+ * 
+ *  `Wings` is voice-dict's compact overlay: two small tabs welded to the top
+ *  of the screen, flanking where a notch would be, instead of a pill hanging
+ *  below the menu bar. macOS only — `RecordingOverlay.swift` gates it on
+ *  `screenHasNotch`, and Windows has no notch and no menu bar to weld to.
+ */
+export type OverlayStyle = "pill" | "wings";
+
+/**
+ *  The style the overlay window should draw, pushed on every show.
+ * 
+ *  Sent rather than read from settings by the webview: the overlay has no
+ *  settings binding of its own, and a style change has to reach a window that
+ *  is already mounted.
+ */
+export type OverlayStyleChanged = OverlayStyle;
+
+/**  A capability the app needs the OS to allow. */
+export type Permission = 
+/**  Global hotkeys, synthetic paste, and reading the focused selection. */
+"accessibility" | "microphone" | 
+/**  Screen context. Nothing reads it yet — see ROADMAP Phase 9. */
+"screenRecording";
+
+export type PermissionStatus = {
+	permission: Permission,
+	granted: boolean,
+};
 
 /**  What the UI reflects. Mirrors the Swift overlay's phases. */
 export type Phase = "idle" | "recording" | "transcribing" | 
@@ -474,6 +550,10 @@ export type Settings = {
 	 *  reopen event rather than a second instance.
 	 */
 	showMenuBarIcon?: boolean,
+	/**  Pill or menu-bar wings. Ignored off macOS, which only has the pill. */
+	overlayStyle?: OverlayStyle,
+	/**  Which screen the overlay shows on. */
+	overlayDisplay?: OverlayDisplay,
 	/**
 	 *  Put the previous clipboard back after pasting. Off leaves the dictated
 	 *  text on the clipboard so it can be pasted again.

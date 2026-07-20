@@ -12,10 +12,59 @@
 /* Centre the pill in the (transparent) window; the pill sizes to its content
    rather than filling the frame, so its height is set here, not by the window. */
 .overlay-root {
+  position: relative; /* the wings anchor to the window's top edge */
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
+}
+
+/* The wings style: two tabs welded to the top edge of the screen, flanking
+ * where the notch is. Rust anchors the window at top margin 0 for this, so
+ * `top: 0` here is the screen's top edge.
+ *
+ * The gap is a fixed 200px because no cross-platform API reports the notch
+ * width (see overlay.rs). On a 14"/16" MacBook that brackets it; on a screen
+ * with no notch the pair simply straddles the middle of the menu bar, which
+ * still reads as deliberate.
+ *
+ * 24px tall so the tabs stay inside a standard menu bar rather than hanging
+ * below it — the whole point of this style over the pill.
+ */
+.wings {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 200px;
+  animation: pill-in var(--dur-base) var(--ease-spring) both;
+}
+
+.wing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 24px;
+  border-radius: 0 0 8px 8px;
+  background: var(--pill-fill);
+  backdrop-filter: blur(4px) saturate(180%);
+  -webkit-backdrop-filter: blur(4px) saturate(180%);
+  box-shadow: var(--pill-shadow);
+  color: var(--pill-ink);
+}
+
+/* The wave has to fit a menu bar rather than a 52px pill, so it is scaled
+   down here rather than given a second set of keyframes. */
+.wing .bars {
+  gap: 2px;
+  height: 13px;
+}
+
+.wing .bars i {
+  width: 2.5px;
 }
 
 .pill {
@@ -194,6 +243,7 @@
 }
 
 /* Nothing to show when idle; Rust hides the window anyway. */
-.pill--idle {
+.pill--idle,
+.wings--idle {
   display: none;
 }

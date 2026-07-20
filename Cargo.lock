@@ -49,6 +49,7 @@ dependencies = [
  "aloud-meeting",
  "aloud-notes",
  "aloud-paste",
+ "aloud-permissions",
  "aloud-selection",
  "aloud-store",
  "aloud-transcribe",
@@ -170,6 +171,16 @@ dependencies = [
  "enigo",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "aloud-permissions"
+version = "0.1.0"
+dependencies = [
+ "aloud-hotkey",
+ "anyhow",
+ "serde",
+ "specta",
 ]
 
 [[package]]

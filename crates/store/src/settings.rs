@@ -21,6 +21,34 @@ const DEFAULT_FALLBACK_MODEL: &str = "qwen/qwen3.6-27b";
 /// paragraph would be paid for on each dictation until someone noticed.
 const MAX_TERM_CHARS: usize = 48;
 
+/// How the recording overlay draws itself.
+///
+/// `Wings` is voice-dict's compact overlay: two small tabs welded to the top
+/// of the screen, flanking where a notch would be, instead of a pill hanging
+/// below the menu bar. macOS only — `RecordingOverlay.swift` gates it on
+/// `screenHasNotch`, and Windows has no notch and no menu bar to weld to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum OverlayStyle {
+    Pill,
+    Wings,
+}
+
+/// Which monitor the overlay appears on.
+///
+/// `Named` stores the OS monitor name rather than an index: indices are
+/// reassigned when a display is unplugged, so a saved index silently starts
+/// meaning a different screen. A name that no longer resolves falls back to
+/// the primary, which is what stops the overlay rendering off-screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum OverlayDisplay {
+    /// The monitor holding the cursor — the screen the user is working on.
+    Active,
+    Primary,
+    Named(String),
+}
+
 /// Everything the app remembers between launches.
 ///
 /// One coarse struct rather than ~70 individual commands: the whole thing is
@@ -106,6 +134,10 @@ pub struct Settings {
     /// to the window is to open the app again, which macOS turns into a
     /// reopen event rather than a second instance.
     pub show_menu_bar_icon: bool,
+    /// Pill or menu-bar wings. Ignored off macOS, which only has the pill.
+    pub overlay_style: OverlayStyle,
+    /// Which screen the overlay shows on.
+    pub overlay_display: OverlayDisplay,
     /// Put the previous clipboard back after pasting. Off leaves the dictated
     /// text on the clipboard so it can be pasted again.
     pub preserve_clipboard: bool,
@@ -149,6 +181,11 @@ impl Default for Settings {
             shortcut_start_delay_ms: 0,
             mute_system_audio: false,
             show_menu_bar_icon: true,
+            // Pill, where voice-dict's compact overlay defaults on: Aloud has
+            // only ever drawn the pill, so defaulting to wings would silently
+            // change the look of every existing install.
+            overlay_style: OverlayStyle::Pill,
+            overlay_display: OverlayDisplay::Active,
             preserve_clipboard: true,
             history_retention: 50,
             // A fresh install has not been through the wizard; a migrated one

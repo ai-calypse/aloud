@@ -98,8 +98,8 @@ traps found so far.
   samples, so they were ported, not re-derived.
 - **Clipboard preservation covers text and images only.** The Swift version's
   arbitrary `NSPasteboardItem` types have no cross-platform equivalent.
-- **Overlay uses CSS `backdrop-filter`**, not the Metal shader; fixed
-  bottom-centre, since no cross-platform API finds a notch.
+- **Overlay uses CSS `backdrop-filter`**, not the Metal shader; top-centre of
+  the focused monitor, since no cross-platform API finds a notch.
 - **`macos-private-api` enabled** for real transparency — rules out Mac App
   Store distribution, which this app does not use.
 - **Dependency versions pinned from live crates.io**, not memory.

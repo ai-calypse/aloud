@@ -87,6 +87,10 @@ pub fn run() {
             commands::input_devices,
             commands::installed_apps,
             commands::hotkeys_permitted,
+            commands::permissions,
+            commands::open_permission_settings,
+            commands::build_info,
+            commands::overlay_displays,
             commands::recent_timings,
             commands::history_recent,
             commands::history_delete,
@@ -114,6 +118,7 @@ pub fn run() {
             overlay::AudioLevel,
             overlay::OverlayError,
             overlay::ModelDownload,
+            overlay::OverlayStyleChanged,
             HotkeysPermitted,
             ConnectorsUpdated,
         ]);
