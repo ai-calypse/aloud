@@ -206,6 +206,7 @@ export const events = {
 	ask: makeEvent<AskEvent>("ask"),
 	audioLevel: makeEvent<AudioLevel>("audio-level"),
 	connectorsUpdated: makeEvent<ConnectorsUpdated>("connectors-updated"),
+	dictationPartial: makeEvent<DictationPartial>("dictation-partial"),
 	dictationPhase: makeEvent<Phase>("dictation-phase"),
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
@@ -359,6 +360,17 @@ export type DefaultPrompt = {
 	text: string,
 	version: string,
 };
+
+/**
+ *  The transcript so far, while streaming transcription is on.
+ * 
+ *  **Feedback only — this is never pasted as it arrives.** Whisper revises: a
+ *  later chunk changes how an earlier one is punctuated or spelled, and text
+ *  already typed into someone's editor cannot be un-typed. The pill is the one
+ *  surface where a revision costs nothing, so it is the only one that sees
+ *  this. The paste still happens once, at the end.
+ */
+export type DictationPartial = string;
 
 export type Engine = 
 /**  On-device whisper.cpp. No network, no API key. */
@@ -547,6 +559,20 @@ export type Settings = {
 	baseUrl?: string,
 	/**  BCP-47 code, or empty to auto-detect. */
 	language?: string,
+	/**
+	 *  Transcribe in ~5-second chunks *while* recording rather than in one
+	 *  pass after it, so the wait after the key comes up is the tail of the
+	 *  sentence rather than the whole of it.
+	 * 
+	 *  **Off by default, and it should stay off until it has been used.** It
+	 *  changes the shape of the hot path — the microphone callback now feeds a
+	 *  background transcriber on every dictation — and it costs accuracy:
+	 *  whisper sees five seconds at a time with no context from the chunk
+	 *  before, and the cut lands on the clock rather than on a pause. See
+	 *  [`aloud_transcribe::stream`]. Nothing is pasted until the end either
+	 *  way; the streamed text only reaches the pill.
+	 */
+	streamingTranscription?: boolean,
 	postProcessingEnabled?: boolean,
 	postProcessingModel?: string,
 	fallbackModel?: string,

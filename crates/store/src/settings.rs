@@ -69,6 +69,18 @@ pub struct Settings {
     pub base_url: String,
     /// BCP-47 code, or empty to auto-detect.
     pub language: String,
+    /// Transcribe in ~5-second chunks *while* recording rather than in one
+    /// pass after it, so the wait after the key comes up is the tail of the
+    /// sentence rather than the whole of it.
+    ///
+    /// **Off by default, and it should stay off until it has been used.** It
+    /// changes the shape of the hot path — the microphone callback now feeds a
+    /// background transcriber on every dictation — and it costs accuracy:
+    /// whisper sees five seconds at a time with no context from the chunk
+    /// before, and the cut lands on the clock rather than on a pause. See
+    /// [`aloud_transcribe::stream`]. Nothing is pasted until the end either
+    /// way; the streamed text only reaches the pill.
+    pub streaming_transcription: bool,
 
     // Post-processing
     pub post_processing_enabled: bool,
@@ -186,6 +198,7 @@ impl Default for Settings {
             transcription_model: aloud_transcribe::cloud::DEFAULT_MODEL.into(),
             base_url: aloud_transcribe::cloud::DEFAULT_BASE_URL.into(),
             language: String::new(),
+            streaming_transcription: false,
             post_processing_enabled: true,
             post_processing_model: DEFAULT_CLEANUP_MODEL.into(),
             fallback_model: DEFAULT_FALLBACK_MODEL.into(),

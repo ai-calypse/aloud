@@ -276,6 +276,18 @@ export function SettingsView({ section }: { section: SettingsSection }) {
             </Row>
 
             <Row
+              label="Transcribe while you speak"
+              hint="Sends audio in ~5-second chunks during recording, so the wait after you let go is the end of the sentence rather than the whole of it. Text still pastes once, at the end. Costs some accuracy: each chunk is transcribed without the one before it."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={settings.streamingTranscription ?? false}
+                label="Transcribe while you speak"
+                onChange={(c) => update({ streamingTranscription: c })}
+              />
+            </Row>
+
+            <Row
               label="Spoken language"
               hint="The language you dictate in. Auto-detect can guess wrong on short utterances; naming it avoids that."
             >

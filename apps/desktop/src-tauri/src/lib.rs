@@ -121,6 +121,7 @@ pub fn run() {
             agent::AgentEvent,
             overlay::AudioLevel,
             overlay::OverlayError,
+            overlay::DictationPartial,
             overlay::ModelDownload,
             overlay::OverlayStyleChanged,
             HotkeysPermitted,

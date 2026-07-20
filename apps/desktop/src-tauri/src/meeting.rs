@@ -212,9 +212,17 @@ async fn transcribe_chunks(
         let Some(t) = transcriber.as_deref() else {
             continue;
         };
-        match transcribe_chunk(t, &chunk, index).await {
-            Some(text) => segments.push((index, text)),
-            None => segments.push((index, "[inaudible]".to_string())),
+        // Staging the chunk as a WAV lives in `aloud_transcribe::stream` now,
+        // shared with the dictation path — a chunk and a whole recording are
+        // the same thing to a `Transcriber`, and there is no reason for two
+        // copies of the code that says so.
+        match aloud_transcribe::stream::transcribe_pcm16(t, &chunk).await {
+            Ok(text) if !text.trim().is_empty() => segments.push((index, text)),
+            Ok(_) => segments.push((index, "[inaudible]".to_string())),
+            Err(e) => {
+                tracing::warn!(%e, "meeting chunk transcription failed");
+                segments.push((index, "[inaudible]".to_string()));
+            }
         }
 
         // Counted off the segments, not the assembled transcript — see
@@ -250,29 +258,6 @@ async fn transcribe_chunks(
         );
     }
     segments
-}
-
-/// Transcribes one PCM16 chunk by wrapping it in a WAV the transcriber reads.
-async fn transcribe_chunk(
-    transcriber: &dyn aloud_transcribe::Transcriber,
-    pcm16: &[u8],
-    index: usize,
-) -> Option<String> {
-    let wav = std::env::temp_dir().join(format!("aloud-meeting-{index}.wav"));
-    if let Err(e) = aloud_audio::write_pcm16_wav(&wav, pcm16) {
-        tracing::warn!(%e, "could not stage meeting chunk");
-        return None;
-    }
-    let result = transcriber.transcribe(&wav).await;
-    let _ = std::fs::remove_file(&wav);
-    match result {
-        Ok(text) if !text.trim().is_empty() => Some(text),
-        Ok(_) => None,
-        Err(e) => {
-            tracing::warn!(%e, "meeting chunk transcription failed");
-            None
-        }
-    }
 }
 
 fn emit(app: &AppHandle, phase: MeetingPhase) {

@@ -65,6 +65,10 @@ enum Outcome {
 #[derive(Default)]
 pub struct Session {
     recorder: Option<aloud_audio::Recorder>,
+    /// The live chunk transcription for this capture, when
+    /// `streaming_transcription` is on. Taken alongside the recorder, so the
+    /// two cannot outlive each other.
+    stream: Option<aloud_transcribe::stream::Stream>,
     /// The last transcript, for "paste again".
     last_transcript: Option<String>,
     /// The in-flight read of the text selected when a command-mode session
@@ -107,6 +111,14 @@ impl Session {
     fn is_active(&self) -> bool {
         self.recorder.is_some() || self.pending_start.is_some()
     }
+}
+
+/// What a stop takes out of the session: the capture, when it began, and the
+/// streamed transcript that has been building while it ran.
+struct Captured {
+    recorder: Option<aloud_audio::Recorder>,
+    started_at: Option<std::time::Instant>,
+    stream: Option<aloud_transcribe::stream::Stream>,
 }
 
 pub struct Pipeline {
@@ -260,10 +272,14 @@ impl Pipeline {
     /// finds no recorder and would otherwise return "not recording" and leave
     /// the delayed start to fire into a session nothing is waiting on — a
     /// capture that runs until the next press, with the pill up the whole time.
-    fn take_recorder(&self) -> (Option<aloud_audio::Recorder>, Option<std::time::Instant>) {
+    fn take_recorder(&self) -> Captured {
         let mut session = self.session.lock().unwrap();
         session.invalidate_start();
-        let taken = (session.recorder.take(), session.started_at.take());
+        let taken = Captured {
+            recorder: session.recorder.take(),
+            started_at: session.started_at.take(),
+            stream: session.stream.take(),
+        };
         drop(session);
 
         // Unconditional, and not gated on the setting: if the user turned
@@ -330,10 +346,38 @@ impl Pipeline {
     ///
     /// Does not emit: the caller owns that, because the delayed path has
     /// already shown the pill and must not announce recording twice.
-    fn begin_capture(&self, mut session: std::sync::MutexGuard<'_, Session>) -> Result<()> {
+    fn begin_capture(
+        self: &Arc<Self>,
+        mut session: std::sync::MutexGuard<'_, Session>,
+    ) -> Result<()> {
         let settings = self.settings();
+
+        // Streaming, when it is on, has to be armed *before* the microphone
+        // opens: the tap is a constructor argument, and audio that arrives
+        // before it exists is audio only the WAV path will ever see.
+        //
+        // The transcriber is built by the worker on its first chunk, not here
+        // — this runs on the event-tap thread, where loading a whisper model
+        // would stall every keystroke on the machine. It goes through
+        // `self.transcriber` rather than `build_transcriber` so the streaming
+        // path shares the cached local model instead of reloading ~150MB of it
+        // on every dictation.
+        let stream = settings.streaming_transcription.then(|| {
+            let pipeline = self.clone();
+            let for_build = settings.clone();
+            let app = self.app.clone();
+            aloud_transcribe::stream::Stream::spawn(
+                // Tauri's runtime handle, because this thread is usually the
+                // OS key-event tap and has no runtime of its own.
+                tauri::async_runtime::handle().inner(),
+                async move { pipeline.transcriber(&for_build).await },
+                Box::new(move |partial| crate::overlay::send_partial(&app, partial)),
+            )
+        });
+
+        let tap = stream.as_ref().map(|s| s.tap());
         let recorder =
-            match aloud_audio::Recorder::start(settings.selected_microphone.as_deref(), None) {
+            match aloud_audio::Recorder::start(settings.selected_microphone.as_deref(), tap) {
                 Ok(recorder) => recorder,
                 Err(e) => {
                     // Leaving this set would make every later start a no-op.
@@ -376,6 +420,7 @@ impl Pipeline {
 
         session.pending_start = None;
         session.recorder = Some(recorder);
+        session.stream = stream;
         // Timed from when audio actually starts, not from the key press, so
         // the delay is not billed to the user as speaking time.
         session.started_at = Some(std::time::Instant::now());
@@ -409,10 +454,11 @@ impl Pipeline {
         )
     )]
     async fn dictate(&self, utterance_id: i64) -> Result<()> {
-        let (recorder, started_at) = self.take_recorder();
-        let Some(recorder) = recorder else {
+        let captured = self.take_recorder();
+        if captured.recorder.is_none() {
             return Ok(()); // not recording
-        };
+        }
+        let started_at = captured.started_at;
 
         let span = tracing::Span::current();
         if let Some(start) = started_at {
@@ -422,7 +468,7 @@ impl Pipeline {
         let generation = self.generation();
         self.emit(Phase::Transcribing);
         let result = tokio::select! {
-            result = self.transcribe_and_paste(recorder, started_at, generation, utterance_id) => result,
+            result = self.transcribe_and_paste(captured, started_at, generation, utterance_id) => result,
             // Dropping the work future here is what actually aborts the
             // in-flight HTTP request.
             _ = self.cancelled.notified() => {
@@ -473,16 +519,16 @@ impl Pipeline {
     /// shared.
     async fn run_stage<F, Fut>(&self, done: Phase, work: F) -> Result<()>
     where
-        F: FnOnce(aloud_audio::Recorder) -> Fut,
+        F: FnOnce(Captured) -> Fut,
         Fut: std::future::Future<Output = Result<()>>,
     {
-        let (recorder, _) = self.take_recorder();
-        let Some(recorder) = recorder else {
+        let captured = self.take_recorder();
+        if captured.recorder.is_none() {
             return Ok(());
-        };
+        }
 
         self.emit(Phase::Transcribing);
-        let result = work(recorder).await;
+        let result = work(captured).await;
         if result.is_err() {
             tracing::Span::current().record("ok", false);
         }
@@ -504,9 +550,15 @@ impl Pipeline {
     /// goes to the OS temp directory and is unlinked here, exactly as before.
     async fn capture(
         &self,
-        recorder: aloud_audio::Recorder,
+        captured: Captured,
         persist: bool,
     ) -> Result<(String, Settings, Option<PathBuf>)> {
+        let Captured {
+            recorder, stream, ..
+        } = captured;
+        let Some(recorder) = recorder else {
+            bail!("no recording to transcribe");
+        };
         // A media directory we cannot create must not take dictation down with
         // it — the recording is a nicety, the transcript is the product.
         let keep = match persist.then(aloud_notes::media_wav_path).transpose() {
@@ -539,6 +591,33 @@ impl Pipeline {
         }
 
         let settings = self.settings();
+
+        // Streaming, when it was on, has already transcribed everything but
+        // the tail while the user was still speaking; this waits only on
+        // what is left. `None` means the stream is not to be trusted — the
+        // model would not build, or a chunk failed — and the WAV path below
+        // runs exactly as it always has. Nothing is lost by that fallback:
+        // the full recording was being written all along.
+        if let Some(stream) = stream {
+            let span = tracing::info_span!("stream_finish", chars = tracing::field::Empty);
+            let streamed = stream.finish().instrument(span.clone()).await;
+            match streamed {
+                Some(text) if !text.trim().is_empty() => {
+                    span.record("chars", text.len());
+                    let keep = guard.keep();
+                    if keep.is_none() {
+                        let _ = std::fs::remove_file(&wav);
+                    }
+                    return Ok((text, settings, keep));
+                }
+                // An empty streamed transcript is ambiguous: it is either
+                // silence or a stream that quietly produced nothing. Re-running
+                // the WAV costs one transcription on a dictation that had no
+                // words in it, and is the only way to tell the two apart.
+                _ => tracing::info!("streaming produced nothing; transcribing the recording"),
+            }
+        }
+
         // The first local run pays for the model load inside this span, which
         // is right: it is time the user spends waiting for a transcript.
         let text = async {
@@ -574,7 +653,7 @@ impl Pipeline {
 
     async fn transcribe_and_paste(
         &self,
-        recorder: aloud_audio::Recorder,
+        captured: Captured,
         started_at: Option<std::time::Instant>,
         generation: u64,
         utterance_id: i64,
@@ -605,7 +684,7 @@ impl Pipeline {
             })
         };
 
-        let (raw, settings, wav) = self.capture(recorder, true).await?;
+        let (raw, settings, wav) = self.capture(captured, true).await?;
         let mut wav = KeptWav(wav);
 
         // Whisper returns nothing for silence, and the cleanup prompt maps
@@ -983,12 +1062,8 @@ impl Pipeline {
             .await
     }
 
-    async fn transcribe_and_rewrite(
-        &self,
-        recorder: aloud_audio::Recorder,
-        selection: &str,
-    ) -> Result<()> {
-        let (command, settings, _) = self.capture(recorder, false).await?;
+    async fn transcribe_and_rewrite(&self, captured: Captured, selection: &str) -> Result<()> {
+        let (command, settings, _) = self.capture(captured, false).await?;
 
         if command.trim().is_empty() {
             return Ok(()); // no command spoken; leave the selection alone
@@ -1057,8 +1132,8 @@ impl Pipeline {
             .await
     }
 
-    async fn transcribe_and_ask(&self, recorder: aloud_audio::Recorder) -> Result<()> {
-        let (question, settings, _) = self.capture(recorder, false).await?;
+    async fn transcribe_and_ask(&self, captured: Captured) -> Result<()> {
+        let (question, settings, _) = self.capture(captured, false).await?;
 
         if question.trim().is_empty() {
             return Ok(());
@@ -1089,8 +1164,8 @@ impl Pipeline {
             .await
     }
 
-    async fn transcribe_and_agent(&self, recorder: aloud_audio::Recorder) -> Result<()> {
-        let (command, settings, _) = self.capture(recorder, false).await?;
+    async fn transcribe_and_agent(&self, captured: Captured) -> Result<()> {
+        let (command, settings, _) = self.capture(captured, false).await?;
 
         if command.trim().is_empty() {
             return Ok(());

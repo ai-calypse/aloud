@@ -17,6 +17,13 @@ const LABEL: Record<Phase, string> = {
 const ERROR_CHARS = 90;
 
 /**
+ * The streamed transcript is shown from its *end*, not its start: the newest
+ * words are the ones that confirm the mic is still hearing you, and a pill
+ * frozen on the first six words of a long dictation reads as a hang.
+ */
+const PARTIAL_CHARS = 60;
+
+/**
  * Bars in the listening wave.
  *
  * Five, as the Swift app used. The count and the per-bar phase step together
@@ -60,6 +67,8 @@ function Overlay() {
     (new URLSearchParams(location.search).get("style") as OverlayStyle) ?? "pill",
   );
   const [error, setError] = useState<string | null>(null);
+  // Streaming transcription only, and feedback only — Rust never pastes this.
+  const [partial, setPartial] = useState<string>("");
   const [download, setDownload] = useState<number | null>(null);
   // The root, not the bar row: --level inherits, so the wings style can draw
   // two waves off one write.
@@ -85,8 +94,12 @@ function Overlay() {
       // A new run clears the last run’s message.
       if (e.payload === "recording") {
         setError(null);
+        setPartial("");
       }
     });
+    const unlistenPartial = events.dictationPartial.listen((e) =>
+      setPartial(e.payload),
+    );
     const unlistenError = events.overlayError.listen((e) => setError(e.payload));
     const unlistenStyle = events.overlayStyle.listen((e) => setStyle(e.payload));
     // First use of the local engine fetches ~150MB; without this the pill sits
@@ -96,6 +109,7 @@ function Overlay() {
     );
     return () => {
       unlistenPhase.then((off) => off());
+      unlistenPartial.then((off) => off());
       unlistenError.then((off) => off());
       unlistenStyle.then((off) => off());
       unlistenDownload.then((off) => off());
@@ -107,7 +121,9 @@ function Overlay() {
       ? truncate(error, ERROR_CHARS)
       : download !== null
         ? `Downloading model… ${Math.round(download * 100)}%`
-        : LABEL[phase];
+        : phase === "recording" && partial
+          ? tail(partial, PARTIAL_CHARS)
+          : LABEL[phase];
 
   return (
     <div className="overlay-root" ref={root}>
@@ -175,6 +191,14 @@ function Indicator({ phase }: { phase: Phase }) {
       ))}
     </span>
   );
+}
+
+/** The last `max` characters, ellipsised at the front. Char-wise, so a
+ * multi-byte character is never split. */
+function tail(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const chars = [...flat];
+  return chars.length <= max ? flat : `…${chars.slice(-max).join("")}`;
 }
 
 /** Cuts on a char boundary so a multi-byte character is never split. */

@@ -24,6 +24,17 @@ pub struct AudioLevel(pub f32);
 #[tauri_specta(event_name = "model-download")]
 pub struct ModelDownload(pub f32);
 
+/// The transcript so far, while streaming transcription is on.
+///
+/// **Feedback only — this is never pasted as it arrives.** Whisper revises: a
+/// later chunk changes how an earlier one is punctuated or spelled, and text
+/// already typed into someone's editor cannot be un-typed. The pill is the one
+/// surface where a revision costs nothing, so it is the only one that sees
+/// this. The paste still happens once, at the end.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
+#[tauri_specta(event_name = "dictation-partial")]
+pub struct DictationPartial(pub String);
+
 /// Why a dictation failed, in words the user can act on. `Phase::Error` says
 /// only that something broke, which the pill used to render as "Failed".
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
@@ -199,6 +210,11 @@ pub fn position_top_center(window: &WebviewWindow, top_margin: f64) -> tauri::Re
 /// Sends the live input level to the pill.
 pub fn send_level(app: &AppHandle, level: f32) {
     let _ = AudioLevel(level).emit_to(app, LABEL);
+}
+
+/// Sends the streamed transcript so far to the pill.
+pub fn send_partial(app: &AppHandle, text: &str) {
+    let _ = DictationPartial(text.to_string()).emit_to(app, LABEL);
 }
 
 /// Sends the message the pill shows instead of a bare "Failed".

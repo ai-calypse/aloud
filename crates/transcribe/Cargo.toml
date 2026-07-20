@@ -27,6 +27,9 @@ whisper-rs = "0.16"
 # cross-platform deps — not macOS-only, or Windows fails to compile.
 futures-util = "0.3"
 aloud-notes = { path = "../notes" }
+# For the chunk-level entry point: the realtime tap's PCM16 has to become the
+# 16 kHz WAV both engines take, and `write_pcm16_wav` already does exactly that.
+aloud-audio = { path = "../audio" }
 
 # GPU acceleration where it is free: Metal on macOS. Windows stays CPU-only
 # for now (whisper-rs offers cuda/vulkan features, but both need a matching
