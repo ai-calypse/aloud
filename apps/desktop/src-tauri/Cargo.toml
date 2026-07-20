@@ -22,6 +22,7 @@ aloud-hotkey = { path = "../../../crates/hotkey" }
 aloud-llm = { path = "../../../crates/llm" }
 aloud-notes = { path = "../../../crates/notes" }
 aloud-paste = { path = "../../../crates/paste" }
+aloud-volume = { path = "../../../crates/volume" }
 aloud-selection = { path = "../../../crates/selection" }
 aloud-store = { path = "../../../crates/store" }
 aloud-transcribe = { path = "../../../crates/transcribe" }

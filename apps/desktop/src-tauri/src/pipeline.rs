@@ -31,6 +31,10 @@ use aloud_store::timings::next_utterance_id;
 /// eye without flooding the event channel.
 const LEVEL_INTERVAL: Duration = Duration::from_millis(50);
 
+/// How long muting waits so the start chime is still audible. Tink is roughly
+/// 250ms; the margin covers `afplay`'s own spawn.
+const START_CHIME_LEAD: Duration = Duration::from_millis(400);
+
 /// What the UI reflects. Mirrors the Swift overlay's phases.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +72,41 @@ pub struct Session {
     /// clipboard round-trip, which must not happen on the hotkey thread.
     selection: Option<tauri::async_runtime::JoinHandle<Option<String>>>,
     started_at: Option<std::time::Instant>,
+    /// The generation of a start that is reserved but still inside its delay,
+    /// so `recorder` is None and yet the session is taken. Counts as recording
+    /// everywhere, or a second press during the delay would queue a second
+    /// capture. Holding the generation here rather than in a separate flag
+    /// means the two cannot drift apart.
+    pending_start: Option<u64>,
+    /// Bumped by every start and every stop, purely to hand out generations
+    /// that a delayed start can be checked against.
+    starts: u64,
+}
+
+impl Session {
+    /// Claims the session for a start and returns the generation a delayed
+    /// start must still see when it wakes.
+    fn reserve_start(&mut self) -> u64 {
+        self.starts = self.starts.wrapping_add(1);
+        self.starts
+    }
+
+    /// Abandons any reserved start. Every stop path calls this, so a release
+    /// arriving inside the delay wins over the start it is racing.
+    fn invalidate_start(&mut self) {
+        self.pending_start = None;
+        self.starts = self.starts.wrapping_add(1);
+    }
+
+    /// Whether a delayed start holding `generation` may still open the mic.
+    fn may_begin(&self, generation: u64) -> bool {
+        self.pending_start == Some(generation)
+    }
+
+    /// A capture is running, or reserved and about to.
+    fn is_active(&self) -> bool {
+        self.recorder.is_some() || self.pending_start.is_some()
+    }
 }
 
 pub struct Pipeline {
@@ -204,23 +243,101 @@ impl Pipeline {
 
     /// Whether a capture session is in flight. Drives the tap-to-toggle
     /// hotkey, which has no release edge to tell start from stop.
+    ///
+    /// A reserved-but-not-yet-started capture counts: during the start delay
+    /// there is no recorder yet, and reporting "not recording" would let the
+    /// toggle hotkey queue a second one.
     pub fn is_recording(&self) -> bool {
-        self.session
-            .lock()
-            .map(|s| s.recorder.is_some())
-            .unwrap_or(false)
+        self.session.lock().map(|s| s.is_active()).unwrap_or(false)
+    }
+
+    /// Takes the recorder for a stop path, and invalidates any pending start.
+    ///
+    /// Every stop goes through here. A stop arriving *during* the start delay
+    /// finds no recorder and would otherwise return "not recording" and leave
+    /// the delayed start to fire into a session nothing is waiting on — a
+    /// capture that runs until the next press, with the pill up the whole time.
+    fn take_recorder(&self) -> (Option<aloud_audio::Recorder>, Option<std::time::Instant>) {
+        let mut session = self.session.lock().unwrap();
+        session.invalidate_start();
+        let taken = (session.recorder.take(), session.started_at.take());
+        drop(session);
+
+        // Unconditional, and not gated on the setting: if the user turned
+        // muting off mid-dictation, the volume is still down and the saved
+        // level is still on disk. A restore with nothing saved is a no-op, so
+        // asking always is both cheaper and safer than deciding.
+        //
+        // Queued rather than run here: Escape reaches `cancel` on the event-tap
+        // thread, where the `osascript` this ends in would stall every
+        // keystroke on the machine.
+        aloud_volume::restore_soon();
+        taken
     }
 
     /// Starts capturing. Idempotent: a second call while recording is a no-op.
-    pub fn start(&self) -> Result<()> {
+    ///
+    /// With a non-zero `shortcut_start_delay_ms` this reserves the slot and
+    /// returns immediately, starting capture from the runtime once the delay
+    /// elapses. It must return immediately: this runs on the CGEventTap
+    /// callback thread, where sleeping stalls every keystroke on the machine
+    /// and can trip `kCGEventTapDisabledByTimeout`, which kills the listener
+    /// silently. That is what PR #60 got wrong.
+    pub fn start(self: &Arc<Self>) -> Result<()> {
+        let delay = self.settings().shortcut_start_delay_ms;
         let mut session = self.session.lock().unwrap();
-        if session.recorder.is_some() {
+        if session.is_active() {
+            return Ok(());
+        }
+        let generation = session.reserve_start();
+
+        if delay == 0 {
+            self.begin_capture(session)?;
+            self.emit(Phase::Recording);
             return Ok(());
         }
 
+        session.pending_start = Some(generation);
+        drop(session);
+
+        // The pill goes up now rather than after the delay: the user pressed
+        // the key, and silence until capture begins reads as a dropped hotkey.
+        // The delayed start deliberately does not emit again — a second
+        // Recording would replay the start chime and rebuild the tray menu.
+        self.emit(Phase::Recording);
+
+        let pipeline = self.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            let session = pipeline.session.lock().unwrap();
+            // Released, cancelled, or restarted while we slept.
+            if !session.may_begin(generation) {
+                return;
+            }
+            if let Err(e) = pipeline.begin_capture(session) {
+                tracing::error!(%e, "could not start recording after the delay");
+                pipeline.emit_error(&e);
+            }
+        });
+        Ok(())
+    }
+
+    /// Opens the microphone and marks the session live. Takes the session guard
+    /// so the caller's generation check and this cannot be raced apart.
+    ///
+    /// Does not emit: the caller owns that, because the delayed path has
+    /// already shown the pill and must not announce recording twice.
+    fn begin_capture(&self, mut session: std::sync::MutexGuard<'_, Session>) -> Result<()> {
         let settings = self.settings();
-        let recorder = aloud_audio::Recorder::start(settings.selected_microphone.as_deref(), None)
-            .context("starting recorder")?;
+        let recorder =
+            match aloud_audio::Recorder::start(settings.selected_microphone.as_deref(), None) {
+                Ok(recorder) => recorder,
+                Err(e) => {
+                    // Leaving this set would make every later start a no-op.
+                    session.pending_start = None;
+                    return Err(e).context("starting recorder");
+                }
+            };
 
         // Feed the overlay's waveform. The handle stays alive only as long as
         // the recorder, so the task ends by itself when recording stops —
@@ -235,11 +352,30 @@ impl Pipeline {
             }
         });
 
-        session.recorder = Some(recorder);
-        session.started_at = Some(std::time::Instant::now());
-        drop(session);
+        // Queued, not run here: with no start delay this whole function runs on
+        // the event-tap thread, and `osascript` takes long enough to stall
+        // every keystroke on the machine — the failure PR #60 hit. Queued also
+        // keeps it ordered against the restore on the stop path.
+        //
+        // The lead is the fix for muting silencing its own start chime: the
+        // chime plays through the output this is about to set to 0, and it is
+        // the only cue telling the user when to speak. Music leaks for the
+        // length of the chime, which is a far smaller problem than a user who
+        // cannot tell whether the hotkey registered.
+        if settings.mute_system_audio {
+            let lead = if settings.play_sounds {
+                START_CHIME_LEAD
+            } else {
+                Duration::ZERO
+            };
+            aloud_volume::mute_soon(lead);
+        }
 
-        self.emit(Phase::Recording);
+        session.pending_start = None;
+        session.recorder = Some(recorder);
+        // Timed from when audio actually starts, not from the key press, so
+        // the delay is not billed to the user as speaking time.
+        session.started_at = Some(std::time::Instant::now());
         Ok(())
     }
 
@@ -261,10 +397,7 @@ impl Pipeline {
         )
     )]
     pub async fn stop_and_paste(&self) -> Result<()> {
-        let (recorder, started_at) = {
-            let mut session = self.session.lock().unwrap();
-            (session.recorder.take(), session.started_at.take())
-        };
+        let (recorder, started_at) = self.take_recorder();
         let Some(recorder) = recorder else {
             return Ok(()); // not recording
         };
@@ -331,7 +464,7 @@ impl Pipeline {
         F: FnOnce(aloud_audio::Recorder) -> Fut,
         Fut: std::future::Future<Output = Result<()>>,
     {
-        let recorder = self.session.lock().unwrap().recorder.take();
+        let (recorder, _) = self.take_recorder();
         let Some(recorder) = recorder else {
             return Ok(());
         };
@@ -751,11 +884,10 @@ impl Pipeline {
     /// Cancels an in-flight session, discarding the audio and abandoning any
     /// transcription or cleanup already sent.
     pub fn cancel(&self) {
-        if let Ok(mut session) = self.session.lock() {
-            // Dropping the recorder stops capture; the samples go with it.
-            session.recorder = None;
-            session.started_at = None;
-        }
+        // Dropping the recorder stops capture; the samples go with it. Going
+        // through take_recorder also invalidates a start still inside its
+        // delay, which Escape must reach or the capture would begin anyway.
+        let _ = self.take_recorder();
         // Wakes the select! in the stop_* paths. A no-op when nothing is
         // waiting, which is the case for a cancel during plain recording —
         // the emit below is what ends that one.
@@ -976,6 +1108,47 @@ mod tests {
         let on_custom = prompt_with_hint("MY CUSTOM PROMPT", hint);
         assert!(on_custom.starts_with("MY CUSTOM PROMPT"));
         assert!(on_custom.ends_with(hint));
+    }
+
+    /// The failure this guards: with a start delay, a tap shorter than the
+    /// delay releases before the recorder exists. The stop path finds nothing
+    /// to take and returns "not recording", and without invalidation the
+    /// delayed start then opens the mic with nothing left to stop it — a
+    /// capture that runs until the next press.
+    #[test]
+    fn a_stop_inside_the_delay_cancels_the_pending_start() {
+        let mut session = Session::default();
+        let generation = session.reserve_start();
+        session.pending_start = Some(generation);
+        assert!(session.is_active(), "a reserved start counts as recording");
+        assert!(session.may_begin(generation));
+
+        // The release lands before the delay elapses.
+        session.invalidate_start();
+        assert!(!session.is_active());
+        assert!(
+            !session.may_begin(generation),
+            "the delayed start must not open the mic after a stop"
+        );
+    }
+
+    /// Press, release, press again — all inside the delay. Both sleepers wake
+    /// and check in. Only the second may proceed: the first is holding a
+    /// generation the release retired, and honouring it would open a mic the
+    /// second start also opens, or one nothing is left to stop.
+    #[test]
+    fn a_restart_inside_the_delay_retires_the_first_start_only() {
+        let mut session = Session::default();
+        let first = session.reserve_start();
+        session.pending_start = Some(first);
+
+        session.invalidate_start(); // release
+        let second = session.reserve_start(); // pressed again
+        session.pending_start = Some(second);
+
+        assert_ne!(first, second, "each start needs its own generation");
+        assert!(!session.may_begin(first), "the retired start must lose");
+        assert!(session.may_begin(second), "the live start must win");
     }
 
     /// With the key UI gone, a user whose cloud key does not resolve has no

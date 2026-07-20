@@ -1,0 +1,15 @@
+[package]
+name = "aloud-volume"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Muting and restoring the system output volume around a dictation"
+
+[dependencies]
+anyhow.workspace = true
+aloud-notes = { path = "../notes" }
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+tracing-subscriber = "0.3"

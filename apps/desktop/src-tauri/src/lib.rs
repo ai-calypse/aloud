@@ -222,10 +222,36 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            // If the app died mid-dictation with the output muted, the saved
+            // level is still on disk and this is the only thing that will put
+            // it back — the user has no in-app control that would.
+            if let Err(e) = aloud_volume::restore() {
+                tracing::warn!(%e, "could not restore the system volume from a previous run");
+            }
+
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {
+            // Reopening the app — double-clicking it in Finder while it is
+            // already running — raises the window. This is the recovery path
+            // that makes hiding the menu-bar icon safe: with no dock icon and
+            // no status item, it is otherwise the only way back to settings.
+            //
+            // TODO: unverified — test this against a real build (`pnpm build`),
+            // not `pnpm dev`. `applicationShouldHandleReopen` is delivered by
+            // LaunchServices to a bundled `.app`, so a bare `cargo run` binary
+            // can never raise it and no test here can cover it. Steps: turn
+            // "Show menu bar icon" off, close the window, then double-click
+            // Aloud in Applications — the window must come back. If it does
+            // not, hiding the icon is a one-way door out of the app and the
+            // toggle has to go behind a settings hotkey (see 1.4 / 2.1).
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                tray::show_main(_app);
+            }
+        });
 }
 
 /// Checks for an update on launch and installs one if the user agrees.

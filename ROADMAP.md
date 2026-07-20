@@ -202,10 +202,16 @@ its merits rather than back-filled to justify a stale comment.
 
 ---
 
-## Phase 1 — Settings the backend already supports
+## Phase 1 — Settings the backend already supports · ✅ **complete**
 
 Each is a `Settings` field plus one row. They share a migration-free path
 because `#[serde(default)]` covers new fields (`settings.rs:21`).
+
+Two of them turned out not to be "a field plus a row" at all: 1.2 needed a
+generation guard so a release inside the delay cannot be outrun by the start it
+races, and 1.3 needed a new crate and a disk file so a crash cannot leave the
+machine muted. 1.1's `transient_clipboard` half is still deferred — it needs
+`objc2-app-kit`.
 
 ### 1.1 — Clipboard toggles · S
 - **Scope** — two new `Settings` fields; `crates/paste` currently does
@@ -218,7 +224,7 @@ because `#[serde(default)]` covers new fields (`settings.rs:21`).
   marking visible to a clipboard manager. PR body states the Windows path is
   a no-op.
 
-### 1.2 — Shortcut start delay · ~~S~~ **M — resized, see below**
+### 1.2 — Shortcut start delay · ~~S~~ **M** · ✅ **done**
 - **The obvious implementation is a bug.** A sleep in `Pipeline::start` runs on
   the CGEventTap callback thread: `handle_hotkey` → `aloud_hotkey::listen`'s
   callback → invoked inside the tap at `crates/hotkey/src/macos.rs:194`.
@@ -228,25 +234,34 @@ because `#[serde(default)]` covers new fields (`settings.rs:21`).
 - **Scope** — reserve the recorder slot under the session lock, return from the
   tap immediately, and start capture from a spawned thread after the delay. The
   guard against a second press arriving mid-delay is the actual work.
-- **Done** — a non-zero delay postpones capture and the event tap keeps running
-  under repeated presses. Verify with a real `CGEvent`, and watch for the tap
-  being disabled — that failure is silent.
+- **Done** — verified with real `CGEvent` presses against a 400ms delay: a
+  1500ms hold recorded 1125ms of audio (capture postponed, and timed from the
+  mic opening rather than the key press), a 150ms tap and four rapid 120ms taps
+  produced no utterance at all, and the tap was never disabled. The guard is a
+  generation counter on `Session`: every stop bumps it, so a release inside the
+  delay invalidates the start it is racing.
 
-### 1.3 — Mute system audio during dictation · M
+### 1.3 — Mute system audio during dictation · M · ✅ **done**
 - **Scope** — new, platform-owned. macOS has no public output-mute API worth
   relying on; the honest implementation is `osascript -e "set volume …"`
   saved/restored around the session, or CoreAudio via `coreaudio-sys`. Windows
   is `IAudioEndpointVolume`. Belongs in a crate, not `src-tauri`.
-- **Done** — toggle in General; volume restored even if the app crashes
-  mid-dictation (restore on next launch from a persisted flag). `examples/`
-  binary that mutes, sleeps, restores.
+- **Done** — `crates/volume`, via `osascript` as predicted. The pre-mute level
+  is written to disk *before* muting, so a crash leaves a restorable file rather
+  than a silent machine; `restore()` runs on every stop path and once at launch.
+  Verified with `mute_restore` on real hardware, including the crash path:
+  volume 69 → muted → 69. **Windows is a no-op** (`IAudioEndpointVolume` is the
+  real path, unwritten while no Windows user can test it).
 
-### 1.4 — Show menu bar icon toggle · S
+### 1.4 — Show menu bar icon toggle · S · ✅ **done**
 - **Scope** — `Settings` field read by `src-tauri/src/tray.rs`.
-- **Done** — hiding the icon leaves hotkeys working. Include the escape hatch:
-  if the icon is the only way into settings, hiding it must not strand the
-  user — decide and document the recovery path (recommend: hiding is only
-  offered once a hotkey to open settings exists).
+- **Done** — hiding leaves hotkeys working, applied live rather than at next
+  launch. **The escape hatch is `RunEvent::Reopen`, not a settings hotkey.**
+  macOS turns re-opening a running app into `applicationShouldHandleReopen`,
+  which Tauri surfaces; `lib.rs` shows the window on it. So the recovery path is
+  "open Aloud again", it costs no new dependency and no new hotkey role, and it
+  does not collide with the recorder in #61. A settings hotkey remains a
+  reasonable *addition* once 2.1 lands, but it is no longer load-bearing.
 
 ### 1.5 — ~~History retention control~~ · **already done**
 Wrong in the parity audit and wrong here. A "History kept" number input already
@@ -544,7 +559,9 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 |---|---|
 | 0 — Corrections and free wins | ✅ **merged** (#59). 0.1 reverted by A.1 in #66 |
 | 1.1 — Clipboard toggles | ✅ **merged** (#63) — `preserve_clipboard`. Transient marking deferred (needs `objc2-app-kit`) |
-| 1.2 — Shortcut start delay | ⚠️ attempted, backed out — resized to M, see above |
+| 1.2 — Shortcut start delay | ✅ **done** — reserve-then-spawn, tap never blocks |
+| 1.3 — Mute system audio | ✅ **done** — `crates/volume`; Windows is a no-op |
+| 1.4 — Menu bar icon toggle | ✅ **done** — reopen event is the escape hatch |
 | 1.5 — History retention | ✅ already existed |
 | 1.6 — Key validation | ❌ deleted (no BYOK) |
 | 2.1 — Hotkey recorder | ✅ PR #61, open |
@@ -575,7 +592,7 @@ Revised for no-BYOK:
 
 **A.1 → A.2 → 2.2 → 3 → 6 → 5 → 7 → 11.1/11.3 → 8 → 9 → 10 → 11.2 → 12**
 
-(0, 1.1, 2.1, 4.1 and A are done. Next up: 2.2.)
+(0, 1, 2.1, 4.1 and A are done. Next up: 2.2, then Phase 3.)
 
 Rationale for the non-obvious moves:
 

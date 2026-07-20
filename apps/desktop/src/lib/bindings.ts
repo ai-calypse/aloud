@@ -325,6 +325,23 @@ export type Settings = {
 	soundVolume?: number | null,
 	pressEnterCommand?: boolean,
 	/**
+	 *  Wait this long after the hotkey before capture begins, so the first
+	 *  syllable is not clipped by a key that is still travelling. 0 disables.
+	 */
+	shortcutStartDelayMs?: number,
+	/**
+	 *  Silence system output while recording, so music does not end up in the
+	 *  transcript. Restored when capture stops, and on the next launch if the
+	 *  app died first. macOS only.
+	 */
+	muteSystemAudio?: boolean,
+	/**
+	 *  Show the menu-bar icon. Hiding it leaves hotkeys working; the way back
+	 *  to the window is to open the app again, which macOS turns into a
+	 *  reopen event rather than a second instance.
+	 */
+	showMenuBarIcon?: boolean,
+	/**
 	 *  Put the previous clipboard back after pasting. Off leaves the dictated
 	 *  text on the clipboard so it can be pasted again.
 	 */

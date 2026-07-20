@@ -52,6 +52,7 @@ dependencies = [
  "aloud-selection",
  "aloud-store",
  "aloud-transcribe",
+ "aloud-volume",
  "anyhow",
  "chrono",
  "futures-util",
@@ -221,6 +222,17 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "whisper-rs",
+]
+
+[[package]]
+name = "aloud-volume"
+version = "0.1.0"
+dependencies = [
+ "aloud-notes",
+ "anyhow",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

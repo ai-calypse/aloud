@@ -5,6 +5,7 @@ import { HotkeyEditor } from "./HotkeyEditor";
 import { MacroEditor } from "./MacroEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
 import { ConnectorEditor } from "./ConnectorEditor";
+import { AUTO_DETECT, LANGUAGES } from "./languages";
 import {
   Group,
   PaneTitle,
@@ -171,14 +172,32 @@ export function SettingsView({ section }: { section: SettingsSection }) {
               </Value>
             </Row>
 
-            <Row label="Language">
-              <Value className="flex-1">
-                <Input
-                  className={rowInput}
-                  value={settings.language ?? ""}
-                  placeholder="Auto-detect"
-                  onChange={(e) => update({ language: e.target.value })}
-                />
+            <Row
+              label="Language"
+              hint="Auto-detect can guess wrong on short utterances. Naming the language avoids that."
+            >
+              <Value>
+                <Select
+                  // Lowercased to match: the field this replaced was free
+                  // text, so a stored "EN" would otherwise select nothing and
+                  // render an empty trigger.
+                  value={settings.language?.toLowerCase() || AUTO_DETECT}
+                  onValueChange={(v) =>
+                    update({ language: v === AUTO_DETECT ? "" : v })
+                  }
+                >
+                  <SelectTrigger className={rowSelect}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={AUTO_DETECT}>Auto-detect</SelectItem>
+                    {LANGUAGES.map((l) => (
+                      <SelectItem key={l.code} value={l.code}>
+                        {l.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Value>
             </Row>
           </Group>
@@ -312,6 +331,54 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                 </Value>
               </Row>
             )}
+
+            <Row
+              label="Show menu bar icon"
+              hint="Hotkeys keep working when hidden. Open Aloud again to get back here."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={settings.showMenuBarIcon ?? true}
+                label="Show menu bar icon"
+                onChange={(c) => update({ showMenuBarIcon: c })}
+              />
+            </Row>
+
+            <Row
+              label="Mute while dictating"
+              hint="Silences system audio so music does not reach the microphone."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={settings.muteSystemAudio ?? false}
+                label="Mute while dictating"
+                onChange={(c) => update({ muteSystemAudio: c })}
+              />
+            </Row>
+
+            <Row
+              label="Start delay"
+              hint="Wait before capturing, so a slow key press does not clip the first word"
+            >
+              <Value className="w-24">
+                <Input
+                  type="number"
+                  min={0}
+                  max={2000}
+                  step={50}
+                  className={rowInput}
+                  value={settings.shortcutStartDelayMs ?? 0}
+                  onChange={(e) =>
+                    update({
+                      shortcutStartDelayMs: Math.max(
+                        0,
+                        Number(e.target.value) || 0,
+                      ),
+                    })
+                  }
+                />
+              </Value>
+            </Row>
 
             <Row label="History kept">
               <Value className="w-24">
