@@ -19,6 +19,7 @@ use anyhow::{Context, Result};
 use std::{
     path::{Path, PathBuf},
     sync::{mpsc, OnceLock},
+    time::Duration,
 };
 
 /// Where the pre-mute volume is parked. Deliberately outside the settings
@@ -82,13 +83,21 @@ fn restore_at(path: &Path) -> Result<()> {
 
 /// What the worker below performs, in the order it was asked.
 enum Command {
-    Mute,
+    /// Muting is held off for `lead` so a start chime is still audible — the
+    /// chime plays through the very output this is about to silence.
+    Mute {
+        lead: Duration,
+    },
     Restore,
 }
 
-/// Queues a mute. Returns immediately.
-pub fn mute_soon() {
-    send(Command::Mute);
+/// Queues a mute, held off for `lead` first.
+///
+/// The lead exists because the caller's start chime plays through the output
+/// this silences: mute immediately and the user loses the cue that tells them
+/// when to speak. Pass `Duration::ZERO` when no chime is playing.
+pub fn mute_soon(lead: Duration) {
+    send(Command::Mute { lead });
 }
 
 /// Queues a restore. Returns immediately.
@@ -116,7 +125,14 @@ fn worker() -> &'static mpsc::Sender<Command> {
             .spawn(move || {
                 for command in rx {
                     let result = match command {
-                        Command::Mute => mute(),
+                        Command::Mute { lead } => {
+                            // Sleeping here rather than before queueing keeps
+                            // the ordering guarantee: a restore queued behind
+                            // this still runs after it, so a dictation stopped
+                            // inside the lead cannot unmute before the mute.
+                            std::thread::sleep(lead);
+                            mute()
+                        }
                         Command::Restore => restore(),
                     };
                     if let Err(e) = result {

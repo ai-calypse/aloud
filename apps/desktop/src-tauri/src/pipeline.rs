@@ -31,6 +31,10 @@ use aloud_store::timings::next_utterance_id;
 /// eye without flooding the event channel.
 const LEVEL_INTERVAL: Duration = Duration::from_millis(50);
 
+/// How long muting waits so the start chime is still audible. Tink is roughly
+/// 250ms; the margin covers `afplay`'s own spawn.
+const START_CHIME_LEAD: Duration = Duration::from_millis(400);
+
 /// What the UI reflects. Mirrors the Swift overlay's phases.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
 #[serde(rename_all = "camelCase")]
@@ -352,8 +356,19 @@ impl Pipeline {
         // the event-tap thread, and `osascript` takes long enough to stall
         // every keystroke on the machine — the failure PR #60 hit. Queued also
         // keeps it ordered against the restore on the stop path.
+        //
+        // The lead is the fix for muting silencing its own start chime: the
+        // chime plays through the output this is about to set to 0, and it is
+        // the only cue telling the user when to speak. Music leaks for the
+        // length of the chime, which is a far smaller problem than a user who
+        // cannot tell whether the hotkey registered.
         if settings.mute_system_audio {
-            aloud_volume::mute_soon();
+            let lead = if settings.play_sounds {
+                START_CHIME_LEAD
+            } else {
+                Duration::ZERO
+            };
+            aloud_volume::mute_soon(lead);
         }
 
         session.pending_start = None;
