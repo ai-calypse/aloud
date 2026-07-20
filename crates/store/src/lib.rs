@@ -10,9 +10,11 @@ pub mod migrate;
 pub mod rules;
 pub mod settings;
 pub mod stats;
+pub mod timings;
 
 pub use history::History;
 pub use macros::Macro;
 pub use rules::AppRule;
 pub use settings::Settings;
 pub use stats::Stats;
+pub use timings::{TimingLayer, Timings};

@@ -189,6 +189,7 @@ dependencies = [
  "specta-typescript",
  "tempfile",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

@@ -14,6 +14,7 @@ use cooldown::CooldownTracker;
 use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
+use tracing::Instrument;
 
 pub const DEFAULT_BASE_URL: &str = "https://api.groq.com/openai/v1";
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -276,7 +277,16 @@ impl LlmClient {
             }
             .into());
         }
-        self.complete(fallback, messages, temperature).await
+        // The retry is invisible in per-stage durations but doubles what the
+        // user waits, so it gets its own span rather than hiding inside the
+        // caller's.
+        self.complete(fallback, messages, temperature)
+            .instrument(tracing::info_span!(
+                "llm_fallback",
+                primary = model,
+                fallback
+            ))
+            .await
     }
 
     /// One tool-enabled chat turn. Sends the tool schemas with `tool_choice`
