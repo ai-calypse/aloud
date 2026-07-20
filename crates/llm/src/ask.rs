@@ -32,35 +32,7 @@ of speech and may contain minor errors; answer the intent.";
 /// question. Each word is compared with punctuation stripped, because the
 /// transcriber attaches it freely ("Hey, flow!").
 pub fn question_from_trigger(transcript: &str) -> Option<String> {
-    let words: Vec<&str> = transcript.split_whitespace().collect();
-
-    for phrase in TRIGGER_PHRASES {
-        if words.len() <= phrase.len() {
-            continue; // the phrase alone is not a question
-        }
-        let matches = words
-            .iter()
-            .zip(*phrase)
-            .all(|(word, spellings)| spellings.contains(&normalize(word).as_str()));
-        if !matches {
-            continue;
-        }
-
-        let question = words[phrase.len()..]
-            .join(" ")
-            .trim_start_matches([',', '.', ' '])
-            .to_string();
-        return (!question.is_empty()).then_some(question);
-    }
-    None
-}
-
-/// Lowercased, letters and digits only — so "Hey," matches "hey".
-fn normalize(word: &str) -> String {
-    word.chars()
-        .filter(|c| c.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
+    crate::trigger::after_trigger(transcript, TRIGGER_PHRASES)
 }
 
 #[cfg(test)]
@@ -105,11 +77,5 @@ mod tests {
     fn mid_sentence_mentions_do_not_match() {
         assert_eq!(question_from_trigger("Send hey flow to the team"), None);
         assert_eq!(question_from_trigger("Let's ask AI about it later"), None);
-    }
-
-    #[test]
-    fn normalizes_punctuation_and_case() {
-        assert_eq!(normalize("Hey,"), "hey");
-        assert_eq!(normalize("FLOW!"), "flow");
     }
 }

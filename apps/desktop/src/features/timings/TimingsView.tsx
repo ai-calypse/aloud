@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { commands, events, type Span } from "@/lib/bindings";
+import { covered, percentile } from "@/lib/waterfall";
 import { cn } from "@/lib/utils";
 
 /** Runs fetched for the aggregates. The waterfall renders far fewer. */
@@ -64,31 +65,6 @@ function group(rows: Span[]): Utterance[] {
     })
     .filter((u): u is Utterance => u !== null)
     .sort((a, b) => b.id - a.id);
-}
-
-/**
- * Wall-clock the stages actually cover. Spans nest — `llm_fallback` runs
- * inside `cleanup` — so summing durations double-counts and makes the
- * unaccounted remainder come out negative.
- */
-function covered(stages: Span[]): number {
-  const spans = [...stages].sort((a, b) => a.startedAt - b.startedAt);
-  let total = 0;
-  let end = -Infinity;
-  for (const s of spans) {
-    const start = Math.max(s.startedAt, end);
-    end = Math.max(end, s.startedAt + s.durationMs);
-    total += Math.max(end - start, 0);
-  }
-  return total;
-}
-
-/** Nearest-rank percentile. Averages hide the tail; this is what to read. */
-function percentile(values: number[], p: number): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const rank = Math.ceil((p / 100) * sorted.length) - 1;
-  return sorted[Math.min(Math.max(rank, 0), sorted.length - 1)];
 }
 
 const mean = (values: number[]) =>
@@ -180,8 +156,8 @@ export function TimingsView() {
               className={cn(
                 "rounded-[7px] px-2.5 py-1 text-[12px] font-medium transition-colors",
                 mode === m
-                  ? "bg-[var(--accent)] text-white"
-                  : "bg-[var(--field)] hover:bg-[var(--card-solid)]",
+                  ? "bg-brand text-white"
+                  : "bg-field hover:bg-surface",
               )}
             >
               {m} <span className="opacity-60">{n}</span>
@@ -190,7 +166,7 @@ export function TimingsView() {
         })}
       </div>
 
-      <section className="rounded-[11px] border-[0.5px] border-[var(--card-border)] bg-[var(--card-solid)] p-5 shadow-[0_1px_2px_rgba(0,0,0,.05)]">
+      <section className="rounded-card border-[0.5px] border-surface-border bg-surface p-5 shadow-card">
         <div className="flex gap-8">
           {[
             { label: "runs", value: runs.length },
@@ -199,7 +175,7 @@ export function TimingsView() {
             { label: "p95", value: `${percentile(totals, 95)} ms` },
           ].map((s) => (
             <div key={s.label}>
-              <div className="text-[11px] uppercase tracking-wide text-[var(--text2)]">
+              <div className="text-[11px] uppercase tracking-wide text-ink-2">
                 {s.label}
               </div>
               <div className="text-lg font-semibold tabular-nums">{s.value}</div>
@@ -224,7 +200,7 @@ export function TimingsView() {
             />
           ))}
         </div>
-        <div className="mt-1 flex justify-between text-[11px] text-[var(--text2)]">
+        <div className="mt-1 flex justify-between text-[11px] text-ink-2">
           <span>oldest</span>
           <span>{overTime.length} runs</span>
           <span>newest</span>
@@ -234,9 +210,9 @@ export function TimingsView() {
       {/* Per-stage, within the selected mode. p95 rather than avg is the
           number to act on — a stage that is usually fast and occasionally
           terrible averages out to fine. */}
-      <section className="rounded-[11px] border-[0.5px] border-[var(--card-border)] bg-[var(--card-solid)] p-5 shadow-[0_1px_2px_rgba(0,0,0,.05)]">
+      <section className="rounded-card border-[0.5px] border-surface-border bg-surface p-5 shadow-card">
         <h2 className="mb-3 text-[13px] font-semibold">Stages · {mode}</h2>
-        <div className="grid grid-cols-[130px_1fr_46px_52px_36px] items-center gap-2 text-[11px] text-[var(--text2)]">
+        <div className="grid grid-cols-[130px_1fr_46px_52px_36px] items-center gap-2 text-[11px] text-ink-2">
           <span>stage</span>
           <span />
           <span className="text-right">avg</span>
@@ -249,7 +225,7 @@ export function TimingsView() {
             className="mt-1.5 grid grid-cols-[130px_1fr_46px_52px_36px] items-center gap-2 text-[11px]"
           >
             <span className="truncate">{s.stage}</span>
-            <div className="h-3 rounded-[3px] bg-[var(--field)]">
+            <div className="h-3 rounded-[3px] bg-field">
               <div
                 className="h-full rounded-[3px] opacity-40"
                 style={{
@@ -267,10 +243,10 @@ export function TimingsView() {
               </div>
             </div>
             <span className="text-right tabular-nums">{s.avg}</span>
-            <span className="text-right tabular-nums text-[var(--text2)]">
+            <span className="text-right tabular-nums text-ink-2">
               {s.p95}
             </span>
-            <span className="text-right tabular-nums text-[var(--text2)]">
+            <span className="text-right tabular-nums text-ink-2">
               {s.n}
             </span>
           </div>
@@ -290,18 +266,18 @@ export function TimingsView() {
         return (
           <section
             key={u.id}
-            className="rounded-[11px] border-[0.5px] border-[var(--card-border)] bg-[var(--card-solid)] p-4 shadow-[0_1px_2px_rgba(0,0,0,.05)]"
+            className="rounded-card border-[0.5px] border-surface-border bg-surface p-4 shadow-card"
           >
             <header className="mb-3 flex items-baseline gap-2 text-[13px]">
               <span
                 className={cn(
                   "text-base font-semibold tabular-nums",
-                  !u.root.success && "text-[var(--warning)]",
+                  !u.root.success && "text-warning",
                 )}
               >
                 {total} ms
               </span>
-              <span className="text-[var(--text2)]">
+              <span className="text-ink-2">
                 {u.mode}
                 {f.outcome ? ` · ${f.outcome}` : ""}
                 {typeof f.spoken_ms === "number" &&
@@ -320,10 +296,10 @@ export function TimingsView() {
                     key={`${s.stage}-${i}`}
                     className="grid grid-cols-[130px_1fr_58px] items-center gap-2 text-[11px]"
                   >
-                    <span className="truncate text-[var(--text2)]">
+                    <span className="truncate text-ink-2">
                       {s.stage}
                     </span>
-                    <div className="h-3 rounded-[3px] bg-[var(--field)]">
+                    <div className="h-3 rounded-[3px] bg-field">
                       <div
                         className="h-full rounded-[3px]"
                         style={{
@@ -337,7 +313,7 @@ export function TimingsView() {
                         title={s.fields}
                       />
                     </div>
-                    <span className="text-right tabular-nums text-[var(--text2)]">
+                    <span className="text-right tabular-nums text-ink-2">
                       {s.durationMs} ms
                     </span>
                   </div>
@@ -345,7 +321,7 @@ export function TimingsView() {
               })}
               {/* Stages never sum to the total; the gap is the app's own
                   overhead, and naming it is the point of the panel. */}
-              <div className="mt-1 grid grid-cols-[130px_1fr_58px] gap-2 text-[11px] text-[var(--text2)]">
+              <div className="mt-1 grid grid-cols-[130px_1fr_58px] gap-2 text-[11px] text-ink-2">
                 <span>unaccounted</span>
                 <span />
                 <span className="text-right tabular-nums">

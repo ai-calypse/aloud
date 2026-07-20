@@ -31,6 +31,19 @@ function text(args: ToolArgs, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
+/**
+ * The panel-window card every tool body sits in. Local to this file rather
+ * than a components/ui primitive: the white/10 hairline is the floating
+ * panel's material, not the settings window's.
+ */
+function ToolCard({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
+      {children}
+    </div>
+  );
+}
+
 /** "someone@example.com" → "someone", for a label that fits one line. */
 function who(address: string): string {
   return address.split("@")[0] || address;
@@ -43,7 +56,7 @@ function emailBody(args: ToolArgs): ReactNode {
   if (!body && !subject) return null;
 
   return (
-    <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
+    <ToolCard>
       {subject && <p className="m-0 text-ui font-medium">{subject}</p>}
       {body ? (
         <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
@@ -56,7 +69,7 @@ function emailBody(args: ToolArgs): ReactNode {
           No message body — cancel and ask again.
         </p>
       )}
-    </div>
+    </ToolCard>
   );
 }
 
@@ -67,14 +80,14 @@ function eventBody(args: ToolArgs): ReactNode {
   if (!start && !location) return null;
 
   return (
-    <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
+    <ToolCard>
       {start && (
         <p className="m-0 text-ui font-medium">{start.replace("T", " ")}</p>
       )}
       {location && (
         <p className="m-0 text-ui text-muted-foreground">{location}</p>
       )}
-    </div>
+    </ToolCard>
   );
 }
 
@@ -106,14 +119,14 @@ const VIEWS: Record<string, ToolView> = {
       const body = text(a, "body");
       if (!title) return null;
       return (
-        <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
+        <ToolCard>
           <p className="m-0 text-ui font-medium">{title}</p>
           {body && (
             <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
               {body}
             </p>
           )}
-        </div>
+        </ToolCard>
       );
     },
   },
@@ -152,12 +165,12 @@ const VIEWS: Record<string, ToolView> = {
       const calendar = text(args, "calendar_id");
       if (!id) return null;
       return (
-        <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
+        <ToolCard>
           <p className="m-0 text-ui font-medium">Event {id}</p>
           {calendar && calendar !== "primary" && (
             <p className="m-0 text-ui text-muted-foreground">{calendar}</p>
           )}
-        </div>
+        </ToolCard>
       );
     },
   },

@@ -6,8 +6,10 @@
 //! the Swift app hit the same Groq endpoint for all four.
 
 pub mod ask;
+pub mod cleanup;
 pub mod cooldown;
 pub mod prompts;
+pub mod trigger;
 
 use anyhow::{anyhow, Context, Result};
 use cooldown::CooldownTracker;
@@ -179,6 +181,36 @@ impl LlmClient {
         })
     }
 
+    /// Turns a non-2xx response into the right [`LlmError`], registering a
+    /// 429's cooldown on the way through so the breaker learns from every
+    /// attempt. A success passes straight back.
+    ///
+    /// Every request path goes through this. Written out three times, the
+    /// rate-limit branch could be fixed in one and left stale in the others —
+    /// and it is the branch a user only hits when they are already rate
+    /// limited, which is the worst time to find out it drifted.
+    async fn check(&self, model: &str, response: reqwest::Response) -> Result<reqwest::Response> {
+        let status = response.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let cooldown = cooldown::from_headers(response.headers());
+            self.cooldowns.set(model, cooldown);
+            return Err(LlmError::RateLimited {
+                model: model.to_string(),
+                retry_after: cooldown.duration,
+            }
+            .into());
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(LlmError::Failed {
+                status: status.as_u16(),
+                body,
+            }
+            .into());
+        }
+        Ok(response)
+    }
+
     /// One chat completion.
     ///
     /// A 429 registers the model's cooldown before returning
@@ -206,24 +238,7 @@ impl LlmClient {
             .await
             .context("chat request failed")?;
 
-        let status = response.status();
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let cooldown = cooldown::from_headers(response.headers());
-            self.cooldowns.set(model, cooldown);
-            return Err(LlmError::RateLimited {
-                model: model.to_string(),
-                retry_after: cooldown.duration,
-            }
-            .into());
-        }
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(LlmError::Failed {
-                status: status.as_u16(),
-                body,
-            }
-            .into());
-        }
+        let response = self.check(model, response).await?;
 
         let parsed: ChatResponse = response.json().await.context("decoding chat response")?;
         let content = parsed
@@ -314,24 +329,7 @@ impl LlmClient {
             .await
             .context("tool chat request failed")?;
 
-        let status = response.status();
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let cooldown = cooldown::from_headers(response.headers());
-            self.cooldowns.set(model, cooldown);
-            return Err(LlmError::RateLimited {
-                model: model.to_string(),
-                retry_after: cooldown.duration,
-            }
-            .into());
-        }
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(LlmError::Failed {
-                status: status.as_u16(),
-                body,
-            }
-            .into());
-        }
+        let response = self.check(model, response).await?;
 
         let parsed: ChatResponse = response.json().await.context("decoding tool response")?;
         let message = parsed
@@ -374,24 +372,7 @@ impl LlmClient {
             .await
             .context("stream request failed")?;
 
-        let status = response.status();
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let cooldown = cooldown::from_headers(response.headers());
-            self.cooldowns.set(model, cooldown);
-            return Err(LlmError::RateLimited {
-                model: model.to_string(),
-                retry_after: cooldown.duration,
-            }
-            .into());
-        }
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(LlmError::Failed {
-                status: status.as_u16(),
-                body,
-            }
-            .into());
-        }
+        let response = self.check(model, response).await?;
 
         Ok(sse_deltas(response.bytes_stream()))
     }
@@ -444,6 +425,65 @@ fn parse_sse_line(line: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn response(status: u16, header: Option<(&str, &str)>) -> reqwest::Response {
+        let mut builder = http::Response::builder().status(status);
+        if let Some((name, value)) = header {
+            builder = builder.header(name, value);
+        }
+        reqwest::Response::from(builder.body("body text").unwrap())
+    }
+
+    /// The three request paths share this, so it is the one place a 429 is
+    /// classified and the cooldown registered. A user only reaches it when
+    /// already rate limited, which is the worst time to discover it broke.
+    #[tokio::test]
+    async fn a_429_registers_the_cooldown_and_reports_rate_limited() {
+        let client = LlmClient::new("k", None).unwrap();
+
+        let error = client
+            .check("m", response(429, Some(("retry-after", "30"))))
+            .await
+            .expect_err("429 must be an error");
+
+        match error.downcast_ref::<LlmError>() {
+            Some(LlmError::RateLimited { model, retry_after }) => {
+                assert_eq!(model, "m");
+                assert_eq!(retry_after.as_secs(), 30);
+            }
+            other => panic!("expected RateLimited, got {other:?}"),
+        }
+        // The breaker must have learned, or the fallback path retries a model
+        // the server just refused.
+        assert!(client.cooldowns.is_limited("m"));
+    }
+
+    #[tokio::test]
+    async fn other_failures_carry_the_status_and_body_and_do_not_cool_down() {
+        let client = LlmClient::new("k", None).unwrap();
+
+        let error = client
+            .check("m", response(500, None))
+            .await
+            .expect_err("500 must be an error");
+
+        match error.downcast_ref::<LlmError>() {
+            Some(LlmError::Failed { status, body }) => {
+                assert_eq!(*status, 500);
+                assert_eq!(body, "body text");
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+        assert!(!client.cooldowns.is_limited("m"), "500 is not a rate limit");
+    }
+
+    #[tokio::test]
+    async fn a_success_passes_through_untouched() {
+        let client = LlmClient::new("k", None).unwrap();
+        let ok = client.check("m", response(200, None)).await.unwrap();
+        assert_eq!(ok.status(), 200);
+        assert!(!client.cooldowns.is_limited("m"));
+    }
 
     #[test]
     fn parses_content_deltas() {

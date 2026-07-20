@@ -22,10 +22,6 @@ const OVERLAY_LINGER: Duration = Duration::from_millis(900);
 /// How long a failure stays up. Long enough to actually read: 900ms was tuned
 /// for "Pasted", and left a rate-limit message unreadable.
 const ERROR_LINGER: Duration = Duration::from_secs(4);
-/// Transcripts this short skip cleanup entirely. Whisper punctuates a short
-/// utterance correctly on its own, and the prompt costs far more than the
-/// words it is fixing.
-const CLEANUP_MIN_WORDS: usize = 3;
 /// Correlates every stage of one dictation. A counter rather than a UUID: it
 /// is only ever read back on this machine, and it sorts by time for free —
 /// which is only true because the store seeds it from disk on open.
@@ -318,12 +314,41 @@ impl Pipeline {
         result.map(|_| ())
     }
 
-    async fn transcribe_and_paste(
-        &self,
-        recorder: aloud_audio::Recorder,
-        started_at: Option<std::time::Instant>,
-        generation: u64,
-    ) -> Result<Outcome> {
+    /// Finalizes the recording and transcribes it, returning the text and the
+    /// settings snapshot the rest of the stage runs against.
+    ///
+    /// Every mode starts this way. Written out four times it had already
+    /// drifted: only the dictation copy recorded `wav_bytes`, so three of the
+    /// four waterfalls were missing a stage field for no reason anyone chose.
+    /// The shared shape of a stop: take the recorder, show Transcribing, run
+    /// the mode's work, then settle the pill on `done` or the error.
+    ///
+    /// The public `stop_and_*` keep their own `#[tracing::instrument]` — the
+    /// `mode` field differs per mode and is the one thing that must not be
+    /// shared.
+    async fn run_stage<F, Fut>(&self, done: Phase, work: F) -> Result<()>
+    where
+        F: FnOnce(aloud_audio::Recorder) -> Fut,
+        Fut: std::future::Future<Output = Result<()>>,
+    {
+        let recorder = self.session.lock().unwrap().recorder.take();
+        let Some(recorder) = recorder else {
+            return Ok(());
+        };
+
+        self.emit(Phase::Transcribing);
+        let result = work(recorder).await;
+        if result.is_err() {
+            tracing::Span::current().record("ok", false);
+        }
+        match &result {
+            Ok(()) => self.emit(done),
+            Err(e) => self.emit_error(e),
+        }
+        result
+    }
+
+    async fn capture(&self, recorder: aloud_audio::Recorder) -> Result<(String, Settings)> {
         let wav = temp_wav_path();
         // Draining the capture buffer and writing the WAV is invisible latency
         // between the key release and the first byte the transcriber sees.
@@ -339,11 +364,11 @@ impl Pipeline {
         let settings = self.settings();
         // The first local run pays for the model load inside this span, which
         // is right: it is time the user spends waiting for a transcript.
-        let raw = async {
+        let text = async {
             let transcriber = self.transcriber(&settings).await?;
-            let raw = transcriber.transcribe(&wav).await?;
-            tracing::Span::current().record("chars", raw.len());
-            anyhow::Ok(raw)
+            let text = transcriber.transcribe(&wav).await?;
+            tracing::Span::current().record("chars", text.len());
+            anyhow::Ok(text)
         }
         .instrument(tracing::info_span!(
             "transcribe",
@@ -352,6 +377,16 @@ impl Pipeline {
         ))
         .await?;
         let _ = std::fs::remove_file(&wav);
+        Ok((text, settings))
+    }
+
+    async fn transcribe_and_paste(
+        &self,
+        recorder: aloud_audio::Recorder,
+        started_at: Option<std::time::Instant>,
+        generation: u64,
+    ) -> Result<Outcome> {
+        let (raw, settings) = self.capture(recorder).await?;
 
         // Whisper returns nothing for silence, and the cleanup prompt maps
         // filler-only speech to its EMPTY sentinel. Neither is an error.
@@ -370,7 +405,14 @@ impl Pipeline {
         // Apply the focused app's rule (if any) to a working copy, so every
         // downstream step just reads the effective settings. History still
         // records against the real config; only cleanup behaviour changes.
-        let (effective, app_name) = apply_app_rule(settings.clone());
+        // Off-thread for the same reason `capture_selection` is: an
+        // Accessibility read waits on the *target* app, so a busy app would
+        // stall a tokio worker here.
+        let app_name = tauri::async_runtime::spawn_blocking(aloud_selection::frontmost_app)
+            .await
+            .ok()
+            .flatten();
+        let effective = apply_app_rule(settings.clone(), app_name.as_deref());
 
         let final_text = self.post_process(&raw, &effective).await;
         if final_text.trim().is_empty() {
@@ -412,7 +454,15 @@ impl Pipeline {
             if !settings.post_processing_enabled || settings.groq_api_key.trim().is_empty() {
                 raw.to_string()
             } else {
-                match self.clean_up(raw, settings).await {
+                let options = aloud_llm::cleanup::Options {
+                    api_key: &settings.groq_api_key,
+                    base_url: &settings.base_url,
+                    model: &settings.post_processing_model,
+                    fallback: Some(settings.fallback_model.as_str()),
+                    custom_prompt: &settings.custom_system_prompt,
+                    vocabulary: &settings.vocabulary,
+                };
+                match aloud_llm::cleanup::clean(options, raw).await {
                     Ok(text) => text,
                     Err(e) => {
                         tracing::warn!(%e, "post-processing failed; pasting raw transcript");
@@ -429,54 +479,6 @@ impl Pipeline {
         } else {
             aloud_store::macros::expand(&cleaned, &settings.macros)
         }
-    }
-
-    async fn clean_up(&self, raw: &str, settings: &Settings) -> Result<String> {
-        // The cleanup prompt is ~1,500 tokens and is spent on every dictation,
-        // against a free-tier budget of 8,000 per minute — about five
-        // dictations before a 429. On "yes", "one sec", "send it" there is
-        // nothing to clean, so skipping those is most of the spend for none of
-        // the benefit.
-        if raw.split_whitespace().count() <= CLEANUP_MIN_WORDS {
-            return Ok(raw.to_string());
-        }
-
-        let client = aloud_llm::LlmClient::new(&settings.groq_api_key, Some(&settings.base_url))?;
-
-        let system = if settings.custom_system_prompt.trim().is_empty() {
-            aloud_llm::prompts::CLEANUP.to_string()
-        } else {
-            settings.custom_system_prompt.clone()
-        };
-
-        let mut user = raw.to_string();
-        if !settings.vocabulary.is_empty() {
-            user = format!("VOCABULARY: {}\n\n{user}", settings.vocabulary.join(", "));
-        }
-
-        let messages = [
-            aloud_llm::Message::system(system),
-            aloud_llm::Message::user(user),
-        ];
-        let cleaned = client
-            .complete_with_fallback(
-                &settings.post_processing_model,
-                Some(settings.fallback_model.as_str()).filter(|f| !f.trim().is_empty()),
-                &messages,
-                Some(0.0), // deterministic: this is cleanup, not writing
-            )
-            .instrument(tracing::info_span!(
-                "cleanup",
-                model = %settings.post_processing_model,
-                words = raw.split_whitespace().count(),
-            ))
-            .await?;
-
-        // The prompt specifies this sentinel for filler-only input.
-        if cleaned.trim() == aloud_llm::EMPTY_SENTINEL {
-            return Ok(String::new());
-        }
-        Ok(cleaned)
     }
 
     /// The configured engine. The local model is cached after first load.
@@ -623,20 +625,8 @@ impl Pipeline {
         )
     )]
     async fn finish_rewrite(&self, selection: String) -> Result<()> {
-        let Some(recorder) = self.session.lock().unwrap().recorder.take() else {
-            return Ok(());
-        };
-
-        self.emit(Phase::Transcribing);
-        let result = self.transcribe_and_rewrite(recorder, &selection).await;
-        if result.is_err() {
-            tracing::Span::current().record("ok", false);
-        }
-        match &result {
-            Ok(()) => self.emit(Phase::Done),
-            Err(e) => self.emit_error(e),
-        }
-        result
+        self.run_stage(Phase::Done, |r| self.transcribe_and_rewrite(r, &selection))
+            .await
     }
 
     async fn transcribe_and_rewrite(
@@ -644,26 +634,7 @@ impl Pipeline {
         recorder: aloud_audio::Recorder,
         selection: &str,
     ) -> Result<()> {
-        let wav = temp_wav_path();
-        {
-            let _e = tracing::info_span!("finalize_audio").entered();
-            recorder.stop_to_wav(&wav)?;
-        }
-
-        let settings = self.settings();
-        let command = async {
-            let transcriber = self.transcriber(&settings).await?;
-            let command = transcriber.transcribe(&wav).await?;
-            tracing::Span::current().record("chars", command.len());
-            anyhow::Ok(command)
-        }
-        .instrument(tracing::info_span!(
-            "transcribe",
-            engine = ?settings.engine,
-            chars = tracing::field::Empty,
-        ))
-        .await?;
-        let _ = std::fs::remove_file(&wav);
+        let (command, settings) = self.capture(recorder).await?;
 
         if command.trim().is_empty() {
             return Ok(()); // no command spoken; leave the selection alone
@@ -726,46 +697,14 @@ impl Pipeline {
         )
     )]
     pub async fn stop_and_ask(&self) -> Result<()> {
-        let recorder = self.session.lock().unwrap().recorder.take();
-        let Some(recorder) = recorder else {
-            return Ok(());
-        };
-
-        self.emit(Phase::Transcribing);
-        let result = self.transcribe_and_ask(recorder).await;
-        if result.is_err() {
-            tracing::Span::current().record("ok", false);
-        }
-        match &result {
-            // Ask and Agent show their own panel; the pill just gets out of
-            // the way unless there is an error worth reading.
-            Ok(()) => self.emit(Phase::Idle),
-            Err(e) => self.emit_error(e),
-        }
-        result
+        // Ask and Agent show their own panel; the pill just gets out of the
+        // way unless there is an error worth reading.
+        self.run_stage(Phase::Idle, |r| self.transcribe_and_ask(r))
+            .await
     }
 
     async fn transcribe_and_ask(&self, recorder: aloud_audio::Recorder) -> Result<()> {
-        let wav = temp_wav_path();
-        {
-            let _e = tracing::info_span!("finalize_audio").entered();
-            recorder.stop_to_wav(&wav)?;
-        }
-
-        let settings = self.settings();
-        let question = async {
-            let transcriber = self.transcriber(&settings).await?;
-            let question = transcriber.transcribe(&wav).await?;
-            tracing::Span::current().record("chars", question.len());
-            anyhow::Ok(question)
-        }
-        .instrument(tracing::info_span!(
-            "transcribe",
-            engine = ?settings.engine,
-            chars = tracing::field::Empty,
-        ))
-        .await?;
-        let _ = std::fs::remove_file(&wav);
+        let (question, settings) = self.capture(recorder).await?;
 
         if question.trim().is_empty() {
             return Ok(());
@@ -790,46 +729,14 @@ impl Pipeline {
         )
     )]
     pub async fn stop_and_agent(&self) -> Result<()> {
-        let recorder = self.session.lock().unwrap().recorder.take();
-        let Some(recorder) = recorder else {
-            return Ok(());
-        };
-
-        self.emit(Phase::Transcribing);
-        let result = self.transcribe_and_agent(recorder).await;
-        if result.is_err() {
-            tracing::Span::current().record("ok", false);
-        }
-        match &result {
-            // Ask and Agent show their own panel; the pill just gets out of
-            // the way unless there is an error worth reading.
-            Ok(()) => self.emit(Phase::Idle),
-            Err(e) => self.emit_error(e),
-        }
-        result
+        // Ask and Agent show their own panel; the pill just gets out of the
+        // way unless there is an error worth reading.
+        self.run_stage(Phase::Idle, |r| self.transcribe_and_agent(r))
+            .await
     }
 
     async fn transcribe_and_agent(&self, recorder: aloud_audio::Recorder) -> Result<()> {
-        let wav = temp_wav_path();
-        {
-            let _e = tracing::info_span!("finalize_audio").entered();
-            recorder.stop_to_wav(&wav)?;
-        }
-
-        let settings = self.settings();
-        let command = async {
-            let transcriber = self.transcriber(&settings).await?;
-            let command = transcriber.transcribe(&wav).await?;
-            tracing::Span::current().record("chars", command.len());
-            anyhow::Ok(command)
-        }
-        .instrument(tracing::info_span!(
-            "transcribe",
-            engine = ?settings.engine,
-            chars = tracing::field::Empty,
-        ))
-        .await?;
-        let _ = std::fs::remove_file(&wav);
+        let (command, settings) = self.capture(recorder).await?;
 
         if command.trim().is_empty() {
             return Ok(());
@@ -874,7 +781,14 @@ impl Pipeline {
     }
 
     pub fn history(&self, limit: usize) -> Result<Vec<aloud_store::history::Entry>> {
-        self.history.lock().unwrap().recent(limit)
+        // The tray builds its History submenu from this on the main thread, so
+        // a poisoned lock here would panic the menu build rather than just
+        // showing an empty submenu. `record` already degrades on this same
+        // mutex; this was the one place that did not.
+        self.history
+            .lock()
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?
+            .recent(limit)
     }
 }
 
@@ -912,18 +826,18 @@ pub async fn build_transcriber(
     }
 }
 
-/// Overrides `settings` with the rule for the currently focused app, if one
-/// matches. Reads the frontmost app once; a None app or no matching rule
-/// leaves the settings untouched.
-fn apply_app_rule(mut settings: Settings) -> (Settings, Option<String>) {
-    // Read once and hand the name back: history records it too, and this is an
-    // Accessibility round-trip we do not want to pay for twice per dictation.
-    let app = aloud_selection::frontmost_app();
+/// Overrides `settings` with the rule for `app`, if one matches. A None app or
+/// no matching rule leaves the settings untouched.
+///
+/// Takes the app name rather than reading it: the Accessibility call blocks on
+/// the target app, so the caller does it off-thread and also reuses the name
+/// for the history record.
+fn apply_app_rule(mut settings: Settings, app: Option<&str>) -> Settings {
     if settings.app_rules.is_empty() {
-        return (settings, app);
+        return settings;
     }
-    let Some(rule) = aloud_store::rules::matching(&settings.app_rules, app.as_deref()) else {
-        return (settings, app);
+    let Some(rule) = aloud_store::rules::matching(&settings.app_rules, app) else {
+        return settings;
     };
     tracing::info!(app = ?app, matcher = %rule.app_matches, "applying app rule");
 
@@ -938,7 +852,7 @@ fn apply_app_rule(mut settings: Settings) -> (Settings, Option<String>) {
         settings.custom_system_prompt =
             prompt_with_hint(&settings.custom_system_prompt, &rule.custom_prompt);
     }
-    (settings, app)
+    settings
 }
 
 /// The effective cleanup prompt for an app rule: the rule's text is a style
@@ -1007,6 +921,31 @@ mod tests {
         // Anything unrecognised must survive intact rather than be guessed at.
         let other = anyhow::anyhow!("no microphone found");
         assert_eq!(user_message(&other), "no microphone found");
+    }
+
+    /// Only testable since the Accessibility read moved out to the caller —
+    /// before that, this function could not run without a focused app.
+    #[test]
+    fn app_rule_applies_only_to_the_app_it_matches() {
+        let settings = Settings {
+            post_processing_enabled: true,
+            app_rules: vec![aloud_store::rules::AppRule {
+                app_matches: "slack".into(),
+                post_processing_enabled: Some(false),
+                custom_prompt: String::new(),
+            }],
+            ..Default::default()
+        };
+
+        let matched = apply_app_rule(settings.clone(), Some("Slack"));
+        assert!(!matched.post_processing_enabled, "the rule must apply");
+
+        let other = apply_app_rule(settings.clone(), Some("Xcode"));
+        assert!(other.post_processing_enabled, "a non-match must not apply");
+
+        // No focused app at all — the read can legitimately return None.
+        let none = apply_app_rule(settings, None);
+        assert!(none.post_processing_enabled, "None must not apply a rule");
     }
 
     /// An app rule's prompt is a style hint, not a replacement. Replacing the

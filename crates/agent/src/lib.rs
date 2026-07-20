@@ -27,33 +27,7 @@ pub use tool_loop::{run as run_tool_loop, LoopEvent};
 /// ask-trigger design so "hey flow" and "hey agent" feel consistent.
 pub fn command_from_trigger(transcript: &str) -> Option<String> {
     const TRIGGERS: &[&[&[&str]]] = &[&[&["hey"], &["agent", "agents"]], &[&["do"], &["this"]]];
-
-    let words: Vec<&str> = transcript.split_whitespace().collect();
-    for phrase in TRIGGERS {
-        if words.len() <= phrase.len() {
-            continue;
-        }
-        let matches = words
-            .iter()
-            .zip(*phrase)
-            .all(|(word, spellings)| spellings.contains(&normalize(word).as_str()));
-        if !matches {
-            continue;
-        }
-        let command = words[phrase.len()..]
-            .join(" ")
-            .trim_start_matches([',', '.', ' '])
-            .to_string();
-        return (!command.is_empty()).then_some(command);
-    }
-    None
-}
-
-fn normalize(word: &str) -> String {
-    word.chars()
-        .filter(|c| c.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
+    aloud_llm::trigger::after_trigger(transcript, TRIGGERS)
 }
 
 #[cfg(test)]

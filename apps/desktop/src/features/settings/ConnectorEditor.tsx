@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { SearchField } from "@/components/ui/search-field";
-import { PaneTitle } from "@/components/ui/rows";
+import { Caption, PaneTitle, Surface } from "@/components/ui/rows";
 import { cn } from "@/lib/utils";
 
 /**
@@ -198,14 +198,12 @@ export function ConnectorEditor() {
 
       {popular.length > 0 && (
         <section>
-          <h3 className="mb-[7px] ml-1 text-xs font-semibold uppercase tracking-[0.03em] text-ink-2">
-            Popular
-          </h3>
+          <Caption>Popular</Caption>
           <div className="grid grid-cols-3 gap-3">
             {popular.map((c) => (
-              <div
+              <Surface
                 key={c.slug}
-                className="flex items-center gap-2 rounded-card border-[0.5px] border-surface-border bg-surface p-2.5 shadow-card"
+                className="flex items-center gap-2 p-2.5"
               >
                 <Logo connector={c} small />
                 {/* Three-up in a 686px pane, so a long name ellipsizes —
@@ -221,7 +219,7 @@ export function ConnectorEditor() {
                   onClick={() => connect(c.slug)}
                   compact
                 />
-              </div>
+              </Surface>
             ))}
           </div>
         </section>

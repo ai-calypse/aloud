@@ -44,8 +44,30 @@ pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> CmdRes
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_stats(state: State<'_, AppState>) -> Stats {
-    state.pipeline.stats()
+pub fn get_stats(state: State<'_, AppState>) -> StatsView {
+    let stats = state.pipeline.stats();
+    StatsView {
+        time_saved_seconds: stats.time_saved_seconds(),
+        stats,
+    }
+}
+
+/// [`Stats`] plus the values derived from it.
+///
+/// Derived rather than stored: `Stats` is written to disk after every
+/// dictation, and persisting a computed field would let the file disagree
+/// with the formula the moment the formula changed.
+///
+/// It crosses the boundary at all so the frontend does not re-derive it. The
+/// 40 wpm rule lived in both `stats.rs` and `App.tsx`, with the constant
+/// inlined on the TS side — changing it in Rust would have silently left the
+/// main window disagreeing with the tray menu.
+#[derive(serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StatsView {
+    #[serde(flatten)]
+    pub stats: Stats,
+    pub time_saved_seconds: f64,
 }
 
 #[tauri::command]
