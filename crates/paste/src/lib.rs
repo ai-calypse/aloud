@@ -143,21 +143,29 @@ impl Snapshot {
     }
 }
 
-/// Pastes `text` into the focused app, then restores the previous clipboard.
+/// Pastes `text` into the focused app.
 ///
 /// `press_enter` sends Return afterwards — the Swift app's "press enter"
 /// voice command.
-pub fn paste_text(text: &str, press_enter: bool) -> Result<()> {
+///
+/// `preserve_clipboard` puts the user's previous clipboard back once the paste
+/// has settled. Turning it off leaves the dictated text on the clipboard, which
+/// is what a user who wants to paste the same transcript again expects — the
+/// Swift app exposed the same choice.
+pub fn paste_text(text: &str, press_enter: bool, preserve_clipboard: bool) -> Result<()> {
     let mut clipboard = arboard::Clipboard::new().context("opening clipboard")?;
-    let saved = Snapshot::capture(&mut clipboard);
+    // Only worth reading the old clipboard if it is going back afterwards.
+    let saved = preserve_clipboard.then(|| Snapshot::capture(&mut clipboard));
 
     clipboard.set_text(text).context("writing transcript")?;
     let result = send_paste(press_enter);
 
     // Restore even if the paste failed, so a failure never eats the clipboard.
-    sleep(PASTE_SETTLE);
-    if let Err(e) = saved.restore(&mut clipboard) {
-        tracing::warn!(%e, "could not restore clipboard");
+    if let Some(saved) = saved {
+        sleep(PASTE_SETTLE);
+        if let Err(e) = saved.restore(&mut clipboard) {
+            tracing::warn!(%e, "could not restore clipboard");
+        }
     }
     result
 }
