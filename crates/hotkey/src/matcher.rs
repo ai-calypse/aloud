@@ -127,7 +127,7 @@ impl State {
         let mut deactivated: Vec<(Role, usize)> = Vec::new();
 
         for (role, binding) in config.roles() {
-            let now = self.binding_is_active(binding);
+            let now = self.binding_is_active(binding, config.permitted_extra);
 
             if role.is_one_shot() {
                 // Fire on the leading edge only; no deactivation edge. `fired`
@@ -168,7 +168,7 @@ impl State {
             .collect()
     }
 
-    fn binding_is_active(&self, binding: &Binding) -> bool {
+    fn binding_is_active(&self, binding: &Binding, permitted_extra: Option<Modifier>) -> bool {
         let Some(key) = binding.key() else {
             return false;
         };
@@ -183,12 +183,16 @@ impl State {
         // tolerated for plain-key bindings; a modifier-only binding demands an
         // exact match, so Right Option alone fires but Cmd+Right Option does
         // not — otherwise every Cmd chord would start dictation.
+        //
+        // `permitted_extra` is the one exception, and it is why manual command
+        // mode works: that modifier is a message to us, not a different chord.
         match binding {
             Binding::ModifierKey { .. } => {
                 let extra: Modifiers = held
                     .difference(&required)
                     .copied()
                     .filter(|m| Some(*m) != key.logical_modifier())
+                    .filter(|m| Some(*m) != permitted_extra)
                     .collect();
                 required.is_subset(&held) && extra.is_empty()
             }
@@ -196,19 +200,25 @@ impl State {
         }
     }
 
+    /// The modifiers held right now, so the app can tell a plain dictation
+    /// from one the user marked as a rewrite.
+    pub fn held_modifiers(&self) -> Modifiers {
+        self.modifiers()
+    }
+
     /// Whether `key` participates in any configured binding — used to decide
     /// whether to swallow the event.
     fn relevant(&self, key: Key, config: &Config) -> bool {
         config.roles().any(|(_, binding)| {
             if binding.key() == Some(key) {
-                return self.binding_is_active(binding);
+                return self.binding_is_active(binding, config.permitted_extra);
             }
             // A modifier that a binding requires is only swallowed while that
             // binding is actually firing.
             match key.logical_modifier() {
                 Some(m) => {
                     binding.modifiers().is_some_and(|mods| mods.contains(&m))
-                        && self.binding_is_active(binding)
+                        && self.binding_is_active(binding, config.permitted_extra)
                 }
                 None => false,
             }
@@ -243,6 +253,65 @@ mod tests {
             }),
             ..Default::default()
         }
+    }
+
+    /// The failure this guards: manual command mode marks a rewrite by holding
+    /// an extra modifier with the dictate key. The exact-match rule for
+    /// modifier-only bindings rejects any extra, so without `permitted_extra`
+    /// the gesture fires *nothing* — not a rewrite, not even a dictation — and
+    /// the user sees the hotkey simply stop working whenever they hold Option.
+    /// The marker has to be a *different* logical modifier from the binding's
+    /// own, or the test proves nothing: Left and Right Option both reduce to
+    /// `Modifier::Option`, which the exact-match rule already excludes as the
+    /// binding's own modifier. Cmd is genuinely extra.
+    #[test]
+    fn a_permitted_extra_modifier_does_not_block_a_modifier_only_hold() {
+        let mut config = hold_right_option();
+        config.permitted_extra = Some(Modifier::Command);
+        let mut state = State::default();
+
+        state.reduce(Input::KeyDown(Key::LeftCommand), &config);
+        let outcome = state.reduce(Input::KeyDown(Key::RightOption), &config);
+
+        assert_eq!(
+            outcome.events,
+            vec![Event::Activated(Role::Hold)],
+            "the marker modifier must not suppress the binding"
+        );
+    }
+
+    /// The tolerance is for one named modifier only. Anything else must still
+    /// be rejected, or every chord in every app would start a dictation.
+    #[test]
+    fn an_unpermitted_extra_modifier_still_blocks_a_modifier_only_hold() {
+        let mut config = hold_right_option();
+        config.permitted_extra = Some(Modifier::Command);
+        let mut state = State::default();
+
+        state.reduce(Input::KeyDown(Key::LeftShift), &config);
+        let outcome = state.reduce(Input::KeyDown(Key::RightOption), &config);
+
+        assert!(
+            outcome.events.is_empty(),
+            "Shift is not the marker, so Shift+Right Option must stay inert"
+        );
+    }
+
+    /// With no marker configured — automatic mode, or command mode off — the
+    /// same chord that fires above must go back to being inert.
+    #[test]
+    fn without_a_permitted_extra_the_exact_match_rule_is_unchanged() {
+        let config = hold_right_option();
+        assert_eq!(config.permitted_extra, None);
+        let mut state = State::default();
+
+        state.reduce(Input::KeyDown(Key::LeftCommand), &config);
+        let outcome = state.reduce(Input::KeyDown(Key::RightOption), &config);
+
+        assert!(
+            outcome.events.is_empty(),
+            "Cmd+Right Option fires only because the marker permits it"
+        );
     }
 
     #[test]

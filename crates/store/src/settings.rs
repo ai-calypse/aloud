@@ -13,6 +13,21 @@ use std::{fs, path::PathBuf};
 const DEFAULT_CLEANUP_MODEL: &str = "openai/gpt-oss-20b";
 const DEFAULT_FALLBACK_MODEL: &str = "qwen/qwen3.6-27b";
 
+/// How dictating over a selection becomes a rewrite. Ported from Swift's
+/// `CommandModeStyle`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum CommandModeStyle {
+    /// A selection is enough: dictating with text selected rewrites it. This
+    /// is what Aloud did before the setting existed, so it stays the default.
+    #[default]
+    Automatic,
+    /// A selection is not enough — the dictate key must be pressed together
+    /// with [`Settings::command_mode_manual_modifier`]. Without it, a
+    /// selection is ignored and the utterance is dictated.
+    Manual,
+}
+
 /// Everything the app remembers between launches.
 ///
 /// One coarse struct rather than ~70 individual commands: the whole thing is
@@ -46,6 +61,18 @@ pub struct Settings {
     pub macros: Vec<crate::macros::Macro>,
     /// Per-app behaviour overrides, applied by the focused app's name.
     pub app_rules: Vec<crate::rules::AppRule>,
+
+    // Command mode — dictating over a selection rewrites it instead.
+    /// Whether a selection can turn a dictation into a rewrite at all.
+    ///
+    /// **Defaults to on, where the Swift app defaults to off.** Aloud shipped
+    /// selection-aware rewriting with no way to disable it, so defaulting to
+    /// off would silently remove a working feature from every existing user.
+    pub command_mode_enabled: bool,
+    /// How a rewrite is invoked once enabled.
+    pub command_mode_style: CommandModeStyle,
+    /// The extra modifier that means "rewrite" under [`CommandModeStyle::Manual`].
+    pub command_mode_manual_modifier: aloud_hotkey::model::Modifier,
 
     // Behaviour
     pub hotkeys: aloud_hotkey::model::Config,
@@ -98,6 +125,11 @@ impl Default for Settings {
             vocabulary: Vec::new(),
             macros: Vec::new(),
             app_rules: Vec::new(),
+            command_mode_enabled: true,
+            command_mode_style: CommandModeStyle::Automatic,
+            // Swift's default too, and the only one of the four that is not
+            // already spoken for by a system-wide chord.
+            command_mode_manual_modifier: aloud_hotkey::model::Modifier::Option,
             hotkeys: aloud_hotkey::model::Config::defaults(),
             selected_microphone: None,
             play_sounds: true,
@@ -117,6 +149,21 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// The hotkey config as the listener should see it: the stored bindings,
+    /// plus the modifier manual command mode needs tolerated as an extra.
+    ///
+    /// Derived rather than stored, and derived *here* rather than at each call
+    /// site, because a listener built without it silently ignores the dictate
+    /// key whenever the marker modifier is down — the exact-match rule drops
+    /// the gesture — and that is invisible until someone tries manual mode.
+    pub fn hotkey_config(&self) -> aloud_hotkey::model::Config {
+        let mut config = self.hotkeys.clone();
+        config.permitted_extra = (self.command_mode_enabled
+            && self.command_mode_style == CommandModeStyle::Manual)
+            .then_some(self.command_mode_manual_modifier);
+        config
+    }
+
     pub fn path() -> Result<PathBuf> {
         Ok(aloud_notes::data_dir()?.join("settings.json"))
     }

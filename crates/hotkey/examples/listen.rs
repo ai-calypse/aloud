@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
         busy,
         // Never armed here: this example exercises the matcher, not capture.
         Default::default(),
-        move |event| {
+        move |event, _held| {
             use aloud_hotkey::model::Event;
             println!("  {event:?}");
 

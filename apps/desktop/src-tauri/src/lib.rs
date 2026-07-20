@@ -165,7 +165,7 @@ pub fn run() {
             let hotkey_config = Arc::new(Mutex::new(
                 settings
                     .lock()
-                    .map(|s| s.hotkeys.clone())
+                    .map(|s| s.hotkey_config())
                     .unwrap_or_default(),
             ));
             let hotkey_capture: aloud_hotkey::CaptureSlot = Default::default();
@@ -340,13 +340,48 @@ fn spawn_hotkey_listener(
         }
 
         let busy = pipeline.busy_flag();
-        let result = aloud_hotkey::listen(config, busy, capture, move |event| {
-            handle_hotkey(&app, &pipeline, &settings, &meeting, event);
+        let result = aloud_hotkey::listen(config, busy, capture, move |event, held| {
+            handle_hotkey(&app, &pipeline, &settings, &meeting, event, held);
         });
         if let Err(e) = result {
             tracing::error!(%e, "hotkey listener stopped");
         }
     });
+}
+
+/// Whether this dictation should look at the selection at all — which is what
+/// decides between rewriting the selection and dictating over it.
+///
+/// Ported from Swift's `resolveSessionIntent`. The awkward case is Manual with
+/// a marker modifier the dictate key *is*: the modifier's press is the
+/// binding's own press, so it carries no extra signal and the only sane
+/// reading is plain dictation.
+fn command_mode_wants_selection(
+    settings: &Arc<Mutex<Settings>>,
+    held: &aloud_hotkey::model::Modifiers,
+) -> bool {
+    use aloud_store::CommandModeStyle;
+
+    let Ok(settings) = settings.lock() else {
+        return true; // the behaviour before the setting existed
+    };
+    if !settings.command_mode_enabled {
+        return false;
+    }
+    match settings.command_mode_style {
+        CommandModeStyle::Automatic => true,
+        CommandModeStyle::Manual => {
+            let marker = settings.command_mode_manual_modifier;
+            let binding_is_the_marker = settings
+                .hotkeys
+                .hold
+                .as_ref()
+                .and_then(|b| b.key())
+                .and_then(|k| k.logical_modifier())
+                == Some(marker);
+            !binding_is_the_marker && held.contains(&marker)
+        }
+    }
 }
 
 fn handle_hotkey(
@@ -355,14 +390,19 @@ fn handle_hotkey(
     settings: &Arc<Mutex<Settings>>,
     meeting: &Arc<Mutex<Option<meeting::Meeting>>>,
     event: aloud_hotkey::model::Event,
+    held: &aloud_hotkey::model::Modifiers,
 ) {
     use aloud_hotkey::model::{Event, Role};
 
     match event {
         Event::Activated(Role::Hold) => {
             // Note anything selected before recording begins: with a selection
-            // the utterance rewrites it, without one it is dictated.
-            pipeline.note_selection_if_any();
+            // the utterance rewrites it, without one it is dictated. Command
+            // mode decides whether to look at all — under Manual, a selection
+            // only counts when the user also held the marker modifier.
+            if command_mode_wants_selection(settings, held) {
+                pipeline.note_selection_if_any();
+            }
             if let Err(e) = pipeline.start() {
                 tracing::error!(%e, "could not start recording");
             }

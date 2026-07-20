@@ -54,6 +54,9 @@ pub fn is_permitted() -> bool {
 /// `busy` is set by the app while a session is still running after its key was
 /// released. Escape only cancels — and is only swallowed — while a role is held
 /// or `busy` is set, so Escape keeps working everywhere else.
+///
+/// `on_event` also receives the modifiers held when the event fired, which is
+/// the only place manual command mode can read them.
 pub fn listen<F>(
     config: Arc<Mutex<Config>>,
     busy: Arc<std::sync::atomic::AtomicBool>,
@@ -61,7 +64,7 @@ pub fn listen<F>(
     mut on_event: F,
 ) -> Result<()>
 where
-    F: FnMut(Event) + Send + 'static,
+    F: FnMut(Event, &model::Modifiers) + Send + 'static,
 {
     let mut state = State::default();
     let mut recorder = capture::Recorder::default();
@@ -91,8 +94,13 @@ where
         let outcome = state.reduce(input, &config);
         drop(config);
 
+        // Read once, after the reduce, so every event from this input sees the
+        // same key state. Manual command mode is decided from it: the extra
+        // modifier is held at the moment the dictate key activates, and there
+        // is no later point at which it can still be observed.
+        let held = state.held_modifiers();
         for event in outcome.events {
-            on_event(event);
+            on_event(event, &held);
         }
         outcome.consume == Consume::Yes
     };

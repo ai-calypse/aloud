@@ -57,6 +57,6 @@ fn main() -> anyhow::Result<()> {
         Arc::new(Mutex::new(Config::defaults())),
         Arc::new(AtomicBool::new(false)),
         capture,
-        |event| println!("  (matcher saw {event:?} — should not happen while capturing)"),
+        |event, _held| println!("  (matcher saw {event:?} — should not happen while capturing)"),
     )
 }

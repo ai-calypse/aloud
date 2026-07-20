@@ -41,6 +41,32 @@ function keyLabel(key: Key): string {
   return "?";
 }
 
+/**
+ * The side-agnostic modifier a key contributes, mirroring Rust's
+ * `Key::logical_modifier`. Both sides collapse to one modifier, which is why
+ * holding Left Option cannot mark a Right Option binding: to the matcher they
+ * are the same modifier, so there is no extra signal to read.
+ */
+const KEY_MODIFIER: Partial<Record<string, Modifier>> = {
+  leftCommand: "command",
+  rightCommand: "command",
+  leftShift: "shift",
+  rightShift: "shift",
+  leftOption: "option",
+  rightOption: "option",
+  leftControl: "control",
+  rightControl: "control",
+  fn: "function",
+};
+
+/** The modifier `binding` is itself, if it is a modifier-only binding. */
+export function bindingModifier(binding: Binding | null): Modifier | null {
+  if (!binding || binding.kind !== "modifierKey") return null;
+  return typeof binding.key === "string"
+    ? (KEY_MODIFIER[binding.key] ?? null)
+    : null;
+}
+
 export function describeBinding(binding: Binding | null): string {
   if (!binding || binding.kind === "disabled") return "Not set";
 

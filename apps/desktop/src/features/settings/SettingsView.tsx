@@ -6,6 +6,7 @@ import { MacroEditor } from "./MacroEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
 import { ConnectorEditor } from "./ConnectorEditor";
 import { AUTO_DETECT, LANGUAGES } from "./languages";
+import { bindingModifier } from "./binding-label";
 import {
   Group,
   PaneTitle,
@@ -459,6 +460,94 @@ export function SettingsView({ section }: { section: SettingsSection }) {
             config={hotkeys}
             onChange={(hotkeys) => update({ hotkeys })}
           />
+
+          <Group title="Command mode">
+            <Row
+              label="Rewrite the selection"
+              hint="Dictating with text selected changes it instead of typing over it."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={settings.commandModeEnabled ?? true}
+                label="Rewrite the selection"
+                onChange={(c) => update({ commandModeEnabled: c })}
+              />
+            </Row>
+
+            {(settings.commandModeEnabled ?? true) && (
+              <Row label="Invoke it">
+                <Value>
+                  <Select
+                    value={settings.commandModeStyle ?? "automatic"}
+                    onValueChange={(v) =>
+                      update({
+                        commandModeStyle: v as Settings["commandModeStyle"],
+                      })
+                    }
+                  >
+                    <SelectTrigger className={rowSelect}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="automatic">
+                        Whenever text is selected
+                      </SelectItem>
+                      <SelectItem value="manual">
+                        Only with an extra key held
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Value>
+              </Row>
+            )}
+
+            {(settings.commandModeEnabled ?? true) &&
+              settings.commandModeStyle === "manual" && (
+                <Row
+                  label="Extra key"
+                  hint="Hold this with the dictate key to rewrite. Without it, a selection is ignored."
+                >
+                  <Value>
+                    <Select
+                      value={settings.commandModeManualModifier ?? "option"}
+                      onValueChange={(v) =>
+                        update({
+                          commandModeManualModifier:
+                            v as Settings["commandModeManualModifier"],
+                        })
+                      }
+                    >
+                      <SelectTrigger className={rowSelect}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="command">Command ⌘</SelectItem>
+                        <SelectItem value="control">Control ⌃</SelectItem>
+                        <SelectItem value="option">Option ⌥</SelectItem>
+                        <SelectItem value="shift">Shift ⇧</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Value>
+                </Row>
+              )}
+
+            {/* Ported from Swift's collision message. Choosing the modifier the
+                dictate key already is leaves nothing to detect — its press is
+                the binding's own press — so the setting would silently never
+                fire, which is the worst way for it to fail. */}
+            {(settings.commandModeEnabled ?? true) &&
+              settings.commandModeStyle === "manual" &&
+              bindingModifier(hotkeys.hold ?? null) ===
+                (settings.commandModeManualModifier ?? "option") && (
+                <Row label="">
+                  <p className="text-warning">
+                    Your dictate key is already this modifier, so there is no
+                    extra key to detect. Pick another, or dictation will never
+                    rewrite the selection.
+                  </p>
+                </Row>
+              )}
+          </Group>
         </>
       )}
 
