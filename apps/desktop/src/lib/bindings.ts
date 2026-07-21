@@ -531,10 +531,13 @@ export type OverlayError = string;
  *  Wings weld to the menu bar, which only macOS has; off macOS (and on an error
  *  too small to read in a wing) the style falls back to the glass pill.
  * 
- *  `DropPill` is stored as `dropPill` and not the `pill` its name suggests,
- *  because `pill` is a legacy value meaning the *glass* capsule and is rewritten
- *  on load. Sharing the string made this style silently revert to glass on the
- *  next launch — see `the_drop_down_pill_survives_a_restart`.
+ *  `DropPill` is stored as `dropPill` and not the `pill` its name suggests.
+ *  `pill` is what the glass capsule was called before it was renamed, and while
+ *  the loader was still rewriting that value this style silently reverted to
+ *  glass on the next launch — see `the_drop_down_pill_survives_a_restart`. The
+ *  rewrite is gone, but the two names stay apart: one of three variants being
+ *  called `pill` when another answered to it first is a trap worth not
+ *  rebuilding.
  */
 export type OverlayStyle = "liquidGlass" | "dropPill" | "wings";
 
