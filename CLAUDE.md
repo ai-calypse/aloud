@@ -190,3 +190,21 @@ disproved them.
 One branch per feature, PR into `main`. PR bodies state what was verified
 and, honestly, what was not — every PR so far carries a ⚠️ noting the Windows
 path is unexercised.
+
+**CI does not pass, and that is not a signal.** The Actions runners are
+unbilled on the free tier, so the workflows fail or never start regardless of
+the code. A red PR means nothing here; `mergeStateStatus: UNSTABLE` is the
+normal state and merges go ahead through it.
+
+The cost is that nothing is checked for you, so the local run *is* the gate.
+Before merging, actually run them:
+
+```sh
+cargo clippy --workspace --all-targets   # must be warning-free
+cargo test --workspace
+pnpm --filter @aloud/desktop typecheck
+pnpm --filter @aloud/desktop test
+```
+
+Say in the PR body which of these you ran, the same way you say what was
+verified on real hardware. "CI is green" is never available as evidence.
