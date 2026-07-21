@@ -7,10 +7,10 @@ describe("describeBinding", () => {
     // of plain "⌥" would make the two indistinguishable in the list.
     expect(
       describeBinding({ kind: "modifierKey", key: "rightOption", modifiers: [] }),
-    ).toBe("⌥R");
+    ).toBe("Right Option ⌥");
     expect(
       describeBinding({ kind: "modifierKey", key: "leftOption", modifiers: [] }),
-    ).toBe("⌥L");
+    ).toBe("Left Option ⌥");
   });
 
   it("renders a chord in modifier-then-key order", () => {
@@ -20,7 +20,22 @@ describe("describeBinding", () => {
         key: { char: "d" },
         modifiers: ["command", "shift"],
       }),
-    ).toBe("⌘⇧D");
+    ).toBe("Cmd ⌘ + Shift ⇧ + D");
+  });
+
+  it("prefers the recorded side over the logical modifier", () => {
+    // `exact_modifiers` is what a recorded chord pins to, and it has to win:
+    // rendering `modifiers` as well would print the Command twice, once
+    // side-agnostic and once not. Untested until now, which is how the format
+    // change below went unnoticed.
+    expect(
+      describeBinding({
+        kind: "key",
+        key: { char: "d" },
+        modifiers: ["command"],
+        exact_modifiers: ["rightCommand"],
+      }),
+    ).toBe("Right Cmd ⌘ + D");
   });
 
   it("handles both object-shaped key variants", () => {
@@ -40,9 +55,9 @@ describe("describeBinding", () => {
   it("spells out keys that have no symbol", () => {
     expect(
       describeBinding({ kind: "key", key: "escape", modifiers: [] }),
-    ).toBe("esc");
+    ).toBe("Esc");
     expect(
       describeBinding({ kind: "key", key: "space", modifiers: ["control"] }),
-    ).toBe("⌃space");
+    ).toBe("Ctrl ⌃ + Space");
   });
 });
