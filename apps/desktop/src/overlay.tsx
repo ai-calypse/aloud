@@ -209,18 +209,32 @@ function useNotchPanel(
 
     const size = { width: 0, height: 0 };
     const draw = () => {
-      const grown = Math.max(0, size.height - base.height);
+      // Floored at the cutout, in both dimensions, because the spring rings
+      // past its target and a close targets the cutout itself.
+      //
+      // The overshoot is the point — it is what makes the panel read as thrown
+      // out of the notch rather than resized — but on the way back in it is an
+      // undershoot, and a panel *smaller* than the hole it hangs from shows the
+      // physical camera bump either side of it. At the damping this runs, the
+      // ring is a fifth of the travel: a 332pt answer collapsed clean through
+      // the 32pt cutout to nothing and sprang back out before settling. The
+      // spring keeps its real state and keeps integrating; only what is drawn
+      // is clamped, so nothing about the motion's timing changes.
+      const width = Math.max(base.width, size.width);
+      const height = Math.max(base.height, size.height);
+
+      const grown = height - base.height;
       const bottomRadius = Math.min(
         RADIUS.bottomMax,
         baseRadius + grown * RADIUS.bottomGrowth,
       );
 
-      surfaceElement.style.width = `${size.width}px`;
-      surfaceElement.style.height = `${size.height}px`;
-      shapeElement.setAttribute("viewBox", `0 0 ${size.width} ${size.height}`);
+      surfaceElement.style.width = `${width}px`;
+      surfaceElement.style.height = `${height}px`;
+      shapeElement.setAttribute("viewBox", `0 0 ${width} ${height}`);
       pathElement.setAttribute(
         "d",
-        notchPath(size.width, size.height, topRadiusAt(size.height), bottomRadius),
+        notchPath(width, height, topRadiusAt(height), bottomRadius),
       );
     };
 

@@ -228,20 +228,17 @@ pub fn show(app: &AppHandle, phase: Phase) {
 /// spring move sub-pixel distances, and waiting for them only delays the window
 /// teardown by time the user cannot see. Long enough that the collapse reads;
 /// short enough that a dictation ending does not feel like it hangs.
-const EXIT_MS: u64 = 260;
-
-/// The same, for an answer panel rather than a status pill.
+/// One hold for both a 40pt status pill and a 330pt answer panel, which is not
+/// the compromise it looks like: a spring's time to reach its target is set by
+/// its response, not by how far it has to travel, so both land on the cutout at
+/// the same moment. Measured at ~250ms for each (the sampling recipe in the
+/// aloud-motion skill), with a little margin here.
 ///
-/// Longer because the travel is: the pill collapses ~40pt back into the cutout
-/// and an answer collapses ~330pt, on the same spring, so the same hold cuts
-/// the answer off around a third of the way down.
-///
-/// Measured rather than guessed (the sampling recipe in the aloud-motion
-/// skill): from a 332pt panel the close spring is within 4pt of the cutout at
-/// ~300ms and fully settled at ~420ms. This sits between the two on purpose —
-/// the remaining frames move distances nobody can see, and an exit that
-/// lingers past the point it looks finished reads as latency.
-const ANSWER_EXIT_MS: u64 = 340;
+/// There is an upper bound too, and it is closer than it used to be. The close
+/// spring rings past the cutout and back out to ~44pt around 600ms; the drawn
+/// size is floored so the undershoot never shows, but the return *would* — the
+/// panel would visibly re-inflate. The window has to be gone well before that.
+const EXIT_MS: u64 = 280;
 
 /// Distinguishes "the hide I scheduled" from "a hide that has been overtaken".
 ///
@@ -419,19 +416,15 @@ pub fn end_answer(app: &AppHandle) {
         // of the animation buy.
         let _ = window.set_ignore_cursor_events(true);
     }
-    hide_after(app, ANSWER_EXIT_MS);
+    hide(app);
 }
 
 pub fn hide(app: &AppHandle) {
-    // The run that produced the answer is over, but the answer is not.
-    if ANSWERING.load(Ordering::SeqCst) {
+    if window(app).is_none() {
         return;
     }
-    hide_after(app, EXIT_MS);
-}
-
-fn hide_after(app: &AppHandle, exit_ms: u64) {
-    if window(app).is_none() {
+    // The run that produced the answer is over, but the answer is not.
+    if ANSWERING.load(Ordering::SeqCst) {
         return;
     }
 
@@ -445,7 +438,7 @@ fn hide_after(app: &AppHandle, exit_ms: u64) {
 
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(exit_ms)).await;
+        tokio::time::sleep(Duration::from_millis(EXIT_MS)).await;
 
         // A show() landed while we were waiting: the pill on screen belongs to
         // a newer dictation and is not ours to hide.
