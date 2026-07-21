@@ -80,7 +80,6 @@
   --color-separator: var(--sep);
   --color-field: var(--field);
   --color-hover: var(--hover);
-  --color-sidebar: var(--sidebar);
   --color-ink: var(--fg);
   --color-ink-2: var(--text2);
   --color-ink-3: var(--text3);
@@ -92,8 +91,6 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-warning-bg: var(--warning-bg);
-  --color-keycap: var(--keycap);
-  --color-keycap-border: var(--keycap-border);
   --color-toggle-on: var(--toggle-on);
   --color-toggle-off: var(--toggle-off);
 

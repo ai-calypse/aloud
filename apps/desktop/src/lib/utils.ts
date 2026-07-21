@@ -43,23 +43,19 @@ const twMerge = extendTailwindMerge({
             "surface",
             "field",
             "hover",
-            "sidebar",
             "brand",
             "brand-fg",
             "danger",
             "success",
             "warning",
             "warning-bg",
-            "keycap",
             "toggle-on",
             "toggle-off",
             "separator",
           ],
         },
       ],
-      "border-color": [
-        { border: ["surface-border", "separator", "brand", "keycap-border"] },
-      ],
+      "border-color": [{ border: ["surface-border", "separator", "brand"] }],
       // Must stay in step with any `ring-<token>` used in a component: without
       // it tailwind-merge files ring-brand alongside ring-2 and ring-offset-2
       // and drops one of the three.

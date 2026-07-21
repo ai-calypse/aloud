@@ -5,7 +5,7 @@ import { usePanelAutosize } from "./lib/autosize";
 import { PanelShell } from "@/components/ui/panel-shell";
 import { Input } from "@/components/ui/input";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { Loader } from "@/components/ai-elements/loader";
+import { LoaderCircleIcon } from "lucide-react";
 import "./index.css";
 import "./styles/panel.css";
 
@@ -108,7 +108,8 @@ function Ask() {
           disabled={state === "streaming"}
           onChange={(e) => setTyped(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key !== "Enter" || !typed.trim() || state === "streaming") return;
+            if (e.key !== "Enter" || !typed.trim() || state === "streaming")
+              return;
             // Cleared here rather than waiting for the backend's `question`
             // event to echo back: until that lands the text sits in the field
             // and is trivially re-submittable.
@@ -126,7 +127,7 @@ function Ask() {
       ) : answer ? (
         <MessageResponse>{answer}</MessageResponse>
       ) : (
-        <Loader />
+        <LoaderCircleIcon className="size-4 animate-spin" />
       )}
     </PanelShell>
   );

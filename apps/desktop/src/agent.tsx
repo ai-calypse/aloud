@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { CheckIcon, TriangleAlertIcon, XIcon } from "lucide-react";
+import {
+  CheckIcon,
+  LoaderCircleIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from "lucide-react";
 import { commands, events } from "./lib/bindings";
 import {
   pendingStep,
@@ -13,7 +18,6 @@ import { bodyFor, labelFor } from "./lib/tool-views";
 import { usePanelAutosize } from "./lib/autosize";
 import { PanelShell } from "@/components/ui/panel-shell";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { Loader } from "@/components/ai-elements/loader";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
   Confirmation,
@@ -43,7 +47,9 @@ function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
     return <XIcon className="size-3.5 shrink-0 text-muted-foreground" />;
   if (pending)
     return <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" />;
-  return <Loader />;
+  return (
+    <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+  );
 }
 
 /**
@@ -141,7 +147,7 @@ function Agent() {
         {/* Before any tool call resolves, we're still parsing the transcript. */}
         {run.steps.length === 0 && !run.error && !run.status && (
           <div className="flex items-center gap-2 text-muted-foreground">
-            <Loader />
+            <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
             <Shimmer>Understanding…</Shimmer>
           </div>
         )}
@@ -165,7 +171,9 @@ function Agent() {
                 {/* Only what this tool is worth showing. A step with no
                     registered view renders its label and nothing else. */}
                 {step !== pending && (
-                  <div className="pl-[22px]">{bodyFor(step.name, step.args)}</div>
+                  <div className="pl-[22px]">
+                    {bodyFor(step.name, step.args)}
+                  </div>
                 )}
               </li>
             ))}
@@ -173,7 +181,10 @@ function Agent() {
         )}
 
         {pending && (
-          <Confirmation approval={{ id: pending.name }} state="approval-requested">
+          <Confirmation
+            approval={{ id: pending.name }}
+            state="approval-requested"
+          >
             <ConfirmationTitle>
               {labelFor(pending.name, pending.args)} — this writes to{" "}
               {pending.app}.
@@ -184,7 +195,10 @@ function Agent() {
                   otherwise quiet. */}
               <div className="mb-3">{bodyFor(pending.name, pending.args)}</div>
               <ConfirmationActions>
-                <ConfirmationAction variant="outline" onClick={() => confirm(false)}>
+                <ConfirmationAction
+                  variant="outline"
+                  onClick={() => confirm(false)}
+                >
                   Cancel
                 </ConfirmationAction>
                 <ConfirmationAction autoFocus onClick={() => confirm(true)}>
@@ -197,7 +211,7 @@ function Agent() {
 
         {run.status && (
           <div className="flex items-center gap-2 text-muted-foreground">
-            <Loader />
+            <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
             <Shimmer>{run.status}</Shimmer>
           </div>
         )}

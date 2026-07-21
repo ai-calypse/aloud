@@ -1,3 +1,4 @@
+import { SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -28,17 +29,11 @@ export function SearchField({
         className,
       )}
     >
-      <svg
-        viewBox="0 0 16 16"
+      <SearchIcon
         className="size-[13px] shrink-0 text-search-icon"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth={1.6}
         aria-hidden="true"
-      >
-        <circle cx="7" cy="7" r="4.2" />
-        <line x1="10.2" y1="10.2" x2="13.5" y2="13.5" strokeLinecap="round" />
-      </svg>
+      />
       <input
         type="search"
         className="w-full bg-transparent text-ui outline-none placeholder:text-ink-2"

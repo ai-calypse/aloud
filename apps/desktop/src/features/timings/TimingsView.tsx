@@ -7,24 +7,32 @@ import { cn } from "@/lib/utils";
 const FETCH = 500;
 const WATERFALLS = 10;
 
-/** One bar per stage, keyed to the stage name so a run is readable at a glance. */
+/** One bar per stage, keyed to the stage name so a run is readable at a glance.
+ *  Tokens, not hexes: these bars sit on a card that flips with the OS, and a
+ *  frozen light-mode palette on a dark card is exactly the wash-out the
+ *  two-tier token system exists to prevent. */
 const STAGE_TINT: Record<string, string> = {
-  finalize_audio: "#ff9f0a",
-  transcribe: "#007aff",
-  cleanup: "#5856d6",
-  llm_fallback: "#ff375f",
-  paste: "#34c759",
-  transform: "#5856d6",
-  ask_answer: "#64d2ff",
+  finalize_audio: "var(--sys-orange)",
+  transcribe: "var(--sys-blue)",
+  cleanup: "var(--sys-indigo)",
+  llm_fallback: "var(--sys-pink)",
+  paste: "var(--sys-green)",
+  transform: "var(--sys-indigo)",
+  ask_answer: "var(--sys-teal)",
   // Agent mode.
-  agent_run: "#8e8e93",
-  tool_discovery: "#64d2ff",
-  tool_select: "#5856d6",
-  tool_select_retry: "#ff375f",
-  composio_exec: "#af52de",
+  agent_run: "var(--sys-grey)",
+  tool_discovery: "var(--sys-teal)",
+  tool_select: "var(--sys-indigo)",
+  tool_select_retry: "var(--sys-pink)",
+  composio_exec: "var(--sys-purple)",
   // Human time, not machine time — greyed so it never reads as a hot stage.
-  confirm: "#c7c7cc",
+  // --text3 is the app's "tertiary, deliberately recessive" grey; it already
+  // has the light/dark pair this needs.
+  confirm: "var(--text3)",
 };
+
+/** Any stage the map does not name. */
+const STAGE_TINT_FALLBACK = "var(--sys-grey)";
 
 type Utterance = {
   id: number;
@@ -140,7 +148,8 @@ export function TimingsView() {
           partition rather than a guess from which stages happen to appear. */}
       <div className="flex flex-wrap gap-1.5">
         {["all", ...modes].map((m) => {
-          const n = m === "all" ? all.length : all.filter((u) => u.mode === m).length;
+          const n =
+            m === "all" ? all.length : all.filter((u) => u.mode === m).length;
           return (
             <button
               key={m}
@@ -170,7 +179,9 @@ export function TimingsView() {
               <div className="text-[11px] uppercase tracking-wide text-ink-2">
                 {s.label}
               </div>
-              <div className="text-lg font-semibold tabular-nums">{s.value}</div>
+              <div className="text-lg font-semibold tabular-nums">
+                {s.value}
+              </div>
             </div>
           ))}
         </div>
@@ -184,9 +195,7 @@ export function TimingsView() {
               className="min-w-[2px] flex-1 rounded-t-[2px]"
               style={{
                 height: `${Math.max((u.root.durationMs / peak) * 100, 2)}%`,
-                background: u.root.success
-                  ? "var(--accent)"
-                  : "var(--warning)",
+                background: u.root.success ? "var(--accent)" : "var(--warning)",
               }}
               title={`run ${u.id} · ${u.mode} · ${u.root.durationMs} ms`}
             />
@@ -222,25 +231,21 @@ export function TimingsView() {
                 className="h-full rounded-[3px] opacity-40"
                 style={{
                   width: `${(s.p95 / slowestStage) * 100}%`,
-                  background: STAGE_TINT[s.stage] ?? "#8e8e93",
+                  background: STAGE_TINT[s.stage] ?? STAGE_TINT_FALLBACK,
                 }}
               >
                 <div
                   className="h-full rounded-[3px]"
                   style={{
                     width: `${(s.avg / Math.max(s.p95, 1)) * 100}%`,
-                    background: STAGE_TINT[s.stage] ?? "#8e8e93",
+                    background: STAGE_TINT[s.stage] ?? STAGE_TINT_FALLBACK,
                   }}
                 />
               </div>
             </div>
             <span className="text-right tabular-nums">{s.avg}</span>
-            <span className="text-right tabular-nums text-ink-2">
-              {s.p95}
-            </span>
-            <span className="text-right tabular-nums text-ink-2">
-              {s.n}
-            </span>
+            <span className="text-right tabular-nums text-ink-2">{s.p95}</span>
+            <span className="text-right tabular-nums text-ink-2">{s.n}</span>
           </div>
         ))}
       </section>
@@ -288,9 +293,7 @@ export function TimingsView() {
                     key={`${s.stage}-${i}`}
                     className="grid grid-cols-[130px_1fr_58px] items-center gap-2 text-[11px]"
                   >
-                    <span className="truncate text-ink-2">
-                      {s.stage}
-                    </span>
+                    <span className="truncate text-ink-2">{s.stage}</span>
                     <div className="h-3 rounded-[3px] bg-field">
                       <div
                         className="h-full rounded-[3px]"
@@ -299,7 +302,7 @@ export function TimingsView() {
                           // Sub-millisecond stages still need to be visible.
                           width: `${Math.max((s.durationMs / total) * 100, 1)}%`,
                           background: s.success
-                            ? (STAGE_TINT[s.stage] ?? "#8e8e93")
+                            ? (STAGE_TINT[s.stage] ?? STAGE_TINT_FALLBACK)
                             : "var(--warning)",
                         }}
                         title={s.fields}

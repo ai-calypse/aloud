@@ -54,13 +54,8 @@
   --warning-bg: #fef3c7;
 
   /* --- Component-specific ------------------------------------------------ */
-  --keycap: #f2f2f4;
-  --keycap-border: rgb(0 0 0 / 0.1);
   --toggle-on: var(--sys-green);
   --toggle-off: #e9e9ea;
-  /* Sidebar glass. Translucent so macOS vibrancy shows through, opaque
-     enough that Windows — which has no vibrancy — still gets a surface. */
-  --sidebar: rgb(246 246 248 / 0.82);
 
   /* --- Radii ------------------------------------------------------------- */
   /* Named for what they wrap, because macOS radii are not a linear scale. */
@@ -94,6 +89,13 @@
     --sys-red: #ff453a;
     --sys-teal: #64d2ff;
     --sys-purple: #bf5af2;
+    /* The rest of the system palette. Only used as tints (sidebar icons,
+       Timings bars), which is why they went unnoticed as missing — a
+       light-mode indigo on a #2c2c2e card is the muddiest of the set. */
+    --sys-orange: #ff9f0a;
+    --sys-pink: #ff375f;
+    --sys-indigo: #5e5ce6;
+    --sys-grey: #98989d;
 
     --bg: #1c1c1e;
     --card-solid: #2c2c2e;
@@ -111,10 +113,7 @@
     --warning: #fbbf24;
     --warning-bg: #422006;
 
-    --keycap: #3a3a3c;
-    --keycap-border: rgb(255 255 255 / 0.14);
     --toggle-off: #39393d;
-    --sidebar: rgb(44 44 46 / 0.82);
   }
 }
 
