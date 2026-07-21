@@ -97,7 +97,47 @@ user saying movement makes them unwell. Collapse the travel; never merely
 lengthen it. `motion.css` has the global switch, and `lib/spring.ts` reads it
 directly because the CSS sweep cannot reach a JS-driven spring.
 
-## 3. Failure modes that render fine and still feel wrong
+## 3. Surfaces that change shape
+
+A thing that merely moves or fades needs only the section above. A thing that
+*grows, opens, or changes silhouette* has four more decisions, and getting any
+of them wrong caps how good the rest can look.
+
+**Never resize the window. Oversize it once and animate inside it.** Give the
+surface a fixed transparent canvas larger than anything it will ever reach, and
+never touch it again. Resizing an OS window per frame stutters; resizing a shape
+inside a still window does not. Make the canvas click-through and transparent
+and it costs nothing to be generous. This is the decision that makes everything
+else possible — get it wrong and no amount of easing rescues it.
+
+The corollary: with nothing centred in the canvas any more, each surface owns
+its own offset from the canvas edge, and the canvas can then grow without
+dragging unrelated surfaces around the screen.
+
+**A silhouette is parameters that interpolate, not a shape you swap.** If the
+outline itself changes — corners opening, a concave shoulder, anything a
+`border-radius` cannot express — build it as a path whose *inputs* are animated
+and rebuild the path each frame. Do not cross-fade between two shapes, and do
+not reach for a mask. Keep the curve type faithful: a quadratic with its control
+point at the corner being cut does not look like an arc or a cubic through the
+same points, and that difference is most of the character.
+
+**Never let it settle smaller than the thing it grew out of.** A surface that
+emerges from an origin — a cutout, a button, a row — must be at least as large
+as that origin in every dimension, floored explicitly. Short content will
+otherwise ask for less, and a panel narrower than the hole it hangs from leaves
+the hardware or the trigger sticking out either side. This looks fine in a
+harness with long placeholder text and wrong the moment real content is short.
+
+**Derive radii from the origin, not from the element.** Corner radii should come
+from the size of the thing it grew out of, so the shoulders stay put as it
+grows, and then open up as it expands past its origin. Deriving them from the
+element's own current size makes the corners swell with the content, which stops
+reading as a cutout immediately. Compute them from the *current* size each frame
+so they interpolate along with the box rather than jumping to their final value
+on frame one.
+
+## 4. Failure modes that render fine and still feel wrong
 
 These all pass typecheck, pass review by eye, and are wrong.
 
@@ -130,7 +170,7 @@ loop read the cached value.
 frame. Sometimes unavoidable (a container genuinely resizing) — when it is,
 keep the subtree small and its children off the parent's width.
 
-## 4. Verify by measuring, not by watching
+## 5. Verify by measuring, not by watching
 
 Every overlay style renders standalone in a browser, with no Tauri and no
 rebuild:
