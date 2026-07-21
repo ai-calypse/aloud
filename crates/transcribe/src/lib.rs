@@ -9,7 +9,7 @@ pub mod cloud;
 pub mod download;
 pub mod hallucination;
 pub mod local;
-pub mod stream;
+pub mod preview;
 
 use anyhow::Result;
 use async_trait::async_trait;
