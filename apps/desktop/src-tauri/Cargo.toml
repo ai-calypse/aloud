@@ -56,5 +56,18 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-opener = "2.5.4"
 
+# Reading the MacBook notch geometry (NSScreen) so the wings overlay welds to
+# it. Already a transitive dep via tauri/wry; pinned to the 0.2 line to share
+# objc2 0.5 rather than pulling a second major.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.2", features = ["NSScreen", "NSWindow", "NSResponder"] }
+objc2-foundation = { version = "0.2", features = ["NSArray", "NSGeometry"] }
+# `NSScreen.screens` hands back a Swift-bridged array whose `count` reports an
+# unsigned `NSUInteger` ('Q'); objc2's debug-only encoding check expects the
+# signed 'q' and aborts the process at launch. This relaxes the sign check to
+# treat the two as compatible. Enabled here (a direct dep) so feature
+# unification turns it on for the objc2 the app-kit/foundation crates share.
+objc2 = { version = "0.5", features = ["relax-sign-encoding"] }
+
 [dev-dependencies]
 hound = "3.5"

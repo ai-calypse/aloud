@@ -8,6 +8,13 @@ import {
 } from "../../lib/bindings";
 import { GridRow, Group } from "@/components/ui/rows";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { describeBinding } from "./binding-label";
 
@@ -40,17 +47,82 @@ const ROLES: { key: keyof Config; label: string; mode: string; hint: string }[] 
 const DISABLED: Binding = { kind: "disabled" };
 
 /**
- * Whether another role's gesture overlaps this one.
+ * The factory settings, mirroring Rust's `Config::defaults()`: dictate on a
+ * bare Right Option, every other role unbound. Kept in step with that by the
+ * one test the Rust side has; there is no runtime source for it because a reset
+ * must work without a round-trip.
+ */
+const DEFAULT_CONFIG: Config = {
+  hold: { kind: "modifierKey", key: "rightOption", modifiers: [] },
+  toggle: null,
+  copy_again: null,
+  ask: null,
+  rewrite: null,
+  meeting_notes: null,
+  agent: null,
+};
+
+/**
+ * One-click holds, for the common case where recording a gesture is overkill.
+ * All modifier-only (`ModifierKey`), so they fire on a bare hold with no extra
+ * key. "Both options"/"both commands" are deliberately absent: a binding holds
+ * one side-specific key, and there is no "either/both sides" concept in the
+ * matcher — offering them would be offering a setting that does nothing.
  *
- * Advisory only — nothing stops the save. But note that ordering is not
- * exclusion: `matcher.rs` sorts simultaneous activations by specificity and
- * then fires *all* of them, so two roles on one key both start against the
- * same recording and the extra stop paths silently no-op on `take_recorder`.
+ * Option+Fn is keyed on Fn with Option *required*, so either Option side plus
+ * Fn fires it — the matcher's exact-match rule then rejects any further
+ * modifier, exactly as it does for a bare Right Option.
+ */
+const PRESETS: Binding[] = [
+  { kind: "modifierKey", key: "fn", modifiers: [] },
+  { kind: "modifierKey", key: "rightOption", modifiers: [] },
+  { kind: "modifierKey", key: "leftOption", modifiers: [] },
+  { kind: "modifierKey", key: "fn", modifiers: ["option"] },
+];
+
+/**
+ * Custom gestures a user has recorded, kept so they stay in the dropdown even
+ * after being cleared or reassigned. This is a UI convenience list, not a
+ * setting the app acts on, so it lives in localStorage rather than in the Rust
+ * Config — no new field, no migration.
+ */
+const CUSTOMS_KEY = "aloud.hotkey.customs";
+
+function loadCustoms(): Binding[] {
+  try {
+    const raw = localStorage.getItem(CUSTOMS_KEY);
+    return raw ? (JSON.parse(raw) as Binding[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function isPreset(b: Binding): boolean {
+  return PRESETS.some((p) => sameBinding(b, p));
+}
+
+/** Whether a role's current binding is exactly this preset, for the on-state. */
+function sameBinding(a: Binding | undefined, b: Binding): boolean {
+  if (!a || a.kind === "disabled" || b.kind === "disabled") return a?.kind === b.kind;
+  return (
+    a.kind === b.kind &&
+    sameKey(a.key, b.key) &&
+    a.modifiers.length === b.modifiers.length &&
+    a.modifiers.every((m) => b.modifiers.includes(m)) &&
+    // A side-specific chord is not its either-side twin.
+    sameKeys(a.exact_modifiers ?? [], b.exact_modifiers ?? [])
+  );
+}
+
+/**
+ * Whether another role has the *identical* gesture to this one.
  *
- * Overlap, not equality, is the test: `binding_is_active` matches a Cmd+D
- * binding while Cmd+Shift+D is held, so those two clash even though the
- * gestures differ. The `kind` guard came out for the same reason — the two
- * kinds can share a physical key.
+ * Only an exact match is a real clash now. A strict overlap like `fn` vs
+ * `⌥fn`, or `⌘D` vs `⌘⇧D`, is resolved by the pipeline: when two bindings are
+ * satisfied at once, the more-specific role owns the session and the other's
+ * release is dropped (see `Session::owner` / `Pipeline::owns`). So specificity
+ * differs → no ambiguity → no warning. Equal modifier sets on the same key are
+ * the one case supersede can't break, and the only one worth flagging.
  */
 function conflictsWith(config: Config, role: keyof Config): boolean {
   const mine = config[role];
@@ -61,8 +133,11 @@ function conflictsWith(config: Config, role: keyof Config): boolean {
     if (!theirs || theirs.kind === "disabled") return false;
     return (
       sameKey(theirs.key, mine.key) &&
-      (isSubset(theirs.modifiers, mine.modifiers) ||
-        isSubset(mine.modifiers, theirs.modifiers))
+      theirs.modifiers.length === mine.modifiers.length &&
+      isSubset(theirs.modifiers, mine.modifiers) &&
+      // Same key and modifiers but different sides is not a clash — Left-Option
+      // and Right-Option chords never both fire.
+      sameKeys(mine.exact_modifiers ?? [], theirs.exact_modifiers ?? [])
     );
   });
 }
@@ -73,6 +148,11 @@ function sameKey(a: Key, b: Key): boolean {
   if ("char" in a && "char" in b) return a.char === b.char;
   if ("f" in a && "f" in b) return a.f === b.f;
   return false;
+}
+
+/** Two key sets equal ignoring order — for the side-specific exact-modifier set. */
+function sameKeys(a: Key[], b: Key[]): boolean {
+  return a.length === b.length && a.every((k) => b.some((k2) => sameKey(k, k2)));
 }
 
 function isSubset(a: Modifier[], b: Modifier[]): boolean {
@@ -88,6 +168,9 @@ export function HotkeyEditor({
 }) {
   /** Which role is recording, if any. Only one at a time. */
   const [recording, setRecording] = useState<keyof Config | null>(null);
+  // Recorded gestures, added on capture and never dropped, so a shortcut you
+  // built once is one dropdown pick away forever after.
+  const [customs, setCustoms] = useState<Binding[]>(loadCustoms);
   // Rust times capture out on its own, so an abandoned recording cannot hold
   // the keyboard. This ref is only to ignore a result that arrives after the
   // user has already moved on to recording a different role.
@@ -119,7 +202,21 @@ export function HotkeyEditor({
       return;
     }
     // null is a timeout or a cancel — leave the existing binding alone.
-    if (result.data) onChange({ ...latest.current, [role]: result.data });
+    if (!result.data) return;
+    const captured = result.data;
+    if (captured.kind !== "disabled" && !isPreset(captured)) {
+      setCustoms((prev) => {
+        if (prev.some((c) => sameBinding(c, captured))) return prev;
+        const next = [...prev, captured];
+        try {
+          localStorage.setItem(CUSTOMS_KEY, JSON.stringify(next));
+        } catch {
+          // A full/blocked store just means it won't persist — not fatal.
+        }
+        return next;
+      });
+    }
+    onChange({ ...latest.current, [role]: captured });
   }
 
   function cancel() {
@@ -128,13 +225,48 @@ export function HotkeyEditor({
     commands.cancelHotkeyCapture();
   }
 
+  /** Back to factory: default bindings, and the recorded-gesture list wiped. */
+  function reset() {
+    cancel();
+    try {
+      localStorage.removeItem(CUSTOMS_KEY);
+    } catch {
+      // A blocked store just means the list survives; the bindings still reset.
+    }
+    setCustoms([]);
+    onChange(DEFAULT_CONFIG);
+  }
+
   return (
+    <>
     <Group>
       {ROLES.map((role) => {
         const binding = config[role.key] ?? DISABLED;
         const isRecording = recording === role.key;
         const bound = binding.kind !== "disabled";
         const clash = conflictsWith(config, role.key);
+
+        // Presets plus every gesture this user has recorded. A binding already
+        // in the config (e.g. hand-edited) but not yet in `customs` is added so
+        // it still shows as the selected value.
+        const options = [...PRESETS, ...customs];
+        if (bound && !options.some((o) => sameBinding(o, binding))) {
+          options.push(binding);
+        }
+
+        // An option already taken by another role drops out of this dropdown,
+        // so two commands can't be pointed at the same hold from here. The
+        // role's own current binding stays, so it renders as the value.
+        const takenElsewhere = new Set(
+          ROLES.filter((r) => r.key !== role.key)
+            .map((r) => config[r.key])
+            .filter((b): b is Binding => !!b && b.kind !== "disabled")
+            .map(describeBinding),
+        );
+        const menuOptions = options.filter(
+          (o) =>
+            sameBinding(binding, o) || !takenElsewhere.has(describeBinding(o)),
+        );
 
         return (
           <GridRow key={role.key} columns="150px 1fr auto">
@@ -156,42 +288,76 @@ export function HotkeyEditor({
             </span>
 
             <div className="flex items-center gap-2.5">
-              {/* Styled as a keycap: the binding is the value of the row, so it
-                  should read as a key rather than as a form field. */}
-              <button
-                type="button"
-                onClick={() => (isRecording ? cancel() : record(role.key))}
-                className={cn(
-                  "rounded-row border-[0.5px] px-3 py-[5px] font-mono text-xs",
-                  "transition-colors duration-[var(--dur-fast)]",
-                  isRecording
-                    ? "animate-pulse border-brand bg-brand/10 text-brand"
-                    : "border-keycap-border bg-keycap hover:border-brand",
-                  !bound && !isRecording && "text-ink-3",
-                )}
-              >
-                {isRecording ? "Press keys…" : describeBinding(binding)}
-              </button>
-
               {isRecording ? (
-                <Button variant="plain" size="text" onClick={cancel}>
-                  Cancel
-                </Button>
+                <>
+                  <span className="animate-pulse rounded-row border-[0.5px] border-brand bg-brand/10 px-3 py-[5px] font-mono text-xs text-brand">
+                    Press keys…
+                  </span>
+                  <Button variant="plain" size="text" onClick={cancel}>
+                    Cancel
+                  </Button>
+                </>
               ) : (
-                // Reserves the column so keycaps stay aligned down the list.
-                <Button
-                  variant="plain"
-                  size="text"
-                  className={cn(!bound && "invisible")}
-                  onClick={() => onChange({ ...config, [role.key]: DISABLED })}
-                >
-                  Clear
-                </Button>
+                <>
+                  {/* The dropdown is the value of the row: it shows what's
+                      bound, and holds the presets plus every gesture recorded
+                      so far. An option used by another role drops out, so you
+                      can't aim two commands at one hold from here. */}
+                  <Select
+                    value={bound ? describeBinding(binding) : ""}
+                    onValueChange={(value) => {
+                      const picked = options.find(
+                        (o) => describeBinding(o) === value,
+                      );
+                      if (picked) onChange({ ...config, [role.key]: picked });
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="h-8 w-[176px] text-xs"
+                    >
+                      <SelectValue placeholder="Not set" />
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      {menuOptions.map((o) => (
+                        <SelectItem
+                          key={describeBinding(o)}
+                          value={describeBinding(o)}
+                          className="text-xs"
+                        >
+                          {describeBinding(o)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Button
+                    variant="plain"
+                    size="text"
+                    onClick={() => record(role.key)}
+                  >
+                    Record
+                  </Button>
+                  <Button
+                    variant="plain"
+                    size="text"
+                    className={cn(!bound && "invisible")}
+                    onClick={() => onChange({ ...config, [role.key]: DISABLED })}
+                  >
+                    Clear
+                  </Button>
+                </>
               )}
             </div>
           </GridRow>
         );
       })}
     </Group>
+    <div className="flex justify-end px-1 pt-2">
+      <Button variant="plain-danger" size="text" onClick={reset}>
+        Reset to defaults
+      </Button>
+    </div>
+    </>
   );
 }

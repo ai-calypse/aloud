@@ -111,12 +111,12 @@ export const commands = {
 	 */
 	captureHotkey: () => typedError<{ kind: "disabled" } | 
 /**  A regular key, optionally with modifiers held (e.g. Cmd+Shift+D). */
-{ kind: "key"; key: Key; modifiers: Modifier[] } | 
+{ kind: "key"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] } | 
 /**
  *  A modifier held on its own (e.g. hold Right Option) — the case Tauri's
  *  global-shortcut plugin cannot express, and why this crate exists.
  */
-{ kind: "modifierKey"; key: Key; modifiers: Modifier[] } | null, string>(__TAURI_INVOKE("capture_hotkey")),
+{ kind: "modifierKey"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] } | null, string>(__TAURI_INVOKE("capture_hotkey")),
 	/**  Disarms a recording the user backed out of. */
 	cancelHotkeyCapture: () => typedError<null, string>(__TAURI_INVOKE("cancel_hotkey_capture")),
 	/**
@@ -292,15 +292,24 @@ export type AudioDevice = {
  */
 export type AudioLevel = number | null;
 
-/**  What triggers a binding. */
+/**
+ *  What triggers a binding.
+ * 
+ *  `modifiers` is side-agnostic (`Option` matches either Alt key), which is
+ *  what the presets want. `exact_modifiers` is the side-specific set a
+ *  *recording* captures: when non-empty it pins the chord to exactly those
+ *  keys, so Left-Option+Z is not Right-Option+Z. Empty means "either side",
+ *  the case for every preset and hand-written binding — matching voice-dict,
+ *  where only recorded bindings carry `exactModifierKeyCodes`.
+ */
 export type Binding = { kind: "disabled" } | 
 /**  A regular key, optionally with modifiers held (e.g. Cmd+Shift+D). */
-{ kind: "key"; key: Key; modifiers: Modifier[] } | 
+{ kind: "key"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] } | 
 /**
  *  A modifier held on its own (e.g. hold Right Option) — the case Tauri's
  *  global-shortcut plugin cannot express, and why this crate exists.
  */
-{ kind: "modifierKey"; key: Key; modifiers: Modifier[] };
+{ kind: "modifierKey"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] };
 
 /**
  *  Version, commit and build date, for pasting into a bug report.
@@ -366,9 +375,9 @@ export type DefaultPrompt = {
  * 
  *  **Feedback only — this is never pasted as it arrives.** Whisper revises: a
  *  later chunk changes how an earlier one is punctuated or spelled, and text
- *  already typed into someone's editor cannot be un-typed. The pill is the one
- *  surface where a revision costs nothing, so it is the only one that sees
- *  this. The paste still happens once, at the end.
+ *  already typed into someone's editor cannot be un-typed. The live-transcript
+ *  panel is the one surface where a revision costs nothing, so it is the only
+ *  one that sees this. The paste still happens once, at the end.
  */
 export type DictationPartial = string;
 
@@ -500,21 +509,34 @@ export type OverlayError = string;
 /**
  *  How the recording overlay draws itself.
  * 
- *  `Wings` is voice-dict's compact overlay: two small tabs welded to the top
- *  of the screen, flanking where a notch would be, instead of a pill hanging
- *  below the menu bar. macOS only — `RecordingOverlay.swift` gates it on
- *  `screenHasNotch`, and Windows has no notch and no menu bar to weld to.
+ *  - `LiquidGlass` is Aloud's pill: a refractive glass capsule floating below
+ *    the menu bar. The default.
+ *  - `Pill` is voice-dict's drop-down pill: a solid-black panel welded to the
+ *    top edge with rounded bottom corners, its content sitting just below the
+ *    notch. Larger and more legible, but covers a strip of the active app.
+ *  - `Wings` is voice-dict's minimalist overlay: two slim tabs welded to the
+ *    top edge, flanking the notch, staying inside the menu bar.
+ * 
+ *  Wings weld to the menu bar, which only macOS has; off macOS (and on an error
+ *  too small to read in a wing) the style falls back to the glass pill.
  */
-export type OverlayStyle = "pill" | "wings";
+export type OverlayStyle = "liquidGlass" | "pill" | "wings";
 
 /**
  *  The style the overlay window should draw, pushed on every show.
  * 
  *  Sent rather than read from settings by the webview: the overlay has no
  *  settings binding of its own, and a style change has to reach a window that
- *  is already mounted.
+ *  is already mounted. Carries the notch cutout so the wings can weld to it —
+ *  zero when not welding (any pill, or a screen with no notch).
  */
-export type OverlayStyleChanged = OverlayStyle;
+export type OverlayStyleChanged = {
+	style: OverlayStyle,
+	/**  Logical-pixel width of the notch gap between the two wings. */
+	notchWidth: number | null,
+	/**  Logical-pixel height of the wings, matching the notch's safe-area inset. */
+	notchHeight: number | null,
+};
 
 /**  A capability the app needs the OS to allow. */
 export type Permission = 
@@ -667,7 +689,10 @@ export type Settings = {
 	 *  reopen event rather than a second instance.
 	 */
 	showMenuBarIcon?: boolean,
-	/**  Pill or menu-bar wings. Ignored off macOS, which only has the pill. */
+	/**
+	 *  Liquid-glass pill or menu-bar wings. Wings are macOS-only; elsewhere the
+	 *  glass pill is always used.
+	 */
 	overlayStyle?: OverlayStyle,
 	/**  Which screen the overlay shows on. */
 	overlayDisplay?: OverlayDisplay,

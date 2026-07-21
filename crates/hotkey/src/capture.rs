@@ -31,17 +31,33 @@ impl Recorder {
     pub fn key_down(&mut self, key: Key) {
         self.pressed.insert(key);
 
-        let modifiers: Modifiers = self
+        // The side-specific modifier keys held alongside the primary. Recording
+        // pins to exactly these, so Left-Option+Z and Right-Option+Z are kept
+        // apart — the whole reason capture stores this rather than only the
+        // logical `modifiers` derived from it.
+        let exact_modifiers: BTreeSet<Key> = self
             .pressed
             .iter()
-            .filter(|k| **k != key)
+            .copied()
+            .filter(|k| *k != key && k.logical_modifier().is_some())
+            .collect();
+        let modifiers: Modifiers = exact_modifiers
+            .iter()
             .filter_map(|k| k.logical_modifier())
             .collect();
 
         let candidate = if key.logical_modifier().is_some() {
-            Binding::ModifierKey { key, modifiers }
+            Binding::ModifierKey {
+                key,
+                modifiers,
+                exact_modifiers,
+            }
         } else {
-            Binding::Key { key, modifiers }
+            Binding::Key {
+                key,
+                modifiers,
+                exact_modifiers,
+            }
         };
 
         if self
@@ -95,16 +111,17 @@ mod tests {
         list.iter().copied().collect()
     }
 
+    fn exact(list: &[Key]) -> BTreeSet<Key> {
+        list.iter().copied().collect()
+    }
+
     #[test]
     fn modifier_held_alone_records_as_modifier_key() {
         let mut r = Recorder::default();
         r.key_down(Key::RightOption);
         assert_eq!(
             r.key_up(Key::RightOption),
-            Some(Binding::ModifierKey {
-                key: Key::RightOption,
-                modifiers: Modifiers::new(),
-            })
+            Some(Binding::modifier_chord(Key::RightOption, Modifiers::new()))
         );
     }
 
@@ -123,6 +140,7 @@ mod tests {
             Some(Binding::Key {
                 key: Key::Char('d'),
                 modifiers: mods(&[Modifier::Command, Modifier::Shift]),
+                exact_modifiers: exact(&[Key::LeftCommand, Key::LeftShift]),
             })
         );
     }
@@ -159,6 +177,7 @@ mod tests {
             Some(Binding::ModifierKey {
                 key: Key::LeftOption,
                 modifiers: mods(&[Modifier::Command]),
+                exact_modifiers: exact(&[Key::LeftCommand]),
             })
         );
     }
@@ -177,10 +196,7 @@ mod tests {
         r.key_down(Key::F(5));
         assert_eq!(
             r.key_up(Key::F(5)),
-            Some(Binding::Key {
-                key: Key::F(5),
-                modifiers: Modifiers::new(),
-            })
+            Some(Binding::key_chord(Key::F(5), Modifiers::new()))
         );
     }
 
@@ -193,10 +209,7 @@ mod tests {
         r.key_down(Key::Char('j'));
         assert_eq!(
             r.key_up(Key::Char('j')),
-            Some(Binding::Key {
-                key: Key::Char('j'),
-                modifiers: Modifiers::new(),
-            })
+            Some(Binding::key_chord(Key::Char('j'), Modifiers::new()))
         );
     }
 
@@ -213,10 +226,7 @@ mod tests {
         r.key_down(Key::F(5));
         assert_eq!(
             r.key_up(Key::F(5)),
-            Some(Binding::Key {
-                key: Key::F(5),
-                modifiers: Modifiers::new(),
-            })
+            Some(Binding::key_chord(Key::F(5), Modifiers::new()))
         );
     }
 }

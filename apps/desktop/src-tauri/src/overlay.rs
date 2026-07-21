@@ -28,9 +28,9 @@ pub struct ModelDownload(pub f32);
 ///
 /// **Feedback only — this is never pasted as it arrives.** Whisper revises: a
 /// later chunk changes how an earlier one is punctuated or spelled, and text
-/// already typed into someone's editor cannot be un-typed. The pill is the one
-/// surface where a revision costs nothing, so it is the only one that sees
-/// this. The paste still happens once, at the end.
+/// already typed into someone's editor cannot be un-typed. The live-transcript
+/// panel is the one surface where a revision costs nothing, so it is the only
+/// one that sees this. The paste still happens once, at the end.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
 #[tauri_specta(event_name = "dictation-partial")]
 pub struct DictationPartial(pub String);
@@ -45,37 +45,97 @@ pub struct OverlayError(pub String);
 ///
 /// Sent rather than read from settings by the webview: the overlay has no
 /// settings binding of its own, and a style change has to reach a window that
-/// is already mounted.
+/// is already mounted. Carries the notch cutout so the wings can weld to it —
+/// zero when not welding (any pill, or a screen with no notch).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
+#[serde(rename_all = "camelCase")]
 #[tauri_specta(event_name = "overlay-style")]
-pub struct OverlayStyleChanged(pub OverlayStyle);
+pub struct OverlayStyleChanged {
+    pub style: OverlayStyle,
+    /// Logical-pixel width of the notch gap between the two wings.
+    pub notch_width: f64,
+    /// Logical-pixel height of the wings, matching the notch's safe-area inset.
+    pub notch_height: f64,
+}
 
 const LABEL: &str = "overlay";
+/// The streaming-transcript panel, shown below the pill while recording with
+/// streaming transcription on. Separate window so the pill stays small.
+const TRANSCRIPT_LABEL: &str = "transcript";
 /// Distance from the top of the screen, in logical pixels. Clears the menu bar.
 const TOP_MARGIN: f64 = 48.0;
+/// The transcript panel drops below the pill; the pill is ~52pt tall at
+/// `TOP_MARGIN`, so this clears it with a little air.
+const TRANSCRIPT_TOP_MARGIN: f64 = 116.0;
 
 fn window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(LABEL)
 }
 
-/// The style the overlay should draw for `phase`.
+/// Lifts the overlay above the menu bar so the wings can draw *into* the notch.
 ///
-/// Wings are macOS-only, and an error never gets them: a wing is 40pt wide and
-/// the message would be invisible, so a failure the user has to read forces
-/// the pill back, exactly as `RecordingOverlay.swift` does with
-/// `forceDropDownPill`.
-fn style_for(app: &AppHandle, phase: Phase) -> OverlayStyle {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (app, phase);
-        OverlayStyle::Pill
+/// Tauri's `always_on_top` sits a window at the floating level (3), which is
+/// below the menu bar (24). macOS then refuses to let the window cover the
+/// menu-bar strip and clamps it down — which is why the wings landed low,
+/// roughly where the pill sits. voice-dict's panel uses `.screenSaver` (1000)
+/// for exactly this reason; matching it lets the top-anchored window keep its
+/// `y = 0` and paint over the notch.
+///
+/// Must run on the main thread — AppKit. Called from `setup`, which is on it.
+#[cfg(target_os = "macos")]
+pub fn raise_over_menu_bar(app: &AppHandle) {
+    use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow};
+
+    let Some(window) = window(app) else { return };
+    let Ok(ptr) = window.ns_window() else { return };
+    // Safety: `ns_window` returns this webview's live `NSWindow`.
+    let ns_window: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+    ns_window.setLevel(NSScreenSaverWindowLevel);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn raise_over_menu_bar(_app: &AppHandle) {}
+
+/// The notch of the screen this overlay will land on, if that screen has one.
+///
+/// Matches the target monitor to a measured notch by logical size — Tauri and
+/// AppKit disagree on origin and axis, but a screen's point size is the same in
+/// both. Shares `resolve_monitor` with positioning, so the two agree on which
+/// screen the overlay is on.
+fn target_notch(window: &WebviewWindow) -> Option<crate::notch::Notch> {
+    let notches = window
+        .app_handle()
+        .try_state::<crate::AppState>()
+        .map(|s| s.notch.clone())?;
+    if notches.is_empty() {
+        return None;
     }
-    #[cfg(target_os = "macos")]
-    {
-        match settings(app).overlay_style {
-            OverlayStyle::Wings if !matches!(phase, Phase::Error) => OverlayStyle::Wings,
-            _ => OverlayStyle::Pill,
-        }
+
+    let monitor = resolve_monitor(window).ok().flatten()?;
+    let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
+    notches
+        .into_iter()
+        .find(|n| (n.screen_w - size.width).abs() < 2.0 && (n.screen_h - size.height).abs() < 2.0)
+}
+
+/// The style to draw for `phase`, and the notch geometry the top-welded styles
+/// need.
+///
+/// The glass pill floats and needs nothing. The drop-down pill welds to the top
+/// and pads its content below the notch, so it takes the measurement but works
+/// on any screen. Wings *flank* the notch, so they only make sense on a notched
+/// macOS screen: off macOS, on an external display, or on an error (a wing is
+/// 40pt wide and the message would be invisible) they collapse to the glass
+/// pill, exactly as `RecordingOverlay.swift` guards on `screenHasNotch` and
+/// `forceDropDownPill`.
+fn style_for(window: &WebviewWindow, phase: Phase) -> (OverlayStyle, Option<crate::notch::Notch>) {
+    match settings(window.app_handle()).overlay_style {
+        OverlayStyle::LiquidGlass => (OverlayStyle::LiquidGlass, None),
+        OverlayStyle::Pill => (OverlayStyle::Pill, target_notch(window)),
+        OverlayStyle::Wings => match (matches!(phase, Phase::Error), target_notch(window)) {
+            (false, Some(notch)) => (OverlayStyle::Wings, Some(notch)),
+            _ => (OverlayStyle::LiquidGlass, None),
+        },
     }
 }
 
@@ -100,12 +160,14 @@ pub fn show(app: &AppHandle, phase: Phase) {
         return;
     };
 
-    let style = style_for(app, phase);
-    // Wings weld to the top edge; the pill hangs below the menu bar. Same
+    let (style, notch) = style_for(&window, phase);
+    // Wings weld to the top edge; both pills hang below the menu bar. Same
     // window, same positioning — only the anchor changes.
     let margin = match style {
-        OverlayStyle::Pill => TOP_MARGIN,
-        OverlayStyle::Wings => 0.0,
+        // Both top-welded styles anchor at the screen edge; only the floating
+        // glass pill drops below the menu bar.
+        OverlayStyle::Wings | OverlayStyle::Pill => 0.0,
+        OverlayStyle::LiquidGlass => TOP_MARGIN,
     };
     if let Err(e) = position_top_center(&window, margin) {
         tracing::warn!(%e, "could not position overlay");
@@ -121,7 +183,12 @@ pub fn show(app: &AppHandle, phase: Phase) {
     // event was emitted above the show and is exactly the one that would be
     // dropped — leaving the overlay drawing a pill on first appearance despite
     // wings being configured.
-    if let Err(e) = OverlayStyleChanged(style).emit_to(app, LABEL) {
+    let style_event = OverlayStyleChanged {
+        style,
+        notch_width: notch.map_or(0.0, |n| n.width),
+        notch_height: notch.map_or(0.0, |n| n.height),
+    };
+    if let Err(e) = style_event.emit_to(app, LABEL) {
         tracing::warn!(%e, "could not send overlay style");
     }
     if let Err(e) = phase.emit_to(app, LABEL) {
@@ -170,12 +237,13 @@ fn chosen_monitor(
     picked.or(primary)
 }
 
-/// Top-centres `window` on the monitor the user picked. Shared with the
-/// ask/agent panels, which drop from the top the way the Swift app's answer
-/// panel does — and follow the same display, so the three never split up.
-pub fn position_top_center(window: &WebviewWindow, top_margin: f64) -> tauri::Result<()> {
-    // Everything the decision needs, resolved once, so the decision itself is
-    // a pure function with a test rather than three OS calls in a match.
+/// The monitor the overlay should land on, per the "Show on" setting, falling
+/// back to the primary. `Ok(None)` only with no monitors at all (headless).
+///
+/// Shared by positioning and notch lookup so the two never disagree about which
+/// screen the overlay is on. The `chosen_monitor` decision it wraps is pure and
+/// tested; this is just the OS calls that feed it.
+fn resolve_monitor(window: &WebviewWindow) -> tauri::Result<Option<tauri::Monitor>> {
     let mut monitors = window.available_monitors()?;
     let names: Vec<_> = monitors.iter().map(|m| m.name().cloned()).collect();
     let index_of = |target: Option<tauri::Monitor>| {
@@ -188,12 +256,17 @@ pub fn position_top_center(window: &WebviewWindow, top_margin: f64) -> tauri::Re
         Ok(at) => index_of(window.monitor_from_point(at.x, at.y)?),
         Err(_) => None,
     };
-
     let display = settings(window.app_handle()).overlay_display;
-    let Some(index) = chosen_monitor(&display, &names, primary, cursor) else {
+    Ok(chosen_monitor(&display, &names, primary, cursor).map(|i| monitors.swap_remove(i)))
+}
+
+/// Top-centres `window` on the monitor the user picked. Shared with the
+/// ask/agent panels, which drop from the top the way the Swift app's answer
+/// panel does — and follow the same display, so the three never split up.
+pub fn position_top_center(window: &WebviewWindow, top_margin: f64) -> tauri::Result<()> {
+    let Some(monitor) = resolve_monitor(window)? else {
         return Ok(()); // headless; leave it wherever it is
     };
-    let monitor = monitors.swap_remove(index);
 
     let scale = monitor.scale_factor();
     let screen = monitor.size().to_logical::<f64>(scale);
@@ -212,9 +285,42 @@ pub fn send_level(app: &AppHandle, level: f32) {
     let _ = AudioLevel(level).emit_to(app, LABEL);
 }
 
-/// Sends the streamed transcript so far to the pill.
+/// Sends the streamed transcript so far to the live-transcript panel.
+///
+/// The pill deliberately no longer shows this — a clipped 60-char line was a
+/// poor place to read a growing transcript, and the panel is the surface for it.
 pub fn send_partial(app: &AppHandle, text: &str) {
-    let _ = DictationPartial(text.to_string()).emit_to(app, LABEL);
+    let _ = DictationPartial(text.to_string()).emit_to(app, TRANSCRIPT_LABEL);
+}
+
+/// Shows the streaming-transcript panel below the pill, when the feature is on.
+///
+/// Click-through and never focused, so it cannot steal keystrokes from the app
+/// being dictated into. A no-op when streaming transcription is off — then no
+/// partials ever arrive and an empty panel would just sit there.
+pub fn show_transcript(app: &AppHandle) {
+    if !settings(app).streaming_transcription {
+        return;
+    }
+    let Some(window) = app.get_webview_window(TRANSCRIPT_LABEL) else {
+        return;
+    };
+    if let Err(e) = position_top_center(&window, TRANSCRIPT_TOP_MARGIN) {
+        tracing::warn!(%e, "could not position transcript panel");
+    }
+    let _ = window.set_ignore_cursor_events(true);
+    let _ = window.show();
+    // Clear the last run's text *after* the show: a hidden window's webview is
+    // created lazily, so an event sent before it would land before anything is
+    // listening and the panel would flash the previous dictation. The panel
+    // treats an empty partial as "Listening…".
+    let _ = DictationPartial(String::new()).emit_to(app, TRANSCRIPT_LABEL);
+}
+
+pub fn hide_transcript(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(TRANSCRIPT_LABEL) {
+        let _ = window.hide();
+    }
 }
 
 /// Sends the message the pill shows instead of a bare "Failed".

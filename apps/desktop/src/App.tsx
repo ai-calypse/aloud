@@ -249,7 +249,9 @@ export default function App() {
 
         {current === "notes" && <NotesView />}
         {current === "timings" && <TimingsView />}
-        {isSettings(current) && <SettingsView section={current} />}
+        {isSettings(current) && (
+          <SettingsView section={current} onSettings={setSettings} />
+        )}
         {current === "status" && (
           <Surface className="p-5">
             <p

@@ -148,6 +148,9 @@
      to the app palette. Kept here anyway so no hex hides in a stylesheet. */
   --pill-ink: #f5f5f7;
   --pill-fill: rgb(28 28 30 / 0.01);
+  /* Pure black, to merge the wings with the physical notch — the cutout is
+     #000, so anything else reads as a seam. */
+  --notch-fill: #000;
   --pill-rim: rgb(255 255 255 / 0.14);
   --pill-shadow: 0 8px 32px rgb(0 0 0 / 0.36);
   --pill-rim-light: inset 0 1px 1px rgb(255 255 255 / 0.6);

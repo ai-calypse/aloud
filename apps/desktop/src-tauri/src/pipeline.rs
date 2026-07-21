@@ -4,6 +4,7 @@
 //! `AppState`, but only orchestrates: every step lives in a crate that is
 //! testable without launching the app.
 
+use aloud_hotkey::model::Role;
 use aloud_store::{History, Settings, Stats};
 use aloud_transcribe::{cloud::CloudTranscriber, local::LocalTranscriber, Engine, Transcriber};
 use anyhow::{bail, Context, Result};
@@ -85,6 +86,16 @@ pub struct Session {
     /// Bumped by every start and every stop, purely to hand out generations
     /// that a delayed start can be checked against.
     starts: u64,
+    /// Which role owns the running session.
+    ///
+    /// When two bindings overlap on the same keys — `fn` and `⌥fn`, or `⌘` and
+    /// `⌘D` — pressing the longer chord activates the shorter binding first,
+    /// then the longer one. Without an owner, the shorter role's *release* edge
+    /// (`Deactivated(Hold)`) tore down the session the longer role was building,
+    /// so `⌥fn`/`⌘D` never recorded. The owner lets a more-specific role
+    /// supersede a less-specific one, and makes a superseded role's release a
+    /// no-op instead of a stop.
+    owner: Option<Role>,
 }
 
 impl Session {
@@ -99,6 +110,7 @@ impl Session {
     /// arriving inside the delay wins over the start it is racing.
     fn invalidate_start(&mut self) {
         self.pending_start = None;
+        self.owner = None;
         self.starts = self.starts.wrapping_add(1);
     }
 
@@ -210,7 +222,17 @@ impl Pipeline {
         }
 
         match phase {
-            Phase::Recording | Phase::Transcribing => crate::overlay::show(&self.app, phase),
+            Phase::Recording => {
+                crate::overlay::show(&self.app, phase);
+                // The live-transcript panel opens with the pill, cleared for the
+                // new utterance.
+                crate::overlay::show_transcript(&self.app);
+            }
+            // The panel stays up through transcription on purpose: a dictation
+            // shorter than one chunk streams no text until the *tail* is
+            // transcribed, which happens only after the key is released — hiding
+            // the panel here would mean it never showed a word.
+            Phase::Transcribing => crate::overlay::show(&self.app, phase),
             // Leave the result on screen briefly, then dismiss. Re-shown, not
             // merely left visible: an error in the wings style has to move
             // back down to the pill's anchor, and only `show` repositions.
@@ -225,9 +247,16 @@ impl Pipeline {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(linger).await;
                     crate::overlay::hide(&app);
+                    // Hidden with the pill so the finished transcript is
+                    // readable for the same linger, not yanked the instant the
+                    // paste lands.
+                    crate::overlay::hide_transcript(&app);
                 });
             }
-            Phase::Idle => crate::overlay::hide(&self.app),
+            Phase::Idle => {
+                crate::overlay::hide(&self.app);
+                crate::overlay::hide_transcript(&self.app);
+            }
         }
     }
 
@@ -266,6 +295,17 @@ impl Pipeline {
         self.session.lock().map(|s| s.is_active()).unwrap_or(false)
     }
 
+    /// Whether `role` still owns the running session, so its release should
+    /// dispose of the capture. A role superseded by a more-specific overlapping
+    /// binding does not, and its release must be dropped — otherwise it stops
+    /// the session the winning role is still running.
+    pub fn owns(&self, role: Role) -> bool {
+        self.session
+            .lock()
+            .map(|s| s.owner == Some(role))
+            .unwrap_or(false)
+    }
+
     /// Takes the recorder for a stop path, and invalidates any pending start.
     ///
     /// Every stop goes through here. A stop arriving *during* the start delay
@@ -302,13 +342,26 @@ impl Pipeline {
     /// callback thread, where sleeping stalls every keystroke on the machine
     /// and can trip `kCGEventTapDisabledByTimeout`, which kills the listener
     /// silently. That is what PR #60 got wrong.
-    pub fn start(self: &Arc<Self>) -> Result<()> {
-        let delay = self.settings().shortcut_start_delay_ms;
+    pub fn start(self: &Arc<Self>, role: Role) -> Result<()> {
+        let settings = self.settings();
+        let delay = settings.shortcut_start_delay_ms;
         let mut session = self.session.lock().unwrap();
         if session.is_active() {
+            // A session is already running or reserved. A more-specific role
+            // takes it over — this is `⌥fn` arriving after `fn`, or `⌘D` after
+            // `⌘` — so its own release edge disposes of the capture. A less- or
+            // equally-specific role leaves the owner alone: first, most-specific
+            // wins, which is what keeps the shorter binding from stealing back a
+            // session the longer one is running.
+            let specificity =
+                |r: Option<Role>| r.map_or(0, |r| settings.hotkeys.binding(r).specificity());
+            if specificity(Some(role)) > specificity(session.owner) {
+                session.owner = Some(role);
+            }
             return Ok(());
         }
         let generation = session.reserve_start();
+        session.owner = Some(role);
 
         if delay == 0 {
             self.begin_capture(session)?;
@@ -1506,6 +1559,24 @@ mod tests {
         assert!(
             !session.may_begin(generation),
             "the delayed start must not open the mic after a stop"
+        );
+    }
+
+    /// A stop clears the owner, so a superseded role's late release edge — the
+    /// `Deactivated(Hold)` that arrives after `⌥fn` has already taken and
+    /// stopped the session — finds no owner and is dropped rather than stopping
+    /// a fresh capture. `owns` gates on exactly this field.
+    #[test]
+    fn a_stop_clears_the_session_owner() {
+        let mut session = Session::default();
+        session.reserve_start();
+        session.owner = Some(Role::Hold);
+        assert_eq!(session.owner, Some(Role::Hold));
+
+        session.invalidate_start();
+        assert_eq!(
+            session.owner, None,
+            "a stopped session must own no role, or a stale release stops the next one"
         );
     }
 

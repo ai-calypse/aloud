@@ -312,7 +312,7 @@ fn toggle_dictation(app: &AppHandle) {
                 tracing::error!(%e, "dictation failed");
             }
         });
-    } else if let Err(e) = pipeline.start() {
+    } else if let Err(e) = pipeline.start(aloud_hotkey::model::Role::Toggle) {
         tracing::error!(%e, "could not start recording");
     }
 }

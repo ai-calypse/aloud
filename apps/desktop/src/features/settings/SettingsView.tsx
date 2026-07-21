@@ -77,7 +77,16 @@ export type SettingsSection =
  * that exists so far; the rest arrive with the features they configure. Which
  * pane shows is driven by the app-level sidebar via the `section` prop.
  */
-export function SettingsView({ section }: { section: SettingsSection }) {
+export function SettingsView({
+  section,
+  onSettings,
+}: {
+  section: SettingsSection;
+  // The app shell keeps its own copy of settings for the sidebar (developer
+  // tools rows, the engine footer). Without this, a toggle here persists to
+  // disk but the shell stays on stale settings until the next launch.
+  onSettings?: (s: Settings) => void;
+}) {
   const [settings, setSettings] = useState<Settings | null>(null);
   // Long-lived closures call `update` from an older render: a hotkey capture
   // waits up to ten seconds, and everything on this pane stays clickable
@@ -156,6 +165,7 @@ export function SettingsView({ section }: { section: SettingsSection }) {
     // Written here too, so two updates in one React batch cannot lose a field.
     live.current = next;
     setSettings(next);
+    onSettings?.(next);
 
     const result = await commands.updateSettings(next);
     if (result.status === "error") {
@@ -630,11 +640,11 @@ export function SettingsView({ section }: { section: SettingsSection }) {
             {IS_MAC && (
               <Row
                 label="Style"
-                hint="Wings tuck into the menu bar; the pill drops below it. An error always uses the pill — a wing is too small to read one in."
+                hint="Liquid glass floats below the menu bar; the drop-down pill and wings weld to the top edge. An error always uses a pill — a wing is too small to read one in."
               >
                 <Value>
                   <Select
-                    value={settings.overlayStyle ?? "pill"}
+                    value={settings.overlayStyle ?? "liquidGlass"}
                     onValueChange={(v) =>
                       update({ overlayStyle: v as Settings["overlayStyle"] })
                     }
@@ -643,7 +653,8 @@ export function SettingsView({ section }: { section: SettingsSection }) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="pill">Pill</SelectItem>
+                      <SelectItem value="liquidGlass">Liquid glass</SelectItem>
+                      <SelectItem value="pill">Drop-down pill</SelectItem>
                       <SelectItem value="wings">Menu bar wings</SelectItem>
                     </SelectContent>
                   </Select>

@@ -60,6 +60,13 @@ pub enum Modifier {
 pub type Modifiers = BTreeSet<Modifier>;
 
 /// What triggers a binding.
+///
+/// `modifiers` is side-agnostic (`Option` matches either Alt key), which is
+/// what the presets want. `exact_modifiers` is the side-specific set a
+/// *recording* captures: when non-empty it pins the chord to exactly those
+/// keys, so Left-Option+Z is not Right-Option+Z. Empty means "either side",
+/// the case for every preset and hand-written binding — matching voice-dict,
+/// where only recorded bindings carry `exactModifierKeyCodes`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Binding {
@@ -68,16 +75,42 @@ pub enum Binding {
     Key {
         key: Key,
         modifiers: Modifiers,
+        #[serde(default)]
+        exact_modifiers: BTreeSet<Key>,
     },
     /// A modifier held on its own (e.g. hold Right Option) — the case Tauri's
     /// global-shortcut plugin cannot express, and why this crate exists.
     ModifierKey {
         key: Key,
         modifiers: Modifiers,
+        #[serde(default)]
+        exact_modifiers: BTreeSet<Key>,
     },
 }
 
 impl Binding {
+    /// A plain-key binding with side-agnostic modifiers (either side matches) —
+    /// how presets and hand-written bindings are built. A recording produces
+    /// the side-specific form via the struct literal instead.
+    pub fn key_chord(key: Key, modifiers: Modifiers) -> Self {
+        Binding::Key {
+            key,
+            modifiers,
+            exact_modifiers: BTreeSet::new(),
+        }
+    }
+
+    /// A modifier-held binding with side-agnostic modifiers. See [`key_chord`].
+    ///
+    /// [`key_chord`]: Binding::key_chord
+    pub fn modifier_chord(key: Key, modifiers: Modifiers) -> Self {
+        Binding::ModifierKey {
+            key,
+            modifiers,
+            exact_modifiers: BTreeSet::new(),
+        }
+    }
+
     pub fn is_disabled(&self) -> bool {
         matches!(self, Binding::Disabled)
     }
@@ -88,6 +121,20 @@ impl Binding {
             Binding::Key { modifiers, .. } | Binding::ModifierKey { modifiers, .. } => {
                 Some(modifiers)
             }
+        }
+    }
+
+    /// The side-specific modifier keys this binding pins to, if any. Empty (or
+    /// `None` for `Disabled`) means either side satisfies each modifier.
+    pub fn exact_modifiers(&self) -> Option<&BTreeSet<Key>> {
+        match self {
+            Binding::Disabled => None,
+            Binding::Key {
+                exact_modifiers, ..
+            }
+            | Binding::ModifierKey {
+                exact_modifiers, ..
+            } => Some(exact_modifiers),
         }
     }
 
@@ -186,10 +233,7 @@ impl Config {
 impl Config {
     pub fn defaults() -> Self {
         Self {
-            hold: Some(Binding::ModifierKey {
-                key: Key::RightOption,
-                modifiers: Modifiers::new(),
-            }),
+            hold: Some(Binding::modifier_chord(Key::RightOption, Modifiers::new())),
             ..Default::default()
         }
     }

@@ -23,13 +23,20 @@ const MAX_TERM_CHARS: usize = 48;
 
 /// How the recording overlay draws itself.
 ///
-/// `Wings` is voice-dict's compact overlay: two small tabs welded to the top
-/// of the screen, flanking where a notch would be, instead of a pill hanging
-/// below the menu bar. macOS only — `RecordingOverlay.swift` gates it on
-/// `screenHasNotch`, and Windows has no notch and no menu bar to weld to.
+/// - `LiquidGlass` is Aloud's pill: a refractive glass capsule floating below
+///   the menu bar. The default.
+/// - `Pill` is voice-dict's drop-down pill: a solid-black panel welded to the
+///   top edge with rounded bottom corners, its content sitting just below the
+///   notch. Larger and more legible, but covers a strip of the active app.
+/// - `Wings` is voice-dict's minimalist overlay: two slim tabs welded to the
+///   top edge, flanking the notch, staying inside the menu bar.
+///
+/// Wings weld to the menu bar, which only macOS has; off macOS (and on an error
+/// too small to read in a wing) the style falls back to the glass pill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum OverlayStyle {
+    LiquidGlass,
     Pill,
     Wings,
 }
@@ -162,7 +169,8 @@ pub struct Settings {
     /// to the window is to open the app again, which macOS turns into a
     /// reopen event rather than a second instance.
     pub show_menu_bar_icon: bool,
-    /// Pill or menu-bar wings. Ignored off macOS, which only has the pill.
+    /// Liquid-glass pill or menu-bar wings. Wings are macOS-only; elsewhere the
+    /// glass pill is always used.
     pub overlay_style: OverlayStyle,
     /// Which screen the overlay shows on.
     pub overlay_display: OverlayDisplay,
@@ -220,10 +228,10 @@ impl Default for Settings {
             shortcut_start_delay_ms: 0,
             mute_system_audio: false,
             show_menu_bar_icon: true,
-            // Pill, where voice-dict's compact overlay defaults on: Aloud has
-            // only ever drawn the pill, so defaulting to wings would silently
-            // change the look of every existing install.
-            overlay_style: OverlayStyle::Pill,
+            // The glass pill is Aloud's signature look and the only overlay it
+            // has ever shipped, so it stays the default; the two voice-dict
+            // styles are opt-in.
+            overlay_style: OverlayStyle::LiquidGlass,
             overlay_display: OverlayDisplay::Active,
             preserve_clipboard: true,
             history_retention: 50,
@@ -313,6 +321,13 @@ impl Settings {
             if let Some(old) = hotkeys.remove("command") {
                 hotkeys.entry("rewrite").or_insert(old);
             }
+        }
+        // `overlayStyle: "pill"` was the old name for the glass pill (and, for a
+        // brief window, a since-removed plain variant). The glass pill is now
+        // "liquidGlass" and bare "pill" no longer deserializes, so rename it or
+        // an existing install would fail to parse and reset to the default.
+        if raw.get("overlayStyle").and_then(|v| v.as_str()) == Some("pill") {
+            raw["overlayStyle"] = serde_json::Value::String("liquidGlass".into());
         }
         serde_json::from_value(raw)
     }
@@ -614,6 +629,25 @@ mod rename_tests {
             "a hotkey saved as `command` must load as `rewrite`"
         );
         assert!(settings.hotkeys.hold.is_some(), "other roles are untouched");
+    }
+
+    /// `overlayStyle: "pill"` is a removed variant name — it must load as
+    /// `LiquidGlass` rather than fail to parse and reset the whole file. A
+    /// `"wings"` value stays wings.
+    #[test]
+    fn an_old_pill_overlay_style_loads_as_liquid_glass() {
+        let glass =
+            Settings::from_json(r#"{ "overlayStyle": "pill" }"#).expect("old settings must parse");
+        assert_eq!(glass.overlay_style, OverlayStyle::LiquidGlass);
+
+        let wings =
+            Settings::from_json(r#"{ "overlayStyle": "wings" }"#).expect("settings must parse");
+        assert_eq!(wings.overlay_style, OverlayStyle::Wings);
+
+        // A file already on the new name is left alone.
+        let plain = Settings::from_json(r#"{ "overlayStyle": "liquidGlass" }"#)
+            .expect("current settings must parse");
+        assert_eq!(plain.overlay_style, OverlayStyle::LiquidGlass);
     }
 
     /// A file already using the new name must not be disturbed.

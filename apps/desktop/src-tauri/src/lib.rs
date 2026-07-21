@@ -2,6 +2,7 @@ mod agent;
 mod ask;
 mod commands;
 mod meeting;
+mod notch;
 mod overlay;
 mod pipeline;
 mod sound;
@@ -48,6 +49,10 @@ pub struct AppState {
     /// Per-stage latency, written by the tracing layer and read by the dev
     /// panel. Shared with the layer, which owns the writes.
     pub timings: Arc<Mutex<aloud_store::Timings>>,
+    /// Notch geometry per attached screen, measured once on the main thread at
+    /// launch. The wings overlay reads it to weld to the cutout; empty on a Mac
+    /// with no notch, and on Windows.
+    pub notch: Vec<notch::Notch>,
 }
 
 pub fn run() {
@@ -197,8 +202,16 @@ pub fn run() {
                 hotkey_capture: hotkey_capture.clone(),
                 connectors: Default::default(),
                 timings: timings.clone(),
+                // Main thread here (Tauri's setup callback), which NSScreen
+                // requires. Measured once; see the note in `notch.rs`.
+                notch: notch::notched_screens(),
             });
             app.manage(agent::PendingConfirmation::default());
+
+            // Lift the overlay above the menu bar (main thread here) so the
+            // wings style can weld into the notch instead of being clamped
+            // below it.
+            overlay::raise_over_menu_bar(app.handle());
 
             tray::init(app)?;
 
@@ -389,11 +402,16 @@ fn handle_hotkey(
             if settings.lock().map_or(true, |s| s.command_mode_enabled) {
                 pipeline.note_selection_if_any();
             }
-            if let Err(e) = pipeline.start() {
+            if let Err(e) = pipeline.start(Role::Hold) {
                 tracing::error!(%e, "could not start recording");
             }
         }
         Event::Deactivated(Role::Hold) => {
+            // Dropped if a more-specific overlapping binding (e.g. `⌥fn`) took
+            // the session over: stopping here would tear out from under it.
+            if !pipeline.owns(Role::Hold) {
+                return;
+            }
             // Transcription is async and the hook thread must not block: a
             // stalled hook stops delivering key events system-wide.
             let pipeline = pipeline.clone();
@@ -414,16 +432,19 @@ fn handle_hotkey(
                         tracing::error!(%e, "dictation failed");
                     }
                 });
-            } else if let Err(e) = pipeline.start() {
+            } else if let Err(e) = pipeline.start(Role::Toggle) {
                 tracing::error!(%e, "could not start recording");
             }
         }
         Event::Activated(Role::Ask) => {
-            if let Err(e) = pipeline.start() {
+            if let Err(e) = pipeline.start(Role::Ask) {
                 tracing::error!(%e, "could not start recording");
             }
         }
         Event::Deactivated(Role::Ask) => {
+            if !pipeline.owns(Role::Ask) {
+                return;
+            }
             let pipeline = pipeline.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = pipeline.stop_and_ask().await {
@@ -436,11 +457,14 @@ fn handle_hotkey(
             // thorough read: this key means the user asked for a rewrite, so
             // the clipboard fallback is worth its cost.
             pipeline.capture_selection();
-            if let Err(e) = pipeline.start() {
+            if let Err(e) = pipeline.start(Role::Rewrite) {
                 tracing::error!(%e, "could not start recording");
             }
         }
         Event::Deactivated(Role::Rewrite) => {
+            if !pipeline.owns(Role::Rewrite) {
+                return;
+            }
             let pipeline = pipeline.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = pipeline.stop_and_dictate().await {
@@ -449,11 +473,14 @@ fn handle_hotkey(
             });
         }
         Event::Activated(Role::Agent) => {
-            if let Err(e) = pipeline.start() {
+            if let Err(e) = pipeline.start(Role::Agent) {
                 tracing::error!(%e, "could not start recording");
             }
         }
         Event::Deactivated(Role::Agent) => {
+            if !pipeline.owns(Role::Agent) {
+                return;
+            }
             let pipeline = pipeline.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = pipeline.stop_and_agent().await {

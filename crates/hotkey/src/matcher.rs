@@ -231,7 +231,7 @@ impl State {
         // tolerated for plain-key bindings; a modifier-only binding demands an
         // exact match, so Right Option alone fires but Cmd+Right Option does
         // not — otherwise every Cmd chord would start dictation.
-        match binding {
+        let logical_ok = match binding {
             Binding::ModifierKey { .. } => {
                 let extra: Modifiers = held
                     .difference(&required)
@@ -247,6 +247,27 @@ impl State {
             // Cmd+Shift+D can activate a Cmd+D binding and the specificity
             // ordering above resolves the two.
             _ => required.is_subset(&held) && (!required.is_empty() || held.is_empty()),
+        };
+        if !logical_ok {
+            return false;
+        }
+
+        // A recorded chord pins to specific sides: the modifier keys held (bar
+        // the binding's own primary key) must be exactly the captured set, so a
+        // Left-Option binding rejects Right Option and vice versa. An empty set
+        // — every preset and hand-written binding — skips this and matches
+        // either side, exactly the logical behaviour above.
+        match binding.exact_modifiers() {
+            Some(exact) if !exact.is_empty() => {
+                let held_keys: BTreeSet<Key> = self
+                    .pressed
+                    .iter()
+                    .copied()
+                    .filter(|k| *k != key && k.logical_modifier().is_some())
+                    .collect();
+                &held_keys == exact
+            }
+            _ => true,
         }
     }
 
@@ -281,20 +302,17 @@ mod tests {
 
     fn hold_right_option() -> Config {
         Config {
-            hold: Some(Binding::ModifierKey {
-                key: Key::RightOption,
-                modifiers: Modifiers::new(),
-            }),
+            hold: Some(Binding::modifier_chord(Key::RightOption, Modifiers::new())),
             ..Default::default()
         }
     }
 
     fn hold_cmd_d() -> Config {
         Config {
-            hold: Some(Binding::Key {
-                key: Key::Char('d'),
-                modifiers: modifiers(&[Modifier::Command]),
-            }),
+            hold: Some(Binding::key_chord(
+                Key::Char('d'),
+                modifiers(&[Modifier::Command]),
+            )),
             ..Default::default()
         }
     }
@@ -401,10 +419,10 @@ mod tests {
     #[test]
     fn one_shot_fires_once_per_press() {
         let config = Config {
-            copy_again: Some(Binding::Key {
-                key: Key::Char('v'),
-                modifiers: modifiers(&[Modifier::Command, Modifier::Shift]),
-            }),
+            copy_again: Some(Binding::key_chord(
+                Key::Char('v'),
+                modifiers(&[Modifier::Command, Modifier::Shift]),
+            )),
             ..Default::default()
         };
         let mut state = State::default();
@@ -492,14 +510,14 @@ mod tests {
     #[test]
     fn activations_are_ordered_most_specific_first() {
         let config = Config {
-            hold: Some(Binding::Key {
-                key: Key::Char('d'),
-                modifiers: modifiers(&[Modifier::Command]),
-            }),
-            ask: Some(Binding::Key {
-                key: Key::Char('d'),
-                modifiers: modifiers(&[Modifier::Command, Modifier::Shift]),
-            }),
+            hold: Some(Binding::key_chord(
+                Key::Char('d'),
+                modifiers(&[Modifier::Command]),
+            )),
+            ask: Some(Binding::key_chord(
+                Key::Char('d'),
+                modifiers(&[Modifier::Command, Modifier::Shift]),
+            )),
             ..Default::default()
         };
         let mut state = State::default();
@@ -524,6 +542,37 @@ mod tests {
         let out = state.reduce(Input::Reset, &config);
         assert_eq!(out.events, vec![Event::Deactivated(Role::Hold)]);
         assert!(!state.is_active(Role::Hold));
+    }
+
+    /// The whole point of `exact_modifiers`: a recorded chord fires only on the
+    /// modifier side it was captured with. Left-Option+Z must ignore Right
+    /// Option, where a logically-built Option+Z would take either.
+    #[test]
+    fn a_recorded_chord_pins_to_its_modifier_side() {
+        let config = Config {
+            hold: Some(Binding::Key {
+                key: Key::Char('z'),
+                modifiers: modifiers(&[Modifier::Option]),
+                exact_modifiers: [Key::LeftOption].into_iter().collect(),
+            }),
+            ..Default::default()
+        };
+        let mut state = State::default();
+
+        // Right Option + Z: wrong side, so the left-bound chord stays silent.
+        state.reduce(Input::KeyDown(Key::RightOption), &config);
+        let wrong = state.reduce(Input::KeyDown(Key::Char('z')), &config);
+        assert!(
+            wrong.events.is_empty(),
+            "Right Option must not fire a Left-Option-bound chord"
+        );
+        state.reduce(Input::KeyUp(Key::Char('z')), &config);
+        state.reduce(Input::KeyUp(Key::RightOption), &config);
+
+        // Left Option + Z: the captured side, so it fires.
+        state.reduce(Input::KeyDown(Key::LeftOption), &config);
+        let right = state.reduce(Input::KeyDown(Key::Char('z')), &config);
+        assert_eq!(right.events, vec![Event::Activated(Role::Hold)]);
     }
 
     #[test]
@@ -597,10 +646,7 @@ mod tests {
     #[test]
     fn a_bare_key_binding_ignores_chords() {
         let config = Config {
-            hold: Some(Binding::Key {
-                key: Key::Space,
-                modifiers: Modifiers::new(),
-            }),
+            hold: Some(Binding::key_chord(Key::Space, Modifiers::new())),
             ..Default::default()
         };
         let mut state = State::default();

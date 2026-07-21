@@ -17,13 +17,6 @@ const LABEL: Record<Phase, string> = {
 const ERROR_CHARS = 90;
 
 /**
- * The streamed transcript is shown from its *end*, not its start: the newest
- * words are the ones that confirm the mic is still hearing you, and a pill
- * frozen on the first six words of a long dictation reads as a hang.
- */
-const PARTIAL_CHARS = 60;
-
-/**
  * Bars in the listening wave.
  *
  * Five, as the Swift app used. The count and the per-bar phase step together
@@ -64,11 +57,10 @@ function Overlay() {
   // Rust picks the style and pushes it on every show — including the swap back
   // to the pill for an error, which no wing is wide enough to show.
   const [style, setStyle] = useState<OverlayStyle>(
-    (new URLSearchParams(location.search).get("style") as OverlayStyle) ?? "pill",
+    (new URLSearchParams(location.search).get("style") as OverlayStyle) ??
+      "liquidGlass",
   );
   const [error, setError] = useState<string | null>(null);
-  // Streaming transcription only, and feedback only — Rust never pastes this.
-  const [partial, setPartial] = useState<string>("");
   const [download, setDownload] = useState<number | null>(null);
   // The root, not the bar row: --level inherits, so the wings style can draw
   // two waves off one write.
@@ -92,16 +84,20 @@ function Overlay() {
     const unlistenPhase = events.dictationPhase.listen((e) => {
       setPhase(e.payload);
       // A new run clears the last run’s message.
-      if (e.payload === "recording") {
-        setError(null);
-        setPartial("");
-      }
+      if (e.payload === "recording") setError(null);
     });
-    const unlistenPartial = events.dictationPartial.listen((e) =>
-      setPartial(e.payload),
-    );
     const unlistenError = events.overlayError.listen((e) => setError(e.payload));
-    const unlistenStyle = events.overlayStyle.listen((e) => setStyle(e.payload));
+    const unlistenStyle = events.overlayStyle.listen((e) => {
+      setStyle(e.payload.style);
+      // The exact notch cutout, measured natively, so the wings weld to it
+      // rather than straddle a fixed guess. Written as vars the CSS reads;
+      // zero for a pill, where the wave falls back to its own gap/height.
+      root.current?.style.setProperty("--notch-w", `${e.payload.notchWidth ?? 0}px`);
+      root.current?.style.setProperty(
+        "--notch-h",
+        `${e.payload.notchHeight ?? 0}px`,
+      );
+    });
     // First use of the local engine fetches ~150MB; without this the pill sits
     // on "Transcribing…" for minutes and the app looks hung.
     const unlistenDownload = events.modelDownload.listen((e) =>
@@ -109,68 +105,90 @@ function Overlay() {
     );
     return () => {
       unlistenPhase.then((off) => off());
-      unlistenPartial.then((off) => off());
       unlistenError.then((off) => off());
       unlistenStyle.then((off) => off());
       unlistenDownload.then((off) => off());
     };
   }, []);
 
+  // The live transcript is no longer shown here — it has its own panel. The
+  // pill is back to a status word plus the wave.
   const label =
     phase === "error" && error
       ? truncate(error, ERROR_CHARS)
       : download !== null
         ? `Downloading model… ${Math.round(download * 100)}%`
-        : phase === "recording" && partial
-          ? tail(partial, PARTIAL_CHARS)
-          : LABEL[phase];
+        : LABEL[phase];
 
   return (
     <div className="overlay-root" ref={root}>
-    {/* Refraction filter: turbulence drives a displacement map that warps the
-        glass highlight layer. WebKit renders this on an element's own content
-        (unlike backdrop-filter: url(), which Safari does not support), so it
-        works in the Tauri webview. */}
-    <svg width="0" height="0" aria-hidden style={{ position: "absolute" }}>
-      <filter id="pill-refraction" x="-20%" y="-20%" width="140%" height="140%">
-        <feTurbulence
-          type="fractalNoise"
-          baseFrequency="0.012 0.02"
-          numOctaves={2}
-          seed={7}
-          result="noise"
-        />
-        <feGaussianBlur in="noise" stdDeviation="1.2" result="softNoise" />
-        <feDisplacementMap
-          in="SourceGraphic"
-          in2="softNoise"
-          scale={22}
-          xChannelSelector="R"
-          yChannelSelector="G"
-        />
-      </filter>
-    </svg>
+    {/* Refraction filter for the glass pill: turbulence drives a displacement
+        map that warps the glass highlight layer. WebKit renders this on an
+        element's own content (unlike backdrop-filter: url(), which Safari does
+        not support), so it works in the Tauri webview. */}
+    {style === "liquidGlass" && (
+      <svg width="0" height="0" aria-hidden style={{ position: "absolute" }}>
+        <filter id="pill-refraction" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence
+            type="fractalNoise"
+            baseFrequency="0.012 0.02"
+            numOctaves={2}
+            seed={7}
+            result="noise"
+          />
+          <feGaussianBlur in="noise" stdDeviation="1.2" result="softNoise" />
+          <feDisplacementMap
+            in="SourceGraphic"
+            in2="softNoise"
+            scale={22}
+            xChannelSelector="R"
+            yChannelSelector="G"
+          />
+        </filter>
+      </svg>
+    )}
     {style === "wings" ? (
-      // Two tabs flanking the notch, the way voice-dict's compact overlay
-      // does. Symmetric on purpose: Rust cannot measure the notch, so the pair
-      // reads as deliberate on a screen that has none.
+      // voice-dict's minimalist overlay: one continuous black bar welded to the
+      // notch — the waveform on the left, a recording light on the right, the
+      // measured cutout between them. Only ever shown on a screen that has a
+      // notch; Rust falls back to a pill otherwise (see overlay.rs).
       <div className={`wings wings--${phase}`}>
-        <span className="wing">
+        <span className="wing wing--left">
           <Indicator phase={phase} />
         </span>
-        <span className="wing">
-          <Indicator phase={phase} />
+        {/* The notch itself: solid black, exactly the cutout's width, so the
+            bar is continuous across it and the camera notch disappears into
+            the strip — the whole point of the blend. */}
+        <span className="wing-notch" aria-hidden />
+        <span className="wing wing--right">
+          {phase === "recording" && (
+            <span className="dot dot--recording" aria-hidden />
+          )}
         </span>
       </div>
+    ) : style === "pill" ? (
+      // voice-dict's drop-down pill: a solid-black panel welded to the top,
+      // rounded only along the bottom, with the wave and status sitting just
+      // below the notch (the __notch spacer is the measured cutout height).
+      <div className={`drop-pill drop-pill--${phase}`}>
+        <span className="drop-pill__notch" aria-hidden />
+        <div className="drop-pill__body">
+          <Indicator phase={phase} />
+          <span className="label" title={error ?? undefined}>
+            {label}
+          </span>
+        </div>
+      </div>
     ) : (
-    <div className={`pill pill--${phase}`}>
-      {/* Warped glass highlight sitting over the real backdrop blur. */}
-      <span className="pill__refraction" aria-hidden />
-      <Indicator phase={phase} />
-      <span className="label" title={error ?? undefined}>
-        {label}
-      </span>
-    </div>
+      // The liquid-glass pill: a refractive capsule below the menu bar, with
+      // the warped sheen (below) riding over the backdrop blur.
+      <div className={`pill pill--${phase}`}>
+        <span className="pill__refraction" aria-hidden />
+        <Indicator phase={phase} />
+        <span className="label" title={error ?? undefined}>
+          {label}
+        </span>
+      </div>
     )}
     </div>
   );
@@ -191,14 +209,6 @@ function Indicator({ phase }: { phase: Phase }) {
       ))}
     </span>
   );
-}
-
-/** The last `max` characters, ellipsised at the front. Char-wise, so a
- * multi-byte character is never split. */
-function tail(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  const chars = [...flat];
-  return chars.length <= max ? flat : `…${chars.slice(-max).join("")}`;
 }
 
 /** Cuts on a char boundary so a multi-byte character is never split. */
