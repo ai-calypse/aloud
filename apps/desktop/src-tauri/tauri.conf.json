@@ -38,21 +38,6 @@
         "acceptFirstMouse": false
       },
       {
-        "label": "transcript",
-        "url": "transcript.html",
-        "width": 500,
-        "height": 64,
-        "visible": false,
-        "transparent": true,
-        "decorations": false,
-        "alwaysOnTop": true,
-        "resizable": false,
-        "shadow": false,
-        "skipTaskbar": true,
-        "focus": false,
-        "acceptFirstMouse": false
-      },
-      {
         "label": "agent",
         "url": "agent.html",
         "title": "Agent",

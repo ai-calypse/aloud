@@ -42,7 +42,7 @@ const DEFAULTS = {
 type Settings = typeof DEFAULTS;
 
 /** Which surface the stage is showing. */
-type Stage = "dropPill" | "liquidGlass" | "wings";
+type Stage = "dropPill" | "wings";
 
 const SLIDERS: {
   key: keyof Settings;
@@ -243,7 +243,7 @@ function Tuner() {
         </p>
 
         <div className="mb-5 flex flex-wrap gap-1.5">
-          {(["dropPill", "liquidGlass", "wings"] as Stage[]).map((s) => (
+          {(["dropPill", "wings"] as Stage[]).map((s) => (
             <button
               key={s}
               className={`rounded-full border border-separator px-3 py-1 text-ui ${
@@ -269,6 +269,13 @@ function Tuner() {
             </Action>
             <Action onClick={() => send({ phase: "done" })}>Pasted</Action>
             <Action onClick={() => send({ phase: "noSpeech" })}>No speech</Action>
+            <Action
+              onClick={() =>
+                send({ style: stage, phase: "recording", partial: "stream" })
+              }
+            >
+              Transcript
+            </Action>
             <Action onClick={() => send({ ask: "open" })}>Answer (whole)</Action>
             <Action onClick={() => send({ ask: "stream" })}>Answer (stream)</Action>
             <Action onClick={() => send({ dismissing: true })}>Dismiss</Action>
@@ -281,7 +288,9 @@ function Tuner() {
             </Action>
           </div>
           <p className="mt-2 mb-0 text-caption text-ink-2">
-            The full run: Listening → Transcribing → Answer (stream) → Dismiss.
+            The full run: Listening → Transcript → Transcribing → Answer
+            (stream) → Dismiss. The transcript preview includes the revisions
+            whisper really makes, which is what can shrink the panel mid-flight.
           </p>
         </Section>
 

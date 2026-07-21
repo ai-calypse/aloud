@@ -18,11 +18,10 @@
  * 90-character error, whichever wins — with room to spare.
  *
  * `flex-start`, not `center`: centring tied every style's vertical position to
- * the window height, so enlarging the canvas would have dropped the glass pill
- * to the middle of the screen. Each surface now owns its own offset, and the
- * window's top edge is the one fixed reference — which is what the two welded
- * styles already assumed. TOP_MARGIN in overlay.rs is the glass pill's top edge
- * because of this; the two move together.
+ * the window height, so enlarging the canvas would move surfaces that have
+ * nothing to do with the change. Both remaining styles weld to the top edge, so
+ * that edge is the one fixed reference and Rust anchors the window at margin 0
+ * for all of them.
  */
 /* The answer's entrance, in the two terms that have to be seen to be chosen.
    On :root rather than on `.ask` so tune.html can override them from an inline
@@ -51,7 +50,7 @@
  * still reads as deliberate.
  *
  * 24px tall so the tabs stay inside a standard menu bar rather than hanging
- * below it — the whole point of this style over the pill.
+ * below it — the whole point of this style over the panel.
  */
 /* One continuous solid-black bar: [waveform wing][notch][light wing]. The
    centre is exactly the measured cutout width, so the physical notch sits
@@ -83,8 +82,7 @@
 
 /* The tabs grow outward from behind the notch, because that is where they
  * appear to come from — a thing that emerges from the cutout should emerge
- * from the cutout's edge, not fade in place or rise from below like the
- * free-floating capsule does.
+ * from the cutout's edge, not fade in place or rise from below.
  *
  * clip-path rather than scaleX: scaling would stretch the waveform inside the
  * left tab, and the whole point of the wave is that its bar widths are
@@ -151,7 +149,7 @@
    The __notch spacer is the measured cutout height, which drops the wave and
    status below the notch line; the black merges with the notch above it. Wider
    than the cutout so the notch sits inside the panel. Falls back to a menu-bar
-   height and a comfortable width for the `?style=pill` browser preview. */
+   height and a comfortable width for the `?style=dropPill` browser preview. */
 /* Its size and its silhouette are both written per frame from JS (see
  * useNotchPanel in overlay.tsx), so almost nothing about its geometry is
  * declared here. What is left is the box the content sits in.
@@ -222,6 +220,67 @@
   width: max-content;
   align-self: center;
   flex: none;
+}
+
+/* Live-transcript mode, while dictating.
+ *
+ * Same row as the status body — wave on the left, text on the right — because
+ * that continuity *is* the transition: the wave does not move, and "Listening…"
+ * simply becomes the words. Laying the transcript out any other way would make
+ * the first partial a re-layout rather than a growth.
+ *
+ * Fixed width so the text wraps and only the height changes. Left over as
+ * `max-content` the panel would run off toward the screen edges one word at a
+ * time, which is the shape of a ticker, not of something that has words in it.
+ *
+ * `flex-start`, so the wave sits on the first line rather than drifting to the
+ * middle of a growing block. */
+.drop-pill__body--transcript {
+  align-items: flex-start;
+  width: 420px;
+  height: auto;
+  padding: 12px 22px;
+}
+
+/* `.phase-swap` carries its own `align-items: center`, which is right for a
+   one-line status and wrong here — it floats the wave to the middle of a
+   growing block of text instead of leaving it on the first line, so the wave
+   appears to drift downwards as the user keeps talking. Width so the text has
+   the full body to wrap in rather than shrinking to fit. */
+.drop-pill__body--transcript .phase-swap {
+  align-items: flex-start;
+  width: 100%;
+}
+
+.transcript {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  /* Roughly five lines, then it scrolls instead of growing — past that the
+     panel is a wall of text hanging off the menu bar, and the words that
+     matter are the last ones anyway (see the follow-to-bottom in overlay.tsx).
+     The cap is also what makes the panel's height stop moving on a long
+     dictation, which is the difference between alive and restless. */
+  max-height: 100px;
+  overflow-y: auto;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  /* The preview revises itself, so the text is never final; a lighter ink than
+     the status word says so without a second surface to explain it. */
+  color: rgb(255 255 255 / 0.92);
+  animation: transcript-in var(--dur-fast) var(--ease-out) both;
+}
+
+@keyframes transcript-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
 }
 
 /* Answer mode. The status body hugs a word; this one is a column at a fixed
@@ -419,109 +478,6 @@
   width: 2.5px;
 }
 
-.pill {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  box-sizing: border-box;
-  height: 52px;
-  border: 0.5px solid var(--pill-rim);
-  border-radius: var(--radius-pill);
-  overflow: hidden; /* clip the refraction layer to the capsule */
-
-  /* backdrop-filter blurs the real desktop behind the transparent window
-     (WebKit supports this). Refraction/distortion is faked on the highlight
-     layer below, since Safari cannot displace the backdrop itself.
-     Two independent knobs:
-       - fill opacity  → the /0.68 below (lower = more transparent)
-       - blur strength → the blur(24px) below (higher px = blurrier backdrop) */
-  background: var(--pill-fill);
-  backdrop-filter: blur(4px) saturate(180%);
-  -webkit-backdrop-filter: blur(4px) saturate(180%);
-  box-shadow:
-    var(--pill-shadow),
-    /* inner rim light — the refractive edge of glass */ var(--pill-rim-light),
-    var(--pill-rim-shade);
-
-  color: var(--pill-ink);
-  font-family: system-ui, -apple-system, sans-serif;
-  font-size: 14px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-
-  animation: pill-in var(--spring-pop-dur) var(--spring-pop) both;
-
-  /* Morphs to its content instead of snapping to it. --spring-dur-slow
-     (response 0.4) and not --spring-dur (0.3): a container changing shape has
-     to read as heavier than the content moving inside it, and the reference
-     implementation lands in the same place — its content-update spring is
-     response 0.47 against 0.39 for the content transition. Critically damped,
-     because a capsule that overshoots its own text wobbles.
-
-     `width` and not a transform: scaling would stretch the glyphs, and the
-     label is the one thing in here that must stay crisp. */
-  width: var(--morph-w, auto);
-  transition: width var(--spring-dur-slow) var(--spring);
-}
-
-/* Carries the capsule's padding and gap, so the width it reports back is the
-   width the capsule should be. `max-content` keeps it off its parent's width —
-   without that it would size to the value it is producing and stall. */
-.pill__morph {
-  display: inline-flex;
-  align-items: center;
-  gap: 11px;
-  width: max-content;
-  height: 100%;
-  padding: 0 22px;
-}
-
-/* A glass sheen (top-lit gradient + a diagonal chromatic streak) warped by the
-   SVG displacement filter, so the highlight ripples like liquid glass. Sits
-   under the content; the pill's own content stays crisp above it. */
-.pill__refraction {
-  position: absolute;
-  inset: -20%;
-  pointer-events: none;
-  border-radius: inherit;
-  background:
-    linear-gradient(
-      160deg,
-      rgb(255 255 255 / 0.38) 0%,
-      rgb(255 255 255 / 0.1) 24%,
-      transparent 48%
-    ),
-    /* chromatic edges: a cool and a warm streak the displacement bends */
-    linear-gradient(120deg, transparent 38%, rgb(120 180 255 / 0.22) 52%, transparent 62%),
-    linear-gradient(300deg, transparent 38%, rgb(255 140 170 / 0.18) 52%, transparent 62%);
-  filter: url(#pill-refraction);
-}
-
-/* Keep the bars/label above the warped sheen. */
-.bars,
-.label,
-.dot {
-  position: relative;
-  z-index: 1;
-}
-
-/* The pill is glass, so it arrives the way a material does: out of focus and
-   slightly small, coming into focus at size. --ease-spring gives it a touch of
-   overshoot, which is what makes it feel like an object landing rather than a
-   box being drawn. */
-@keyframes pill-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.94);
-    filter: blur(6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-    filter: blur(0);
-  }
-}
-
 .label {
   white-space: nowrap;
 }
@@ -666,8 +622,9 @@
   }
 }
 
-/* Nothing to show before the first run; Rust hides the window anyway. */
-.pill--idle,
+/* Nothing to show before the first run; Rust hides the window anyway.
+   `.wings--idle` is also how the wings step aside once they have handed over
+   to the panel — see `effectiveStyle` in overlay.tsx. */
 .drop-pill--idle,
 .wings--idle {
   display: none;
@@ -682,25 +639,14 @@
  * the hard cut it replaced.
  *
  * The drop-down panel is absent here on purpose: it collapses back into the
- * cutout from JS, on the same springs that opened it.
+ * cutout from JS, on the same springs that opened it — and when the wings have
+ * handed over to it, that collapse is the only exit playing.
  *
  * Each exit is the entrance run backwards, which is the rule the drop-panel's
  * old entrance broke and was fixed for: a thing should leave by the path it
  * arrived on. Faster than the entrance, though — an exit is the acknowledgement
  * of something already finished, and lingering over it reads as latency.
  */
-.overlay-root[data-exiting] .pill {
-  animation: pill-out var(--dur-fast) var(--ease-in) both;
-}
-
-@keyframes pill-out {
-  to {
-    opacity: 0;
-    transform: translateY(6px) scale(0.96);
-    filter: blur(4px);
-  }
-}
-
 /* The answer leaves ahead of the panel that carries it.
  *
  * The panel collapses back into the cutout on its own spring, and it clips
@@ -761,17 +707,7 @@
   }
 }
 
-/* The other half of the reduced-transparency handling in tokens.css: a token
-   can turn the fill opaque, but the blur and the refracted sheen are effects,
-   not colours, and have to be switched off here. Without this the pill would
-   be an opaque capsule still sampling and warping the desktop behind it. */
-@media (prefers-reduced-transparency: reduce) {
-  .pill {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-
-  .pill__refraction {
-    display: none;
-  }
-}
+/* Nothing here answers to "Reduce transparency" any more. Both remaining
+   surfaces are pure opaque black by design — they merge with the physical
+   cutout — so there is no translucency for that setting to switch off. The
+   block that used to live here was entirely about the glass capsule. */

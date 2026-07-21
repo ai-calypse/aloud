@@ -24,7 +24,6 @@ export default defineConfig(async () => ({
         main: resolve(__dirname, "index.html"),
         overlay: resolve(__dirname, "overlay.html"),
         agent: resolve(__dirname, "agent.html"),
-        transcript: resolve(__dirname, "transcript.html"),
       },
     },
   },

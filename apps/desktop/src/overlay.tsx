@@ -305,47 +305,6 @@ function useNotchPanel(
 }
 
 /**
- * Drives the surface's width from its content, so a phase change *morphs* the
- * pill instead of snapping it.
- *
- * A normal dictation swaps the label three times in a couple of seconds
- * ("Listening…" → "Transcribing…" → "Pasted"), and an auto-width capsule jumps
- * on each one. The jump is what reads as web UI rather than as one physical
- * object changing shape — resizing is the motion, so it has to be animated.
- *
- * The observed node carries the padding and never remounts, so its border-box
- * width *is* the width the surface should take. `width: max-content` on it
- * keeps it independent of the surface it is sizing, which is what stops the
- * observer feeding back into itself. CSS owns the interpolation; this only
- * ever writes a target, so the compositor keeps every frame.
- *
- * Zero widths are dropped: the branch is `display: none` when idle, and
- * animating out of 0 would collapse the capsule to a sliver on the way in.
- */
-function useMorphWidth(style: OverlayStyle) {
-  const surface = useRef<HTMLDivElement>(null);
-  const content = useRef<HTMLDivElement>(null);
-
-  // Keyed on `style` because each style renders its own branch: the refs point
-  // at different nodes after Rust pushes a new one, and an observer left on the
-  // old node would size a surface that no longer exists.
-  useEffect(() => {
-    const surfaceElement = surface.current;
-    const contentElement = content.current;
-    if (!surfaceElement || !contentElement) return;
-
-    const observer = new ResizeObserver((entries) => {
-      const width = entries[0]?.borderBoxSize?.[0]?.inlineSize;
-      if (width) surfaceElement.style.setProperty("--morph-w", `${width}px`);
-    });
-    observer.observe(contentElement);
-    return () => observer.disconnect();
-  }, [style]);
-
-  return { surface, content };
-}
-
-/**
  * A question and the answer streaming in under it, or null when the panel is
  * just a status pill.
  *
@@ -379,6 +338,32 @@ const ASK_PREVIEW: Ask = {
 const STREAM_MS = 45;
 
 /**
+ * A dictation preview, as whisper actually produces one.
+ *
+ * Each entry is the *whole* transcript at that moment, not a delta — that is
+ * the shape of the real event, and it is why the text can go backwards. The
+ * two shortenings here are deliberate: a rolling re-read revises what it
+ * thought it heard, and a panel that springs to fit every revision is the one
+ * way this can look nervous. A preview that only ever grew would hide that.
+ */
+const PARTIAL_PREVIEW = [
+  "So the",
+  "So the thing about",
+  "So the thing about springs is",
+  // Revised: "springs is" became "spring is", and the tail was re-heard.
+  "So the thing about a spring is that",
+  "So the thing about a spring is that you can redirect it",
+  "So the thing about a spring is that you can redirect it mid flight and it",
+  // Revised shorter again, the case that actually shrinks the panel.
+  "So the thing about a spring is that you can redirect it mid-flight",
+  "So the thing about a spring is that you can redirect it mid-flight and it keeps the velocity it already had, which is the whole reason",
+  "So the thing about a spring is that you can redirect it mid-flight and it keeps the velocity it already had, which is the whole reason it does not stall halfway.",
+];
+
+/** How fast `partial: "stream"` advances, in ms between revisions. */
+const PARTIAL_MS = 320;
+
+/**
  * The recording pill. Rust drives the window's visibility, so this only ever
  * renders the current phase.
  */
@@ -398,6 +383,12 @@ function Overlay() {
   );
   const [error, setError] = useState<string | null>(null);
   const [download, setDownload] = useState<number | null>(null);
+  // The words so far, while the live preview is on. Feedback only — none of
+  // this is ever pasted; it is a rolling re-read of the last few seconds by
+  // the small local model, so it revises itself as a sentence lands.
+  const [partial, setPartial] = useState("");
+  // Latched once a run has produced words; see `effectiveStyle`.
+  const [droppedDown, setDroppedDown] = useState(false);
   const [ask, setAsk] = useState<Ask | null>(null);
   // The phase listener subscribes once and has to know whether an answer is on
   // screen. A ref rather than the state it mirrors: re-subscribing on every
@@ -428,14 +419,29 @@ function Overlay() {
     const timer = setTimeout(() => setAsk(ASK_PREVIEW), Number(askAfter) || 0);
     return () => clearTimeout(timer);
   }, [askAfter]);
-  // Sizes the glass capsule to its own content. The wings are two fixed tabs
-  // welded to a measured cutout, so they are deliberately not morphed.
-  const { surface, content } = useMorphWidth(style);
   // Rust decides when this window may take clicks by testing the pointer
   // against the panel's box (see `track_cursor` in overlay.rs), so it needs the
   // box. Reported from the one place that already computes it, and only when
   // it changes: the target moves on every remeasure, which while an answer is
   // streaming is roughly once a frame.
+  const transcript = !ask && phase === "recording" && partial.trim().length > 0;
+
+  /**
+   * The style actually drawn, which is not always the one that was chosen.
+   *
+   * A wing is a 40pt tab inside the menu bar and has nowhere to put a sentence,
+   * so the moment there are words it hands over to the drop-down panel. Both
+   * are welded to the same cutout, so what the user sees is the notch itself
+   * pulling down — not one overlay being swapped for another.
+   *
+   * `droppedDown` latches for the rest of the run rather than tracking the
+   * words: the transcript is gone by `transcribing`, and springing back up to a
+   * menu-bar tab at that moment would undo the drop they just watched, one beat
+   * before the panel has anything to say about the result.
+   */
+  const effectiveStyle: OverlayStyle =
+    style === "wings" && (droppedDown || ask) ? "dropPill" : style;
+
   const reported = useRef("");
   const reportBox = useCallback((width: number, height: number) => {
     const box = `${Math.round(width)}x${Math.round(height)}`;
@@ -450,11 +456,12 @@ function Overlay() {
       /* no Tauri; nothing is polling the pointer either */
     }
   }, []);
-  const panel = useNotchPanel(style, run, dismissing, reportBox);
+  const panel = useNotchPanel(effectiveStyle, run, dismissing, reportBox);
   // The root, not the bar row: --level inherits, so the wings style can draw
   // two waves off one write.
   const root = useRef<HTMLDivElement>(null);
   const answerRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLParagraphElement>(null);
 
   // Levels land every 50ms. Writing --level straight onto the node keeps them
   // out of React entirely: at 20 renders a second the pill would rebuild its
@@ -500,6 +507,10 @@ function Overlay() {
         // A dictation started over the top of an answer takes the panel back;
         // `overlay::show` has already cleared its side of the same state.
         setAsk(null);
+        // Rust no longer sends an empty partial to clear the last run: there is
+        // no separate window to show, so there is no show to hang it off.
+        setPartial("");
+        setDroppedDown(false);
         // Rebuilds the panel so it grows out of the notch again rather than
         // resuming from wherever the last run's springs were left.
         setRun((previous) => previous + 1);
@@ -523,12 +534,20 @@ function Overlay() {
     const unlistenDownload = events.modelDownload.listen((e) =>
       setDownload(e.payload === null || e.payload >= 1 ? null : e.payload),
     );
+    // The live transcript, which used to have a window of its own below the
+    // pill. Rust sends an empty string to say the preview is over.
+    const unlistenPartial = events.dictationPartial.listen((e) => {
+      setPartial(e.payload);
+      // One-way for the rest of the run: see `effectiveStyle`.
+      if (e.payload.trim()) setDroppedDown(true);
+    });
     return () => {
       unlistenPhase.then((off) => off());
       unlistenDismiss.then((off) => off());
       unlistenError.then((off) => off());
       unlistenStyle.then((off) => off());
       unlistenDownload.then((off) => off());
+      unlistenPartial.then((off) => off());
     };
   }, []);
 
@@ -577,9 +596,26 @@ function Overlay() {
       }, STREAM_MS);
     };
 
+    const dictate = () => {
+      clearInterval(typing);
+      let at = 0;
+      setPartial("");
+      typing = window.setInterval(() => {
+        if (at >= PARTIAL_PREVIEW.length) {
+          clearInterval(typing);
+          return;
+        }
+        setPartial(PARTIAL_PREVIEW[at++]);
+        setDroppedDown(true);
+      }, PARTIAL_MS);
+    };
+
     const onPreview = (event: Event) => {
       const command = (event as CustomEvent<PreviewCommand>).detail;
       if (command.style) setStyle(command.style);
+      // Phase first, because `recording` resets everything below it — including
+      // the one timer both streams share. Starting a stream before that reset
+      // has it cancelled by the same command that asked for it.
       if (command.phase) {
         setPhase(command.phase);
         setDismissing(false);
@@ -587,6 +623,8 @@ function Overlay() {
           clearInterval(typing);
           setAsk(null);
           setError(null);
+          setPartial("");
+          setDroppedDown(false);
           setRun((previous) => previous + 1);
         }
       }
@@ -596,6 +634,11 @@ function Overlay() {
         setAsk(null);
       }
       if (command.ask === "stream") stream();
+      if (command.partial === "stream") dictate();
+      if (command.partial === "clear") {
+        clearInterval(typing);
+        setPartial("");
+      }
       if (command.dismissing !== undefined) setDismissing(command.dismissing);
       // Last, so it applies on top of whatever else this command changed.
       if (command.restart) setRun((previous) => previous + 1);
@@ -627,8 +670,19 @@ function Overlay() {
     if (el && ask && !ask.done) el.scrollTop = el.scrollHeight;
   }, [ask]);
 
-  // The live transcript is no longer shown here — it has its own panel. The
-  // pill is back to a status word plus the wave.
+  // The live transcript replaces the status word while it is running: once
+  // there are words, "Listening…" is saying less than they are. Only during
+  // `recording` — a partial left over from the capture must not sit under
+  // "Transcribing…", which is about the *whole* utterance being re-read.
+
+  // Follow the words down as they arrive. The panel grows to fit until the cap
+  // in overlay.css, and after that this is the only thing keeping the newest
+  // words on screen.
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [partial]);
+
   const label =
     phase === "error" && error
       ? truncate(error, ERROR_CHARS)
@@ -637,39 +691,24 @@ function Overlay() {
         : LABEL[phase];
 
   return (
-    // The exit is a state of the whole surface, not of one style: all three
-    // now have the window held open for them, so all three have to use it.
+    // The exit is a state of the whole surface, not of one style: both have
+    // the window held open for them, so both have to use it.
     <div className="overlay-root" ref={root} data-exiting={dismissing || undefined}>
-    {/* Refraction filter for the glass pill: turbulence drives a displacement
-        map that warps the glass highlight layer. WebKit renders this on an
-        element's own content (unlike backdrop-filter: url(), which Safari does
-        not support), so it works in the Tauri webview. */}
-    {style === "liquidGlass" && (
-      <svg width="0" height="0" aria-hidden style={{ position: "absolute" }}>
-        <filter id="pill-refraction" x="-20%" y="-20%" width="140%" height="140%">
-          <feTurbulence
-            type="fractalNoise"
-            baseFrequency="0.012 0.02"
-            numOctaves={2}
-            seed={7}
-            result="noise"
-          />
-          <feGaussianBlur in="noise" stdDeviation="1.2" result="softNoise" />
-          <feDisplacementMap
-            in="SourceGraphic"
-            in2="softNoise"
-            scale={22}
-            xChannelSelector="R"
-            yChannelSelector="G"
-          />
-        </filter>
-      </svg>
-    )}
-    {style === "wings" ? (
+    {/* Rendered whenever wings are the chosen style, and deliberately left
+        rendered *underneath* the panel once it has taken over. Both are pure
+        black welded to the same cutout, so the panel covers the tabs as it
+        grows past them and uncovers them as it collapses — nothing has to
+        animate out, and more importantly nothing pinches: hiding the wings on
+        hand-over would snap the bar from their width down to the bare cutout
+        for the frame before the panel starts growing.
+        This relies on the panel always settling wider than the tabs, which
+        holds while its floor (notch x 1.5) exceeds their span (notch + 88) —
+        true for any cutout wider than 176pt, and a real one is ~180-220. */}
+    {style === "wings" && (
       // voice-dict's minimalist overlay: one continuous black bar welded to the
       // notch — the waveform on the left, a recording light on the right, the
       // measured cutout between them. Only ever shown on a screen that has a
-      // notch; Rust falls back to a pill otherwise (see overlay.rs).
+      // notch; Rust falls back to the drop pill otherwise (see overlay.rs).
       <div className={`wings wings--${phase}`}>
         <span className="wing wing--left">
           <PhaseSwap phase={phase}>
@@ -686,7 +725,8 @@ function Overlay() {
           )}
         </span>
       </div>
-    ) : style === "dropPill" ? (
+    )}
+    {effectiveStyle === "dropPill" && (
       // voice-dict's drop-down pill: a solid-black panel welded to the top,
       // rounded only along the bottom, with the wave and status sitting just
       // below the notch (the __notch spacer is the measured cutout height).
@@ -708,7 +748,9 @@ function Overlay() {
         </svg>
         <span className="drop-pill__notch" aria-hidden />
         <div
-          className={`drop-pill__body${ask ? " drop-pill__body--ask" : ""}`}
+          className={`drop-pill__body${
+            ask ? " drop-pill__body--ask" : transcript ? " drop-pill__body--transcript" : ""
+          }`}
           ref={panel.content}
         >
           {ask ? (
@@ -718,27 +760,21 @@ function Overlay() {
           ) : (
             <PhaseSwap phase={phase}>
               <Indicator phase={phase} />
-              <span className="label" title={error ?? undefined}>
-                {label}
-              </span>
+              {/* Deliberately inside PhaseSwap and beside the wave, rather than
+                  a layout of its own: the wave stays exactly where it is and
+                  only the text beside it changes, so "Listening…" becoming the
+                  words is one surface growing rather than a re-layout. */}
+              {transcript ? (
+                <p className="transcript" ref={transcriptRef}>
+                  {partial}
+                </p>
+              ) : (
+                <span className="label" title={error ?? undefined}>
+                  {label}
+                </span>
+              )}
             </PhaseSwap>
           )}
-        </div>
-      </div>
-    ) : (
-      // The liquid-glass pill: a refractive capsule below the menu bar, with
-      // the warped sheen (below) riding over the backdrop blur.
-      <div className={`pill pill--${phase}`} ref={surface}>
-        <span className="pill__refraction" aria-hidden />
-        {/* Carries the capsule's padding so its border-box width is exactly the
-            width the capsule should morph to. */}
-        <div className="pill__morph" ref={content}>
-          <PhaseSwap phase={phase}>
-            <Indicator phase={phase} />
-            <span className="label" title={error ?? undefined}>
-              {label}
-            </span>
-          </PhaseSwap>
         </div>
       </div>
     )}

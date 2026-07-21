@@ -24,27 +24,33 @@ const MAX_TERM_CHARS: usize = 48;
 /// How the recording overlay draws itself.
 ///
 /// - `DropPill` is voice-dict's drop-down pill: a panel that grows out of the
-///   notch, wearing its silhouette. The default — it is the most legible of the
-///   three and the only one that reads as part of the hardware.
-/// - `LiquidGlass` is Aloud's own pill: a refractive glass capsule floating
-///   below the menu bar.
+///   notch, wearing its silhouette. The default, and the only one with room for
+///   content — a live transcript, an Ask answer — rather than a status word.
 /// - `Wings` is voice-dict's minimalist overlay: two slim tabs welded to the
-///   top edge, flanking the notch, staying inside the menu bar.
+///   top edge, flanking the notch, staying inside the menu bar. It is the drop
+///   pill collapsed to nothing, and hands over to it the moment there are words
+///   to show.
 ///
-/// Wings weld to the menu bar, which only macOS has; off macOS (and on an error
-/// too small to read in a wing) the style falls back to the glass pill.
+/// Wings weld to the menu bar, which only macOS has; off macOS, on a screen
+/// with no notch, and on an error too long to read in a 40pt tab, the style
+/// falls back to the drop pill.
+///
+/// A third variant, `LiquidGlass` — a refractive capsule floating below the
+/// menu bar — was retired. It was the one surface here that could not hold
+/// content: it morphed to its own width, so a sentence stretched it most of the
+/// way across the screen. Files still naming it load as the default; see
+/// `a_retired_overlay_style_falls_back_without_resetting_the_file`.
 ///
 /// `DropPill` is stored as `dropPill` and not the `pill` its name suggests.
 /// `pill` is what the glass capsule was called before it was renamed, and while
 /// the loader was still rewriting that value this style silently reverted to
 /// glass on the next launch — see `the_drop_down_pill_survives_a_restart`. The
-/// rewrite is gone, but the two names stay apart: one of three variants being
-/// called `pill` when another answered to it first is a trap worth not
+/// rewrite is gone, and now so is the capsule, but the names stay apart: a
+/// variant answering to a name another one used first is a trap worth not
 /// rebuilding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum OverlayStyle {
-    LiquidGlass,
     DropPill,
     Wings,
 }
@@ -176,8 +182,8 @@ pub struct Settings {
     /// to the window is to open the app again, which macOS turns into a
     /// reopen event rather than a second instance.
     pub show_menu_bar_icon: bool,
-    /// Liquid-glass pill or menu-bar wings. Wings are macOS-only; elsewhere the
-    /// glass pill is always used.
+    /// Drop-down pill or menu-bar wings. Wings are macOS-only, and hand over to
+    /// the drop pill wherever they cannot say what needs saying.
     pub overlay_style: OverlayStyle,
     /// Which screen the overlay shows on.
     pub overlay_display: OverlayDisplay,
@@ -665,12 +671,17 @@ mod rename_tests {
             "the rest of the file survives"
         );
 
+        // The retired glass capsule takes the same path as `"pill"` did: it
+        // loads as the default rather than failing the document it is in.
+        let glass = Settings::from_json(
+            r#"{ "overlayStyle": "liquidGlass", "groqApiKey": "keep-me" }"#,
+        )
+        .expect("a retired style must not fail the document");
+        assert_eq!(glass.overlay_style, Settings::default().overlay_style);
+        assert_eq!(glass.groq_api_key, "keep-me");
+
         // Every live name is left exactly alone.
-        for style in [
-            OverlayStyle::LiquidGlass,
-            OverlayStyle::DropPill,
-            OverlayStyle::Wings,
-        ] {
+        for style in [OverlayStyle::DropPill, OverlayStyle::Wings] {
             let saved = serde_json::to_string(&style).expect("must serialize");
             let reloaded = Settings::from_json(&format!(r#"{{ "overlayStyle": {saved} }}"#))
                 .expect("a current style must parse");

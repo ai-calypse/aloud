@@ -523,25 +523,32 @@ export type OverlayError = string;
  *  How the recording overlay draws itself.
  * 
  *  - `DropPill` is voice-dict's drop-down pill: a panel that grows out of the
- *    notch, wearing its silhouette. The default — it is the most legible of the
- *    three and the only one that reads as part of the hardware.
- *  - `LiquidGlass` is Aloud's own pill: a refractive glass capsule floating
- *    below the menu bar.
+ *    notch, wearing its silhouette. The default, and the only one with room for
+ *    content — a live transcript, an Ask answer — rather than a status word.
  *  - `Wings` is voice-dict's minimalist overlay: two slim tabs welded to the
- *    top edge, flanking the notch, staying inside the menu bar.
+ *    top edge, flanking the notch, staying inside the menu bar. It is the drop
+ *    pill collapsed to nothing, and hands over to it the moment there are words
+ *    to show.
  * 
- *  Wings weld to the menu bar, which only macOS has; off macOS (and on an error
- *  too small to read in a wing) the style falls back to the glass pill.
+ *  Wings weld to the menu bar, which only macOS has; off macOS, on a screen
+ *  with no notch, and on an error too long to read in a 40pt tab, the style
+ *  falls back to the drop pill.
+ * 
+ *  A third variant, `LiquidGlass` — a refractive capsule floating below the
+ *  menu bar — was retired. It was the one surface here that could not hold
+ *  content: it morphed to its own width, so a sentence stretched it most of the
+ *  way across the screen. Files still naming it load as the default; see
+ *  `a_retired_overlay_style_falls_back_without_resetting_the_file`.
  * 
  *  `DropPill` is stored as `dropPill` and not the `pill` its name suggests.
  *  `pill` is what the glass capsule was called before it was renamed, and while
  *  the loader was still rewriting that value this style silently reverted to
  *  glass on the next launch — see `the_drop_down_pill_survives_a_restart`. The
- *  rewrite is gone, but the two names stay apart: one of three variants being
- *  called `pill` when another answered to it first is a trap worth not
+ *  rewrite is gone, and now so is the capsule, but the names stay apart: a
+ *  variant answering to a name another one used first is a trap worth not
  *  rebuilding.
  */
-export type OverlayStyle = "liquidGlass" | "dropPill" | "wings";
+export type OverlayStyle = "dropPill" | "wings";
 
 /**
  *  The style the overlay window should draw, pushed on every show.
@@ -716,8 +723,8 @@ export type Settings = {
 	 */
 	showMenuBarIcon?: boolean,
 	/**
-	 *  Liquid-glass pill or menu-bar wings. Wings are macOS-only; elsewhere the
-	 *  glass pill is always used.
+	 *  Drop-down pill or menu-bar wings. Wings are macOS-only, and hand over to
+	 *  the drop pill wherever they cannot say what needs saying.
 	 */
 	overlayStyle?: OverlayStyle,
 	/**  Which screen the overlay shows on. */
