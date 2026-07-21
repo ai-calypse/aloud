@@ -44,6 +44,14 @@ impl LocalTranscriber {
     }
 }
 
+/// Threads for the CPU-side decode. Leaves one core for the audio callback and
+/// the event tap, both of which are latency-critical and must not be starved
+/// by a transcription that is already saturating the machine.
+fn threads() -> i32 {
+    let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+    cores.saturating_sub(1).clamp(1, 8) as i32
+}
+
 /// The blocking inference itself, free-standing so it can run on the blocking
 /// pool without borrowing the transcriber.
 fn run_whisper(
@@ -58,6 +66,19 @@ fn run_whisper(
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
+
+    // whisper.cpp defaults to `min(4, hardware_concurrency)`. **Measured as a
+    // no-op on macOS** — Metal owns the encoder (see Cargo.toml), so the
+    // CPU-side work left over is small: 6s of speech transcribed in 157-215ms
+    // at 9 threads against 154-236ms at 4. Kept because it is free here and the
+    // Windows path has no Metal at all, where a 4-thread cap on a 16-core box
+    // is the whole decode. Do not expect it to show up on a Mac.
+    params.set_n_threads(threads());
+
+    // A dictation is one utterance, not a continuation of the last one, so
+    // priming the decoder with the previous window's text only invites it to
+    // invent a run-on. Correctness, not speed.
+    params.set_no_context(true);
 
     let mut state = context.create_state().context("creating state")?;
     state.full(params, samples).context("running whisper")?;
@@ -150,6 +171,17 @@ fn read_wav_16k_mono(path: &Path) -> Result<Vec<f32>> {
         .map(|s| Ok(f32::from(s?) / f32::from(i16::MAX)))
         .collect::<Result<Vec<f32>, hound::Error>>()
         .context("reading samples")
+}
+
+/// Whether the default model is already on disk.
+///
+/// The offline fallback needs this: `ensure_model` *downloads* a missing
+/// model, and a user on the cloud engine has never had one, so falling back
+/// blind would put a 150MB download inside the dictation the user is waiting
+/// on — and on the transport-error case the download fails too, because the
+/// network is exactly what just broke.
+pub fn model_is_present() -> bool {
+    model_dir().is_ok_and(|dir| dir.join(DEFAULT_MODEL).exists())
 }
 
 /// Where models live: `<app-data>/Aloud/models`.

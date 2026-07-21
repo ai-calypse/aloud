@@ -38,6 +38,21 @@
         "acceptFirstMouse": false
       },
       {
+        "label": "transcript",
+        "url": "transcript.html",
+        "width": 500,
+        "height": 64,
+        "visible": false,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "shadow": false,
+        "skipTaskbar": true,
+        "focus": false,
+        "acceptFirstMouse": false
+      },
+      {
         "label": "ask",
         "url": "ask.html",
         "title": "Ask",
@@ -66,7 +81,13 @@
     ],
     "macOSPrivateApi": true,
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data:; media-src 'self' asset: http://asset.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$DATA/Aloud/media/*"
+        ]
+      }
     }
   },
   "bundle": {

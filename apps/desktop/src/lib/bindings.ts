@@ -12,6 +12,21 @@ export const commands = {
 	searchNotes: (query: string) => typedError<SearchResult[], string>(__TAURI_INVOKE("search_notes", { query })),
 	/**  Newest notes, for the empty-query state. */
 	recentNotes: (limit: number) => typedError<Note[], string>(__TAURI_INVOKE("recent_notes", { limit })),
+	defaultPrompt: () => __TAURI_INVOKE<DefaultPrompt>("default_prompt"),
+	/**
+	 *  Runs a prompt against a sample without a dictation, for the Prompts pane.
+	 * 
+	 *  Everything but the prompt comes from live settings, so what this shows is
+	 *  what the next dictation would do — including the model, the fallback and
+	 *  the vocabulary, all of which change the answer.
+	 * 
+	 *  The two ways this can appear broken while working correctly are answered
+	 *  here rather than left as a puzzle: cleanup skips anything at or under
+	 *  [`aloud_llm::cleanup::MIN_WORDS`] and returns it verbatim, which reads as a
+	 *  prompt that did nothing; and a filler-only sample legitimately produces no
+	 *  text at all, which reads as a blank panel.
+	 */
+	testPrompt: (prompt: string, sample: string) => typedError<string, string>(__TAURI_INVOKE("test_prompt", { prompt, sample })),
 	inputDevices: () => typedError<AudioDevice[], string>(__TAURI_INVOKE("input_devices")),
 	/**
 	 *  Installed apps, to fill the App Rules picker. Empty on Windows (no scan
@@ -32,10 +47,106 @@ export const commands = {
 	 */
 	hotkeysPermitted: () => __TAURI_INVOKE<boolean>("hotkeys_permitted"),
 	/**
+	 *  Every OS permission the app needs, with its current answer. Empty off
+	 *  macOS, which the Permissions card reads as "nothing to show".
+	 * 
+	 *  One command for all of them rather than one per permission: the card asks
+	 *  for the whole set every time it refreshes, and three round-trips to answer
+	 *  one question is three chances for the rows to disagree.
+	 */
+	permissions: () => __TAURI_INVOKE<PermissionStatus[]>("permissions"),
+	/**  Opens the System Settings pane that grants `permission`. */
+	openPermissionSettings: (permission: Permission) => typedError<null, string>(__TAURI_INVOKE("open_permission_settings", { permission })),
+	buildInfo: () => __TAURI_INVOKE<BuildInfo>("build_info"),
+	/**
+	 *  Monitor names, to fill the overlay's "Show on" picker.
+	 * 
+	 *  Unnamed monitors are dropped rather than given a placeholder: the setting
+	 *  stores a name, so an entry with no name could never be matched back to a
+	 *  screen and would be a row that silently does nothing.
+	 */
+	overlayDisplays: () => typedError<string[], string>(__TAURI_INVOKE("overlay_displays")),
+	/**
 	 *  The last `utterances` dictations, every stage of each, for the dev panel's
 	 *  waterfall. Newest utterance first; stages in start order within one.
 	 */
 	recentTimings: (utterances: number) => typedError<Span[], string>(__TAURI_INVOKE("recent_timings", { utterances })),
+	/**  The newest `limit` dictations, for the Run Log pane. */
+	historyRecent: (limit: number) => typedError<Entry[], string>(__TAURI_INVOKE("history_recent", { limit })),
+	/**
+	 *  Row ids cross the boundary as i32 because specta refuses to export i64
+	 *  (see [`Entry`]). SQLite hands out ids by insertion count and retention caps
+	 *  the table in the hundreds, so 2^31 is not a reachable ceiling.
+	 */
+	historyDelete: (id: number) => typedError<null, string>(__TAURI_INVOKE("history_delete", { id })),
+	historyClear: () => typedError<null, string>(__TAURI_INVOKE("history_clear")),
+	/**
+	 *  Writes back the output of a cleanup re-run.
+	 * 
+	 *  Separate from [`test_prompt`], which produces the text: a retry is that
+	 *  same call plus this one, so there is no second cleanup path to keep in
+	 *  step with the real pipeline's.
+	 */
+	historyUpdateFinal: (id: number, text: string) => typedError<null, string>(__TAURI_INVOKE("history_update_final", { id, text })),
+	/**
+	 *  Re-runs transcription against the run's stored recording, optionally on a
+	 *  different engine, and writes both transcripts back.
+	 * 
+	 *  Returns the new pasted text so the Run Log can repaint the row without a
+	 *  refetch. Everything it does lives on the pipeline, which is what makes the
+	 *  retry match the dictation that produced the row.
+	 */
+	historyRetryTranscription: (id: number, engine: 
+/**  On-device whisper.cpp. No network, no API key. */
+"local" | 
+/**  An OpenAI-compatible endpoint (Groq by default). */
+"cloud" | null) => typedError<string, string>(__TAURI_INVOKE("history_retry_transcription", { id, engine })),
+	/**
+	 *  Records the next key gesture and returns it as a binding.
+	 * 
+	 *  Async because it blocks until the user presses something: capture swallows
+	 *  keys while armed, so this owns a `spawn_blocking` thread rather than the
+	 *  main one. Cancelling is `cancel_hotkey_capture`, or simply waiting out
+	 *  [`CAPTURE_TIMEOUT`].
+	 */
+	captureHotkey: () => typedError<{ kind: "disabled" } | 
+/**  A regular key, optionally with modifiers held (e.g. Cmd+Shift+D). */
+{ kind: "key"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] } | 
+/**
+ *  A modifier held on its own (e.g. hold Right Option) — the case Tauri's
+ *  global-shortcut plugin cannot express, and why this crate exists.
+ */
+{ kind: "modifierKey"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] } | null, string>(__TAURI_INVOKE("capture_hotkey")),
+	/**  Disarms a recording the user backed out of. */
+	cancelHotkeyCapture: () => typedError<null, string>(__TAURI_INVOKE("cancel_hotkey_capture")),
+	/**
+	 *  The running meeting's elapsed time and word count, or None when idle.
+	 * 
+	 *  The `meeting-phase` event carries the same payload, but it only fires on a
+	 *  state change and on each finished chunk — up to a minute apart. A window
+	 *  opened mid-meeting would show nothing until the next chunk without this.
+	 */
+	meetingStatus: () => __TAURI_INVOKE<
+/**
+ *  Re-emitted as each chunk finishes, roughly once a minute, so the
+ *  readout re-syncs instead of drifting off a single start event.
+ */
+{ phase: "recording"; elapsedSecs: number; words: number } | { phase: "saving" } | { phase: "idle" } | null>("meeting_status"),
+	/**
+	 *  Starts or stops meeting capture — the same toggle the tray and the hotkey
+	 *  use, so all three cannot disagree about whether a session is open.
+	 */
+	toggleMeeting: () => __TAURI_INVOKE<void>("toggle_meeting"),
+	/**
+	 *  Draws the overlay in `phase` without a real dictation, for the Debug pane.
+	 * 
+	 *  Behind `developer_tools` in the UI only — a command cannot be hidden, but
+	 *  the worst this can do is show and hide a click-through window.
+	 * 
+	 *  ponytail: no update-overlay preview. There is no updater UI to preview
+	 *  until Phase 8 lands a signing keypair; add the case here when it does.
+	 */
+	debugOverlay: (phase: Phase) => __TAURI_INVOKE<void>("debug_overlay", { phase }),
 	/**
 	 *  Plays the start chime, so the volume slider can be judged by ear rather
 	 *  than by guessing at a number.
@@ -73,6 +184,14 @@ export const commands = {
 	 */
 	connectConnector: (toolkit: string) => typedError<null, string>(__TAURI_INVOKE("connect_connector", { toolkit })),
 	disconnectConnector: (connectionId: string) => typedError<null, string>(__TAURI_INVOKE("disconnect_connector", { connectionId })),
+	/**
+	 *  Answers a question the user typed into the panel.
+	 * 
+	 *  `answer` already took a plain `String`, so it is the seam: the typed and
+	 *  spoken paths differ only in where the string came from, and nothing about
+	 *  streaming, the panel or the credential check is duplicated to serve one.
+	 */
+	askText: (question: string) => typedError<null, string>(__TAURI_INVOKE("ask_text", { question })),
 	/**  Lets the panel dismiss itself on Escape or a click outside. */
 	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
 	/**  Resolves the pending confirmation. Called by the panel's Yes/No buttons. */
@@ -87,11 +206,13 @@ export const events = {
 	ask: makeEvent<AskEvent>("ask"),
 	audioLevel: makeEvent<AudioLevel>("audio-level"),
 	connectorsUpdated: makeEvent<ConnectorsUpdated>("connectors-updated"),
+	dictationPartial: makeEvent<DictationPartial>("dictation-partial"),
 	dictationPhase: makeEvent<Phase>("dictation-phase"),
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
 	overlayError: makeEvent<OverlayError>("overlay-error"),
+	overlayStyle: makeEvent<OverlayStyleChanged>("overlay-style"),
 };
 
 /* Types */
@@ -133,6 +254,18 @@ export type AppRule = {
 	 *  matches.
 	 */
 	app_matches: string,
+	/**
+	 *  The app's `CFBundleIdentifier`, when the rule was written by picking an
+	 *  app rather than typing a name.
+	 * 
+	 *  Additive on purpose: every rule written before this field existed
+	 *  deserialises with None and keeps matching on [`app_matches`], so there
+	 *  is no migration to run and nothing to get wrong. Rules acquire a bundle
+	 *  id lazily, the next time the user edits one.
+	 * 
+	 *  [`app_matches`]: AppRule::app_matches
+	 */
+	bundle_id?: string | null,
 	/**  Override cleanup on/off for this app. None leaves the global setting. */
 	post_processing_enabled: boolean | null,
 	/**  A prompt to use instead of the global one. Empty leaves the global. */
@@ -159,15 +292,36 @@ export type AudioDevice = {
  */
 export type AudioLevel = number | null;
 
-/**  What triggers a binding. */
+/**
+ *  What triggers a binding.
+ * 
+ *  `modifiers` is side-agnostic (`Option` matches either Alt key), which is
+ *  what the presets want. `exact_modifiers` is the side-specific set a
+ *  *recording* captures: when non-empty it pins the chord to exactly those
+ *  keys, so Left-Option+Z is not Right-Option+Z. Empty means "either side",
+ *  the case for every preset and hand-written binding — matching voice-dict,
+ *  where only recorded bindings carry `exactModifierKeyCodes`.
+ */
 export type Binding = { kind: "disabled" } | 
 /**  A regular key, optionally with modifiers held (e.g. Cmd+Shift+D). */
-{ kind: "key"; key: Key; modifiers: Modifier[] } | 
+{ kind: "key"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] } | 
 /**
  *  A modifier held on its own (e.g. hold Right Option) — the case Tauri's
  *  global-shortcut plugin cannot express, and why this crate exists.
  */
-{ kind: "modifierKey"; key: Key; modifiers: Modifier[] };
+{ kind: "modifierKey"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] };
+
+/**
+ *  Version, commit and build date, for pasting into a bug report.
+ * 
+ *  The commit and the date are baked in by `build.rs`; a build from a tarball
+ *  with no `.git` reports "unknown" rather than failing to compile.
+ */
+export type BuildInfo = {
+	version: string,
+	commit: string,
+	date: string,
+};
 
 export type Config = {
 	hold: Binding | null,
@@ -204,11 +358,67 @@ export type Connector = {
  */
 export type ConnectorsUpdated = Connector[];
 
+/**
+ *  The shipped cleanup prompt and the date it last changed.
+ * 
+ *  Both halves serve the Prompts pane: the text backs "View Default", and the
+ *  version is what `Settings::seen_prompt_version` is compared against to
+ *  decide whether a user who forked the prompt is missing an improvement.
+ */
+export type DefaultPrompt = {
+	text: string,
+	version: string,
+};
+
+/**
+ *  The transcript so far, while streaming transcription is on.
+ * 
+ *  **Feedback only — this is never pasted as it arrives.** Whisper revises: a
+ *  later chunk changes how an earlier one is punctuated or spelled, and text
+ *  already typed into someone's editor cannot be un-typed. The live-transcript
+ *  panel is the one surface where a revision costs nothing, so it is the only
+ *  one that sees this. The paste still happens once, at the end.
+ */
+export type DictationPartial = string;
+
 export type Engine = 
 /**  On-device whisper.cpp. No network, no API key. */
 "local" | 
 /**  An OpenAI-compatible endpoint (Groq by default). */
 "cloud";
+
+/**
+ *  Specta forbids exporting i64 by default, since JS loses precision past
+ *  2^53. These are row ids, unix seconds and millisecond durations — all
+ *  many orders of magnitude below that — so `number` is exact here and
+ *  BigInt would only make the frontend painful.
+ */
+export type Entry = {
+	id: number,
+	/**  Unix seconds. */
+	createdAt: number,
+	/**  What the transcriber returned. */
+	rawTranscript: string,
+	/**  What was actually pasted, after cleanup. */
+	finalTranscript: string,
+	/**  Which app had focus, for per-app rules and debugging. */
+	appName: string | null,
+	durationMs: number,
+	/**
+	 *  Joins this row to its `timings` spans. Null on every row written
+	 *  before the column existed — those runs simply have no breakdown, which
+	 *  is why the Run Log has to treat its absence as normal rather than as
+	 *  missing data.
+	 */
+	utteranceId: number | null,
+	/**
+	 *  The recording this run was transcribed from, while it survives the
+	 *  audio budget. Null on runs from before recordings were kept, on the
+	 *  modes that deliberately do not keep one, and on every run whose audio
+	 *  has since been evicted — the transcript outlives the WAV.
+	 */
+	audioPath: string | null,
+};
 
 /**
  *  Emitted once hotkeys are live, so the UI can clear its permission banner
@@ -218,8 +428,14 @@ export type HotkeysPermitted = boolean;
 
 /**  An installed application, for the App Rules picker. */
 export type InstalledApp = {
-	/**  Display name, e.g. "Slack". This is what app rules match against. */
+	/**  Display name, e.g. "Slack". */
 	name: string,
+	/**
+	 *  `CFBundleIdentifier`, so a rule created from the picker can be keyed on
+	 *  something that survives the app being renamed. None when the bundle does
+	 *  not declare one.
+	 */
+	bundle_id: string | null,
 	/**
 	 *  A `data:image/png;base64,…` URI for the app icon, or None if it could
 	 *  not be read. Lets the picker show icons without a second round-trip.
@@ -243,7 +459,12 @@ export type Macro = {
 	expansion: string,
 };
 
-export type MeetingPhase = "recording" | "saving" | "idle";
+export type MeetingPhase = 
+/**
+ *  Re-emitted as each chunk finishes, roughly once a minute, so the
+ *  readout re-syncs instead of drifting off a single start event.
+ */
+{ phase: "recording"; elapsedSecs: number; words: number } | { phase: "saving" } | { phase: "idle" };
 
 /**
  *  Model download progress, 0.0–1.0. First use of the local engine fetches
@@ -268,10 +489,66 @@ export type Note = {
 };
 
 /**
+ *  Which monitor the overlay appears on.
+ * 
+ *  `Named` stores the OS monitor name rather than an index: indices are
+ *  reassigned when a display is unplugged, so a saved index silently starts
+ *  meaning a different screen. A name that no longer resolves falls back to
+ *  the primary, which is what stops the overlay rendering off-screen.
+ */
+export type OverlayDisplay = 
+/**  The monitor holding the cursor — the screen the user is working on. */
+"active" | "primary" | { named: string };
+
+/**
  *  Why a dictation failed, in words the user can act on. `Phase::Error` says
  *  only that something broke, which the pill used to render as "Failed".
  */
 export type OverlayError = string;
+
+/**
+ *  How the recording overlay draws itself.
+ * 
+ *  - `LiquidGlass` is Aloud's pill: a refractive glass capsule floating below
+ *    the menu bar. The default.
+ *  - `Pill` is voice-dict's drop-down pill: a solid-black panel welded to the
+ *    top edge with rounded bottom corners, its content sitting just below the
+ *    notch. Larger and more legible, but covers a strip of the active app.
+ *  - `Wings` is voice-dict's minimalist overlay: two slim tabs welded to the
+ *    top edge, flanking the notch, staying inside the menu bar.
+ * 
+ *  Wings weld to the menu bar, which only macOS has; off macOS (and on an error
+ *  too small to read in a wing) the style falls back to the glass pill.
+ */
+export type OverlayStyle = "liquidGlass" | "pill" | "wings";
+
+/**
+ *  The style the overlay window should draw, pushed on every show.
+ * 
+ *  Sent rather than read from settings by the webview: the overlay has no
+ *  settings binding of its own, and a style change has to reach a window that
+ *  is already mounted. Carries the notch cutout so the wings can weld to it —
+ *  zero when not welding (any pill, or a screen with no notch).
+ */
+export type OverlayStyleChanged = {
+	style: OverlayStyle,
+	/**  Logical-pixel width of the notch gap between the two wings. */
+	notchWidth: number | null,
+	/**  Logical-pixel height of the wings, matching the notch's safe-area inset. */
+	notchHeight: number | null,
+};
+
+/**  A capability the app needs the OS to allow. */
+export type Permission = 
+/**  Global hotkeys, synthetic paste, and reading the focused selection. */
+"accessibility" | "microphone" | 
+/**  Screen context. Nothing reads it yet — see ROADMAP Phase 9. */
+"screenRecording";
+
+export type PermissionStatus = {
+	permission: Permission,
+	granted: boolean,
+};
 
 /**  What the UI reflects. Mirrors the Swift overlay's phases. */
 export type Phase = "idle" | "recording" | "transcribing" | 
@@ -304,17 +581,88 @@ export type Settings = {
 	baseUrl?: string,
 	/**  BCP-47 code, or empty to auto-detect. */
 	language?: string,
+	/**
+	 *  Transcribe in ~5-second chunks *while* recording rather than in one
+	 *  pass after it, so the wait after the key comes up is the tail of the
+	 *  sentence rather than the whole of it.
+	 * 
+	 *  **Off by default, and it should stay off until it has been used.** It
+	 *  changes the shape of the hot path — the microphone callback now feeds a
+	 *  background transcriber on every dictation — and it costs accuracy:
+	 *  whisper sees five seconds at a time with no context from the chunk
+	 *  before, and the cut lands on the clock rather than on a pause. See
+	 *  [`aloud_transcribe::stream`]. Nothing is pasted until the end either
+	 *  way; the streamed text only reaches the pill.
+	 */
+	streamingTranscription?: boolean,
 	postProcessingEnabled?: boolean,
 	postProcessingModel?: string,
 	fallbackModel?: string,
 	/**  Overrides the built-in cleanup prompt when non-empty. */
 	customSystemPrompt?: string,
+	/**
+	 *  The version of the built-in prompt the user last acknowledged. Empty
+	 *  means never, which is exactly right for a fork made before this
+	 *  existed: they should see the offer once.
+	 */
+	seenPromptVersion?: string,
+	/**
+	 *  Language the pasted text is written in — distinct from [`language`],
+	 *  which is the language *spoken into the mic*. Blank keeps the spoken
+	 *  one. Cleanup applies it; transcription never sees it.
+	 * 
+	 *  [`language`]: Settings::language
+	 */
+	outputLanguage?: string,
+	/**
+	 *  Reject a cleanup that *answered* the transcript instead of tidying it —
+	 *  see [`aloud_llm::guard`]. On by default, matching the Swift app: the
+	 *  failure it catches pastes text the user never dictated, and the worst
+	 *  a false positive costs is the raw transcript.
+	 */
+	instructionGuardEnabled?: boolean,
 	/**  Proper nouns and jargon fed to the model as a spelling reference. */
 	vocabulary?: string[],
+	/**
+	 *  Tell cleanup what app and window are in front, so it can spell a
+	 *  recipient's name the way the screen already spells it.
+	 * 
+	 *  Off by default. It sends the title of whatever window has focus to a
+	 *  third party on every dictation, and a window title is not always
+	 *  innocuous — it is a document name, a chat participant, a URL. That is
+	 *  an opt-in, not something to turn on behind the user's back.
+	 */
+	contextEnabled?: boolean,
+	/**
+	 *  Also capture a screenshot with the context.
+	 * 
+	 *  Off by default, and separately from [`context_enabled`], because it
+	 *  needs the Screen Recording grant Aloud has never asked for. Nothing in
+	 *  the dictation path reads the image yet — see `aloud_screen::Context`.
+	 * 
+	 *  [`context_enabled`]: Settings::context_enabled
+	 */
+	contextScreenshotEnabled?: boolean,
 	/**  Spoken shorthand that expands to canned text after cleanup. */
 	macros?: Macro[],
 	/**  Per-app behaviour overrides, applied by the focused app's name. */
 	appRules?: AppRule[],
+	/**
+	 *  Whether a selection can turn a dictation into a rewrite at all.
+	 * 
+	 *  A selection is the *only* signal: there is no extra-modifier gesture.
+	 *  Swift offered one, and it was removed here because it collided with the
+	 *  dictate key in three of the four modifier choices and had to be
+	 *  defended by a conflict-detection routine that could only ever tell the
+	 *  user their setting does nothing. An explicit rewrite that does not
+	 *  depend on a selection is [`aloud_hotkey::model::Role::Rewrite`], which
+	 *  has its own hotkey.
+	 * 
+	 *  **Defaults to on, where the Swift app defaults to off.** Aloud shipped
+	 *  selection-aware rewriting with no way to disable it, so defaulting to
+	 *  off would silently remove a working feature from every existing user.
+	 */
+	commandModeEnabled?: boolean,
 	hotkeys?: Config,
 	selectedMicrophone?: string | null,
 	playSounds?: boolean,
@@ -342,6 +690,13 @@ export type Settings = {
 	 */
 	showMenuBarIcon?: boolean,
 	/**
+	 *  Liquid-glass pill or menu-bar wings. Wings are macOS-only; elsewhere the
+	 *  glass pill is always used.
+	 */
+	overlayStyle?: OverlayStyle,
+	/**  Which screen the overlay shows on. */
+	overlayDisplay?: OverlayDisplay,
+	/**
 	 *  Put the previous clipboard back after pasting. Off leaves the dictated
 	 *  text on the clipboard so it can be pasted again.
 	 */
@@ -355,6 +710,17 @@ export type Settings = {
 	 */
 	developerTools?: boolean,
 	historyRetention?: number,
+	/**
+	 *  Disk the kept recordings may use, in megabytes. 0 keeps none, which
+	 *  also removes the Run Log's player and its transcription retry — both
+	 *  read the WAV.
+	 */
+	audioRetentionMb?: number,
+	/**
+	 *  Evict recordings older than this many days whatever the size budget
+	 *  says. 0 leaves size as the only limit.
+	 */
+	audioRetentionDays?: number,
 };
 
 /**  One closed span. */

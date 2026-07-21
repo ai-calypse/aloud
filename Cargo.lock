@@ -49,6 +49,8 @@ dependencies = [
  "aloud-meeting",
  "aloud-notes",
  "aloud-paste",
+ "aloud-permissions",
+ "aloud-screen",
  "aloud-selection",
  "aloud-store",
  "aloud-transcribe",
@@ -57,6 +59,9 @@ dependencies = [
  "chrono",
  "futures-util",
  "hound",
+ "objc2 0.5.2",
+ "objc2-app-kit 0.2.2",
+ "objc2-foundation 0.2.2",
  "serde",
  "serde_json",
  "specta",
@@ -173,6 +178,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "aloud-permissions"
+version = "0.1.0"
+dependencies = [
+ "aloud-hotkey",
+ "anyhow",
+ "serde",
+ "specta",
+]
+
+[[package]]
+name = "aloud-screen"
+version = "0.1.0"
+dependencies = [
+ "aloud-permissions",
+ "aloud-selection",
+ "base64 0.22.1",
+ "tracing",
+]
+
+[[package]]
 name = "aloud-selection"
 version = "0.1.0"
 dependencies = [
@@ -208,6 +233,7 @@ dependencies = [
 name = "aloud-transcribe"
 version = "0.1.0"
 dependencies = [
+ "aloud-audio",
  "aloud-notes",
  "anyhow",
  "async-trait",
@@ -218,6 +244,7 @@ dependencies = [
  "serde_json",
  "specta",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2091,6 +2118,12 @@ dependencies = [
  "http-body",
  "pin-project-lite",
 ]
+
+[[package]]
+name = "http-range"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21dec9db110f5f872ed9699c3ecf50cf16f423502706ba5c72462e28d3157573"
 
 [[package]]
 name = "httparse"
@@ -4739,6 +4772,7 @@ dependencies = [
  "gtk",
  "heck 0.5.0",
  "http",
+ "http-range",
  "jni 0.21.1",
  "libc",
  "log",

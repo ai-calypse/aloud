@@ -92,6 +92,29 @@ pub fn hide(app: &AppHandle) {
     }
 }
 
+/// Answers a question the user typed into the panel.
+///
+/// `answer` already took a plain `String`, so it is the seam: the typed and
+/// spoken paths differ only in where the string came from, and nothing about
+/// streaming, the panel or the credential check is duplicated to serve one.
+#[tauri::command]
+#[specta::specta]
+pub async fn ask_text(
+    app: AppHandle,
+    state: tauri::State<'_, crate::AppState>,
+    question: String,
+) -> Result<(), String> {
+    let question = question.trim().to_string();
+    if question.is_empty() {
+        return Ok(());
+    }
+    // Cloned rather than held: the guard is not Send across the await below.
+    let settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
+    answer(&app, question, &settings)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 /// Lets the panel dismiss itself on Escape or a click outside.
 #[tauri::command]
 #[specta::specta]

@@ -61,6 +61,19 @@ pub fn assemble(segments: &[Option<String>]) -> String {
         .join("\n\n")
 }
 
+/// Words captured so far, for the in-progress meeting readout.
+///
+/// Counted from the segment text, never from [`assemble`]'s output: the
+/// `[hh:mm]` stamp it prepends is whitespace-separated, so counting the
+/// assembled transcript inflates the total by one word per minute of meeting.
+pub fn word_count(segments: &[Option<String>]) -> usize {
+    segments
+        .iter()
+        .flatten()
+        .map(|s| s.split_whitespace().count())
+        .sum()
+}
+
 /// The note's markdown and title.
 ///
 /// One LLM call turns the transcript into notes; **any** failure still
@@ -155,6 +168,27 @@ mod tests {
             assemble(&segments),
             "[00:00] first minute\n\n[00:02] third minute"
         );
+    }
+
+    /// The regression this guards: counting `assemble()`'s output instead of
+    /// the segments adds the `[hh:mm]` stamp to the total, so the live word
+    /// count drifts up by one per minute — a 90-minute meeting reads 90 words
+    /// longer than it is.
+    #[test]
+    fn the_word_count_does_not_include_the_timestamp_stamps() {
+        let segments = vec![
+            Some("one two three".to_string()),
+            None,
+            Some("four five".to_string()),
+        ];
+        assert_eq!(word_count(&segments), 5);
+        assert_eq!(
+            assemble(&segments).split_whitespace().count(),
+            7,
+            "the stamps are why this cannot be counted off the transcript"
+        );
+        assert_eq!(word_count(&[]), 0);
+        assert_eq!(word_count(&[None, Some("   ".into())]), 0);
     }
 
     #[test]

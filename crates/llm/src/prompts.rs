@@ -8,6 +8,14 @@
 /// Cleans a raw dictation transcript. Returns `EMPTY` for pure filler.
 pub const CLEANUP: &str = include_str!("prompts/cleanup.md");
 
+/// The date [`CLEANUP`] last changed, ported from voice-dict's
+/// `defaultSystemPromptDate`. A user who forked the prompt stops receiving
+/// improvements to it silently; the app compares this against the version they
+/// last acknowledged and offers them the new default. Bump it whenever
+/// `cleanup.md` changes — `cleanup_version_tracks_the_prompt` fails if you
+/// forget.
+pub const CLEANUP_VERSION: &str = "2026-05-13";
+
 /// Transforms selected text per a spoken editing command.
 pub const COMMAND: &str = include_str!("prompts/command.md");
 
@@ -42,6 +50,25 @@ mod tests {
         assert!(CLEANUP.contains("literal dictation cleanup layer"));
         assert!(CLEANUP.contains("return exactly: EMPTY"));
         assert!(COMMAND.contains("SELECTED_TEXT"));
+    }
+
+    /// The banner that offers a forked user the improved default is driven
+    /// entirely by [`CLEANUP_VERSION`], so editing `cleanup.md` without
+    /// bumping it means nobody is ever told — the feature rots in total
+    /// silence. This fails loudly instead.
+    ///
+    /// FNV-1a rather than `DefaultHasher`: the standard hasher is explicitly
+    /// not stable across Rust releases, so it would fail on a toolchain bump.
+    #[test]
+    fn cleanup_version_tracks_the_prompt() {
+        let hash = CLEANUP.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+            (h ^ b as u64).wrapping_mul(0x1000_0000_01b3)
+        });
+        assert_eq!(
+            (hash, CLEANUP_VERSION),
+            (0x998e_0b71_0b10_4748, "2026-05-13"),
+            "cleanup.md changed — bump CLEANUP_VERSION and this hash together"
+        );
     }
 
     #[test]

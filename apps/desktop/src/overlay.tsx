@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { events, type Phase } from "./lib/bindings";
+import { events, type OverlayStyle, type Phase } from "./lib/bindings";
 import "./styles/overlay.css";
 
 const LABEL: Record<Phase, string> = {
@@ -54,9 +54,17 @@ function Overlay() {
   // real app there is no query string, so this is idle until Rust drives it.
   const preview = new URLSearchParams(location.search).get("phase") as Phase | null;
   const [phase, setPhase] = useState<Phase>(preview ?? "idle");
+  // Rust picks the style and pushes it on every show — including the swap back
+  // to the pill for an error, which no wing is wide enough to show.
+  const [style, setStyle] = useState<OverlayStyle>(
+    (new URLSearchParams(location.search).get("style") as OverlayStyle) ??
+      "liquidGlass",
+  );
   const [error, setError] = useState<string | null>(null);
   const [download, setDownload] = useState<number | null>(null);
-  const bars = useRef<HTMLSpanElement>(null);
+  // The root, not the bar row: --level inherits, so the wings style can draw
+  // two waves off one write.
+  const root = useRef<HTMLDivElement>(null);
 
   // Levels land every 50ms. Writing --level straight onto the node keeps them
   // out of React entirely: at 20 renders a second the pill would rebuild its
@@ -65,7 +73,7 @@ function Overlay() {
   useEffect(() => {
     const unlisten = events.audioLevel.listen((e) => {
       const level = Math.min(1, Math.max(0, e.payload ?? 0));
-      bars.current?.style.setProperty("--level", String(level));
+      root.current?.style.setProperty("--level", String(level));
     });
     return () => {
       unlisten.then((off) => off());
@@ -76,11 +84,20 @@ function Overlay() {
     const unlistenPhase = events.dictationPhase.listen((e) => {
       setPhase(e.payload);
       // A new run clears the last run’s message.
-      if (e.payload === "recording") {
-        setError(null);
-      }
+      if (e.payload === "recording") setError(null);
     });
     const unlistenError = events.overlayError.listen((e) => setError(e.payload));
+    const unlistenStyle = events.overlayStyle.listen((e) => {
+      setStyle(e.payload.style);
+      // The exact notch cutout, measured natively, so the wings weld to it
+      // rather than straddle a fixed guess. Written as vars the CSS reads;
+      // zero for a pill, where the wave falls back to its own gap/height.
+      root.current?.style.setProperty("--notch-w", `${e.payload.notchWidth ?? 0}px`);
+      root.current?.style.setProperty(
+        "--notch-h",
+        `${e.payload.notchHeight ?? 0}px`,
+      );
+    });
     // First use of the local engine fetches ~150MB; without this the pill sits
     // on "Transcribing…" for minutes and the app looks hung.
     const unlistenDownload = events.modelDownload.listen((e) =>
@@ -89,10 +106,13 @@ function Overlay() {
     return () => {
       unlistenPhase.then((off) => off());
       unlistenError.then((off) => off());
+      unlistenStyle.then((off) => off());
       unlistenDownload.then((off) => off());
     };
   }, []);
 
+  // The live transcript is no longer shown here — it has its own panel. The
+  // pill is back to a status word plus the wave.
   const label =
     phase === "error" && error
       ? truncate(error, ERROR_CHARS)
@@ -101,58 +121,93 @@ function Overlay() {
         : LABEL[phase];
 
   return (
-    <div className="overlay-root">
-    {/* Refraction filter: turbulence drives a displacement map that warps the
-        glass highlight layer. WebKit renders this on an element's own content
-        (unlike backdrop-filter: url(), which Safari does not support), so it
-        works in the Tauri webview. */}
-    <svg width="0" height="0" aria-hidden style={{ position: "absolute" }}>
-      <filter id="pill-refraction" x="-20%" y="-20%" width="140%" height="140%">
-        <feTurbulence
-          type="fractalNoise"
-          baseFrequency="0.012 0.02"
-          numOctaves={2}
-          seed={7}
-          result="noise"
-        />
-        <feGaussianBlur in="noise" stdDeviation="1.2" result="softNoise" />
-        <feDisplacementMap
-          in="SourceGraphic"
-          in2="softNoise"
-          scale={22}
-          xChannelSelector="R"
-          yChannelSelector="G"
-        />
-      </filter>
-    </svg>
-    <div className={`pill pill--${phase}`}>
-      {/* Warped glass highlight sitting over the real backdrop blur. */}
-      <span className="pill__refraction" aria-hidden />
-      {phase === "recording" ? (
-        // A continuous wave the voice scales rather than drives. CSS owns the
-        // motion; these two custom properties only give each bar its place in
-        // the row and its height ceiling.
-        <span className="bars" ref={bars} aria-hidden>
-          {BAR_PEAKS.map((peak, i) => (
-            <i
-              key={i}
-              style={
-                {
-                  "--i": i,
-                  "--peak": peak,
-                } as React.CSSProperties
-              }
-            />
-          ))}
+    <div className="overlay-root" ref={root}>
+    {/* Refraction filter for the glass pill: turbulence drives a displacement
+        map that warps the glass highlight layer. WebKit renders this on an
+        element's own content (unlike backdrop-filter: url(), which Safari does
+        not support), so it works in the Tauri webview. */}
+    {style === "liquidGlass" && (
+      <svg width="0" height="0" aria-hidden style={{ position: "absolute" }}>
+        <filter id="pill-refraction" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence
+            type="fractalNoise"
+            baseFrequency="0.012 0.02"
+            numOctaves={2}
+            seed={7}
+            result="noise"
+          />
+          <feGaussianBlur in="noise" stdDeviation="1.2" result="softNoise" />
+          <feDisplacementMap
+            in="SourceGraphic"
+            in2="softNoise"
+            scale={22}
+            xChannelSelector="R"
+            yChannelSelector="G"
+          />
+        </filter>
+      </svg>
+    )}
+    {style === "wings" ? (
+      // voice-dict's minimalist overlay: one continuous black bar welded to the
+      // notch — the waveform on the left, a recording light on the right, the
+      // measured cutout between them. Only ever shown on a screen that has a
+      // notch; Rust falls back to a pill otherwise (see overlay.rs).
+      <div className={`wings wings--${phase}`}>
+        <span className="wing wing--left">
+          <Indicator phase={phase} />
         </span>
-      ) : (
-        <span className={`dot dot--${phase}`} aria-hidden />
-      )}
-      <span className="label" title={error ?? undefined}>
-        {label}
-      </span>
+        {/* The notch itself: solid black, exactly the cutout's width, so the
+            bar is continuous across it and the camera notch disappears into
+            the strip — the whole point of the blend. */}
+        <span className="wing-notch" aria-hidden />
+        <span className="wing wing--right">
+          {phase === "recording" && (
+            <span className="dot dot--recording" aria-hidden />
+          )}
+        </span>
+      </div>
+    ) : style === "pill" ? (
+      // voice-dict's drop-down pill: a solid-black panel welded to the top,
+      // rounded only along the bottom, with the wave and status sitting just
+      // below the notch (the __notch spacer is the measured cutout height).
+      <div className={`drop-pill drop-pill--${phase}`}>
+        <span className="drop-pill__notch" aria-hidden />
+        <div className="drop-pill__body">
+          <Indicator phase={phase} />
+          <span className="label" title={error ?? undefined}>
+            {label}
+          </span>
+        </div>
+      </div>
+    ) : (
+      // The liquid-glass pill: a refractive capsule below the menu bar, with
+      // the warped sheen (below) riding over the backdrop blur.
+      <div className={`pill pill--${phase}`}>
+        <span className="pill__refraction" aria-hidden />
+        <Indicator phase={phase} />
+        <span className="label" title={error ?? undefined}>
+          {label}
+        </span>
+      </div>
+    )}
     </div>
-    </div>
+  );
+}
+
+/** The wave while recording, a status dot otherwise. Shared by both styles. */
+function Indicator({ phase }: { phase: Phase }) {
+  if (phase !== "recording") {
+    return <span className={`dot dot--${phase}`} aria-hidden />;
+  }
+  // A continuous wave the voice scales rather than drives. CSS owns the
+  // motion; these two custom properties only give each bar its place in the
+  // row and its height ceiling.
+  return (
+    <span className="bars" aria-hidden>
+      {BAR_PEAKS.map((peak, i) => (
+        <i key={i} style={{ "--i": i, "--peak": peak } as React.CSSProperties} />
+      ))}
+    </span>
   );
 }
 

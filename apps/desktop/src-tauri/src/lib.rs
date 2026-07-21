@@ -2,6 +2,7 @@ mod agent;
 mod ask;
 mod commands;
 mod meeting;
+mod notch;
 mod overlay;
 mod pipeline;
 mod sound;
@@ -39,12 +40,19 @@ pub struct AppState {
     /// The live hotkey config the listener reads. Shared with the listener
     /// thread so a rebind from Settings applies without a restart.
     pub hotkey_config: Arc<Mutex<aloud_hotkey::model::Config>>,
+    /// Arms binding capture in the listener thread. The recorder pane sets it;
+    /// the listener clears it as soon as a gesture commits.
+    pub hotkey_capture: aloud_hotkey::CaptureSlot,
     /// Composio reads held across opens of the Connectors pane, so it paints
     /// from memory instead of a round-trip. See `aloud_agent::ResponseCache`.
     pub connectors: commands::ConnectorCache,
     /// Per-stage latency, written by the tracing layer and read by the dev
     /// panel. Shared with the layer, which owns the writes.
     pub timings: Arc<Mutex<aloud_store::Timings>>,
+    /// Notch geometry per attached screen, measured once on the main thread at
+    /// launch. The wings overlay reads it to weld to the cutout; empty on a Mac
+    /// with no notch, and on Windows.
+    pub notch: Vec<notch::Notch>,
 }
 
 pub fn run() {
@@ -79,10 +87,26 @@ pub fn run() {
             commands::get_stats,
             commands::search_notes,
             commands::recent_notes,
+            commands::default_prompt,
+            commands::test_prompt,
             commands::input_devices,
             commands::installed_apps,
             commands::hotkeys_permitted,
+            commands::permissions,
+            commands::open_permission_settings,
+            commands::build_info,
+            commands::overlay_displays,
             commands::recent_timings,
+            commands::history_recent,
+            commands::history_delete,
+            commands::history_clear,
+            commands::history_update_final,
+            commands::history_retry_transcription,
+            commands::capture_hotkey,
+            commands::cancel_hotkey_capture,
+            commands::meeting_status,
+            commands::toggle_meeting,
+            commands::debug_overlay,
             commands::preview_sound,
             commands::launch_at_login,
             commands::set_launch_at_login,
@@ -90,6 +114,7 @@ pub fn run() {
             commands::search_connectors,
             commands::connect_connector,
             commands::disconnect_connector,
+            ask::ask_text,
             ask::close_ask,
             agent::confirm_agent,
             agent::close_agent,
@@ -101,7 +126,9 @@ pub fn run() {
             agent::AgentEvent,
             overlay::AudioLevel,
             overlay::OverlayError,
+            overlay::DictationPartial,
             overlay::ModelDownload,
+            overlay::OverlayStyleChanged,
             HotkeysPermitted,
             ConnectorsUpdated,
         ]);
@@ -154,6 +181,9 @@ pub fn run() {
                 app.handle().clone(),
                 settings.clone(),
             )?);
+            // Load the transcription model now rather than inside the user's
+            // first dictation. Returns immediately; the work is spawned.
+            pipeline.warm_up();
             let meeting: Arc<Mutex<Option<meeting::Meeting>>> = Arc::new(Mutex::new(None));
             // The live hotkey config, shared between AppState (written on a
             // rebind) and the listener thread (which reads it every event).
@@ -163,15 +193,25 @@ pub fn run() {
                     .map(|s| s.hotkeys.clone())
                     .unwrap_or_default(),
             ));
+            let hotkey_capture: aloud_hotkey::CaptureSlot = Default::default();
             app.manage(AppState {
                 settings: settings.clone(),
                 pipeline: pipeline.clone(),
                 meeting: meeting.clone(),
                 hotkey_config: hotkey_config.clone(),
+                hotkey_capture: hotkey_capture.clone(),
                 connectors: Default::default(),
                 timings: timings.clone(),
+                // Main thread here (Tauri's setup callback), which NSScreen
+                // requires. Measured once; see the note in `notch.rs`.
+                notch: notch::notched_screens(),
             });
             app.manage(agent::PendingConfirmation::default());
+
+            // Lift the overlay above the menu bar (main thread here) so the
+            // wings style can weld into the notch instead of being clamped
+            // below it.
+            overlay::raise_over_menu_bar(app.handle());
 
             tray::init(app)?;
 
@@ -193,6 +233,7 @@ pub fn run() {
                 pipeline,
                 meeting,
                 hotkey_config,
+                hotkey_capture,
             );
 
             // Closing the window must hide it, not destroy it. This is a
@@ -309,6 +350,7 @@ fn spawn_hotkey_listener(
     pipeline: Arc<pipeline::Pipeline>,
     meeting: Arc<Mutex<Option<meeting::Meeting>>>,
     config: Arc<Mutex<aloud_hotkey::model::Config>>,
+    capture: aloud_hotkey::CaptureSlot,
 ) {
     // `config` is the same Arc AppState holds, so a rebind from Settings is
     // seen here on the next key event — no restart needed.
@@ -331,7 +373,7 @@ fn spawn_hotkey_listener(
         }
 
         let busy = pipeline.busy_flag();
-        let result = aloud_hotkey::listen(config, busy, move |event| {
+        let result = aloud_hotkey::listen(config, busy, capture, move |event, _held| {
             handle_hotkey(&app, &pipeline, &settings, &meeting, event);
         });
         if let Err(e) = result {
@@ -352,13 +394,24 @@ fn handle_hotkey(
     match event {
         Event::Activated(Role::Hold) => {
             // Note anything selected before recording begins: with a selection
-            // the utterance rewrites it, without one it is dictated.
-            pipeline.note_selection_if_any();
-            if let Err(e) = pipeline.start() {
+            // the utterance rewrites it, without one it is dictated. A
+            // selection is the only signal — the extra-modifier gesture came
+            // out, because the Rewrite hotkey covers rewriting on demand. A
+            // poisoned lock falls back to looking, which is the behaviour that
+            // predates the toggle, rather than dropping the selection silently.
+            if settings.lock().map_or(true, |s| s.command_mode_enabled) {
+                pipeline.note_selection_if_any();
+            }
+            if let Err(e) = pipeline.start(Role::Hold) {
                 tracing::error!(%e, "could not start recording");
             }
         }
         Event::Deactivated(Role::Hold) => {
+            // Dropped if a more-specific overlapping binding (e.g. `⌥fn`) took
+            // the session over: stopping here would tear out from under it.
+            if !pipeline.owns(Role::Hold) {
+                return;
+            }
             // Transcription is async and the hook thread must not block: a
             // stalled hook stops delivering key events system-wide.
             let pipeline = pipeline.clone();
@@ -379,16 +432,19 @@ fn handle_hotkey(
                         tracing::error!(%e, "dictation failed");
                     }
                 });
-            } else if let Err(e) = pipeline.start() {
+            } else if let Err(e) = pipeline.start(Role::Toggle) {
                 tracing::error!(%e, "could not start recording");
             }
         }
         Event::Activated(Role::Ask) => {
-            if let Err(e) = pipeline.start() {
+            if let Err(e) = pipeline.start(Role::Ask) {
                 tracing::error!(%e, "could not start recording");
             }
         }
         Event::Deactivated(Role::Ask) => {
+            if !pipeline.owns(Role::Ask) {
+                return;
+            }
             let pipeline = pipeline.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = pipeline.stop_and_ask().await {
@@ -401,11 +457,14 @@ fn handle_hotkey(
             // thorough read: this key means the user asked for a rewrite, so
             // the clipboard fallback is worth its cost.
             pipeline.capture_selection();
-            if let Err(e) = pipeline.start() {
+            if let Err(e) = pipeline.start(Role::Rewrite) {
                 tracing::error!(%e, "could not start recording");
             }
         }
         Event::Deactivated(Role::Rewrite) => {
+            if !pipeline.owns(Role::Rewrite) {
+                return;
+            }
             let pipeline = pipeline.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = pipeline.stop_and_dictate().await {
@@ -414,11 +473,14 @@ fn handle_hotkey(
             });
         }
         Event::Activated(Role::Agent) => {
-            if let Err(e) = pipeline.start() {
+            if let Err(e) = pipeline.start(Role::Agent) {
                 tracing::error!(%e, "could not start recording");
             }
         }
         Event::Deactivated(Role::Agent) => {
+            if !pipeline.owns(Role::Agent) {
+                return;
+            }
             let pipeline = pipeline.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = pipeline.stop_and_agent().await {

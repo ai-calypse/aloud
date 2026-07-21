@@ -12,10 +12,127 @@
 /* Centre the pill in the (transparent) window; the pill sizes to its content
    rather than filling the frame, so its height is set here, not by the window. */
 .overlay-root {
+  position: relative; /* the wings anchor to the window's top edge */
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
+}
+
+/* The wings style: two slim tabs welded to the top edge of the screen,
+ * flanking where the notch is — voice-dict's minimalist overlay. Rust anchors
+ * the window at top margin 0 for this, so `top: 0` here is the screen's top
+ * edge. The left wing carries the waveform, the right a small recording light.
+ *
+ * The gap is a fixed 200px because no cross-platform API reports the notch
+ * width (see overlay.rs). On a 14"/16" MacBook that brackets it; on a screen
+ * with no notch the pair simply straddles the middle of the menu bar, which
+ * still reads as deliberate.
+ *
+ * 24px tall so the tabs stay inside a standard menu bar rather than hanging
+ * below it — the whole point of this style over the pill.
+ */
+/* One continuous solid-black bar: [waveform wing][notch][light wing]. The
+   centre is exactly the measured cutout width, so the physical notch sits
+   inside the black and vanishes into the strip — the whole bar reads as an
+   extension of the notch. Welded to the top edge; the window sits at the
+   screen-saver level so it can paint over the menu bar (see overlay.rs).
+   The centre gap and the bar height are the native measurement; the fallbacks
+   are only for the `?style=wings` browser preview. */
+.wings {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  height: var(--notch-h, 24px);
+  animation: pill-in var(--dur-base) var(--ease-spring) both;
+}
+
+.wing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 100%;
+  background: var(--notch-fill);
+  color: var(--pill-ink);
+}
+
+/* Round only the two outer bottom corners so the whole strip — wings plus
+   notch — has the notch's rounded bottom, not four separate tabs. */
+.wing--left {
+  border-radius: 0 0 0 10px;
+}
+
+.wing--right {
+  border-radius: 0 0 10px 0;
+}
+
+/* The notch fill between the wings: same black, exactly the cutout's width. */
+.wing-notch {
+  width: var(--notch-w, 200px);
+  height: 100%;
+  background: var(--notch-fill);
+}
+
+/* The right wing's recording light: a small solid-red dot, the way voice-dict
+   marks a live capture. Steady, not breathing — the waveform already moves. */
+.dot--recording {
+  background: var(--sys-red);
+}
+
+/* voice-dict's drop-down pill: a solid-black panel welded to the top edge with
+   only its bottom corners rounded, so it reads as dropping out of the menu bar.
+   The __notch spacer is the measured cutout height, which drops the wave and
+   status below the notch line; the black merges with the notch above it. Wider
+   than the cutout so the notch sits inside the panel. Falls back to a menu-bar
+   height and a comfortable width for the `?style=pill` browser preview. */
+.drop-pill {
+  position: absolute;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: calc(var(--notch-w, 160px) + 96px);
+  background: var(--notch-fill);
+  border-radius: 0 0 16px 16px;
+  color: var(--pill-ink);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  /* No shadow: the soft drop-shadow's translucent black blur reads as a grey
+     halo against a bright desktop, which is exactly the "grey, not black" the
+     welded panel must avoid. It merges with the notch by being pure #000. */
+  animation: pill-in var(--dur-base) var(--ease-spring) both;
+}
+
+.drop-pill__notch {
+  flex: none;
+  height: var(--notch-h, 24px);
+}
+
+.drop-pill__body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 22px;
+}
+
+/* The wave has to fit a menu bar rather than a 52px pill, so it is scaled
+   down here rather than given a second set of keyframes. */
+.wing .bars {
+  gap: 2px;
+  height: 13px;
+}
+
+.wing .bars i {
+  width: 2.5px;
 }
 
 .pill {
@@ -194,6 +311,8 @@
 }
 
 /* Nothing to show when idle; Rust hides the window anyway. */
-.pill--idle {
+.pill--idle,
+.drop-pill--idle,
+.wings--idle {
   display: none;
 }

@@ -161,11 +161,26 @@ pub fn paste_text(text: &str, press_enter: bool, preserve_clipboard: bool) -> Re
     let result = send_paste(press_enter);
 
     // Restore even if the paste failed, so a failure never eats the clipboard.
+    //
+    // On its own thread, because the settle wait is dead time the *user* was
+    // being charged for: the text is already in their document by here, and
+    // waiting inline delayed the pill's "Pasted" by the full 150ms and parked a
+    // tokio worker for the duration. Nothing downstream reads the clipboard, so
+    // there is nothing to order against.
     if let Some(saved) = saved {
-        sleep(PASTE_SETTLE);
-        if let Err(e) = saved.restore(&mut clipboard) {
-            tracing::warn!(%e, "could not restore clipboard");
-        }
+        std::thread::spawn(move || {
+            sleep(PASTE_SETTLE);
+            // A second handle: `clipboard` stays with the caller, and arboard's
+            // is not Send on every platform.
+            match arboard::Clipboard::new() {
+                Ok(mut clipboard) => {
+                    if let Err(e) = saved.restore(&mut clipboard) {
+                        tracing::warn!(%e, "could not restore clipboard");
+                    }
+                }
+                Err(e) => tracing::warn!(%e, "could not reopen clipboard to restore"),
+            }
+        });
     }
     result
 }
@@ -180,6 +195,16 @@ pub fn set_clipboard(text: &str) -> Result<()> {
         .context("opening clipboard")?
         .set_text(text)
         .context("writing to clipboard")
+}
+
+/// Reads the clipboard as text. An image or an empty board yields an error
+/// rather than a blank string, so a caller cannot mistake "nothing there" for
+/// "the user copied whitespace".
+pub fn clipboard_text() -> Result<String> {
+    arboard::Clipboard::new()
+        .context("opening clipboard")?
+        .get_text()
+        .context("reading clipboard")
 }
 
 /// Sends the paste chord (Cmd+V / Ctrl+V), optionally followed by Return.

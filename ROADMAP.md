@@ -374,17 +374,18 @@ which matters more now, because a user with no key field has no way to fix it.
 - **Scope** — the real work behind "an audio player in the Run Log". Touches:
   drop the `remove_file` at `pipeline.rs:379`; write into a media dir under
   `aloud_notes::data_dir()`; add a path column to `history` (schema is a bare
-  `CREATE TABLE IF NOT EXISTS` at `history.rs:54`, and `crates/store/src/migrate.rs`
-  is a Swift-app importer, **not** schema versioning — so schema migration
-  machinery has to exist first); teach `prune()` (`history.rs:109`) to unlink
-  files; add a size/age budget and its setting.
+  `CREATE TABLE IF NOT EXISTS`, and `crates/store/src/migrate.rs` is a Swift-app
+  importer, **not** schema versioning — but Phase 4 landed the missing machinery,
+  so this is one more `PRAGMA user_version`-guarded ALTER, not a new mechanism);
+  teach `prune()` to unlink files; add a size/age budget and its setting.
 - **Done** — recordings survive, disk usage is bounded and visible, and pruning
   never orphans a file or a row. Verify by filling the budget and watching it
   evict. Compression (WAV → Opus) is the obvious follow-up, not part of this.
 
 ### 5.2 — Audio player in the expanded run · M
 - **Scope** — trivial once 5.1 lands: a Tauri asset-protocol URL into an
-  `<audio>` element.
+  `<audio>` element. Note it needs the `protocol-asset` Cargo feature and a
+  `media-src` in the CSP; there is no capability to grant, only a scope.
 - **Done** — playback from the Run Log. **Strictly blocked on 5.1.**
 
 ### 5.3 — Retry transcription from audio · S
@@ -425,23 +426,28 @@ which matters more now, because a user with no key field has no way to fix it.
 
 ### 7.1 — Overlay style choice · L
 - **Scope** — minimalist menu-bar wings vs the current drop-down pill. Aloud's
-  overlay is fixed bottom-centre by decision (`PROGRESS.md:96`), because no
-  cross-platform API finds a notch. The wings style is macOS-only; scope it
+  overlay is fixed top-centre of the focused monitor by decision
+  (`PROGRESS.md:101`), because no cross-platform API finds a notch — it has
+  never been bottom-centre. The wings style is macOS-only; scope it
   behind `#[cfg]` and accept that Windows keeps the pill.
 - **Done** — both styles selectable on macOS, with the decision note in
   `PROGRESS.md` updated rather than contradicted.
 
 ### 7.2 — "Show on" display picker · M
 - **Scope** — active window / primary / named monitor, refreshing as monitors
-  come and go. Tauri exposes monitor enumeration.
+  come and go. Tauri exposes monitor enumeration. Note that `position_top_center`
+  already implemented the active-window mode *and* the primary fallback below;
+  what was missing was the setting, the picker, and matching by name.
 - **Done** — the overlay follows the chosen display, and unplugging the chosen
   monitor falls back to primary instead of rendering off-screen. That fallback
   is the test.
 
 ### 7.3 — Permissions card · M
 - **Scope** — per-permission status with Grant buttons. `hotkeys_permitted`
-  exists (`commands.rs:118`); microphone, accessibility and (with Phase 9)
-  screen recording need the same treatment.
+  exists (`commands.rs:118`); microphone and (with Phase 9) screen recording
+  need the same treatment. Accessibility does not: `hotkeys_permitted` *is*
+  `AXIsProcessTrusted`, so hotkeys and accessibility are one TCC bucket and one
+  row. Input Monitoring is a genuinely separate bucket, and nothing needs it.
 - **Done** — every permission the app needs shows live status and a button that
   opens the right System Settings pane. macOS-only; Windows shows nothing.
 
@@ -522,34 +528,56 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 
 ## Phase 11 — Surfacing what exists
 
-### 11.1 — Meeting notes in the main window · M
+### 11.1 — Meeting notes in the main window · M ✅
 - **Scope** — meeting notes are tray-only. No in-progress elapsed time or word
   count anywhere in the app window, despite `crates/meeting` having the data.
-- **Done** — a pane showing an in-progress meeting and past ones.
+- **Correction** — `MeetingPhase` was *already* registered in `collect_events!`,
+  so no new event plumbing was needed. And `crates/meeting` did **not** have the
+  data: it exposes transcript assembly only, with neither elapsed time nor a
+  word count. Both were added.
+- **Done** — ✅ a `meetings` pane: a live card (elapsed, running word count,
+  start/stop) plus past meetings, which are `recent_notes` — `write_note` has
+  exactly one caller, so every note *is* a meeting note.
 
 ### 11.2 — Onboarding expansion · L
 - **Scope** — **3 steps** vs voice-dict's 14. It was 4; the API key step went
-  in A.1, so 3 is the real starting point. Missing: screen recording
-  (blocked on 9.1), all
-  three shortcut-capture steps (unblocked by 2.1, shipped in #61), edit mode
-  config (2.2), vocabulary, overlay style + mic pick (7.1), launch-at-login (the
-  command exists at `commands.rs:135`), and a live test-transcription step.
+  in A.1, so 3 is the real starting point. Missing: screen recording, all three
+  shortcut-capture steps, edit mode config, vocabulary, overlay style + mic
+  pick, launch-at-login, and a live test-transcription step.
+- **Blocked on 9.1 only.** Everything else on that list is callable today:
+  shortcut capture (`capture_hotkey`, 2.1, #61), edit-mode config (2.2),
+  launch-at-login (`set_launch_at_login`), mic selection (`input_devices`),
+  overlay style (7.1, landed) and vocabulary (Phase 3, #70). Screen recording
+  is the one genuine gate — it needs a TCC permission the app has never asked
+  for.
 - **Note** — voice-dict's 14 steps included key entry too. Parity here means
   matching the *useful* steps, not the count.
 - **Done** — a new user reaches a working dictation without opening settings.
   **Sequence this last** — it is a wrapper around features from Phases 2, 7 and
   9, and building it first means building it twice.
 
-### 11.3 — App rules keyed on bundle ID · M
+### 11.3 — App rules keyed on bundle ID · M ✅
 - **Scope** — Aloud matches on app name (`PROGRESS.md:53`); voice-dict keys on
   bundle ID, which survives renames and localisation.
-- **Done** — rules key on bundle ID with a migration carrying existing
-  name-based rules across. The migration is the work, not the matching.
+- **Correction — there is no migration.** The frontmost read was rewritten in
+  the latency PR (#69) and already resolves pid → `proc_pidpath` → the outermost
+  `.app`, so the bundle *path* is in hand; `CFBundleIdentifier` is one
+  string-slice out of the `Info.plist` at that path, next to the
+  `CFBundleIconFile` read that was already there. Making `bundle_id` an
+  **additive** `Option<String>` that falls back to name matching means old rules
+  keep working untouched and upgrade lazily when the user next edits them.
+- **Done** — ✅ rules key on bundle ID when they have one, on name otherwise.
+  `InstalledApp` carries the id so the picker writes it. A keyed rule still
+  falls back to the name where the OS reports no bundle id (Windows, plain
+  binaries) — otherwise upgrading a rule would break it off macOS.
 
-### 11.4 — Debug pane · S
+### 11.4 — Debug pane · S ✅
 - **Scope** — overlay simulator, update-overlay preview. Pairs with 0.3's
   developer-tools setting; both live behind the same switch.
-- **Done** — overlay states are inspectable without triggering real dictation.
+- **Done** — ✅ a `debug` pane behind `Settings::developer_tools`, alongside
+  Timings, with one `debug_overlay` command that draws any `pipeline::Phase`.
+  **The update-overlay preview is skipped** — there is no updater UI to preview
+  until Phase 8 lands a signing keypair, so it would be a preview of nothing.
 
 ---
 
@@ -564,14 +592,48 @@ GitHub Actions is blocked on billing, so the feed has no publisher today.
 | 1.4 — Menu bar icon toggle | ✅ **done** — reopen event is the escape hatch |
 | 1.5 — History retention | ✅ already existed |
 | 1.6 — Key validation | ❌ deleted (no BYOK) |
-| 2.1 — Hotkey recorder | ✅ PR #61, open |
-| 4.1 — Run Log pane | ✅ PR #62, open |
-| 2.2 — Command mode settings | ◐ in progress |
+| **2 — Hotkey recorder + command mode** | ✅ **PR #61, open** — 2.1 and 2.2, plus eight hotkey defects |
+| **3 — Prompt and vocabulary tooling** | ✅ **PR #70, open** — 3.1-3.4 |
+| **4 — Run Log pane** | ✅ **PR #71, open** — 4.1-4.4. Supersedes #62, which should be closed |
+| **6 — Pipeline behaviour** | ✅ **PR #72, open** — 6.1-6.3 |
+| **7 — Overlay and display** | ✅ **PR #73, open** — 7.1-7.4 |
+| **Latency (not a phase)** | ✅ **PR #69, open** — ~320ms measured off the cleanup stage |
 | **A — Remove key surfaces** | ✅ **merged** (#66) — both A.1 and A.2 |
 | **A.1 — Remove key surfaces** | ✅ no key input anywhere; keys come from `.env` |
 | **A.2 — Local as the floor** | ✅ cloud without a key falls back to on-device |
+| **5 — Audio persistence** | not started. Unblocked: #71 landed the `PRAGMA user_version` migration it needs |
+| **8 — Updates** | blocked on a signing keypair, which is a decision, not code |
+| **9 — Screen context** | not started (XL, and needs a TCC permission the app has never asked for) |
+| **10 — Realtime streaming** | not started. Smaller than the roadmap says — see the note below |
+| **11 — Surfacing what exists** | 11.1, 11.3, 11.4 ✅ done on `feat/phase-11-surfacing`. 11.2 still blocked on 9.1 |
 | **12 — Cloud key provisioning** | deferred until there is a shipped build |
-| everything else | not started |
+
+### Corrections found while building the above
+
+Each of these was believed by this document or `PROGRESS.md` and is false
+against the code. Listed because a plan built on them plans the wrong work.
+
+- **The Groq key is not expired.** `PROGRESS.md` says it is; it returns 200.
+  Phase 3's live verification ran against it.
+- **4.1 did not ship in #62.** That branch's pane is not in the tree.
+- **7.2 was substantially already built** — the active-monitor mode and the
+  primary fallback both existed. Only the setting and the picker were missing.
+- **The overlay is top-centre on the cursor's monitor**, not "fixed
+  bottom-centre". Corrected in 7.1 and in `PROGRESS.md`.
+- **`crates/audio` already streams.** `Chunker` and the `on_pcm16` tap are in
+  production use by meeting mode, which transcribes chunks concurrently as they
+  arrive. Phase 10's real work is a chunk-level entry point in
+  `crates/transcribe` and the pipeline restructure — not the audio half.
+- **11.2's blocked list is mostly wrong.** Shortcut capture, edit-mode config,
+  launch-at-login and mic selection are all callable today. Only screen
+  recording (9.1) and overlay style (7.1) genuinely gated it, and 7.1 has
+  landed — so **9.1 is now the only thing blocking 11.2**.
+- **11.3's migration does not exist.** The roadmap called it "the work". Making
+  the field additive with a name fallback removes it entirely; see 11.3.
+- **`MeetingPhase` was already a registered event.** 11.1 was described as
+  needing new plumbing for it; it needed a payload, not a pipe.
+- **`frontmost_app` returned None for every app**, so no app rule had ever
+  fired. Fixed in #69.
 
 ⚠️ **CI has not run on any of this.** GitHub Actions is blocked on billing —
 jobs report `steps=0` with no logs, meaning no runner is ever allocated. Every

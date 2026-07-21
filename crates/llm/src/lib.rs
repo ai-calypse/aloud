@@ -8,6 +8,7 @@
 pub mod ask;
 pub mod cleanup;
 pub mod cooldown;
+pub mod guard;
 pub mod prompts;
 pub mod trigger;
 
@@ -125,6 +126,37 @@ pub struct LlmClient {
     cooldowns: Arc<CooldownTracker>,
 }
 
+/// One connection pool for the process. A client is built per request — once
+/// per dictation for cleanup, again for a rewrite or an Ask — and a fresh
+/// `reqwest::Client` means a fresh pool, so every one of those paid a full
+/// TCP+TLS handshake. Measured against Groq: 85-130ms per request, twice per
+/// dictation once transcription is counted. `reqwest::Client` is an `Arc`
+/// inside, so cloning is free and the pool is shared.
+static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+
+/// The breaker, process-wide for the same reason. Per-client it was born empty
+/// on every call and died at the end of it, which made `is_limited` always
+/// false — so a rate limit was rediscovered with a wasted request every single
+/// dictation, exactly the cost the code was written to avoid.
+///
+/// ponytail: in-memory only, so a restart forgets a cooldown. Persisting to
+/// the store is the upgrade path if a daily limit proves annoying.
+static COOLDOWNS: std::sync::OnceLock<Arc<CooldownTracker>> = std::sync::OnceLock::new();
+
+fn shared_http() -> Result<reqwest::Client> {
+    // No client-wide timeout: the two callers disagree (20s for transcription,
+    // 30s here), so it is set per request instead.
+    match HTTP.get() {
+        Some(client) => Ok(client.clone()),
+        None => {
+            let client = reqwest::Client::builder()
+                .build()
+                .context("building http client")?;
+            Ok(HTTP.get_or_init(|| client).clone())
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct ChatRequest<'a> {
     model: &'a str,
@@ -137,6 +169,34 @@ struct ChatRequest<'a> {
     tools: Option<&'a [serde_json::Value]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<&'a str>,
+    /// Both omitted unless [`reasoning_for`] knows the model — sending
+    /// `reasoning_effort` to a model that does not reason is a 400.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include_reasoning: Option<bool>,
+}
+
+/// How much a given model should think, ported from voice-dict's
+/// `ModelConfiguration`. The Rust port carried the model *names* across and
+/// dropped the per-model request config with them.
+///
+/// This is worth real time: the default cleanup model reasons by default, and
+/// cleanup is a deterministic rewrite at temperature 0 with nothing to reason
+/// about. Measured against Groq, gpt-oss-20b spent ~185 reasoning tokens to
+/// produce a twelve-word answer — 854ms, against 487ms at "low".
+///
+/// Keyed on the model rather than the call site because
+/// `complete_with_fallback` re-enters `complete` with a *different* model, and
+/// the two do not accept the same values: qwen takes "none" and rejects "low".
+/// Anything unrecognised sends neither field, so a user-set model or a
+/// non-Groq base URL is unaffected.
+fn reasoning_for(model: &str) -> (Option<&'static str>, Option<bool>) {
+    match model {
+        "openai/gpt-oss-20b" | "openai/gpt-oss-120b" => (Some("low"), Some(false)),
+        "qwen/qwen3.6-27b" | "qwen/qwen3-32b" => (Some("none"), Some(false)),
+        _ => (None, None),
+    }
 }
 
 #[derive(Deserialize)]
@@ -168,17 +228,23 @@ pub struct ToolTurn {
 impl LlmClient {
     pub fn new(api_key: impl Into<String>, base_url: Option<&str>) -> Result<Self> {
         Ok(Self {
-            client: reqwest::Client::builder()
-                .timeout(TIMEOUT)
-                .build()
-                .context("building http client")?,
+            client: shared_http()?,
             base_url: base_url
                 .unwrap_or(DEFAULT_BASE_URL)
                 .trim_end_matches('/')
                 .to_string(),
             api_key: api_key.into(),
-            cooldowns: Arc::new(CooldownTracker::new()),
+            cooldowns: COOLDOWNS
+                .get_or_init(|| Arc::new(CooldownTracker::new()))
+                .clone(),
         })
+    }
+
+    /// The cooldown key. The endpoint is part of it because the tracker is now
+    /// process-wide and the app talks to two providers — a bare model name
+    /// would let Groq's limit suppress the same-named model at Gemini.
+    fn cooldown_key(&self, model: &str) -> String {
+        format!("{}|{model}", self.base_url)
     }
 
     /// Turns a non-2xx response into the right [`LlmError`], registering a
@@ -193,7 +259,7 @@ impl LlmClient {
         let status = response.status();
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let cooldown = cooldown::from_headers(response.headers());
-            self.cooldowns.set(model, cooldown);
+            self.cooldowns.set(&self.cooldown_key(model), cooldown);
             return Err(LlmError::RateLimited {
                 model: model.to_string(),
                 retry_after: cooldown.duration,
@@ -222,9 +288,13 @@ impl LlmClient {
         messages: &[Message],
         temperature: Option<f32>,
     ) -> Result<String> {
+        let (reasoning_effort, include_reasoning) = reasoning_for(model);
         let response = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
+            // Per request, not on the client: the client is shared with the
+            // transcribe crate, which wants a different one.
+            .timeout(TIMEOUT)
             .bearer_auth(&self.api_key)
             .json(&ChatRequest {
                 model,
@@ -233,6 +303,8 @@ impl LlmClient {
                 stream: false,
                 tools: None,
                 tool_choice: None,
+                reasoning_effort,
+                include_reasoning,
             })
             .send()
             .await
@@ -265,7 +337,7 @@ impl LlmClient {
     ) -> Result<String> {
         // Skip a model already known to be limited rather than spending a
         // request to rediscover it.
-        if !self.cooldowns.is_limited(model) {
+        if !self.cooldowns.is_limited(&self.cooldown_key(model)) {
             match self.complete(model, messages, temperature).await {
                 Err(e) if is_rate_limited(&e) => {
                     tracing::info!(model, "rate-limited; trying fallback");
@@ -280,7 +352,7 @@ impl LlmClient {
         // Spending a request to rediscover a limit we already recorded costs
         // the caller a full timeout — up to 30s on top of the 30s the primary
         // just burned, with the pill up and uncancellable the whole time.
-        if let Some(wait) = self.cooldowns.remaining(fallback) {
+        if let Some(wait) = self.cooldowns.remaining(&self.cooldown_key(fallback)) {
             return Err(LlmError::RateLimited {
                 model: fallback.to_string(),
                 retry_after: wait,
@@ -313,9 +385,13 @@ impl LlmClient {
         tools: Option<&[serde_json::Value]>,
         temperature: Option<f32>,
     ) -> Result<ToolTurn> {
+        let (reasoning_effort, include_reasoning) = reasoning_for(model);
         let response = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
+            // Per request, not on the client: the client is shared with the
+            // transcribe crate, which wants a different one.
+            .timeout(TIMEOUT)
             .bearer_auth(&self.api_key)
             .json(&ChatRequest {
                 model,
@@ -324,6 +400,8 @@ impl LlmClient {
                 stream: false,
                 tools,
                 tool_choice: tools.map(|_| "auto"),
+                reasoning_effort,
+                include_reasoning,
             })
             .send()
             .await
@@ -356,9 +434,13 @@ impl LlmClient {
         messages: &[Message],
         temperature: Option<f32>,
     ) -> Result<impl Stream<Item = Result<String>>> {
+        let (reasoning_effort, include_reasoning) = reasoning_for(model);
         let response = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
+            // Per request, not on the client: the client is shared with the
+            // transcribe crate, which wants a different one.
+            .timeout(TIMEOUT)
             .bearer_auth(&self.api_key)
             .json(&ChatRequest {
                 model,
@@ -367,6 +449,8 @@ impl LlmClient {
                 stream: true,
                 tools: None,
                 tool_choice: None,
+                reasoning_effort,
+                include_reasoning,
             })
             .send()
             .await
@@ -442,20 +526,20 @@ mod tests {
         let client = LlmClient::new("k", None).unwrap();
 
         let error = client
-            .check("m", response(429, Some(("retry-after", "30"))))
+            .check("m-429", response(429, Some(("retry-after", "30"))))
             .await
             .expect_err("429 must be an error");
 
         match error.downcast_ref::<LlmError>() {
             Some(LlmError::RateLimited { model, retry_after }) => {
-                assert_eq!(model, "m");
+                assert_eq!(model, "m-429", "the error names the bare model");
                 assert_eq!(retry_after.as_secs(), 30);
             }
             other => panic!("expected RateLimited, got {other:?}"),
         }
         // The breaker must have learned, or the fallback path retries a model
         // the server just refused.
-        assert!(client.cooldowns.is_limited("m"));
+        assert!(client.cooldowns.is_limited(&client.cooldown_key("m-429")));
     }
 
     #[tokio::test]
@@ -463,7 +547,7 @@ mod tests {
         let client = LlmClient::new("k", None).unwrap();
 
         let error = client
-            .check("m", response(500, None))
+            .check("m-500", response(500, None))
             .await
             .expect_err("500 must be an error");
 
@@ -474,15 +558,18 @@ mod tests {
             }
             other => panic!("expected Failed, got {other:?}"),
         }
-        assert!(!client.cooldowns.is_limited("m"), "500 is not a rate limit");
+        assert!(
+            !client.cooldowns.is_limited(&client.cooldown_key("m-500")),
+            "500 is not a rate limit"
+        );
     }
 
     #[tokio::test]
     async fn a_success_passes_through_untouched() {
         let client = LlmClient::new("k", None).unwrap();
-        let ok = client.check("m", response(200, None)).await.unwrap();
+        let ok = client.check("m-ok", response(200, None)).await.unwrap();
         assert_eq!(ok.status(), 200);
-        assert!(!client.cooldowns.is_limited("m"));
+        assert!(!client.cooldowns.is_limited(&client.cooldown_key("m-ok")));
     }
 
     #[test]
@@ -520,5 +607,54 @@ mod tests {
             .await
             .concat();
         assert_eq!(text, "Hello");
+    }
+
+    /// The failure: the tracker was per-client, and a client is built per
+    /// request, so it was born empty every time and `is_limited` was always
+    /// false. The breaker was dead code — every dictation after a 429 spent a
+    /// full request rediscovering the limit, which is exactly the timeout the
+    /// code was written to avoid.
+    #[tokio::test]
+    async fn the_breaker_survives_a_new_client() {
+        // A port that refuses connections, so a request that *is* made
+        // surfaces as a connection error rather than the message below.
+        let first = LlmClient::new("k", Some("http://127.0.0.1:1")).unwrap();
+        let _ = first
+            .check("m-shared", response(429, Some(("retry-after", "30"))))
+            .await;
+
+        let second = LlmClient::new("k", Some("http://127.0.0.1:1")).unwrap();
+        assert!(
+            second
+                .cooldowns
+                .is_limited(&second.cooldown_key("m-shared")),
+            "a fresh client must still know about the limit"
+        );
+
+        let err = second
+            .complete_with_fallback("m-shared", None, &[], None)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("no fallback model is set"),
+            "the primary must be skipped without a request, got: {err}"
+        );
+    }
+
+    /// Sending `reasoning_effort` to a model that does not reason is a 400, so
+    /// the table has to stay conservative. The llama case is the regression
+    /// that matters.
+    #[test]
+    fn only_known_reasoning_models_carry_the_field() {
+        assert_eq!(
+            reasoning_for("openai/gpt-oss-20b"),
+            (Some("low"), Some(false))
+        );
+        assert_eq!(
+            reasoning_for("qwen/qwen3.6-27b"),
+            (Some("none"), Some(false))
+        );
+        assert_eq!(reasoning_for("llama-3.3-70b-versatile"), (None, None));
+        assert_eq!(reasoning_for("whatever-the-user-typed"), (None, None));
     }
 }

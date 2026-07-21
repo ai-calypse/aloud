@@ -31,7 +31,9 @@ fn main() -> anyhow::Result<()> {
     aloud_hotkey::listen(
         Arc::new(Mutex::new(Config::defaults())),
         busy,
-        move |event| {
+        // Never armed here: this example exercises the matcher, not capture.
+        Default::default(),
+        move |event, _held| {
             use aloud_hotkey::model::Event;
             println!("  {event:?}");
 

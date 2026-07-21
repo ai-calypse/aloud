@@ -114,3 +114,13 @@ export const LANGUAGES: ReadonlyArray<{ code: string; name: string }> = [
  * "no selection" and will not render it as a chosen value — hence a sentinel.
  */
 export const AUTO_DETECT = "auto";
+
+/**
+ * The "no translation" option for the output language.
+ *
+ * A separate sentinel from {@link AUTO_DETECT} because the two settings mean
+ * different things — one is the language spoken into the mic, the other the
+ * language pasted out — and sharing a constant is how they end up sharing a
+ * bug. Both store `""` in `Settings`; only the Select needs a value.
+ */
+export const SAME_AS_SPOKEN = "same";

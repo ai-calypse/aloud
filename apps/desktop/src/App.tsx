@@ -51,7 +51,11 @@ const NAV: {
   { id: "macros", title: "Voice Macros", group: "settings", tint: "var(--sys-green)", icon: "M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3ZM5 11a7 7 0 0 0 14 0M12 18v4" },
   { id: "rules", title: "App Rules", group: "settings", tint: "var(--sys-blue)", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM4 9h16M8 6h.01" },
   { id: "prompts", title: "Prompts", group: "settings", tint: "var(--sys-pink)", icon: "M4 4h16v12H7l-3 3V4ZM8 9h8M8 12h5" },
+  { id: "runlog", title: "Run Log", group: "settings", tint: "var(--sys-purple)", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM8 8h8M8 12h8M8 16h5" },
+  { id: "meetings", title: "Meetings", group: "settings", tint: "var(--sys-orange)", icon: "M15 10l5-3v10l-5-3v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1Z" },
   { id: "connectors", title: "Connectors", group: "settings", tint: "var(--sys-teal)", icon: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" },
+  // Hidden unless "Developer tools" is on, for the same reason as Timings.
+  { id: "debug", title: "Debug", group: "settings", tint: "var(--sys-grey)", icon: "M9 4h6M12 4v3M7 10a5 5 0 0 1 10 0v4a5 5 0 0 1-10 0v-4ZM3 11h4M17 11h4M3 17h4M17 17h4" },
 ];
 
 const SETTINGS_IDS: SettingsSection[] = [
@@ -61,6 +65,9 @@ const SETTINGS_IDS: SettingsSection[] = [
   "rules",
   "prompts",
   "connectors",
+  "runlog",
+  "meetings",
+  "debug",
 ];
 
 /**
@@ -140,12 +147,15 @@ export default function App() {
     );
   }
 
-  // Timings is the only conditional row. Filtering here rather than at module
-  // scope keeps the pill's index and the sidebar's group divider agreeing with
-  // what is actually rendered.
-  const rows = NAV.filter((n) => n.id !== "timings" || settings.developerTools);
-  // Turning developer tools off while Timings is open would otherwise strand
-  // the shell on a row that is no longer rendered.
+  // Timings and Debug are the conditional rows. Filtering here rather than at
+  // module scope keeps the pill's index and the sidebar's group divider
+  // agreeing with what is actually rendered.
+  const rows = NAV.filter(
+    (n) =>
+      (n.id !== "timings" && n.id !== "debug") || settings.developerTools,
+  );
+  // Turning developer tools off while one of them is open would otherwise
+  // strand the shell on a row that is no longer rendered.
   const current: Nav = rows.some((n) => n.id === nav) ? nav : "notes";
   const active = rows.find((n) => n.id === current)!;
 
@@ -239,7 +249,9 @@ export default function App() {
 
         {current === "notes" && <NotesView />}
         {current === "timings" && <TimingsView />}
-        {isSettings(current) && <SettingsView section={current} />}
+        {isSettings(current) && (
+          <SettingsView section={current} onSettings={setSettings} />
+        )}
         {current === "status" && (
           <Surface className="p-5">
             <p

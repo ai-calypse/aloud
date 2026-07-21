@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { commands, events } from "./lib/bindings";
 import { usePanelAutosize } from "./lib/autosize";
 import { PanelShell } from "@/components/ui/panel-shell";
+import { Input } from "@/components/ui/input";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Loader } from "@/components/ai-elements/loader";
 import "./index.css";
@@ -15,10 +16,14 @@ import "./styles/panel.css";
 function Ask() {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
-  const [state, setState] = useState<"streaming" | "done" | "failed">("streaming");
+  const [state, setState] = useState<"streaming" | "done" | "failed">(
+    "streaming",
+  );
   const [error, setError] = useState("");
+  const [typed, setTyped] = useState("");
   const cardRef = useRef<HTMLDivElement>(null);
   const answerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   usePanelAutosize(cardRef);
 
@@ -28,6 +33,7 @@ function Ask() {
         case "question":
           // A new question resets the panel; it is reused, not recreated.
           setQuestion(payload.value);
+          setTyped("");
           setAnswer("");
           setError("");
           setState("streaming");
@@ -48,6 +54,18 @@ function Ask() {
       unlisten.then((off) => off());
     };
   }, []);
+
+  // DOM focus only, never a window focus request: `ask::show` already makes
+  // the panel key when it appears, and it is the only thing that takes focus
+  // from the app being dictated into. This just puts the caret somewhere
+  // useful inside a window that already has the keyboard.
+  //
+  // In an effect rather than in the event handler because PanelShell is keyed
+  // on the question — a new one remounts the input, and focusing before that
+  // render lands on the node about to be discarded.
+  useEffect(() => {
+    if (question) inputRef.current?.focus();
+  }, [question]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -73,6 +91,35 @@ function Ask() {
       bodyRef={answerRef}
       copyText={answer}
       onClose={() => commands.closeAsk()}
+      footer={
+        <Input
+          ref={inputRef}
+          className="h-8 flex-1 rounded-full text-ui"
+          // Not "Ask a follow-up": `stream_answer` builds a fresh
+          // [system, user] pair with no prior turn, so there is no
+          // conversation to follow up on. Promising one and then answering
+          // "and what about Friday?" with no context is worse than not
+          // offering it.
+          placeholder="Ask a question…"
+          value={typed}
+          // Disabled mid-answer: two streams write Delta into the same window,
+          // and the second one's Question event resets `answer` to "" while the
+          // first keeps appending — the two answers splice together.
+          disabled={state === "streaming"}
+          onChange={(e) => setTyped(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || !typed.trim() || state === "streaming") return;
+            // Cleared here rather than waiting for the backend's `question`
+            // event to echo back: until that lands the text sits in the field
+            // and is trivially re-submittable.
+            const question = typed;
+            setTyped("");
+            // The same backend entry point the spoken trigger uses, so the
+            // two paths cannot answer differently.
+            void commands.askText(question);
+          }}
+        />
+      }
     >
       {state === "failed" ? (
         <p className="m-0 text-destructive">{error}</p>
@@ -84,7 +131,6 @@ function Ask() {
     </PanelShell>
   );
 }
-
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

@@ -4,6 +4,7 @@
 //! `AppState`, but only orchestrates: every step lives in a crate that is
 //! testable without launching the app.
 
+use aloud_hotkey::model::Role;
 use aloud_store::{History, Settings, Stats};
 use aloud_transcribe::{cloud::CloudTranscriber, local::LocalTranscriber, Engine, Transcriber};
 use anyhow::{bail, Context, Result};
@@ -65,6 +66,10 @@ enum Outcome {
 #[derive(Default)]
 pub struct Session {
     recorder: Option<aloud_audio::Recorder>,
+    /// The live chunk transcription for this capture, when
+    /// `streaming_transcription` is on. Taken alongside the recorder, so the
+    /// two cannot outlive each other.
+    stream: Option<aloud_transcribe::stream::Stream>,
     /// The last transcript, for "paste again".
     last_transcript: Option<String>,
     /// The in-flight read of the text selected when a command-mode session
@@ -81,6 +86,16 @@ pub struct Session {
     /// Bumped by every start and every stop, purely to hand out generations
     /// that a delayed start can be checked against.
     starts: u64,
+    /// Which role owns the running session.
+    ///
+    /// When two bindings overlap on the same keys — `fn` and `⌥fn`, or `⌘` and
+    /// `⌘D` — pressing the longer chord activates the shorter binding first,
+    /// then the longer one. Without an owner, the shorter role's *release* edge
+    /// (`Deactivated(Hold)`) tore down the session the longer role was building,
+    /// so `⌥fn`/`⌘D` never recorded. The owner lets a more-specific role
+    /// supersede a less-specific one, and makes a superseded role's release a
+    /// no-op instead of a stop.
+    owner: Option<Role>,
 }
 
 impl Session {
@@ -95,6 +110,7 @@ impl Session {
     /// arriving inside the delay wins over the start it is racing.
     fn invalidate_start(&mut self) {
         self.pending_start = None;
+        self.owner = None;
         self.starts = self.starts.wrapping_add(1);
     }
 
@@ -107,6 +123,14 @@ impl Session {
     fn is_active(&self) -> bool {
         self.recorder.is_some() || self.pending_start.is_some()
     }
+}
+
+/// What a stop takes out of the session: the capture, when it began, and the
+/// streamed transcript that has been building while it ran.
+struct Captured {
+    recorder: Option<aloud_audio::Recorder>,
+    started_at: Option<std::time::Instant>,
+    stream: Option<aloud_transcribe::stream::Stream>,
 }
 
 pub struct Pipeline {
@@ -198,9 +222,22 @@ impl Pipeline {
         }
 
         match phase {
-            Phase::Recording | Phase::Transcribing => crate::overlay::show(&self.app, phase),
-            // Leave the result on screen briefly, then dismiss.
+            Phase::Recording => {
+                crate::overlay::show(&self.app, phase);
+                // The live-transcript panel opens with the pill, cleared for the
+                // new utterance.
+                crate::overlay::show_transcript(&self.app);
+            }
+            // The panel stays up through transcription on purpose: a dictation
+            // shorter than one chunk streams no text until the *tail* is
+            // transcribed, which happens only after the key is released — hiding
+            // the panel here would mean it never showed a word.
+            Phase::Transcribing => crate::overlay::show(&self.app, phase),
+            // Leave the result on screen briefly, then dismiss. Re-shown, not
+            // merely left visible: an error in the wings style has to move
+            // back down to the pill's anchor, and only `show` repositions.
             Phase::Done | Phase::Error => {
+                crate::overlay::show(&self.app, phase);
                 let app = self.app.clone();
                 let linger = if matches!(phase, Phase::Error) {
                     ERROR_LINGER
@@ -210,9 +247,16 @@ impl Pipeline {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(linger).await;
                     crate::overlay::hide(&app);
+                    // Hidden with the pill so the finished transcript is
+                    // readable for the same linger, not yanked the instant the
+                    // paste lands.
+                    crate::overlay::hide_transcript(&app);
                 });
             }
-            Phase::Idle => crate::overlay::hide(&self.app),
+            Phase::Idle => {
+                crate::overlay::hide(&self.app);
+                crate::overlay::hide_transcript(&self.app);
+            }
         }
     }
 
@@ -251,16 +295,31 @@ impl Pipeline {
         self.session.lock().map(|s| s.is_active()).unwrap_or(false)
     }
 
+    /// Whether `role` still owns the running session, so its release should
+    /// dispose of the capture. A role superseded by a more-specific overlapping
+    /// binding does not, and its release must be dropped — otherwise it stops
+    /// the session the winning role is still running.
+    pub fn owns(&self, role: Role) -> bool {
+        self.session
+            .lock()
+            .map(|s| s.owner == Some(role))
+            .unwrap_or(false)
+    }
+
     /// Takes the recorder for a stop path, and invalidates any pending start.
     ///
     /// Every stop goes through here. A stop arriving *during* the start delay
     /// finds no recorder and would otherwise return "not recording" and leave
     /// the delayed start to fire into a session nothing is waiting on — a
     /// capture that runs until the next press, with the pill up the whole time.
-    fn take_recorder(&self) -> (Option<aloud_audio::Recorder>, Option<std::time::Instant>) {
+    fn take_recorder(&self) -> Captured {
         let mut session = self.session.lock().unwrap();
         session.invalidate_start();
-        let taken = (session.recorder.take(), session.started_at.take());
+        let taken = Captured {
+            recorder: session.recorder.take(),
+            started_at: session.started_at.take(),
+            stream: session.stream.take(),
+        };
         drop(session);
 
         // Unconditional, and not gated on the setting: if the user turned
@@ -283,13 +342,26 @@ impl Pipeline {
     /// callback thread, where sleeping stalls every keystroke on the machine
     /// and can trip `kCGEventTapDisabledByTimeout`, which kills the listener
     /// silently. That is what PR #60 got wrong.
-    pub fn start(self: &Arc<Self>) -> Result<()> {
-        let delay = self.settings().shortcut_start_delay_ms;
+    pub fn start(self: &Arc<Self>, role: Role) -> Result<()> {
+        let settings = self.settings();
+        let delay = settings.shortcut_start_delay_ms;
         let mut session = self.session.lock().unwrap();
         if session.is_active() {
+            // A session is already running or reserved. A more-specific role
+            // takes it over — this is `⌥fn` arriving after `fn`, or `⌘D` after
+            // `⌘` — so its own release edge disposes of the capture. A less- or
+            // equally-specific role leaves the owner alone: first, most-specific
+            // wins, which is what keeps the shorter binding from stealing back a
+            // session the longer one is running.
+            let specificity =
+                |r: Option<Role>| r.map_or(0, |r| settings.hotkeys.binding(r).specificity());
+            if specificity(Some(role)) > specificity(session.owner) {
+                session.owner = Some(role);
+            }
             return Ok(());
         }
         let generation = session.reserve_start();
+        session.owner = Some(role);
 
         if delay == 0 {
             self.begin_capture(session)?;
@@ -327,10 +399,38 @@ impl Pipeline {
     ///
     /// Does not emit: the caller owns that, because the delayed path has
     /// already shown the pill and must not announce recording twice.
-    fn begin_capture(&self, mut session: std::sync::MutexGuard<'_, Session>) -> Result<()> {
+    fn begin_capture(
+        self: &Arc<Self>,
+        mut session: std::sync::MutexGuard<'_, Session>,
+    ) -> Result<()> {
         let settings = self.settings();
+
+        // Streaming, when it is on, has to be armed *before* the microphone
+        // opens: the tap is a constructor argument, and audio that arrives
+        // before it exists is audio only the WAV path will ever see.
+        //
+        // The transcriber is built by the worker on its first chunk, not here
+        // — this runs on the event-tap thread, where loading a whisper model
+        // would stall every keystroke on the machine. It goes through
+        // `self.transcriber` rather than `build_transcriber` so the streaming
+        // path shares the cached local model instead of reloading ~150MB of it
+        // on every dictation.
+        let stream = settings.streaming_transcription.then(|| {
+            let pipeline = self.clone();
+            let for_build = settings.clone();
+            let app = self.app.clone();
+            aloud_transcribe::stream::Stream::spawn(
+                // Tauri's runtime handle, because this thread is usually the
+                // OS key-event tap and has no runtime of its own.
+                tauri::async_runtime::handle().inner(),
+                async move { pipeline.transcriber(&for_build).await },
+                Box::new(move |partial| crate::overlay::send_partial(&app, partial)),
+            )
+        });
+
+        let tap = stream.as_ref().map(|s| s.tap());
         let recorder =
-            match aloud_audio::Recorder::start(settings.selected_microphone.as_deref(), None) {
+            match aloud_audio::Recorder::start(settings.selected_microphone.as_deref(), tap) {
                 Ok(recorder) => recorder,
                 Err(e) => {
                     // Leaving this set would make every later start a no-op.
@@ -373,6 +473,7 @@ impl Pipeline {
 
         session.pending_start = None;
         session.recorder = Some(recorder);
+        session.stream = stream;
         // Timed from when audio actually starts, not from the key press, so
         // the delay is not billed to the user as speaking time.
         session.started_at = Some(std::time::Instant::now());
@@ -385,22 +486,32 @@ impl Pipeline {
     /// the one latency number the user actually feels; every stage below is a
     /// slice of it. Instrumenting only the inner calls would report a pipeline
     /// measurably faster than the app, because the clock starts before them.
+    ///
+    /// The id is minted by the caller rather than inside `fields(…)` so that
+    /// the history row can be stamped with it: a field expression's value is
+    /// not readable back off the span, and the Run Log's per-stage breakdown
+    /// is exactly that join.
+    pub async fn stop_and_paste(&self) -> Result<()> {
+        self.dictate(next_utterance_id()).await
+    }
+
     #[tracing::instrument(
         name = "utterance",
         skip_all,
         fields(
-            utterance_id = next_utterance_id(),
+            utterance_id = utterance_id,
             mode = "dictation",
             spoken_ms = tracing::field::Empty,
             outcome = tracing::field::Empty,
             ok = tracing::field::Empty,
         )
     )]
-    pub async fn stop_and_paste(&self) -> Result<()> {
-        let (recorder, started_at) = self.take_recorder();
-        let Some(recorder) = recorder else {
+    async fn dictate(&self, utterance_id: i64) -> Result<()> {
+        let captured = self.take_recorder();
+        if captured.recorder.is_none() {
             return Ok(()); // not recording
-        };
+        }
+        let started_at = captured.started_at;
 
         let span = tracing::Span::current();
         if let Some(start) = started_at {
@@ -410,7 +521,7 @@ impl Pipeline {
         let generation = self.generation();
         self.emit(Phase::Transcribing);
         let result = tokio::select! {
-            result = self.transcribe_and_paste(recorder, started_at, generation) => result,
+            result = self.transcribe_and_paste(captured, started_at, generation, utterance_id) => result,
             // Dropping the work future here is what actually aborts the
             // in-flight HTTP request.
             _ = self.cancelled.notified() => {
@@ -461,16 +572,16 @@ impl Pipeline {
     /// shared.
     async fn run_stage<F, Fut>(&self, done: Phase, work: F) -> Result<()>
     where
-        F: FnOnce(aloud_audio::Recorder) -> Fut,
+        F: FnOnce(Captured) -> Fut,
         Fut: std::future::Future<Output = Result<()>>,
     {
-        let (recorder, _) = self.take_recorder();
-        let Some(recorder) = recorder else {
+        let captured = self.take_recorder();
+        if captured.recorder.is_none() {
             return Ok(());
-        };
+        }
 
         self.emit(Phase::Transcribing);
-        let result = work(recorder).await;
+        let result = work(captured).await;
         if result.is_err() {
             tracing::Span::current().record("ok", false);
         }
@@ -481,8 +592,46 @@ impl Pipeline {
         result
     }
 
-    async fn capture(&self, recorder: aloud_audio::Recorder) -> Result<(String, Settings)> {
-        let wav = temp_wav_path();
+    /// Finalizes the recording, transcribes it, and returns the WAV only when
+    /// the caller is going to write a history row pointing at it.
+    ///
+    /// Ask, agent and rewrite share this helper and deliberately pass `false`.
+    /// That is a privacy call, not a technical one: those modes keep no history
+    /// row, so a kept recording would be an orphan by construction — invisible
+    /// to the budget, unreachable from the Run Log, and a permanent copy of a
+    /// question the user asked out loud and never chose to store. Their audio
+    /// goes to the OS temp directory and is unlinked here, exactly as before.
+    async fn capture(
+        &self,
+        captured: Captured,
+        persist: bool,
+    ) -> Result<(String, Settings, Option<PathBuf>)> {
+        let Captured {
+            recorder, stream, ..
+        } = captured;
+        let Some(recorder) = recorder else {
+            bail!("no recording to transcribe");
+        };
+        // A media directory we cannot create must not take dictation down with
+        // it — the recording is a nicety, the transcript is the product.
+        let keep = match persist.then(aloud_notes::media_wav_path).transpose() {
+            Ok(path) => path,
+            Err(e) => {
+                tracing::warn!(%e, "no media directory; this recording will not be kept");
+                None
+            }
+        };
+        // Armed *before* the file can exist, not after transcription succeeds.
+        // Every `?` below — a failed write, no API key, no network, a Groq 5xx,
+        // a failed model download — used to return `Err` with the recording
+        // already on disk and nothing left holding it. Those files are the
+        // worst kind: they live in the media directory rather than the OS temp
+        // dir so nothing reaps them, no history row points at them so the size
+        // budget cannot see them, and `clear()` selects paths from the table so
+        // "Clear all history" leaves them behind. A recording of every
+        // dictation that failed to transcribe, invisible and permanent.
+        let mut guard = KeptWav(keep);
+        let wav = guard.0.clone().unwrap_or_else(temp_wav_path);
         // Draining the capture buffer and writing the WAV is invisible latency
         // between the key release and the first byte the transcriber sees.
         {
@@ -495,31 +644,101 @@ impl Pipeline {
         }
 
         let settings = self.settings();
+
+        // Streaming, when it was on, has already transcribed everything but
+        // the tail while the user was still speaking; this waits only on
+        // what is left. `None` means the stream is not to be trusted — the
+        // model would not build, or a chunk failed — and the WAV path below
+        // runs exactly as it always has. Nothing is lost by that fallback:
+        // the full recording was being written all along.
+        if let Some(stream) = stream {
+            let span = tracing::info_span!("stream_finish", chars = tracing::field::Empty);
+            let streamed = stream.finish().instrument(span.clone()).await;
+            match streamed {
+                Some(text) if !text.trim().is_empty() => {
+                    span.record("chars", text.len());
+                    let keep = guard.keep();
+                    if keep.is_none() {
+                        let _ = std::fs::remove_file(&wav);
+                    }
+                    return Ok((text, settings, keep));
+                }
+                // An empty streamed transcript is ambiguous: it is either
+                // silence or a stream that quietly produced nothing. Re-running
+                // the WAV costs one transcription on a dictation that had no
+                // words in it, and is the only way to tell the two apart.
+                _ => tracing::info!("streaming produced nothing; transcribing the recording"),
+            }
+        }
+
         // The first local run pays for the model load inside this span, which
         // is right: it is time the user spends waiting for a transcript.
         let text = async {
-            let transcriber = self.transcriber(&settings).await?;
-            let text = transcriber.transcribe(&wav).await?;
-            tracing::Span::current().record("chars", text.len());
+            // The configured engine is recorded up front so a *failed*
+            // transcription still names one. Recording it only on success left
+            // the one row where "which engine was this?" matters most — the
+            // failure — with no engine at all.
+            let span = tracing::Span::current();
+            span.record("engine", tracing::field::debug(effective_engine(&settings)));
+
+            let (text, engine) = self.transcribe_with_local_fallback(&settings, &wav).await?;
+            // Overwritten with the engine that actually *ran*, which differs
+            // from the configured one after a silent fallback. This costs no
+            // new storage: the Run Log already renders `Span.fields`.
+            span.record("engine", tracing::field::debug(engine));
+            span.record("chars", text.len());
             anyhow::Ok(text)
         }
         .instrument(tracing::info_span!(
             "transcribe",
-            engine = ?settings.engine,
+            engine = tracing::field::Empty,
             chars = tracing::field::Empty,
         ))
         .await?;
-        let _ = std::fs::remove_file(&wav);
-        Ok((text, settings))
+        let keep = guard.keep();
+        // The non-persisted modes (ask, agent, rewrite) wrote to the temp dir,
+        // which the guard does not own — delete it here as before.
+        if keep.is_none() {
+            let _ = std::fs::remove_file(&wav);
+        }
+        Ok((text, settings, keep))
     }
 
     async fn transcribe_and_paste(
         &self,
-        recorder: aloud_audio::Recorder,
+        captured: Captured,
         started_at: Option<std::time::Instant>,
         generation: u64,
+        utterance_id: i64,
     ) -> Result<Outcome> {
-        let (raw, settings) = self.capture(recorder).await?;
+        // Started before transcription rather than after it. The read depends
+        // on nothing transcription produces, and an Accessibility call blocks
+        // on the *target* app's run loop — a busy Chrome makes it unbounded —
+        // so it overlaps the transcribe instead of being billed after it.
+        //
+        // It is also read *now* rather than post-paste for correctness: by then
+        // the focused app is whatever the paste chord left in front.
+        let app_name = tauri::async_runtime::spawn_blocking(aloud_selection::frontmost_app);
+
+        // Screen context, for the same two reasons and with the same timing:
+        // it describes the window being dictated into, which is not the window
+        // in front once the paste chord has run. Only when the user opted in —
+        // it leaves the machine with the transcript.
+        //
+        // ponytail: this repeats the frontmost-app read the task above just
+        // did, costing a second Accessibility round-trip on a path that is off
+        // by default. Threading the already-read name into `aloud_screen` is
+        // the upgrade if the context setting ever defaults on.
+        let context = {
+            let settings = self.settings();
+            settings.context_enabled.then(|| {
+                let screenshot = settings.context_screenshot_enabled;
+                tauri::async_runtime::spawn_blocking(move || aloud_screen::capture(screenshot))
+            })
+        };
+
+        let (raw, settings, wav) = self.capture(captured, true).await?;
+        let mut wav = KeptWav(wav);
 
         // Whisper returns nothing for silence, and the cleanup prompt maps
         // filler-only speech to its EMPTY sentinel. Neither is an error.
@@ -538,16 +757,24 @@ impl Pipeline {
         // Apply the focused app's rule (if any) to a working copy, so every
         // downstream step just reads the effective settings. History still
         // records against the real config; only cleanup behaviour changes.
-        // Off-thread for the same reason `capture_selection` is: an
-        // Accessibility read waits on the *target* app, so a busy app would
-        // stall a tokio worker here.
-        let app_name = tauri::async_runtime::spawn_blocking(aloud_selection::frontmost_app)
-            .await
-            .ok()
-            .flatten();
-        let effective = apply_app_rule(settings.clone(), app_name.as_deref());
+        // By here the read started above has almost always finished.
+        let focused = app_name.await.ok().flatten();
+        let app_name = focused.as_ref().map(|f| f.name.clone());
+        let effective = apply_app_rule(
+            settings.clone(),
+            app_name.as_deref(),
+            focused.as_ref().and_then(|f| f.bundle_id.as_deref()),
+        );
 
-        let final_text = self.post_process(&raw, &effective).await;
+        let context = match context {
+            Some(handle) => handle.await.ok().unwrap_or_default(),
+            None => aloud_screen::Context::default(),
+        };
+        if !context.summary.is_empty() {
+            tracing::info!(context = %context.summary, "screen context");
+        }
+
+        let final_text = self.post_process(&raw, &effective, &context.summary).await;
         if final_text.trim().is_empty() {
             return Ok(Outcome::NoSpeech);
         }
@@ -575,6 +802,8 @@ impl Pipeline {
             started_at,
             &settings,
             app_name.as_deref(),
+            utterance_id,
+            wav.keep(),
         );
         Ok(Outcome::Pasted)
     }
@@ -582,7 +811,7 @@ impl Pipeline {
     /// Cleans up the transcript, falling back to the raw text if the LLM is
     /// unavailable: pasting the unpolished words beats pasting nothing. Voice
     /// macros expand last, on whichever text we settled on.
-    async fn post_process(&self, raw: &str, settings: &Settings) -> String {
+    async fn post_process(&self, raw: &str, settings: &Settings, context: &str) -> String {
         let cleaned =
             if !settings.post_processing_enabled || settings.groq_api_key.trim().is_empty() {
                 raw.to_string()
@@ -594,6 +823,9 @@ impl Pipeline {
                     fallback: Some(settings.fallback_model.as_str()),
                     custom_prompt: &settings.custom_system_prompt,
                     vocabulary: &settings.vocabulary,
+                    context,
+                    output_language: &settings.output_language,
+                    instruction_guard: settings.instruction_guard_enabled,
                 };
                 match aloud_llm::cleanup::clean(options, raw).await {
                     Ok(text) => text,
@@ -612,6 +844,113 @@ impl Pipeline {
         } else {
             aloud_store::macros::expand(&cleaned, &settings.macros)
         }
+    }
+
+    /// Loads the local model ahead of the first dictation, if that is the
+    /// engine in play.
+    ///
+    /// Without this the cache is filled lazily *inside* the first utterance, so
+    /// the user's first dictation of the session pays a 150MB read plus the
+    /// Metal pipeline build — and on a fresh install, the whole model download.
+    /// Nothing about that work depends on the utterance, so it has no business
+    /// being in front of one.
+    ///
+    /// Deliberately silent: a failure here is not the user's problem yet, and
+    /// the real attempt inside `capture` will surface it properly if it
+    /// persists. It also must not block startup, hence the spawn.
+    pub fn warm_up(self: &Arc<Self>) {
+        let pipeline = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let settings = pipeline.settings();
+            if effective_engine(&settings) != Engine::Local {
+                return;
+            }
+            let started = std::time::Instant::now();
+            match pipeline.transcriber(&settings).await {
+                Ok(_) => tracing::info!(ms = started.elapsed().as_millis(), "warmed local model"),
+                Err(e) => tracing::warn!(%e, "could not warm the local model"),
+            }
+        });
+    }
+
+    /// Downloads the on-device model in the background so the *next* cloud
+    /// failure has something to fall back to.
+    ///
+    /// Fire-and-forget, and deliberately not awaited by the dictation that
+    /// triggered it: the point is to keep a 150MB fetch out of the utterance
+    /// the user is waiting on. A second call while one is in flight is
+    /// harmless — `ensure_model` returns early once the file exists, and the
+    /// worst case is a duplicate download nobody sees.
+    fn fetch_local_model_soon(&self) {
+        tauri::async_runtime::spawn(async move {
+            let Ok(dir) = aloud_transcribe::local::model_dir() else {
+                return;
+            };
+            tracing::info!("fetching the on-device model so the next fallback can use it");
+            // No progress to the overlay: no dictation is waiting on this, and
+            // a progress bar for work the user did not ask for reads as the app
+            // doing something to them.
+            match aloud_transcribe::download::ensure_model(
+                &dir,
+                aloud_transcribe::local::DEFAULT_MODEL,
+                |_| {},
+            )
+            .await
+            {
+                Ok(_) => tracing::info!("on-device model ready for the next fallback"),
+                Err(e) => tracing::warn!(%e, "could not fetch the on-device model"),
+            }
+        });
+    }
+
+    /// Transcribes, retrying on-device once if the cloud call failed for a
+    /// reason on-device would not, and reports which engine produced the text.
+    ///
+    /// The catch is here, at the call, rather than behind a network monitor —
+    /// see [`aloud_transcribe::is_recoverable_locally`] for why. Once, not in a
+    /// loop: the user is holding a pill open, and the on-device engine either
+    /// works or is broken in a way a second attempt will not fix.
+    async fn transcribe_with_local_fallback(
+        &self,
+        settings: &Settings,
+        wav: &std::path::Path,
+    ) -> Result<(String, Engine)> {
+        let engine = effective_engine(settings);
+        let error = match self.transcriber(settings).await?.transcribe(wav).await {
+            Ok(text) => return Ok((text, engine)),
+            Err(e) if engine == Engine::Cloud && aloud_transcribe::is_recoverable_locally(&e) => e,
+            Err(e) => return Err(e),
+        };
+
+        // Only when the model is already on disk. `ensure_model` downloads a
+        // missing one, and a user on the cloud engine has never had a reason to
+        // hold it — so falling back blind would put a 150MB download inside the
+        // dictation they are waiting on. On the transport-error case it is
+        // worse: the network is what just broke, so the download fails too and
+        // the user gets a download error wrapped in a transcription error.
+        //
+        // Fetching it in the background instead means the *next* failure is
+        // covered, which is the one that matters: an outage rarely lasts one
+        // utterance.
+        if !aloud_transcribe::local::model_is_present() {
+            self.fetch_local_model_soon();
+            return Err(error
+                .context("cloud transcription failed and no on-device model is downloaded yet"));
+        }
+
+        tracing::warn!(%error, "cloud transcription failed; retrying on-device");
+        let mut local = settings.clone();
+        local.engine = Engine::Local;
+        let text = self
+            .transcriber(&local)
+            .await?
+            .transcribe(wav)
+            .await
+            // The cloud error is the interesting half of the story: without it
+            // the user is told the local model failed and never learns why it
+            // was reached for.
+            .with_context(|| format!("after the cloud engine failed: {error:#}"))?;
+        Ok((text, Engine::Local))
     }
 
     /// The configured engine. The local model is cached after first load.
@@ -634,6 +973,10 @@ impl Pipeline {
 
     /// Records the dictation for history and stats. Never fails the paste:
     /// the text is already in the user's document.
+    // Same reasoning as `History::insert`: these are the columns of one row,
+    // and a params struct would be an `Entry` the sole caller builds only to
+    // have it taken apart again.
+    #[allow(clippy::too_many_arguments)]
     fn record(
         &self,
         raw: &str,
@@ -641,6 +984,8 @@ impl Pipeline {
         started_at: Option<std::time::Instant>,
         settings: &Settings,
         app_name: Option<&str>,
+        utterance_id: i64,
+        audio_path: Option<PathBuf>,
     ) {
         let duration_ms = started_at.map_or(0, |s| s.elapsed().as_millis() as i64);
 
@@ -655,7 +1000,13 @@ impl Pipeline {
                 final_text,
                 app_name,
                 duration_ms,
-                settings.history_retention,
+                Some(utterance_id),
+                // Lossy paths are dropped rather than mangled: a path that
+                // does not round-trip through UTF-8 cannot be handed to the
+                // asset protocol either, so storing an approximation of it
+                // would only produce a play button that 404s.
+                audio_path.as_deref().and_then(|p| p.to_str()),
+                settings.retention(),
             ) {
                 tracing::warn!(%e, "could not record history");
             }
@@ -764,12 +1115,8 @@ impl Pipeline {
             .await
     }
 
-    async fn transcribe_and_rewrite(
-        &self,
-        recorder: aloud_audio::Recorder,
-        selection: &str,
-    ) -> Result<()> {
-        let (command, settings) = self.capture(recorder).await?;
+    async fn transcribe_and_rewrite(&self, captured: Captured, selection: &str) -> Result<()> {
+        let (command, settings, _) = self.capture(captured, false).await?;
 
         if command.trim().is_empty() {
             return Ok(()); // no command spoken; leave the selection alone
@@ -838,8 +1185,8 @@ impl Pipeline {
             .await
     }
 
-    async fn transcribe_and_ask(&self, recorder: aloud_audio::Recorder) -> Result<()> {
-        let (question, settings) = self.capture(recorder).await?;
+    async fn transcribe_and_ask(&self, captured: Captured) -> Result<()> {
+        let (question, settings, _) = self.capture(captured, false).await?;
 
         if question.trim().is_empty() {
             return Ok(());
@@ -870,8 +1217,8 @@ impl Pipeline {
             .await
     }
 
-    async fn transcribe_and_agent(&self, recorder: aloud_audio::Recorder) -> Result<()> {
-        let (command, settings) = self.capture(recorder).await?;
+    async fn transcribe_and_agent(&self, captured: Captured) -> Result<()> {
+        let (command, settings, _) = self.capture(captured, false).await?;
 
         if command.trim().is_empty() {
             return Ok(());
@@ -915,14 +1262,69 @@ impl Pipeline {
     }
 
     pub fn history(&self, limit: usize) -> Result<Vec<aloud_store::history::Entry>> {
-        // The tray builds its History submenu from this on the main thread, so
-        // a poisoned lock here would panic the menu build rather than just
-        // showing an empty submenu. `record` already degrades on this same
-        // mutex; this was the one place that did not.
+        self.history_db()?.recent(limit)
+    }
+
+    /// The history store, for the Run Log's row-level edits.
+    ///
+    /// Handing out the guard rather than forwarding each statement: delete,
+    /// clear and update-final are one line apiece, and three wrappers around
+    /// them is more code than the leak costs.
+    ///
+    /// The tray builds its History submenu from this on the main thread, so a
+    /// poisoned lock here would panic the menu build rather than just showing
+    /// an empty submenu. `record` already degrades on this same mutex; this
+    /// was the one place that did not.
+    pub fn history_db(&self) -> Result<std::sync::MutexGuard<'_, History>> {
         self.history
             .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?
-            .recent(limit)
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))
+    }
+
+    /// Re-transcribes a stored recording and rewrites the run with the result.
+    ///
+    /// Reuses the live pipeline's own `transcriber` and `post_process` rather
+    /// than a second path: a retry that cleans up differently from the real
+    /// dictation would be worse than no retry, because the user would trust it.
+    ///
+    /// `engine` overrides the configured one for this run only. Note that
+    /// `transcriber` caches the on-device model keyed on the effective engine,
+    /// so retrying local after a cloud run pays a model load — a few hundred
+    /// milliseconds, or a 150MB download on a machine that has never held one.
+    /// It looks like a hang and is not one.
+    pub async fn retry_transcription(&self, id: i64, engine: Option<Engine>) -> Result<String> {
+        let entry = self
+            .history_db()?
+            .get(id)?
+            .context("that run is no longer in the history")?;
+        let wav = entry
+            .audio_path
+            .context("no recording was kept for this run, so there is nothing to re-transcribe")?;
+        let wav = PathBuf::from(wav);
+        // The row can outlive the file: the budget nulls the column when it
+        // evicts, but a hand-deleted file leaves the path behind.
+        if !wav.exists() {
+            bail!("the recording for this run is no longer on disk");
+        }
+
+        let mut settings = self.settings();
+        if let Some(engine) = engine {
+            settings.engine = engine;
+        }
+        let raw = self.transcriber(&settings).await?.transcribe(&wav).await?;
+        if raw.trim().is_empty() {
+            bail!("the recording transcribed to nothing — it may be silence");
+        }
+
+        // No context: this re-runs a recording made at some earlier moment, and
+        // whatever is on screen now describes a different one.
+        let final_text = self.post_process(&raw, &settings, "").await;
+        // Both halves, unlike a cleanup retry: this run really does have a new
+        // transcriber output, and leaving the old "Heard" next to the new
+        // "Pasted" would describe two different runs.
+        self.history_db()?
+            .update_transcripts(id, Some(&raw), &final_text)?;
+        Ok(final_text)
     }
 }
 
@@ -972,11 +1374,11 @@ pub async fn build_transcriber(
 /// Takes the app name rather than reading it: the Accessibility call blocks on
 /// the target app, so the caller does it off-thread and also reuses the name
 /// for the history record.
-fn apply_app_rule(mut settings: Settings, app: Option<&str>) -> Settings {
+fn apply_app_rule(mut settings: Settings, app: Option<&str>, bundle_id: Option<&str>) -> Settings {
     if settings.app_rules.is_empty() {
         return settings;
     }
-    let Some(rule) = aloud_store::rules::matching(&settings.app_rules, app) else {
+    let Some(rule) = aloud_store::rules::matching(&settings.app_rules, app, bundle_id) else {
         return settings;
     };
     tracing::info!(app = ?app, matcher = %rule.app_matches, "applying app rule");
@@ -1032,6 +1434,33 @@ fn user_message(error: &anyhow::Error) -> String {
     full
 }
 
+/// Owns a kept recording until a history row takes it, and deletes it if none
+/// does.
+///
+/// Every early return between transcription and the insert — silence, filler
+/// only, a spoken Ask trigger, a cancel that raced the paste — leaves a WAV in
+/// the media directory that no row points at. A row can be orphaned once and
+/// noticed; a file orphaned on every silent key press accumulates forever,
+/// because the size budget only ever looks at recordings the history knows
+/// about. A guard rather than a delete in each branch so the next early return
+/// added here is covered without anyone remembering to.
+struct KeptWav(Option<PathBuf>);
+
+impl KeptWav {
+    /// Hands the recording to the caller and disarms the delete.
+    fn keep(&mut self) -> Option<PathBuf> {
+        self.0.take()
+    }
+}
+
+impl Drop for KeptWav {
+    fn drop(&mut self) {
+        if let Some(path) = &self.0 {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 /// A unique temp path per dictation, so overlapping sessions cannot collide.
 fn temp_wav_path() -> PathBuf {
     let unique = std::time::SystemTime::now()
@@ -1074,20 +1503,21 @@ mod tests {
             post_processing_enabled: true,
             app_rules: vec![aloud_store::rules::AppRule {
                 app_matches: "slack".into(),
+                bundle_id: None,
                 post_processing_enabled: Some(false),
                 custom_prompt: String::new(),
             }],
             ..Default::default()
         };
 
-        let matched = apply_app_rule(settings.clone(), Some("Slack"));
+        let matched = apply_app_rule(settings.clone(), Some("Slack"), None);
         assert!(!matched.post_processing_enabled, "the rule must apply");
 
-        let other = apply_app_rule(settings.clone(), Some("Xcode"));
+        let other = apply_app_rule(settings.clone(), Some("Xcode"), None);
         assert!(other.post_processing_enabled, "a non-match must not apply");
 
         // No focused app at all — the read can legitimately return None.
-        let none = apply_app_rule(settings, None);
+        let none = apply_app_rule(settings, None, None);
         assert!(none.post_processing_enabled, "None must not apply a rule");
     }
 
@@ -1129,6 +1559,24 @@ mod tests {
         assert!(
             !session.may_begin(generation),
             "the delayed start must not open the mic after a stop"
+        );
+    }
+
+    /// A stop clears the owner, so a superseded role's late release edge — the
+    /// `Deactivated(Hold)` that arrives after `⌥fn` has already taken and
+    /// stopped the session — finds no owner and is dropped rather than stopping
+    /// a fresh capture. `owns` gates on exactly this field.
+    #[test]
+    fn a_stop_clears_the_session_owner() {
+        let mut session = Session::default();
+        session.reserve_start();
+        session.owner = Some(Role::Hold);
+        assert_eq!(session.owner, Some(Role::Hold));
+
+        session.invalidate_start();
+        assert_eq!(
+            session.owner, None,
+            "a stopped session must own no role, or a stale release stops the next one"
         );
     }
 

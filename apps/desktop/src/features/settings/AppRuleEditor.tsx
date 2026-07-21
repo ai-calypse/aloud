@@ -40,6 +40,9 @@ function summary(r: AppRule): string {
 }
 
 // Starting points, never auto-applied. Mirrors AppRule.suggestions in Swift.
+// No bundle ids here: a suggestion is a name the user may not even have
+// installed, and guessing an id that turns out to be wrong would key the rule
+// on something that can never match.
 const SUGGESTIONS: AppRule[] = [
   { app_matches: "Terminal", post_processing_enabled: false, custom_prompt: "" },
   {
@@ -214,6 +217,20 @@ function RuleDialog({
     if (!canSave) return;
     onSave({
       app_matches: match.trim(),
+      // Only when the name came from the picker: a bundle id is the exact
+      // identity of *that* app, so attaching one to hand-typed free text would
+      // key the rule on an app the user never chose. Typed rules keep matching
+      // on the name, which is what they have always done.
+      //
+      // Falls back to the id the rule already had, and that fallback is the
+      // whole point of the feature. `picked` is an exact name match against
+      // the *currently installed* apps, recomputed on save — so editing a rule
+      // for an app that has since been renamed (the exact case a bundle id
+      // exists to survive) would find nothing and write null, destroying the
+      // rename-survival property and dropping the rule back to matching a name
+      // that no longer exists. Only an explicit change of the matcher text
+      // clears it.
+      bundle_id: picked?.bundle_id ?? rule?.bundle_id ?? null,
       post_processing_enabled: !verbatim,
       custom_prompt: verbatim ? "" : hint.trim(),
     });
@@ -272,6 +289,9 @@ function RuleDialog({
                   <img src={picked.icon} alt="" className="size-4 rounded" />
                 )}
                 Selected: {picked.name}
+                {picked.bundle_id && (
+                  <span className="truncate">· {picked.bundle_id}</span>
+                )}
               </p>
             )}
           </div>

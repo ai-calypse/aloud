@@ -13,6 +13,49 @@ use std::{fs, path::PathBuf};
 const DEFAULT_CLEANUP_MODEL: &str = "openai/gpt-oss-20b";
 const DEFAULT_FALLBACK_MODEL: &str = "qwen/qwen3.6-27b";
 
+/// Longest single vocabulary term accepted from the clipboard.
+///
+/// A vocabulary term is a proper noun or a piece of jargon — "Kubernetes",
+/// "Anthropic". Anything longer is a sentence the user happened to have
+/// copied, and every term is re-sent with every cleanup request, so a stray
+/// paragraph would be paid for on each dictation until someone noticed.
+const MAX_TERM_CHARS: usize = 48;
+
+/// How the recording overlay draws itself.
+///
+/// - `LiquidGlass` is Aloud's pill: a refractive glass capsule floating below
+///   the menu bar. The default.
+/// - `Pill` is voice-dict's drop-down pill: a solid-black panel welded to the
+///   top edge with rounded bottom corners, its content sitting just below the
+///   notch. Larger and more legible, but covers a strip of the active app.
+/// - `Wings` is voice-dict's minimalist overlay: two slim tabs welded to the
+///   top edge, flanking the notch, staying inside the menu bar.
+///
+/// Wings weld to the menu bar, which only macOS has; off macOS (and on an error
+/// too small to read in a wing) the style falls back to the glass pill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum OverlayStyle {
+    LiquidGlass,
+    Pill,
+    Wings,
+}
+
+/// Which monitor the overlay appears on.
+///
+/// `Named` stores the OS monitor name rather than an index: indices are
+/// reassigned when a display is unplugged, so a saved index silently starts
+/// meaning a different screen. A name that no longer resolves falls back to
+/// the primary, which is what stops the overlay rendering off-screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum OverlayDisplay {
+    /// The monitor holding the cursor — the screen the user is working on.
+    Active,
+    Primary,
+    Named(String),
+}
+
 /// Everything the app remembers between launches.
 ///
 /// One coarse struct rather than ~70 individual commands: the whole thing is
@@ -33,6 +76,18 @@ pub struct Settings {
     pub base_url: String,
     /// BCP-47 code, or empty to auto-detect.
     pub language: String,
+    /// Transcribe in ~5-second chunks *while* recording rather than in one
+    /// pass after it, so the wait after the key comes up is the tail of the
+    /// sentence rather than the whole of it.
+    ///
+    /// **Off by default, and it should stay off until it has been used.** It
+    /// changes the shape of the hot path — the microphone callback now feeds a
+    /// background transcriber on every dictation — and it costs accuracy:
+    /// whisper sees five seconds at a time with no context from the chunk
+    /// before, and the cut lands on the clock rather than on a pause. See
+    /// [`aloud_transcribe::stream`]. Nothing is pasted until the end either
+    /// way; the streamed text only reaches the pill.
+    pub streaming_transcription: bool,
 
     // Post-processing
     pub post_processing_enabled: bool,
@@ -40,12 +95,59 @@ pub struct Settings {
     pub fallback_model: String,
     /// Overrides the built-in cleanup prompt when non-empty.
     pub custom_system_prompt: String,
+    /// The version of the built-in prompt the user last acknowledged. Empty
+    /// means never, which is exactly right for a fork made before this
+    /// existed: they should see the offer once.
+    pub seen_prompt_version: String,
+    /// Language the pasted text is written in — distinct from [`language`],
+    /// which is the language *spoken into the mic*. Blank keeps the spoken
+    /// one. Cleanup applies it; transcription never sees it.
+    ///
+    /// [`language`]: Settings::language
+    pub output_language: String,
+    /// Reject a cleanup that *answered* the transcript instead of tidying it —
+    /// see [`aloud_llm::guard`]. On by default, matching the Swift app: the
+    /// failure it catches pastes text the user never dictated, and the worst
+    /// a false positive costs is the raw transcript.
+    pub instruction_guard_enabled: bool,
     /// Proper nouns and jargon fed to the model as a spelling reference.
     pub vocabulary: Vec<String>,
+    /// Tell cleanup what app and window are in front, so it can spell a
+    /// recipient's name the way the screen already spells it.
+    ///
+    /// Off by default. It sends the title of whatever window has focus to a
+    /// third party on every dictation, and a window title is not always
+    /// innocuous — it is a document name, a chat participant, a URL. That is
+    /// an opt-in, not something to turn on behind the user's back.
+    pub context_enabled: bool,
+    /// Also capture a screenshot with the context.
+    ///
+    /// Off by default, and separately from [`context_enabled`], because it
+    /// needs the Screen Recording grant Aloud has never asked for. Nothing in
+    /// the dictation path reads the image yet — see `aloud_screen::Context`.
+    ///
+    /// [`context_enabled`]: Settings::context_enabled
+    pub context_screenshot_enabled: bool,
     /// Spoken shorthand that expands to canned text after cleanup.
     pub macros: Vec<crate::macros::Macro>,
     /// Per-app behaviour overrides, applied by the focused app's name.
     pub app_rules: Vec<crate::rules::AppRule>,
+
+    // Command mode — dictating over a selection rewrites it instead.
+    /// Whether a selection can turn a dictation into a rewrite at all.
+    ///
+    /// A selection is the *only* signal: there is no extra-modifier gesture.
+    /// Swift offered one, and it was removed here because it collided with the
+    /// dictate key in three of the four modifier choices and had to be
+    /// defended by a conflict-detection routine that could only ever tell the
+    /// user their setting does nothing. An explicit rewrite that does not
+    /// depend on a selection is [`aloud_hotkey::model::Role::Rewrite`], which
+    /// has its own hotkey.
+    ///
+    /// **Defaults to on, where the Swift app defaults to off.** Aloud shipped
+    /// selection-aware rewriting with no way to disable it, so defaulting to
+    /// off would silently remove a working feature from every existing user.
+    pub command_mode_enabled: bool,
 
     // Behaviour
     pub hotkeys: aloud_hotkey::model::Config,
@@ -67,6 +169,11 @@ pub struct Settings {
     /// to the window is to open the app again, which macOS turns into a
     /// reopen event rather than a second instance.
     pub show_menu_bar_icon: bool,
+    /// Liquid-glass pill or menu-bar wings. Wings are macOS-only; elsewhere the
+    /// glass pill is always used.
+    pub overlay_style: OverlayStyle,
+    /// Which screen the overlay shows on.
+    pub overlay_display: OverlayDisplay,
     /// Put the previous clipboard back after pasting. Off leaves the dictated
     /// text on the clipboard so it can be pasted again.
     pub preserve_clipboard: bool,
@@ -78,6 +185,14 @@ pub struct Settings {
     pub developer_tools: bool,
     #[specta(type = specta_typescript::Number)]
     pub history_retention: usize,
+    /// Disk the kept recordings may use, in megabytes. 0 keeps none, which
+    /// also removes the Run Log's player and its transcription retry — both
+    /// read the WAV.
+    #[specta(type = specta_typescript::Number)]
+    pub audio_retention_mb: u64,
+    /// Evict recordings older than this many days whatever the size budget
+    /// says. 0 leaves size as the only limit.
+    pub audio_retention_days: u32,
 }
 
 impl Default for Settings {
@@ -91,13 +206,20 @@ impl Default for Settings {
             transcription_model: aloud_transcribe::cloud::DEFAULT_MODEL.into(),
             base_url: aloud_transcribe::cloud::DEFAULT_BASE_URL.into(),
             language: String::new(),
+            streaming_transcription: false,
             post_processing_enabled: true,
             post_processing_model: DEFAULT_CLEANUP_MODEL.into(),
             fallback_model: DEFAULT_FALLBACK_MODEL.into(),
             custom_system_prompt: String::new(),
+            seen_prompt_version: String::new(),
+            output_language: String::new(),
+            instruction_guard_enabled: true,
             vocabulary: Vec::new(),
+            context_enabled: false,
+            context_screenshot_enabled: false,
             macros: Vec::new(),
             app_rules: Vec::new(),
+            command_mode_enabled: true,
             hotkeys: aloud_hotkey::model::Config::defaults(),
             selected_microphone: None,
             play_sounds: true,
@@ -106,8 +228,25 @@ impl Default for Settings {
             shortcut_start_delay_ms: 0,
             mute_system_audio: false,
             show_menu_bar_icon: true,
+            // The glass pill is Aloud's signature look and the only overlay it
+            // has ever shipped, so it stays the default; the two voice-dict
+            // styles are opt-in.
+            overlay_style: OverlayStyle::LiquidGlass,
+            overlay_display: OverlayDisplay::Active,
             preserve_clipboard: true,
             history_retention: 50,
+            // **Off by default, and deliberately.** `#[serde(default)]` means
+            // an existing settings.json inherits whatever this says, so a
+            // non-zero default would silently start writing raw audio of every
+            // dictation to disk for every current user, on upgrade, with no
+            // prompt. That is a strictly larger disclosure than the window
+            // title two fields up, which this file already argues is "an
+            // opt-in, not something to turn on behind the user's back".
+            //
+            // 250 MB is roughly four hours at 16 kHz mono — the number to type
+            // in when turning it on, and what the settings row suggests.
+            audio_retention_mb: 0,
+            audio_retention_days: 30,
             // A fresh install has not been through the wizard; a migrated one
             // is handled below, since the Swift users are already set up.
             onboarded: false,
@@ -117,6 +256,17 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// The three retention numbers as the history store wants them, so the
+    /// megabyte-to-byte conversion lives in one place rather than at every
+    /// call site that inserts a row.
+    pub fn retention(&self) -> crate::history::Retention {
+        crate::history::Retention {
+            entries: self.history_retention,
+            audio_bytes: self.audio_retention_mb.saturating_mul(1024 * 1024),
+            audio_days: self.audio_retention_days.into(),
+        }
+    }
+
     pub fn path() -> Result<PathBuf> {
         Ok(aloud_notes::data_dir()?.join("settings.json"))
     }
@@ -172,6 +322,13 @@ impl Settings {
                 hotkeys.entry("rewrite").or_insert(old);
             }
         }
+        // `overlayStyle: "pill"` was the old name for the glass pill (and, for a
+        // brief window, a since-removed plain variant). The glass pill is now
+        // "liquidGlass" and bare "pill" no longer deserializes, so rename it or
+        // an existing install would fail to parse and reset to the default.
+        if raw.get("overlayStyle").and_then(|v| v.as_str()) == Some("pill") {
+            raw["overlayStyle"] = serde_json::Value::String("liquidGlass".into());
+        }
         serde_json::from_value(raw)
     }
 
@@ -198,6 +355,56 @@ impl Settings {
                 *field = value;
             }
         }
+    }
+
+    /// Appends a vocabulary term, returning whether it was new.
+    ///
+    /// Case-insensitive, matching Swift's `mergedVocabularyTerms`: the list is
+    /// pasted into the prompt as a spelling reference, so "Tauri" and "tauri"
+    /// are the same hint twice and only make the prompt longer. The *first*
+    /// spelling wins, since that is the one the user chose to teach.
+    ///
+    /// `to_lowercase` rather than `eq_ignore_ascii_case`: a vocabulary is
+    /// where names like "Café" live, and the ASCII comparison would happily
+    /// store that twice.
+    pub fn add_vocabulary_term(&mut self, term: &str) -> bool {
+        let term = term.trim();
+        if term.is_empty() {
+            return false;
+        }
+        let folded = term.to_lowercase();
+        // ponytail: linear scan — the list is a handful of words the user
+        // typed, and a HashSet is the upgrade path if it ever isn't.
+        if self
+            .vocabulary
+            .iter()
+            .any(|existing| existing.trim().to_lowercase() == folded)
+        {
+            return false;
+        }
+        self.vocabulary.push(term.to_string());
+        true
+    }
+
+    /// Adds every term in `text`, returning how many were new.
+    ///
+    /// Splits on newlines, commas and semicolons, matching Swift's
+    /// `mergedVocabularyTerms`. Without the split, "Tauri, Specta" becomes one
+    /// term — and since the menu item's source is *the clipboard*, whatever
+    /// the user last copied lands here verbatim.
+    ///
+    /// [`MAX_TERM_CHARS`] is why the length bound exists at all: the whole
+    /// vocabulary is prefixed to the user message of every subsequent cleanup
+    /// request, so a copied paragraph or email would be re-sent on each
+    /// dictation for as long as it stayed in the list.
+    pub fn add_vocabulary_terms(&mut self, text: &str) -> usize {
+        text.split(['\n', ',', ';'])
+            .filter(|t| {
+                let t = t.trim();
+                !t.is_empty() && t.chars().count() <= MAX_TERM_CHARS
+            })
+            .filter(|t| self.add_vocabulary_term(t))
+            .count()
     }
 
     pub fn save(&self) -> Result<()> {
@@ -279,6 +486,55 @@ fn restrict_permissions(_path: &std::path::Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Rewriting on a selection is on out of the box: turning it off is a
+    /// choice, and every existing user had it before the toggle existed.
+    #[test]
+    fn rewriting_a_selection_is_on_by_default() {
+        assert!(Settings::default().command_mode_enabled);
+    }
+
+    /// A term added twice in different casing is the same spelling hint said
+    /// twice — it only lengthens every cleanup prompt from then on.
+    #[test]
+    fn vocabulary_terms_dedupe_ignoring_case() {
+        let mut settings = Settings::default();
+        assert!(settings.add_vocabulary_term("Tauri"));
+        assert!(!settings.add_vocabulary_term("tauri"));
+        assert!(!settings.add_vocabulary_term("  TAURI \n"), "trimmed first");
+        assert!(!settings.add_vocabulary_term("   "), "blank is not a term");
+        assert!(settings.add_vocabulary_term("Café"));
+        assert!(
+            !settings.add_vocabulary_term("café"),
+            "case folding must be Unicode, not ASCII"
+        );
+        assert_eq!(settings.vocabulary, ["Tauri", "Café"]);
+    }
+
+    /// The failure this guards: the source is the clipboard, so "Tauri, Specta"
+    /// arrived as a single term and a copied paragraph arrived whole — and the
+    /// whole vocabulary is prefixed to every later cleanup request.
+    #[test]
+    fn clipboard_text_is_split_into_terms_and_long_ones_are_dropped() {
+        let mut settings = Settings::default();
+
+        assert_eq!(
+            settings.add_vocabulary_terms("Tauri, Specta; Rust\nserde"),
+            4
+        );
+        assert_eq!(settings.vocabulary, ["Tauri", "Specta", "Rust", "serde"]);
+
+        // Re-adding the same list is a no-op, so the menu item is idempotent.
+        assert_eq!(settings.add_vocabulary_terms("tauri, SPECTA"), 0);
+
+        // A sentence someone happened to have copied is not a proper noun.
+        let paragraph = "a".repeat(MAX_TERM_CHARS + 1);
+        assert_eq!(settings.add_vocabulary_terms(&paragraph), 0);
+        assert_eq!(
+            settings.add_vocabulary_terms(&"b".repeat(MAX_TERM_CHARS)),
+            1
+        );
+    }
 
     #[test]
     fn dotenv_value_is_parsed_and_unquoted() {
@@ -373,6 +629,25 @@ mod rename_tests {
             "a hotkey saved as `command` must load as `rewrite`"
         );
         assert!(settings.hotkeys.hold.is_some(), "other roles are untouched");
+    }
+
+    /// `overlayStyle: "pill"` is a removed variant name — it must load as
+    /// `LiquidGlass` rather than fail to parse and reset the whole file. A
+    /// `"wings"` value stays wings.
+    #[test]
+    fn an_old_pill_overlay_style_loads_as_liquid_glass() {
+        let glass =
+            Settings::from_json(r#"{ "overlayStyle": "pill" }"#).expect("old settings must parse");
+        assert_eq!(glass.overlay_style, OverlayStyle::LiquidGlass);
+
+        let wings =
+            Settings::from_json(r#"{ "overlayStyle": "wings" }"#).expect("settings must parse");
+        assert_eq!(wings.overlay_style, OverlayStyle::Wings);
+
+        // A file already on the new name is left alone.
+        let plain = Settings::from_json(r#"{ "overlayStyle": "liquidGlass" }"#)
+            .expect("current settings must parse");
+        assert_eq!(plain.overlay_style, OverlayStyle::LiquidGlass);
     }
 
     /// A file already using the new name must not be disturbed.

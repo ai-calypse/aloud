@@ -4,7 +4,7 @@
 //! resembling logic belongs in a crate where it can be tested.
 
 use crate::AppState;
-use aloud_store::{timings::Span, Settings, Stats};
+use aloud_store::{history::Entry, timings::Span, Settings, Stats};
 use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
@@ -95,6 +95,85 @@ pub fn recent_notes(limit: u32) -> CmdResult<Vec<aloud_notes::Note>> {
     Ok(notes)
 }
 
+/// The shipped cleanup prompt and the date it last changed.
+///
+/// Both halves serve the Prompts pane: the text backs "View Default", and the
+/// version is what `Settings::seen_prompt_version` is compared against to
+/// decide whether a user who forked the prompt is missing an improvement.
+#[derive(serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DefaultPrompt {
+    pub text: String,
+    pub version: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn default_prompt() -> DefaultPrompt {
+    DefaultPrompt {
+        text: aloud_llm::prompts::CLEANUP.to_string(),
+        version: aloud_llm::prompts::CLEANUP_VERSION.to_string(),
+    }
+}
+
+/// Runs a prompt against a sample without a dictation, for the Prompts pane.
+///
+/// Everything but the prompt comes from live settings, so what this shows is
+/// what the next dictation would do — including the model, the fallback and
+/// the vocabulary, all of which change the answer.
+///
+/// The two ways this can appear broken while working correctly are answered
+/// here rather than left as a puzzle: cleanup skips anything at or under
+/// [`aloud_llm::cleanup::MIN_WORDS`] and returns it verbatim, which reads as a
+/// prompt that did nothing; and a filler-only sample legitimately produces no
+/// text at all, which reads as a blank panel.
+#[tauri::command]
+#[specta::specta]
+pub async fn test_prompt(
+    state: State<'_, AppState>,
+    prompt: String,
+    sample: String,
+) -> CmdResult<String> {
+    let settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
+
+    if sample.trim().is_empty() {
+        return Err("Type a sample transcript to run the prompt against.".into());
+    }
+    if aloud_llm::cleanup::is_too_short(&sample) {
+        // Worded for both callers: the Prompts pane runs a sample the user can
+        // lengthen, the Run Log retries a stored transcript it cannot. Telling
+        // the second one to "add a few more words" was advice it cannot take.
+        return Err(format!(
+            "Too short to clean up. Dictations of {} words or fewer skip cleanup entirely \
+             and are pasted as spoken, so the prompt never runs on them.",
+            aloud_llm::cleanup::MIN_WORDS
+        ));
+    }
+    if settings.groq_api_key.trim().is_empty() {
+        return Err("No API key is configured, so there is nothing to run against.".into());
+    }
+
+    let options = aloud_llm::cleanup::Options {
+        api_key: &settings.groq_api_key,
+        base_url: &settings.base_url,
+        model: &settings.post_processing_model,
+        fallback: Some(settings.fallback_model.as_str()),
+        custom_prompt: &prompt,
+        vocabulary: &settings.vocabulary,
+        // The Prompts pane runs against a typed sample and the Run Log against
+        // a stored one; in neither case does the window in front now describe
+        // the moment being tested.
+        context: "",
+        output_language: &settings.output_language,
+        instruction_guard: settings.instruction_guard_enabled,
+    };
+    // An empty result is returned as an empty string, not as prose explaining
+    // it. This command has two callers — the Prompts pane, which explains the
+    // blank, and the Run Log's retry, which *writes the result back into the
+    // user's transcript*. A sentence here becomes their dictation.
+    to_string_err(aloud_llm::cleanup::clean(options, &sample).await)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn input_devices() -> CmdResult<Vec<aloud_audio::AudioDevice>> {
@@ -119,12 +198,69 @@ pub async fn installed_apps() -> CmdResult<Vec<aloud_selection::InstalledApp>> {
         .map_err(|e| format!("listing installed apps: {e}"))
 }
 
+/// Monitor names, to fill the overlay's "Show on" picker.
+///
+/// Unnamed monitors are dropped rather than given a placeholder: the setting
+/// stores a name, so an entry with no name could never be matched back to a
+/// screen and would be a row that silently does nothing.
+#[tauri::command]
+#[specta::specta]
+pub fn overlay_displays(app: AppHandle) -> CmdResult<Vec<String>> {
+    Ok(app
+        .available_monitors()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter_map(|m| m.name().cloned())
+        .collect())
+}
+
 /// Whether the OS lets us listen for keys. False on macOS until the user
 /// grants Accessibility permission.
 #[tauri::command]
 #[specta::specta]
 pub fn hotkeys_permitted() -> bool {
     aloud_hotkey::is_permitted()
+}
+
+/// Every OS permission the app needs, with its current answer. Empty off
+/// macOS, which the Permissions card reads as "nothing to show".
+///
+/// One command for all of them rather than one per permission: the card asks
+/// for the whole set every time it refreshes, and three round-trips to answer
+/// one question is three chances for the rows to disagree.
+#[tauri::command]
+#[specta::specta]
+pub fn permissions() -> Vec<aloud_permissions::PermissionStatus> {
+    aloud_permissions::all()
+}
+
+/// Opens the System Settings pane that grants `permission`.
+#[tauri::command]
+#[specta::specta]
+pub fn open_permission_settings(permission: aloud_permissions::Permission) -> CmdResult<()> {
+    to_string_err(aloud_permissions::open_settings(permission))
+}
+
+/// Version, commit and build date, for pasting into a bug report.
+///
+/// The commit and the date are baked in by `build.rs`; a build from a tarball
+/// with no `.git` reports "unknown" rather than failing to compile.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildInfo {
+    pub version: String,
+    pub commit: String,
+    pub date: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn build_info() -> BuildInfo {
+    BuildInfo {
+        version: env!("CARGO_PKG_VERSION").into(),
+        commit: env!("GIT_HASH").into(),
+        date: env!("BUILD_DATE").into(),
+    }
 }
 
 /// Plays the start chime, so the volume slider can be judged by ear rather
@@ -362,4 +498,180 @@ pub fn recent_timings(state: State<'_, AppState>, utterances: u32) -> CmdResult<
         .lock()
         .map_err(|_| "timings lock poisoned".to_string())?;
     to_string_err(timings.recent(utterances as usize))
+}
+
+/// The newest `limit` dictations, for the Run Log pane.
+#[tauri::command]
+#[specta::specta]
+pub fn history_recent(state: State<'_, AppState>, limit: u32) -> CmdResult<Vec<Entry>> {
+    to_string_err(state.pipeline.history(limit as usize))
+}
+
+/// Row ids cross the boundary as i32 because specta refuses to export i64
+/// (see [`Entry`]). SQLite hands out ids by insertion count and retention caps
+/// the table in the hundreds, so 2^31 is not a reachable ceiling.
+#[tauri::command]
+#[specta::specta]
+pub fn history_delete(app: tauri::AppHandle, state: State<'_, AppState>, id: i32) -> CmdResult<()> {
+    to_string_err(
+        state
+            .pipeline
+            .history_db()
+            .and_then(|h| h.delete(id as i64)),
+    )?;
+    // The tray builds its History submenu from the same table. Without this a
+    // transcript deleted here — plausibly *because* it was sensitive — stays
+    // listed and one click from being pasted until the next dictation.
+    crate::tray::refresh(&app);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn history_clear(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    to_string_err(state.pipeline.history_db().and_then(|h| h.clear()))?;
+    crate::tray::refresh(&app);
+    Ok(())
+}
+
+/// Writes back the output of a cleanup re-run.
+///
+/// Separate from [`test_prompt`], which produces the text: a retry is that
+/// same call plus this one, so there is no second cleanup path to keep in
+/// step with the real pipeline's.
+#[tauri::command]
+#[specta::specta]
+pub fn history_update_final(state: State<'_, AppState>, id: i32, text: String) -> CmdResult<()> {
+    to_string_err(
+        state
+            .pipeline
+            .history_db()
+            .and_then(|h| h.update_final(id as i64, &text)),
+    )
+}
+
+/// Re-runs transcription against the run's stored recording, optionally on a
+/// different engine, and writes both transcripts back.
+///
+/// Returns the new pasted text so the Run Log can repaint the row without a
+/// refetch. Everything it does lives on the pipeline, which is what makes the
+/// retry match the dictation that produced the row.
+#[tauri::command]
+#[specta::specta]
+pub async fn history_retry_transcription(
+    state: State<'_, AppState>,
+    id: i32,
+    engine: Option<aloud_transcribe::Engine>,
+) -> CmdResult<String> {
+    to_string_err(state.pipeline.retry_transcription(id as i64, engine).await)
+}
+
+/// How long a recording waits for the user before giving up. Long enough to
+/// find the key, short enough that a forgotten dialog frees the keyboard —
+/// capture swallows every key while armed, so it must never be indefinite.
+const CAPTURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Records the next key gesture and returns it as a binding.
+///
+/// Async because it blocks until the user presses something: capture swallows
+/// keys while armed, so this owns a `spawn_blocking` thread rather than the
+/// main one. Cancelling is `cancel_hotkey_capture`, or simply waiting out
+/// [`CAPTURE_TIMEOUT`].
+#[tauri::command]
+#[specta::specta]
+pub async fn capture_hotkey(
+    state: State<'_, AppState>,
+) -> CmdResult<Option<aloud_hotkey::model::Binding>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    // Identifies this request, so its give-up path can tell whether the slot is
+    // still its own rather than a later recording's.
+    static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    {
+        let mut slot = state
+            .hotkey_capture
+            .lock()
+            .map_err(|_| "hotkey capture lock poisoned".to_string())?;
+        // Replacing an in-flight recording is intentional: opening a second
+        // recorder should retarget, not deadlock behind the first.
+        *slot = Some(aloud_hotkey::Capture { id, tx });
+    }
+
+    let capture = state.hotkey_capture.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let captured = rx.recv_timeout(CAPTURE_TIMEOUT).ok();
+        // Disarm on timeout. The listener clears the slot itself on a commit,
+        // so this only matters for the give-up path — but leaving it armed
+        // would swallow the keyboard indefinitely.
+        //
+        // Only if the slot is still *ours*. Retargeting drops this task's
+        // sender, waking it with Disconnected, which reads as "gave up" — and
+        // clearing then disarms the recording that just replaced us. The
+        // second row would sit on "Press keys…" while the keys it captured
+        // fell through to the matcher and started a real dictation.
+        if captured.is_none() {
+            if let Ok(mut slot) = capture.lock() {
+                if slot.as_ref().is_some_and(|c| c.id == id) {
+                    *slot = None;
+                }
+            }
+        }
+        captured
+    })
+    .await
+    .map_err(|e| format!("capture task failed: {e}"))
+}
+
+/// Disarms a recording the user backed out of.
+#[tauri::command]
+#[specta::specta]
+pub fn cancel_hotkey_capture(state: State<'_, AppState>) -> CmdResult<()> {
+    let mut slot = state
+        .hotkey_capture
+        .lock()
+        .map_err(|_| "hotkey capture lock poisoned".to_string())?;
+    // Dropping the sender wakes the waiting task, which returns None.
+    *slot = None;
+    Ok(())
+}
+
+/// The running meeting's elapsed time and word count, or None when idle.
+///
+/// The `meeting-phase` event carries the same payload, but it only fires on a
+/// state change and on each finished chunk — up to a minute apart. A window
+/// opened mid-meeting would show nothing until the next chunk without this.
+#[tauri::command]
+#[specta::specta]
+pub fn meeting_status(state: State<'_, AppState>) -> Option<crate::meeting::MeetingPhase> {
+    state.meeting.lock().ok()?.as_ref().map(|m| m.phase())
+}
+
+/// Starts or stops meeting capture — the same toggle the tray and the hotkey
+/// use, so all three cannot disagree about whether a session is open.
+#[tauri::command]
+#[specta::specta]
+pub fn toggle_meeting(app: AppHandle, state: State<'_, AppState>) {
+    crate::toggle_meeting(&app, &state.settings, &state.meeting);
+}
+
+/// Draws the overlay in `phase` without a real dictation, for the Debug pane.
+///
+/// Behind `developer_tools` in the UI only — a command cannot be hidden, but
+/// the worst this can do is show and hide a click-through window.
+///
+/// ponytail: no update-overlay preview. There is no updater UI to preview
+/// until Phase 8 lands a signing keypair; add the case here when it does.
+#[tauri::command]
+#[specta::specta]
+pub fn debug_overlay(app: AppHandle, phase: crate::pipeline::Phase) {
+    match phase {
+        crate::pipeline::Phase::Idle => crate::overlay::hide(&app),
+        crate::pipeline::Phase::Error => {
+            crate::overlay::show(&app, phase);
+            // The pill renders an error with no text as a blank bar, which
+            // looks like a bug rather than the state being previewed.
+            crate::overlay::send_error(&app, "Preview: something went wrong");
+        }
+        _ => crate::overlay::show(&app, phase),
+    }
 }
