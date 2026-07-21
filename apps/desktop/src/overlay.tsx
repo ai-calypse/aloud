@@ -62,6 +62,14 @@ function Overlay() {
   );
   const [error, setError] = useState<string | null>(null);
   const [download, setDownload] = useState<number | null>(null);
+  // Rust says when it is about to hide the window and gives us a fixed window
+  // to animate in before it does (EXIT in overlay.rs). Hiding is the OS
+  // removing the window, so without this the pill has no frame to leave on.
+  // `?leaving=1` holds the exit's final frame in a browser, the same way
+  // `?phase=` renders a state the hotkey would otherwise be needed to reach.
+  const [leaving, setLeaving] = useState(
+    new URLSearchParams(location.search).get("leaving") === "1",
+  );
   // The root, not the bar row: --level inherits, so the wings style can draw
   // two waves off one write.
   const root = useRef<HTMLDivElement>(null);
@@ -85,7 +93,14 @@ function Overlay() {
       setPhase(e.payload);
       // A new run clears the last run’s message.
       if (e.payload === "recording") setError(null);
+      // Load-bearing, not tidiness: the window is hidden, never unmounted, so
+      // this webview survives to the next dictation carrying whatever state it
+      // had. Left set, the pill would stay in its exited frame — invisible —
+      // for every dictation after the first. A show always emits a phase, so
+      // this is the one signal guaranteed to arrive with it.
+      setLeaving(false);
     });
+    const unlistenDismiss = events.overlayDismiss.listen(() => setLeaving(true));
     const unlistenError = events.overlayError.listen((e) => setError(e.payload));
     const unlistenStyle = events.overlayStyle.listen((e) => {
       setStyle(e.payload.style);
@@ -105,6 +120,7 @@ function Overlay() {
     );
     return () => {
       unlistenPhase.then((off) => off());
+      unlistenDismiss.then((off) => off());
       unlistenError.then((off) => off());
       unlistenStyle.then((off) => off());
       unlistenDownload.then((off) => off());
@@ -152,7 +168,7 @@ function Overlay() {
       // notch — the waveform on the left, a recording light on the right, the
       // measured cutout between them. Only ever shown on a screen that has a
       // notch; Rust falls back to a pill otherwise (see overlay.rs).
-      <div className={`wings wings--${phase}`}>
+      <div className={`wings wings--${phase}${leaving ? " wings--leaving" : ""}`}>
         <span className="wing wing--left">
           <PhaseSwap phase={phase}>
             <Indicator phase={phase} />
@@ -172,7 +188,7 @@ function Overlay() {
       // voice-dict's drop-down pill: a solid-black panel welded to the top,
       // rounded only along the bottom, with the wave and status sitting just
       // below the notch (the __notch spacer is the measured cutout height).
-      <div className={`drop-pill drop-pill--${phase}`}>
+      <div className={`drop-pill drop-pill--${phase}${leaving ? " drop-pill--leaving" : ""}`}>
         <span className="drop-pill__notch" aria-hidden />
         <div className="drop-pill__body">
           <PhaseSwap phase={phase}>
@@ -186,7 +202,7 @@ function Overlay() {
     ) : (
       // The liquid-glass pill: a refractive capsule below the menu bar, with
       // the warped sheen (below) riding over the backdrop blur.
-      <div className={`pill pill--${phase}`}>
+      <div className={`pill pill--${phase}${leaving ? " pill--leaving" : ""}`}>
         <span className="pill__refraction" aria-hidden />
         <PhaseSwap phase={phase}>
           <Indicator phase={phase} />

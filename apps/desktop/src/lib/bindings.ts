@@ -211,6 +211,7 @@ export const events = {
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
+	overlayDismiss: makeEvent<OverlayDismiss>("overlay-dismiss"),
 	overlayError: makeEvent<OverlayError>("overlay-error"),
 	overlayStyle: makeEvent<OverlayStyleChanged>("overlay-style"),
 };
@@ -487,6 +488,15 @@ export type Note = {
 	date: number,
 	content: string,
 };
+
+/**
+ *  Sent just before the overlay window is hidden, so it can animate out.
+ * 
+ *  The window is hidden by the OS, which cannot be animated — it blinks out on
+ *  whatever frame `hide()` lands. This gives the webview a fixed window in
+ *  which to play its exit before that happens.
+ */
+export type OverlayDismiss = null;
 
 /**
  *  Which monitor the overlay appears on.
