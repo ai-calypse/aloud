@@ -23,6 +23,7 @@ const PHASE_LABEL: Record<Phase, string> = {
   recording: "Listening…",
   transcribing: "Transcribing…",
   done: "Pasted",
+  noSpeech: "No speech detected",
   error: "Something went wrong",
 };
 

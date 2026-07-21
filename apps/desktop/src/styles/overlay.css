@@ -9,12 +9,24 @@
  * weight. It does load the shared tokens, which is why no colour below is a
  * literal — before, this file carried its own private copy of the palette.
  */
-/* Centre the pill in the (transparent) window; the pill sizes to its content
-   rather than filling the frame, so its height is set here, not by the window. */
+/* The window is a fixed 1000x420 transparent canvas, deliberately far larger
+ * than anything drawn in it, and it is never resized. Growing an NSWindow per
+ * frame stutters; growing a shape inside a still window does not. Everything
+ * here therefore anchors to the canvas's top edge and animates its own size.
+ * The width has to clear the widest the panel can get — three notches, or a
+ * 90-character error, whichever wins — with room to spare.
+ *
+ * `flex-start`, not `center`: centring tied every style's vertical position to
+ * the window height, so enlarging the canvas would have dropped the glass pill
+ * to the middle of the screen. Each surface now owns its own offset, and the
+ * window's top edge is the one fixed reference — which is what the two welded
+ * styles already assumed. TOP_MARGIN in overlay.rs is the glass pill's top edge
+ * because of this; the two move together.
+ */
 .overlay-root {
   position: relative; /* the wings anchor to the window's top edge */
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   height: 100%;
 }
@@ -81,16 +93,29 @@
 }
 
 /* Eaten from the left: the left tab is revealed from its right edge — the one
-   touching the notch — outward. The right tab mirrors it. */
+   touching the notch — outward. The right tab mirrors it.
+ *
+ * Both ends state an explicit `inset()`, and that is load-bearing rather than
+ * tidiness. Left implicit, the far end resolves to the element's own
+ * `clip-path: none`, and `none` does not interpolate with an inset — the
+ * browser falls back to a discrete swap, so the tab jumped out at full width
+ * instead of extending. It read as a fade because the strip's own opacity
+ * animation was the only thing actually moving. */
 @keyframes wing-extend {
   from {
     clip-path: inset(0 0 0 100%);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
   }
 }
 
 @keyframes wing-extend-right {
   from {
     clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
   }
 }
 
@@ -118,45 +143,66 @@
    status below the notch line; the black merges with the notch above it. Wider
    than the cutout so the notch sits inside the panel. Falls back to a menu-bar
    height and a comfortable width for the `?style=pill` browser preview. */
+/* Its size and its silhouette are both written per frame from JS (see
+ * useNotchPanel in overlay.tsx), so almost nothing about its geometry is
+ * declared here. What is left is the box the content sits in.
+ *
+ * No background and no border-radius: the `<svg>` below paints the whole
+ * shape, because the two top corners are concave and CSS radii only round
+ * corners outward. No `min-width` either — the panel's floor is now the notch
+ * cutout itself, which is what makes it look like it grew out of the hardware
+ * rather than appearing at some arbitrary minimum.
+ *
+ * No shadow: a translucent black blur reads as a grey halo against a bright
+ * desktop, which is exactly the "grey, not black" a welded panel must avoid.
+ * It merges with the notch by being pure #000.
+ *
+ * No entrance animation either. It used to slide down from behind the menu
+ * bar; it now *grows out of the cutout*, which is the same idea done properly,
+ * and running both would fight.
+ */
 .drop-pill {
   position: absolute;
   top: 0;
   display: flex;
   flex-direction: column;
-  min-width: calc(var(--notch-w, 160px) + 96px);
-  background: var(--notch-fill);
-  border-radius: 0 0 16px 16px;
   color: var(--pill-ink);
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 14px;
   font-weight: 500;
   letter-spacing: 0.01em;
+  /* While the panel is still smaller than its contents — every frame of the
+     opening — the label would otherwise spill out over the desktop. */
   overflow: hidden;
-  /* No shadow: the soft drop-shadow's translucent black blur reads as a grey
-     halo against a bright desktop, which is exactly the "grey, not black" the
-     welded panel must avoid. It merges with the notch by being pure #000. */
-  /* It drops out of the notch, so it enters from *above* — it used to share
-     the floating capsule's entrance and rise into place from below, which
-     reads as a card flying up to stick itself under the menu bar rather than
-     as a panel sliding out of it. Same path in both directions is the rule;
-     this one was going the wrong way. */
-  animation: drop-pill-in var(--spring-pop-dur) var(--spring-pop) both;
 }
 
-/* translateY by percentage, so this holds at whatever height the measured
-   notch plus the body comes to. The slight overshoot at the end of
-   --spring-pop is the panel settling on its stop. */
-@keyframes drop-pill-in {
-  from {
-    transform: translateY(-100%);
-  }
+/* The silhouette. `preserveAspectRatio="none"` is deliberately paired with a
+   viewBox rewritten to the panel's exact pixel size on every frame: the path is
+   authored in real pixels, so the two always agree and nothing is ever actually
+   stretched. Behind the content, and never a hit target. */
+.drop-pill__shape {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
+/* Spacer that pushes the content clear of the physical cutout, so the wave and
+   the status word sit below the notch rather than behind the camera. */
 .drop-pill__notch {
   flex: none;
   height: var(--notch-h, 24px);
 }
 
+/* The node the panel is sized *from*: `max-content` so it stays the size of its
+   own content and never inherits the width it is driving, which would stall the
+   measurement in a loop. `align-self` centres it between the two shoulders,
+   since the panel is wider than the body by twice the top radius.
+
+   `flex: none` because the panel spends the whole opening animation shorter
+   than this body; without it the column would compress the body to fit and the
+   label would jiggle as the panel grows. */
 .drop-pill__body {
   display: flex;
   align-items: center;
@@ -164,6 +210,9 @@
   gap: 10px;
   height: 40px;
   padding: 0 22px;
+  width: max-content;
+  align-self: center;
+  flex: none;
 }
 
 /* The wave has to fit a menu bar rather than a 52px pill, so it is scaled
@@ -181,10 +230,8 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 11px;
   box-sizing: border-box;
   height: 52px;
-  padding: 0 22px;
   border: 0.5px solid var(--pill-rim);
   border-radius: var(--radius-pill);
   overflow: hidden; /* clip the refraction layer to the capsule */
@@ -210,6 +257,30 @@
   letter-spacing: 0.01em;
 
   animation: pill-in var(--spring-pop-dur) var(--spring-pop) both;
+
+  /* Morphs to its content instead of snapping to it. --spring-dur-slow
+     (response 0.4) and not --spring-dur (0.3): a container changing shape has
+     to read as heavier than the content moving inside it, and the reference
+     implementation lands in the same place — its content-update spring is
+     response 0.47 against 0.39 for the content transition. Critically damped,
+     because a capsule that overshoots its own text wobbles.
+
+     `width` and not a transform: scaling would stretch the glyphs, and the
+     label is the one thing in here that must stay crisp. */
+  width: var(--morph-w, auto);
+  transition: width var(--spring-dur-slow) var(--spring);
+}
+
+/* Carries the capsule's padding and gap, so the width it reports back is the
+   width the capsule should be. `max-content` keeps it off its parent's width —
+   without that it would size to the value it is producing and stall. */
+.pill__morph {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  width: max-content;
+  height: 100%;
+  padding: 0 22px;
 }
 
 /* A glass sheen (top-lit gradient + a diagonal chromatic streak) warped by the
@@ -275,6 +346,18 @@
  * `gap: inherit` so the wrapper reproduces whichever gap its parent set — the
  * capsule and the drop-down panel space their contents differently, and this
  * sits inside both.
+ *
+ * The scale is anisotropic, and that asymmetry is the whole point: vertical
+ * compresses about three times harder than horizontal, so the content reads as
+ * being squeezed out of a slot rather than zoomed. It is the signature of the
+ * Dynamic Island's content swap (which crushes 0.4 wide against 0.2 tall — far
+ * more than works here, where the subject is one dot and one word rather than a
+ * whole panel). Tune the *ratio* between the two, not either number alone;
+ * equal values immediately read as a generic scale-in.
+ *
+ * Still on --dur-fast: this fires three times a dictation, and the earlier note
+ * about never being perpetually mid-transition is the binding constraint. The
+ * squash makes the same 160ms read as physical without spending any longer.
  */
 .phase-swap {
   display: inline-flex;
@@ -287,6 +370,7 @@
   from {
     opacity: 0;
     filter: blur(3px);
+    transform: scale(0.86, 0.55);
   }
 }
 
@@ -389,11 +473,80 @@
   }
 }
 
-/* Nothing to show when idle; Rust hides the window anyway. */
+/* Nothing to show before the first run; Rust hides the window anyway. */
 .pill--idle,
 .drop-pill--idle,
 .wings--idle {
   display: none;
+}
+
+/* --- Exits ---------------------------------------------------------------
+ *
+ * Rust holds the window open for EXIT_MS after a run ends (overlay.rs) so the
+ * overlay can leave under its own power instead of being cut off mid-frame.
+ * That hold applies to every style, so every style owes an exit — a capsule
+ * sitting motionless for a quarter second and then blinking out is worse than
+ * the hard cut it replaced.
+ *
+ * The drop-down panel is absent here on purpose: it collapses back into the
+ * cutout from JS, on the same springs that opened it.
+ *
+ * Each exit is the entrance run backwards, which is the rule the drop-panel's
+ * old entrance broke and was fixed for: a thing should leave by the path it
+ * arrived on. Faster than the entrance, though — an exit is the acknowledgement
+ * of something already finished, and lingering over it reads as latency.
+ */
+.overlay-root[data-exiting] .pill {
+  animation: pill-out var(--dur-fast) var(--ease-in) both;
+}
+
+@keyframes pill-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+    filter: blur(4px);
+  }
+}
+
+/* Back into the notch it grew out of: the tabs are eaten from the outside in,
+   mirroring wing-extend, while the cutout fill holds until the last moment so
+   the strip never appears to detach from the hardware. */
+.overlay-root[data-exiting] .wing--left {
+  animation: wing-retract var(--dur-fast) var(--ease-in) both;
+}
+
+.overlay-root[data-exiting] .wing--right {
+  animation: wing-retract-right var(--dur-fast) var(--ease-in) both;
+}
+
+.overlay-root[data-exiting] .wing-notch {
+  animation: fade-out var(--dur-fast) var(--ease-in) both;
+  animation-delay: var(--dur-instant);
+}
+
+/* Explicit at both ends for the same reason as wing-extend above. */
+@keyframes wing-retract {
+  from {
+    clip-path: inset(0 0 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 100%);
+  }
+}
+
+@keyframes wing-retract-right {
+  from {
+    clip-path: inset(0 0 0 0);
+  }
+  to {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
 }
 
 /* The other half of the reduced-transparency handling in tokens.css: a token

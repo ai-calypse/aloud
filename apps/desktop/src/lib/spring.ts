@@ -59,8 +59,13 @@ export function integrate(
 const SUB_STEP = 1 / 240;
 
 export type Spring = {
-  /** Animate towards `value`, keeping whatever velocity is already in flight. */
-  to(value: number): void;
+  /**
+   * Animate towards `value`, keeping whatever velocity is already in flight.
+   *
+   * `response` retunes the spring for this leg and every leg after it, without
+   * disturbing the motion already underway.
+   */
+  to(value: number, response?: number): void;
   /** Jump to `value` with no motion and no residual velocity. */
   jump(value: number): void;
   /** Cancel any frame in flight. Call from the effect's cleanup. */
@@ -83,7 +88,7 @@ export function createSpring(
       matchMedia("(prefers-reduced-motion: reduce)").matches,
   }: { damping?: number; response?: number; reducedMotion?: boolean } = {},
 ): Spring {
-  const omega = (2 * Math.PI) / response;
+  let omega = (2 * Math.PI) / response;
 
   let position = 0;
   let velocity = 0;
@@ -94,7 +99,13 @@ export function createSpring(
   const step = (now: number) => {
     // A window that was hidden (App Nap suspends this webview) returns with a
     // multi-second gap. Clamping keeps that from teleporting the element.
-    const dt = Math.min((now - previous) / 1000, 1 / 30);
+    //
+    // Floored at zero as well, because a negative dt does not merely stall the
+    // spring — it integrates it *backwards*, away from the target. An animation
+    // frame carries the time the frame began, which can be marginally earlier
+    // than a `performance.now()` read moments before it in `start`, so the very
+    // first step of any motion is the one exposed to this.
+    const dt = Math.max(0, Math.min((now - previous) / 1000, 1 / 30));
     previous = now;
 
     const steps = Math.max(1, Math.ceil(dt / SUB_STEP));
@@ -129,7 +140,15 @@ export function createSpring(
   };
 
   return {
-    to(value) {
+    to(value, retargetResponse) {
+      // Retuning on the way to a new target, not on the way to the same one:
+      // opening and closing are allowed to have different characters (a close
+      // that lingers slightly longer than the open is what reads as weight),
+      // and the spring keeps its velocity across the change because only omega
+      // moves — position and velocity are untouched.
+      if (retargetResponse !== undefined) {
+        omega = (2 * Math.PI) / retargetResponse;
+      }
       if (value === target) return;
       target = value;
       // Reduced motion is not "a faster spring" — it is no travel at all. The
