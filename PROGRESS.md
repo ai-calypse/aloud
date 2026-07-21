@@ -1,7 +1,6 @@
 # Build Log
 
 Running log of what's done, what's decided, and what's blocked.
-See [MORNING-REPORT.md](MORNING-REPORT.md) for the summary; this is the detail.
 
 ---
 
@@ -44,7 +43,7 @@ untestable; check the claim before repeating it.
 | `crates/agent` — tool loop, Composio, cache | ✅ unit-tested; no live API |
 | Dictation pipeline | ✅ **verified end-to-end** |
 | Migration from the Swift app | ✅ verified on real data |
-| Recording overlay | ✅ level meter driven with synthesised levels |
+| Recording overlay | ✅ three styles — liquid glass, drop-down pill, menu-bar wings; wings/pill weld to the measured notch on macOS |
 | Notes window | ✅ verified in a headless browser against stubbed IPC |
 | Settings UI | ✅ verified in a headless browser against stubbed IPC |
 | Ask panel | ✅ |
@@ -57,31 +56,32 @@ untestable; check the claim before repeating it.
 | Frontend design system | ✅ tokens, primitives, motion — see below |
 | Menu bar | ✅ history, stats, meeting notes, Re-run Setup…, Settings… |
 
-clippy clean · typecheck clean · 150 Rust tests · 14 frontend tests.
+clippy clean · typecheck clean · 244 Rust tests · 14 frontend tests.
+
+**Phases 2–11 landed on `main` on 21 July** (the stacked PRs #61, #69–#78,
+merged via #78): the hotkey recorder, command/rewrite/ask/agent modes, meeting
+notes, the Run Log with audio playback, ~320ms off every dictation,
+screen-context cleanup, streaming transcription while the key is still held,
+and the three overlay styles. Recent additions on top of that:
+
+- **Hotkeys: session ownership.** Overlapping bindings resolve by specificity —
+  `fn`/`⌥fn` and `⌘`/`⌘D` no longer tear each other's recording down; the
+  more-specific role owns the capture and a superseded role's release is a
+  no-op.
+- **Hotkeys: Left/Right modifier sides.** A recorded chord pins to the side it
+  was captured with (via `exact_modifiers`, mirroring voice-dict's
+  `exactModifierKeyCodes`); presets stay either-side.
+- **Overlay: three styles.** Liquid glass (floats), voice-dict's drop-down pill
+  and menu-bar wings (both welded to the top). On macOS the notch is measured
+  natively so wings/pill weld to the real cutout in solid black.
 
 ## Not done
 
-Realtime streaming (though `crates/audio` already streams — see below) · app
-context/screenshot · updater (registered but inert — no signing pubkey) ·
-signing/notarization · audio persistence and Run Log playback · meeting notes
-in the main window · app rules keyed on bundle ID · a debug pane · onboarding
-beyond three steps.
-
-**Landed overnight on 20 July, in review as a stack of six PRs** (#61, #69,
-#70, #71, #72, #73): the hotkey recorder and eight hotkey defects · command
-mode without the invocation picker · ~320ms off every dictation · the prompt
-test runner · the stale-prompt banner · clipboard-to-vocabulary ·
-output-language translation · the Run Log pane · the Instruction Guard · the
-offline fallback · typed Ask · overlay style · the display picker · a
-permissions card · a build stamp.
-
-**`crates/audio` is not the streaming gap.** `Chunker` and the `on_pcm16` tap
-are in production use by meeting mode, which transcribes chunks concurrently
-as they arrive. What Phase 10 actually needs is a chunk-level entry point in
-`crates/transcribe` and a decision about how partial text reaches the user
-without corrupting the paste.
-
-See [ROADMAP.md](ROADMAP.md) for these broken into phased, sized tasks.
+- **Updater** — registered but inert; no signing pubkey configured yet.
+- **Signing / notarization** — needed before a real release build ships.
+- **The Windows path is written but unexercised.** Every `WH_KEYBOARD_LL`,
+  WASAPI and `Ctrl+V` branch compiles and has never run on hardware. CI would
+  prove it, and CI is blocked (see above).
 
 ---
 
@@ -113,8 +113,15 @@ traps found so far.
   samples, so they were ported, not re-derived.
 - **Clipboard preservation covers text and images only.** The Swift version's
   arbitrary `NSPasteboardItem` types have no cross-platform equivalent.
-- **Overlay uses CSS `backdrop-filter`**, not the Metal shader; top-centre of
-  the focused monitor, since no cross-platform API finds a notch.
+- **Overlay uses CSS `backdrop-filter`**, not the Metal shader. On macOS the
+  notch is measured via `NSScreen` (objc2) so the menu-bar wings and drop-down
+  pill weld to the real cutout in solid black; elsewhere, and for the glass
+  pill, it floats top-centre of the chosen monitor.
+- **Overlapping hotkeys resolve by specificity, not by order.** The pipeline's
+  session tracks an owning role, so the more-specific of two satisfied bindings
+  (`⌥fn` over `fn`, `⌘D` over `⌘`) wins and the other's release is a no-op.
+  Recorded chords also keep their modifier *side* (`exact_modifiers`), so
+  Left-Option is not Right-Option.
 - **`macos-private-api` enabled** for real transparency — rules out Mac App
   Store distribution, which this app does not use.
 - **Dependency versions pinned from live crates.io**, not memory.
@@ -189,3 +196,13 @@ by driving the real thing.
 - **The listening bars were not listening.** Each ran a canned 0.9s sine loop;
   the measured level only squashed the whole row, so the motion was identical
   in speech and in silence.
+- **objc2 aborted the app at launch** reading the notch. `NSScreen.screens`
+  returns a Swift-bridged array whose `count` reports an unsigned `NSUInteger`
+  (`'Q'`); objc2's debug-only encoding check expected the signed `'q'` and
+  `panic_cannot_unwind`. It compiled clean and only died on real hardware. Fixed
+  with objc2's `relax-sign-encoding` feature.
+- **The wings landed below the notch, not welded to it.** A Tauri always-on-top
+  window sits at the floating level (3), below the menu bar (24), so macOS
+  clamps its content out of the menu-bar strip. voice-dict uses `.screenSaver`
+  (1000); setting the overlay's `NSWindow` level to match lets it paint over the
+  menu bar into the notch.

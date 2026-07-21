@@ -66,7 +66,7 @@ src/styles/          the design system — every colour, size and curve
   base.css           document reset + cursor rules, shared by all windows
   motion.css         durations, easings, named animations, reduced-motion
   panel.css          ask/agent window chrome
-  overlay.css        the recording pill
+  overlay.css        the recording overlay — glass pill, drop-down pill, wings
 src/components/ui/   shared primitives. Nothing app-specific lives here
 src/features/<area>/ one folder per area of the app
 src/lib/             logic worth testing away from React
@@ -142,6 +142,13 @@ files and drifting apart.
   not loosen to `^`.
 - **Bindings are emitted relative to the crate dir**, so `cargo run -p aloud`
   must run from `apps/desktop/src-tauri`. `pnpm dev` handles this.
+- **Reading the notch touches AppKit through `objc2`, with two traps.**
+  `NSScreen.screens`'s `count` reports an unsigned encoding that objc2's
+  debug-only check rejects and *aborts* the process — the `relax-sign-encoding`
+  feature on `objc2` (a direct dep) fixes it. And a menu-bar/notch overlay must
+  set its `NSWindow` level to `NSScreenSaverWindowLevel`; a floating-level
+  window is clamped below the menu bar. `NSScreen` calls must run on the main
+  thread — the notch is measured once in `setup`.
 
 ## Verifying
 

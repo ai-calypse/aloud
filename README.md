@@ -13,8 +13,11 @@ Built with Tauri v2: Rust for the work, React for the interface.
 
 ## Status
 
-Porting a macOS-only Swift app to run on both platforms. See
-[`PROGRESS.md`](PROGRESS.md) for what has landed and what has not.
+A port of a macOS-only Swift app to run on both platforms. The macOS feature
+set has largely landed — dictation, rewrite, ask, agent and meeting modes, a
+Run Log, streaming transcription, and three overlay styles. Windows compiles
+but is unexercised, and release signing is still open. See
+[`PROGRESS.md`](PROGRESS.md) for the detail.
 
 ## Building
 
