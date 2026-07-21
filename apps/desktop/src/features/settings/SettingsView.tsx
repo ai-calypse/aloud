@@ -653,8 +653,8 @@ export function SettingsView({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="dropPill">Drop-down pill</SelectItem>
                       <SelectItem value="liquidGlass">Liquid glass</SelectItem>
-                      <SelectItem value="pill">Drop-down pill</SelectItem>
                       <SelectItem value="wings">Menu bar wings</SelectItem>
                     </SelectContent>
                   </Select>

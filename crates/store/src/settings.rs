@@ -23,21 +23,26 @@ const MAX_TERM_CHARS: usize = 48;
 
 /// How the recording overlay draws itself.
 ///
-/// - `LiquidGlass` is Aloud's pill: a refractive glass capsule floating below
-///   the menu bar. The default.
-/// - `Pill` is voice-dict's drop-down pill: a solid-black panel welded to the
-///   top edge with rounded bottom corners, its content sitting just below the
-///   notch. Larger and more legible, but covers a strip of the active app.
+/// - `DropPill` is voice-dict's drop-down pill: a panel that grows out of the
+///   notch, wearing its silhouette. The default — it is the most legible of the
+///   three and the only one that reads as part of the hardware.
+/// - `LiquidGlass` is Aloud's own pill: a refractive glass capsule floating
+///   below the menu bar.
 /// - `Wings` is voice-dict's minimalist overlay: two slim tabs welded to the
 ///   top edge, flanking the notch, staying inside the menu bar.
 ///
 /// Wings weld to the menu bar, which only macOS has; off macOS (and on an error
 /// too small to read in a wing) the style falls back to the glass pill.
+///
+/// `DropPill` is stored as `dropPill` and not the `pill` its name suggests,
+/// because `pill` is a legacy value meaning the *glass* capsule and is rewritten
+/// on load. Sharing the string made this style silently revert to glass on the
+/// next launch — see `the_drop_down_pill_survives_a_restart`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum OverlayStyle {
     LiquidGlass,
-    Pill,
+    DropPill,
     Wings,
 }
 
@@ -230,7 +235,7 @@ impl Default for Settings {
             // The glass pill is Aloud's signature look and the only overlay it
             // has ever shipped, so it stays the default; the two voice-dict
             // styles are opt-in.
-            overlay_style: OverlayStyle::LiquidGlass,
+            overlay_style: OverlayStyle::DropPill,
             overlay_display: OverlayDisplay::Active,
             preserve_clipboard: true,
             history_retention: 50,
@@ -647,6 +652,27 @@ mod rename_tests {
         let plain = Settings::from_json(r#"{ "overlayStyle": "liquidGlass" }"#)
             .expect("current settings must parse");
         assert_eq!(plain.overlay_style, OverlayStyle::LiquidGlass);
+    }
+
+    /// The drop-down pill used to be unable to survive a restart.
+    ///
+    /// It serialized as `"pill"`, which is the exact string the migration above
+    /// rewrites to `liquidGlass` — so choosing it in Settings held until the
+    /// next launch and then silently reverted to the glass capsule. Renaming
+    /// its stored value to `dropPill` is what separates the two meanings; the
+    /// legacy rewrite above still has to keep working, which is why both live
+    /// in the same file.
+    #[test]
+    fn the_drop_down_pill_survives_a_restart() {
+        let saved = serde_json::to_string(&OverlayStyle::DropPill).expect("must serialize");
+        assert_eq!(
+            saved, r#""dropPill""#,
+            "must not collide with the legacy name"
+        );
+
+        let reloaded = Settings::from_json(&format!(r#"{{ "overlayStyle": {saved} }}"#))
+            .expect("settings must parse");
+        assert_eq!(reloaded.overlay_style, OverlayStyle::DropPill);
     }
 
     /// A file already using the new name must not be disturbed.

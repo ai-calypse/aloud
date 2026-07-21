@@ -520,18 +520,23 @@ export type OverlayError = string;
 /**
  *  How the recording overlay draws itself.
  * 
- *  - `LiquidGlass` is Aloud's pill: a refractive glass capsule floating below
- *    the menu bar. The default.
- *  - `Pill` is voice-dict's drop-down pill: a solid-black panel welded to the
- *    top edge with rounded bottom corners, its content sitting just below the
- *    notch. Larger and more legible, but covers a strip of the active app.
+ *  - `DropPill` is voice-dict's drop-down pill: a panel that grows out of the
+ *    notch, wearing its silhouette. The default — it is the most legible of the
+ *    three and the only one that reads as part of the hardware.
+ *  - `LiquidGlass` is Aloud's own pill: a refractive glass capsule floating
+ *    below the menu bar.
  *  - `Wings` is voice-dict's minimalist overlay: two slim tabs welded to the
  *    top edge, flanking the notch, staying inside the menu bar.
  * 
  *  Wings weld to the menu bar, which only macOS has; off macOS (and on an error
  *  too small to read in a wing) the style falls back to the glass pill.
+ * 
+ *  `DropPill` is stored as `dropPill` and not the `pill` its name suggests,
+ *  because `pill` is a legacy value meaning the *glass* capsule and is rewritten
+ *  on load. Sharing the string made this style silently revert to glass on the
+ *  next launch — see `the_drop_down_pill_survives_a_restart`.
  */
-export type OverlayStyle = "liquidGlass" | "pill" | "wings";
+export type OverlayStyle = "liquidGlass" | "dropPill" | "wings";
 
 /**
  *  The style the overlay window should draw, pushed on every show.
