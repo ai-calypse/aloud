@@ -216,7 +216,7 @@ async fn transcribe_chunks(
         // shared with the dictation path — a chunk and a whole recording are
         // the same thing to a `Transcriber`, and there is no reason for two
         // copies of the code that says so.
-        match aloud_transcribe::stream::transcribe_pcm16(t, &chunk).await {
+        match aloud_transcribe::preview::transcribe_pcm16(t, &chunk).await {
             Ok(text) if !text.trim().is_empty() => segments.push((index, text)),
             Ok(_) => segments.push((index, "[inaudible]".to_string())),
             Err(e) => {

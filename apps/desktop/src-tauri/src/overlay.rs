@@ -24,13 +24,13 @@ pub struct AudioLevel(pub f32);
 #[tauri_specta(event_name = "model-download")]
 pub struct ModelDownload(pub f32);
 
-/// The transcript so far, while streaming transcription is on.
+/// The words so far, while the live preview is on.
 ///
-/// **Feedback only — this is never pasted as it arrives.** Whisper revises: a
-/// later chunk changes how an earlier one is punctuated or spelled, and text
-/// already typed into someone's editor cannot be un-typed. The live-transcript
-/// panel is the one surface where a revision costs nothing, so it is the only
-/// one that sees this. The paste still happens once, at the end.
+/// **Feedback only — none of this is ever pasted.** It is a rolling re-read of
+/// the last few seconds by the small local model, so it revises itself as a
+/// sentence lands. The panel is the one surface where a revision costs nothing,
+/// so it is the only one that sees this; the paste is a separate, single pass
+/// over the whole recording once the key is up.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
 #[tauri_specta(event_name = "dictation-partial")]
 pub struct DictationPartial(pub String);
@@ -285,7 +285,7 @@ pub fn send_level(app: &AppHandle, level: f32) {
     let _ = AudioLevel(level).emit_to(app, LABEL);
 }
 
-/// Sends the streamed transcript so far to the live-transcript panel.
+/// Sends the previewed words so far to the live-transcript panel.
 ///
 /// The pill deliberately no longer shows this — a clipped 60-char line was a
 /// poor place to read a growing transcript, and the panel is the surface for it.
@@ -293,15 +293,13 @@ pub fn send_partial(app: &AppHandle, text: &str) {
     let _ = DictationPartial(text.to_string()).emit_to(app, TRANSCRIPT_LABEL);
 }
 
-/// Shows the streaming-transcript panel below the pill, when the feature is on.
+/// Shows the streaming-transcript panel below the pill.
 ///
 /// Click-through and never focused, so it cannot steal keystrokes from the app
-/// being dictated into. A no-op when streaming transcription is off — then no
-/// partials ever arrive and an empty panel would just sit there.
+/// being dictated into. Called only where a preview has just been armed to fill
+/// it — the caller owns that decision, because it is the one that knows whether
+/// this capture is a dictation at all.
 pub fn show_transcript(app: &AppHandle) {
-    if !settings(app).streaming_transcription {
-        return;
-    }
     let Some(window) = app.get_webview_window(TRANSCRIPT_LABEL) else {
         return;
     };

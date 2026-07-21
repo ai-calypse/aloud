@@ -66,10 +66,9 @@ enum Outcome {
 #[derive(Default)]
 pub struct Session {
     recorder: Option<aloud_audio::Recorder>,
-    /// The live chunk transcription for this capture, when
-    /// `streaming_transcription` is on. Taken alongside the recorder, so the
-    /// two cannot outlive each other.
-    stream: Option<aloud_transcribe::stream::Stream>,
+    /// The live preview for this capture, when `streaming_transcription` is
+    /// on. Taken alongside the recorder, so the two cannot outlive each other.
+    preview: Option<aloud_transcribe::preview::Preview>,
     /// The last transcript, for "paste again".
     last_transcript: Option<String>,
     /// The in-flight read of the text selected when a command-mode session
@@ -125,12 +124,23 @@ impl Session {
     }
 }
 
+/// Whether a role's capture gets the live-transcript panel.
+///
+/// Dictation only. Ask and agent already put the words in their own window, a
+/// rewrite replaces a selection the user is looking at, and a meeting runs for
+/// an hour in the background — for all four the panel is a second, contradicting
+/// surface, and the preview behind it is a core spent on nothing.
+fn shows_transcript(role: Option<Role>) -> bool {
+    matches!(role, Some(Role::Hold | Role::Toggle))
+}
+
 /// What a stop takes out of the session: the capture, when it began, and the
-/// streamed transcript that has been building while it ran.
+/// live preview that has been running alongside it.
 struct Captured {
     recorder: Option<aloud_audio::Recorder>,
     started_at: Option<std::time::Instant>,
-    stream: Option<aloud_transcribe::stream::Stream>,
+    /// Never read — held only so that dropping `Captured` stops the preview.
+    _preview: Option<aloud_transcribe::preview::Preview>,
 }
 
 pub struct Pipeline {
@@ -222,16 +232,14 @@ impl Pipeline {
         }
 
         match phase {
-            Phase::Recording => {
-                crate::overlay::show(&self.app, phase);
-                // The live-transcript panel opens with the pill, cleared for the
-                // new utterance.
-                crate::overlay::show_transcript(&self.app);
-            }
-            // The panel stays up through transcription on purpose: a dictation
-            // shorter than one chunk streams no text until the *tail* is
-            // transcribed, which happens only after the key is released — hiding
-            // the panel here would mean it never showed a word.
+            // The live-transcript panel is *not* opened here: it belongs to
+            // dictation, and this fires for every role. `begin_capture` opens it
+            // alongside the preview that fills it.
+            Phase::Recording => crate::overlay::show(&self.app, phase),
+            // The panel stays up through transcription on purpose: the last
+            // preview pass is the only place the end of the sentence is
+            // readable, and hiding it here would blank it the instant the user
+            // let go — before they had a chance to read it.
             Phase::Transcribing => crate::overlay::show(&self.app, phase),
             // Leave the result on screen briefly, then dismiss. Re-shown, not
             // merely left visible: an error in the wings style has to move
@@ -318,7 +326,7 @@ impl Pipeline {
         let taken = Captured {
             recorder: session.recorder.take(),
             started_at: session.started_at.take(),
-            stream: session.stream.take(),
+            _preview: session.preview.take(),
         };
         drop(session);
 
@@ -357,6 +365,12 @@ impl Pipeline {
                 |r: Option<Role>| r.map_or(0, |r| settings.hotkeys.binding(r).specificity());
             if specificity(Some(role)) > specificity(session.owner) {
                 session.owner = Some(role);
+                // `⌥fn` landing on top of `fn`: what began as a dictation is now
+                // an ask, and the panel and its preview go back with it.
+                if !shows_transcript(Some(role)) {
+                    session.preview = None;
+                    crate::overlay::hide_transcript(&self.app);
+                }
             }
             return Ok(());
         }
@@ -405,30 +419,31 @@ impl Pipeline {
     ) -> Result<()> {
         let settings = self.settings();
 
-        // Streaming, when it is on, has to be armed *before* the microphone
+        // The preview, when it is on, has to be armed *before* the microphone
         // opens: the tap is a constructor argument, and audio that arrives
         // before it exists is audio only the WAV path will ever see.
         //
-        // The transcriber is built by the worker on its first chunk, not here
-        // — this runs on the event-tap thread, where loading a whisper model
-        // would stall every keystroke on the machine. It goes through
-        // `self.transcriber` rather than `build_transcriber` so the streaming
-        // path shares the cached local model instead of reloading ~150MB of it
-        // on every dictation.
-        let stream = settings.streaming_transcription.then(|| {
-            let pipeline = self.clone();
-            let for_build = settings.clone();
-            let app = self.app.clone();
-            aloud_transcribe::stream::Stream::spawn(
-                // Tauri's runtime handle, because this thread is usually the
-                // OS key-event tap and has no runtime of its own.
-                tauri::async_runtime::handle().inner(),
-                async move { pipeline.transcriber(&for_build).await },
-                Box::new(move |partial| crate::overlay::send_partial(&app, partial)),
-            )
-        });
+        // The transcriber is built by the worker on its first pass, not here —
+        // this runs on the event-tap thread, where loading a whisper model
+        // would stall every keystroke on the machine.
+        let preview =
+            (settings.streaming_transcription && shows_transcript(session.owner)).then(|| {
+                let pipeline = self.clone();
+                let for_build = settings.clone();
+                let app = self.app.clone();
+                aloud_transcribe::preview::Preview::spawn(
+                    // Tauri's runtime handle, because this thread is usually the
+                    // OS key-event tap and has no runtime of its own.
+                    tauri::async_runtime::handle().inner(),
+                    async move { pipeline.preview_transcriber(&for_build).await },
+                    Box::new(move |partial| crate::overlay::send_partial(&app, partial)),
+                )
+            });
+        if preview.is_some() {
+            crate::overlay::show_transcript(&self.app);
+        }
 
-        let tap = stream.as_ref().map(|s| s.tap());
+        let tap = preview.as_ref().map(|p| p.tap());
         let recorder =
             match aloud_audio::Recorder::start(settings.selected_microphone.as_deref(), tap) {
                 Ok(recorder) => recorder,
@@ -473,7 +488,7 @@ impl Pipeline {
 
         session.pending_start = None;
         session.recorder = Some(recorder);
-        session.stream = stream;
+        session.preview = preview;
         // Timed from when audio actually starts, not from the key press, so
         // the delay is not billed to the user as speaking time.
         session.started_at = Some(std::time::Instant::now());
@@ -606,9 +621,11 @@ impl Pipeline {
         captured: Captured,
         persist: bool,
     ) -> Result<(String, Settings, Option<PathBuf>)> {
-        let Captured {
-            recorder, stream, ..
-        } = captured;
+        // The preview is dropped right here, with the rest of `Captured`: the
+        // key is up, so a pass still running is CPU the real transcription
+        // wants. Whatever it last emitted stays on the panel until the pill
+        // hides it.
+        let Captured { recorder, .. } = captured;
         let Some(recorder) = recorder else {
             bail!("no recording to transcribe");
         };
@@ -645,31 +662,11 @@ impl Pipeline {
 
         let settings = self.settings();
 
-        // Streaming, when it was on, has already transcribed everything but
-        // the tail while the user was still speaking; this waits only on
-        // what is left. `None` means the stream is not to be trusted — the
-        // model would not build, or a chunk failed — and the WAV path below
-        // runs exactly as it always has. Nothing is lost by that fallback:
-        // the full recording was being written all along.
-        if let Some(stream) = stream {
-            let span = tracing::info_span!("stream_finish", chars = tracing::field::Empty);
-            let streamed = stream.finish().instrument(span.clone()).await;
-            match streamed {
-                Some(text) if !text.trim().is_empty() => {
-                    span.record("chars", text.len());
-                    let keep = guard.keep();
-                    if keep.is_none() {
-                        let _ = std::fs::remove_file(&wav);
-                    }
-                    return Ok((text, settings, keep));
-                }
-                // An empty streamed transcript is ambiguous: it is either
-                // silence or a stream that quietly produced nothing. Re-running
-                // the WAV costs one transcription on a dictation that had no
-                // words in it, and is the only way to tell the two apart.
-                _ => tracing::info!("streaming produced nothing; transcribing the recording"),
-            }
-        }
+        // The live preview is deliberately *not* consulted here. It re-reads a
+        // rolling window with the small local model to keep up with the voice,
+        // which is the wrong trade for text about to be pasted into someone's
+        // document — that gets one pass over the whole recording on the engine
+        // the user chose, as it always has.
 
         // The first local run pays for the model load inside this span, which
         // is right: it is time the user spends waiting for a transcript.
@@ -968,6 +965,33 @@ impl Pipeline {
         if engine == Engine::Local {
             *self.local.lock().unwrap() = Some(transcriber.clone());
         }
+        Ok(transcriber)
+    }
+
+    /// The model the live preview runs on: always the local one, whatever
+    /// engine the pasted transcript uses.
+    ///
+    /// The preview re-transcribes its window several times a second, which a
+    /// metered cloud API is the wrong shape for — a minute of dictation would
+    /// be a couple of hundred uploads of the same audio, and the rate limiter
+    /// would take the real transcription down with it. Shares `self.local` with
+    /// the paste path, so a local user loads the model once.
+    ///
+    /// Never downloads: a 150 MB fetch kicked off by pressing the dictate key
+    /// would fight the transcription it is previewing for bandwidth. No model
+    /// on disk means no preview, and the dictation is unaffected.
+    async fn preview_transcriber(&self, settings: &Settings) -> Result<Arc<dyn Transcriber>> {
+        if let Some(local) = self.local.lock().unwrap().clone() {
+            return Ok(local);
+        }
+        let model =
+            aloud_transcribe::local::model_dir()?.join(aloud_transcribe::local::DEFAULT_MODEL);
+        if !model.exists() {
+            bail!("no local model downloaded; skipping the live preview");
+        }
+        let language = Some(settings.language.as_str()).filter(|l| !l.is_empty());
+        let transcriber: Arc<dyn Transcriber> = Arc::new(LocalTranscriber::new(&model, language)?);
+        *self.local.lock().unwrap() = Some(transcriber.clone());
         Ok(transcriber)
     }
 
@@ -1578,6 +1602,23 @@ mod tests {
             session.owner, None,
             "a stopped session must own no role, or a stale release stops the next one"
         );
+    }
+
+    /// The panel is dictation's alone. Ask and agent answer in their own
+    /// window, and a live transcript of the question underneath it is a second
+    /// surface saying something else; a meeting would leave it up for an hour.
+    /// Every role is named here so adding one is a decision, not a default.
+    #[test]
+    fn only_dictation_gets_the_transcript_panel() {
+        for role in Role::ALL {
+            let expected = matches!(role, Role::Hold | Role::Toggle);
+            assert_eq!(
+                shows_transcript(Some(role)),
+                expected,
+                "{role:?} disagrees about the live-transcript panel"
+            );
+        }
+        assert!(!shows_transcript(None));
     }
 
     /// Press, release, press again — all inside the delay. Both sleepers wake

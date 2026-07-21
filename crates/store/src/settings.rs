@@ -76,17 +76,16 @@ pub struct Settings {
     pub base_url: String,
     /// BCP-47 code, or empty to auto-detect.
     pub language: String,
-    /// Transcribe in ~5-second chunks *while* recording rather than in one
-    /// pass after it, so the wait after the key comes up is the tail of the
-    /// sentence rather than the whole of it.
+    /// Show the words in the live-transcript panel as they are spoken.
     ///
-    /// **Off by default, and it should stay off until it has been used.** It
-    /// changes the shape of the hot path — the microphone callback now feeds a
-    /// background transcriber on every dictation — and it costs accuracy:
-    /// whisper sees five seconds at a time with no context from the chunk
-    /// before, and the cut lands on the clock rather than on a pause. See
-    /// [`aloud_transcribe::stream`]. Nothing is pasted until the end either
-    /// way; the streamed text only reaches the pill.
+    /// **Preview only, and it changes nothing about what gets pasted**: the
+    /// text still comes from one pass over the whole recording, on the chosen
+    /// engine, cleaned up by the LLM. See [`aloud_transcribe::preview`].
+    ///
+    /// Off by default: it changes the shape of the hot path — the microphone
+    /// callback now feeds a background transcriber — and it runs the local
+    /// model several times a second for the length of the dictation, which is
+    /// real CPU and real battery on a laptop.
     pub streaming_transcription: bool,
 
     // Post-processing

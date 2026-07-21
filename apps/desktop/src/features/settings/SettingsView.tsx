@@ -286,13 +286,13 @@ export function SettingsView({
             </Row>
 
             <Row
-              label="Transcribe while you speak"
-              hint="Sends audio in ~5-second chunks during recording, so the wait after you let go is the end of the sentence rather than the whole of it. Text still pastes once, at the end. Costs some accuracy: each chunk is transcribed without the one before it."
+              label="Show words as you speak"
+              hint="Shows the words in a panel as you speak them, read on-device by the local model. A preview only — it does not change what gets pasted, which is still one clean pass over the whole recording. Needs the local model downloaded, and keeps a core busy while you talk."
               className="py-[11px]"
             >
               <Toggle
                 checked={settings.streamingTranscription ?? false}
-                label="Transcribe while you speak"
+                label="Show words as you speak"
                 onChange={(c) => update({ streamingTranscription: c })}
               />
             </Row>
