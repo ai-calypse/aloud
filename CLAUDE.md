@@ -55,6 +55,7 @@ that compile fine and break at runtime.
 | `src-tauri/`, `tauri.conf.json`, capabilities JSON, `#[tauri::command]`, `invoke()`, `@tauri-apps/*`, `cargo tauri …` | `tauri-wisdom` |
 | Anything in `crates/`, or Rust anywhere | `rust-skills` |
 | `apps/desktop/src/**` — components, hooks, state | `vercel:react-best-practices` |
+| Any animation, transition or gesture response — anything that opens, closes, resizes, or changes while on screen | `aloud-motion` |
 | Reading the Swift reference app for parity | `swiftui-pro` |
 
 Most work here spans two — a new dictation feature is a Tauri command
@@ -125,6 +126,14 @@ its own `240ms cubic-bezier(...)` will drift out of step with everything
 around it. Reduced motion is one global switch that collapses durations to
 1ms rather than setting `animation: none`, which can strand an element on its
 opening frame.
+
+The one exception is motion whose target can change while it is still moving —
+a status that swaps three times a dictation, a drag, anything retargeted
+mid-flight. `motion.css`'s springs are baked into `linear()`, and a baked curve
+redirected halfway restarts from zero velocity; `lib/spring.ts` integrates a
+real one per frame and carries its momentum through. Choosing between the two
+is the first decision in any animation here — `aloud-motion` covers it, along
+with the failure modes that render fine and still feel wrong.
 
 **Before adding markup, check `components/ui/`.** The search field, the
 grouped card, the hairline row, the pane title and every button shape already
