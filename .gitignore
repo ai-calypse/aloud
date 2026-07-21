@@ -8,3 +8,9 @@ target/
 !.env.example
 .gstack/
 package-lock.json
+
+# Vendored third-party docs, not ours to carry in this history. Refresh by
+# re-cloning github.com/Takazudo/zudo-tauri-wisdom and copying
+# src/content/docs/ back over reference/. Scoped to this one skill so a
+# hand-written project skill can still be committed.
+.claude/skills/tauri-wisdom/
