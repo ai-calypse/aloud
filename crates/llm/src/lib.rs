@@ -202,6 +202,26 @@ fn reasoning_for(model: &str) -> (Option<&'static str>, Option<bool>) {
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<Choice>,
+    /// Untyped on purpose: providers disagree on the shape. Groq reports
+    /// `queue_time`/`prompt_time`/`completion_time`, Gemini's OpenAI-compat
+    /// layer reports `prompt_tokens_details.cached_tokens`, and this only ever
+    /// feeds the timings DB. A struct here would drop whichever fields it
+    /// failed to anticipate — which is exactly the ones worth seeing.
+    #[serde(default)]
+    usage: Option<serde_json::Value>,
+}
+
+/// Records the provider's `usage` block on the enclosing span.
+///
+/// Wall-clock alone cannot say *why* a request was slow: a 3s cleanup on four
+/// words is server queue time or prompt processing, and the fix differs. The
+/// caller's span is the one already written to `timings.sqlite`, so this needs
+/// no new table — but the field must be pre-declared as `Empty` on that span
+/// or `record` is a no-op.
+fn record_usage(usage: &Option<serde_json::Value>) {
+    if let Some(usage) = usage {
+        tracing::Span::current().record("usage", usage.to_string().as_str());
+    }
 }
 
 #[derive(Deserialize)]
@@ -313,6 +333,7 @@ impl LlmClient {
         let response = self.check(model, response).await?;
 
         let parsed: ChatResponse = response.json().await.context("decoding chat response")?;
+        record_usage(&parsed.usage);
         let content = parsed
             .choices
             .into_iter()
@@ -366,7 +387,8 @@ impl LlmClient {
             .instrument(tracing::info_span!(
                 "llm_fallback",
                 primary = model,
-                fallback
+                fallback,
+                usage = tracing::field::Empty,
             ))
             .await
     }
@@ -410,6 +432,7 @@ impl LlmClient {
         let response = self.check(model, response).await?;
 
         let parsed: ChatResponse = response.json().await.context("decoding tool response")?;
+        record_usage(&parsed.usage);
         let message = parsed
             .choices
             .into_iter()

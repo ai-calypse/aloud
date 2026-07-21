@@ -117,7 +117,12 @@ where
             // settle spends three model calls, and "the model was slow" and
             // "the model went round twice" are different problems with
             // different fixes.
-            .instrument(tracing::info_span!("tool_select", model, round))
+            .instrument(tracing::info_span!(
+                "tool_select",
+                model,
+                round,
+                usage = tracing::field::Empty
+            ))
         };
 
         // Ported from `AskService.requestChatMessage`: a 429 mid-loop is
