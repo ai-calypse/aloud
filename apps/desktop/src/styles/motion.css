@@ -31,6 +31,59 @@
   --ease-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
 }
 
+/* --- Springs -------------------------------------------------------------
+ *
+ * A bezier is a shape someone drew; a spring is a shape physics produced. The
+ * difference is visible: a bezier decelerates on a schedule, a spring settles,
+ * and settling is what "Apple-feeling" motion actually is.
+ *
+ * These are real mass-spring solutions sampled into `linear()`, in Apple's two
+ * parameters rather than mass/stiffness/damping (which nobody can reason
+ * about):
+ *
+ *   damping ratio  1.0 = no overshoot, ~0.6 = a visible settle past the target
+ *   response       how fast it reaches the target, in seconds. NOT a duration
+ *
+ * A critically damped spring's shape is scale-invariant in time, so `--spring`
+ * is one curve and the two durations below pick how fast it runs. Only the
+ * overshooting one needs a second curve.
+ *
+ * The `-dur` values are the FULL settle, which is why they look long. The
+ * motion is perceptually over much sooner — --spring-snappy is 90% done at
+ * 186ms of its 441ms, and that gap is the whole point: it reads as fast and
+ * still lands softly. Do not "fix" these by shortening them; that just clips
+ * the settle and the spring stops being one.
+ *
+ * The bezier line before each `linear()` is a real fallback, not decoration:
+ * a webview too old to parse `linear()` drops that declaration and keeps the
+ * bezier above it. Never collapse the pairs into one line.
+ */
+:root {
+  /* Critically damped: the default for anything a user did not throw. */
+  --spring: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --spring: linear(
+    0, 0.0438, 0.1419, 0.2604, 0.3801, 0.4909, 0.5883, 0.6712, 0.74, 0.7961,
+    0.8412, 0.8771, 0.9053, 0.9274, 0.9445, 0.9578, 0.968, 0.9758, 0.9817,
+    0.9862, 0.9896, 0.9922, 0.9942, 0.9956, 0.9967, 0.9976, 0.9982, 0.9987, 1
+  );
+
+  /* damping 0.62 — overshoots 8.4%, for things that should feel like an object
+     arriving rather than a value changing. Reserved for entrances and for
+     motion the user's own gesture threw; overshoot on a menu that merely faded
+     in reads as noise. */
+  --spring-pop: cubic-bezier(0.34, 1.42, 0.64, 1);
+  --spring-pop: linear(
+    0, 0.0575, 0.1948, 0.3681, 0.5455, 0.7068, 0.8404, 0.9423, 1.0131, 1.0566,
+    1.0782, 1.0835, 1.0779, 1.0661, 1.0515, 1.0367, 1.0234, 1.0125, 1.0042,
+    0.9985, 0.995, 0.9934, 0.993, 0.9936, 0.9946, 0.9958, 0.997, 0.9981, 1
+  );
+
+  /* response 0.3 / 0.4 / 0.4 respectively. */
+  --spring-dur: 441ms;
+  --spring-dur-slow: 588ms;
+  --spring-pop-dur: 654ms;
+}
+
 /* One global switch. Every animation in the app is expected to be covered by
  * this — if a new one is not, it is a bug, not a style choice. Vestibular
  * disorders make large motion genuinely unpleasant, and the OS setting is the
@@ -48,6 +101,14 @@
     --dur-base: 1ms;
     --dur-slow: 1ms;
     --dur-slower: 1ms;
+
+    /* The springs are on the same switch. A spring left running here would
+       survive the sweep below, because that only reaches `animation-duration`
+       and `transition-duration` — a JS-driven spring (lib/spring.ts) reads
+       these vars instead and needs to be told directly. */
+    --spring-dur: 1ms;
+    --spring-dur-slow: 1ms;
+    --spring-pop-dur: 1ms;
   }
 
   *,
@@ -67,18 +128,22 @@
  * the per-frame path entirely.
  */
 
-/* The travelling selection chip. --ease-glide is the curve that makes it feel
-   weighted: almost no overshoot, but a long tail, so it settles rather than
-   arrives. --dur-slow is deliberately generous — this is the one motion the
-   user watches on purpose, because they caused it. */
+/* The travelling selection chip.
+ *
+ * Its transform is driven per-frame by a spring (lib/spring.ts), NOT by a
+ * transition, so that clicking a second row while it is still moving bends the
+ * travel rather than stalling it. A `transition: transform` here would fight
+ * those writes and smear them a frame behind the spring — the property is
+ * deliberately absent.
+ *
+ * Height is still a transition because it is written straight through and, with
+ * uniform rows, never actually changes. */
 .motion-pill {
   border-radius: var(--radius-row);
   background: var(--accent);
   box-shadow: var(--shadow-accent);
   will-change: transform;
-  transition:
-    transform var(--dur-slow) var(--ease-glide),
-    height var(--dur-slow) var(--ease-glide);
+  transition: height var(--dur-fast) var(--ease-out);
 }
 
 /* Content arriving in a pane: out of focus and slightly displaced, coming
@@ -98,7 +163,7 @@
 }
 
 .motion-materialize {
-  animation: materialize var(--dur-slow) var(--ease-out) both;
+  animation: materialize var(--spring-dur) var(--spring) both;
 }
 
 /* A highlight sweeping across text while the agent is thinking.

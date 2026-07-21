@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, type ReactNode } from "react";
 import ReactDOM from "react-dom/client";
 import { events, type OverlayStyle, type Phase } from "./lib/bindings";
 import "./styles/overlay.css";
@@ -154,7 +154,9 @@ function Overlay() {
       // notch; Rust falls back to a pill otherwise (see overlay.rs).
       <div className={`wings wings--${phase}`}>
         <span className="wing wing--left">
-          <Indicator phase={phase} />
+          <PhaseSwap phase={phase}>
+            <Indicator phase={phase} />
+          </PhaseSwap>
         </span>
         {/* The notch itself: solid black, exactly the cutout's width, so the
             bar is continuous across it and the camera notch disappears into
@@ -173,10 +175,12 @@ function Overlay() {
       <div className={`drop-pill drop-pill--${phase}`}>
         <span className="drop-pill__notch" aria-hidden />
         <div className="drop-pill__body">
-          <Indicator phase={phase} />
-          <span className="label" title={error ?? undefined}>
-            {label}
-          </span>
+          <PhaseSwap phase={phase}>
+            <Indicator phase={phase} />
+            <span className="label" title={error ?? undefined}>
+              {label}
+            </span>
+          </PhaseSwap>
         </div>
       </div>
     ) : (
@@ -184,13 +188,32 @@ function Overlay() {
       // the warped sheen (below) riding over the backdrop blur.
       <div className={`pill pill--${phase}`}>
         <span className="pill__refraction" aria-hidden />
-        <Indicator phase={phase} />
-        <span className="label" title={error ?? undefined}>
-          {label}
-        </span>
+        <PhaseSwap phase={phase}>
+          <Indicator phase={phase} />
+          <span className="label" title={error ?? undefined}>
+            {label}
+          </span>
+        </PhaseSwap>
       </div>
     )}
     </div>
+  );
+}
+
+/**
+ * Cross-fades its contents whenever the phase changes.
+ *
+ * The `key` is the whole mechanism: React remounts on a new phase, so the CSS
+ * entrance in overlay.css runs again without the usual reflow-to-restart-a-
+ * keyframe dance. Cheap here because the subtree is a dot (or five bars) and a
+ * word — and the bars only exist in one phase, so nothing mid-wave is thrown
+ * away by the remount.
+ */
+function PhaseSwap({ phase, children }: { phase: Phase; children: ReactNode }) {
+  return (
+    <span key={phase} className="phase-swap">
+      {children}
+    </span>
   );
 }
 

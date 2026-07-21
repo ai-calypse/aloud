@@ -48,9 +48,27 @@
   justify-content: center;
   align-items: stretch;
   height: var(--notch-h, 24px);
-  animation: pill-in var(--dur-base) var(--ease-spring) both;
+  /* The strip itself only fades; the tabs below do the travelling. Sliding the
+     whole bar up out of the menu bar would move the notch fill too, and that
+     is meant to be nailed to the cutout. */
+  animation: wings-in var(--dur-fast) var(--ease-out) both;
 }
 
+@keyframes wings-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The tabs grow outward from behind the notch, because that is where they
+ * appear to come from — a thing that emerges from the cutout should emerge
+ * from the cutout's edge, not fade in place or rise from below like the
+ * free-floating capsule does.
+ *
+ * clip-path rather than scaleX: scaling would stretch the waveform inside the
+ * left tab, and the whole point of the wave is that its bar widths are
+ * deliberate. A clip reveals the tab at its true size.
+ */
 .wing {
   display: flex;
   align-items: center;
@@ -59,6 +77,21 @@
   height: 100%;
   background: var(--notch-fill);
   color: var(--pill-ink);
+  animation: wing-extend var(--spring-pop-dur) var(--spring-pop) both;
+}
+
+/* Eaten from the left: the left tab is revealed from its right edge — the one
+   touching the notch — outward. The right tab mirrors it. */
+@keyframes wing-extend {
+  from {
+    clip-path: inset(0 0 0 100%);
+  }
+}
+
+@keyframes wing-extend-right {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
 }
 
 /* Round only the two outer bottom corners so the whole strip — wings plus
@@ -69,6 +102,7 @@
 
 .wing--right {
   border-radius: 0 0 10px 0;
+  animation-name: wing-extend-right;
 }
 
 /* The notch fill between the wings: same black, exactly the cutout's width. */
@@ -76,12 +110,6 @@
   width: var(--notch-w, 200px);
   height: 100%;
   background: var(--notch-fill);
-}
-
-/* The right wing's recording light: a small solid-red dot, the way voice-dict
-   marks a live capture. Steady, not breathing — the waveform already moves. */
-.dot--recording {
-  background: var(--sys-red);
 }
 
 /* voice-dict's drop-down pill: a solid-black panel welded to the top edge with
@@ -107,7 +135,21 @@
   /* No shadow: the soft drop-shadow's translucent black blur reads as a grey
      halo against a bright desktop, which is exactly the "grey, not black" the
      welded panel must avoid. It merges with the notch by being pure #000. */
-  animation: pill-in var(--dur-base) var(--ease-spring) both;
+  /* It drops out of the notch, so it enters from *above* — it used to share
+     the floating capsule's entrance and rise into place from below, which
+     reads as a card flying up to stick itself under the menu bar rather than
+     as a panel sliding out of it. Same path in both directions is the rule;
+     this one was going the wrong way. */
+  animation: drop-pill-in var(--spring-pop-dur) var(--spring-pop) both;
+}
+
+/* translateY by percentage, so this holds at whatever height the measured
+   notch plus the body comes to. The slight overshoot at the end of
+   --spring-pop is the panel settling on its stop. */
+@keyframes drop-pill-in {
+  from {
+    transform: translateY(-100%);
+  }
 }
 
 .drop-pill__notch {
@@ -167,7 +209,7 @@
   font-weight: 500;
   letter-spacing: 0.01em;
 
-  animation: pill-in var(--dur-base) var(--ease-spring) both;
+  animation: pill-in var(--spring-pop-dur) var(--spring-pop) both;
 }
 
 /* A glass sheen (top-lit gradient + a diagonal chromatic streak) warped by the
@@ -218,6 +260,34 @@
 
 .label {
   white-space: nowrap;
+}
+
+/* The wave/dot and the status word swap together on every phase change, which
+ * on a normal dictation is three times in a couple of seconds. Cut hard, that
+ * is three visible jump-cuts on the one piece of UI the user is watching.
+ *
+ * Short and movement-free on purpose: this is frequent, system-driven status,
+ * not something the user asked to see animate — anything longer than a beat
+ * would put the pill perpetually mid-transition. The blur is what sells it as
+ * one thing changing rather than two things swapping; a plain opacity
+ * crossfade at this speed shows both states overlapping.
+ *
+ * `gap: inherit` so the wrapper reproduces whichever gap its parent set — the
+ * capsule and the drop-down panel space their contents differently, and this
+ * sits inside both.
+ */
+.phase-swap {
+  display: inline-flex;
+  align-items: center;
+  gap: inherit;
+  animation: phase-in var(--dur-fast) var(--ease-out) both;
+}
+
+@keyframes phase-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
 }
 
 /* The listening wave.
@@ -291,6 +361,15 @@
   background: var(--sys-grey);
 }
 
+/* The right wing's recording light: a small solid-red dot, the way voice-dict
+   marks a live capture. Steady, not breathing — the waveform already moves.
+   It has to sit *below* the `.dot` base rule: it used to be declared up with
+   the wing styles it belongs to, where the base's grey — same specificity,
+   later in the file — silently won and the light was never red. */
+.dot--recording {
+  background: var(--sys-red);
+}
+
 .dot--transcribing {
   background: var(--sys-blue);
   animation: breathe 1.1s ease-in-out infinite;
@@ -315,4 +394,19 @@
 .drop-pill--idle,
 .wings--idle {
   display: none;
+}
+
+/* The other half of the reduced-transparency handling in tokens.css: a token
+   can turn the fill opaque, but the blur and the refracted sheen are effects,
+   not colours, and have to be switched off here. Without this the pill would
+   be an opaque capsule still sampling and warping the desktop behind it. */
+@media (prefers-reduced-transparency: reduce) {
+  .pill {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .pill__refraction {
+    display: none;
+  }
 }

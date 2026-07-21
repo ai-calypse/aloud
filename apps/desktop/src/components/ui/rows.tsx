@@ -202,7 +202,7 @@ export function Toggle({
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative h-6 w-10 shrink-0 rounded-full transition-colors duration-300 outline-none",
+        "relative h-6 w-10 shrink-0 rounded-full transition-colors duration-[var(--dur-base)] ease-[var(--ease-out)] outline-none",
         "focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
         checked ? "bg-toggle-on" : "bg-toggle-off",
       )}
@@ -210,7 +210,11 @@ export function Toggle({
       <span
         className={cn(
           "absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow-knob",
-          "transition-transform duration-300 ease-[cubic-bezier(.32,.72,0,1)]",
+          // The knob is a physical object being thrown to the other end of the
+          // track, so it gets the spring that overshoots rather than a curve
+          // that decelerates: ~1px past the stop and back, which is the whole
+          // difference between an iOS switch and a checkbox that slides.
+          "transition-transform duration-[var(--spring-pop-dur)] ease-[var(--spring-pop)]",
           checked ? "translate-x-4" : "translate-x-0",
         )}
       />

@@ -1,13 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { createSpring, type Spring } from "@/lib/spring";
 import { cn } from "@/lib/utils";
 
 /**
  * Motion primitives.
  *
- * Both of these follow the same rule: JavaScript sets a target value or
- * restarts a keyframe, and the browser's compositor runs every frame in
- * between. Nothing here animates from a rAF loop, so the motion does not
- * stutter when React is busy rendering the pane that is arriving.
+ * The default rule in this app is that JavaScript sets a target value or
+ * restarts a keyframe and the compositor runs every frame in between, so
+ * motion does not stutter while React renders. `Materialize` below is exactly
+ * that.
+ *
+ * `SlidingPill` is the deliberate exception, and the reason is interruption:
+ * see lib/spring.ts. It is the only element here a user can redirect while it
+ * is still moving, and a CSS transition cannot carry velocity through that.
  */
 
 /**
@@ -35,31 +40,49 @@ export function SlidingPill({
   className?: string;
 }) {
   const pill = useRef<HTMLDivElement>(null);
+  const spring = useRef<Spring | null>(null);
   // The first placement must not animate — a pill that slides in from the top
   // of the window on launch looks like a bug, not a flourish.
   const placed = useRef(false);
 
   useLayoutEffect(() => {
     const el = pill.current;
-    if (!el || !target) return;
+    if (!el) return;
 
-    const top = target.offsetTop;
-    const height = target.offsetHeight;
+    // Critically damped: this chip lands on a row the user picked, and a chip
+    // that sails past the row it is meant to mark reads as a miss, not as
+    // physics. Overshoot is reserved for motion the user threw.
+    const driver = createSpring(
+      (y) => {
+        el.style.transform = `translateY(${y}px)`;
+      },
+      { damping: 1, response: 0.3 },
+    );
+    spring.current = driver;
+    return () => driver.stop();
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = pill.current;
+    const driver = spring.current;
+    if (!el || !driver || !target) return;
+
+    // Height is written straight through rather than sprung: every row in the
+    // sidebar is the same height, so this never actually animates, and a
+    // second spring on a layout property would cost a reflow a frame to do
+    // nothing. Give the rows different heights and this needs its own spring.
+    el.style.height = `${target.offsetHeight}px`;
 
     if (!placed.current) {
-      el.style.transition = "none";
       el.style.opacity = "1";
-    }
-    el.style.height = `${height}px`;
-    el.style.transform = `translateY(${top}px)`;
-
-    if (!placed.current) {
-      // Force the no-transition frame to commit before restoring it, or the
-      // browser coalesces both writes and animates the initial placement.
-      void el.offsetWidth;
-      el.style.transition = "";
+      driver.jump(target.offsetTop);
       placed.current = true;
+      return;
     }
+
+    // Retarget. Whatever speed the chip already has is kept, so clicking a
+    // second row mid-travel bends the move instead of stalling and restarting.
+    driver.to(target.offsetTop);
     // `target` is load-bearing in this list: it arrives from a callback ref one
     // render *after* the id changes, so keying only on the caller's deps left
     // the pill unpositioned on first paint.
