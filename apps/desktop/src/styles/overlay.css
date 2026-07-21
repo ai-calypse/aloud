@@ -24,6 +24,14 @@
  * styles already assumed. TOP_MARGIN in overlay.rs is the glass pill's top edge
  * because of this; the two move together.
  */
+/* The answer's entrance, in the two terms that have to be seen to be chosen.
+   On :root rather than on `.ask` so tune.html can override them from an inline
+   style on the document element, which a rule here would otherwise outrank. */
+:root {
+  --ask-throw: 12px;
+  --ask-stagger: 45ms;
+}
+
 .overlay-root {
   position: relative; /* the wings anchor to the window's top edge */
   display: flex;
@@ -230,24 +238,63 @@
   padding: 0;
 }
 
-/* Deliberately slower than the .phase-swap status swap: that fires three times
-   a dictation and has to stay out of the way, while this is the thing the user
-   asked for and is allowed to arrive. It runs *while* the panel is still
-   springing open around it, which is why it only fades and settles — content
-   travelling inside a box that is itself travelling reads as two animations. */
 .ask {
   display: flex;
   flex-direction: column;
   min-height: 0;
   padding: 12px 18px 12px;
-  animation: ask-in var(--dur-base) var(--ease-out) both;
 }
 
-@keyframes ask-in {
+/* The answer's three parts arrive under their own momentum, one after the
+ * next, rather than the block fading in as one piece.
+ *
+ * Two animations rather than one, because they want different curves: the rise
+ * is on the overshooting spring, so each part carries past its resting place
+ * and settles back — that overshoot is the "alive" part, and it is the same
+ * token every other object-arriving-somewhere in the app uses. The fade is a
+ * plain short ease; run on the spring it would bounce through full opacity,
+ * which is invisible on the way up and a flicker on the way down.
+ *
+ * The throw is deliberately small against the ~260pt the panel itself travels
+ * underneath. Content moving as far as its container reads as two animations
+ * fighting; content moving a fraction of it reads as settling into a box that
+ * is still arriving.
+ *
+ * Both knobs are variables because they are the two that have to be *seen* to
+ * be chosen — see tune.html. */
+.ask > * {
+  animation:
+    ask-rise var(--spring-pop-dur) var(--spring-pop) both,
+    ask-fade var(--dur-fast) var(--ease-out) both;
+}
+
+.ask__answer {
+  animation-delay: var(--ask-stagger, 45ms);
+}
+
+.ask__footer {
+  animation-delay: calc(var(--ask-stagger, 45ms) * 2);
+}
+
+/* Both ends stated: an implicit end resolves to the element's own computed
+   transform, and `none` does not interpolate with a `translateY`. */
+@keyframes ask-rise {
+  from {
+    transform: translateY(var(--ask-throw, 12px));
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes ask-fade {
   from {
     opacity: 0;
     filter: blur(3px);
-    transform: scale(0.97, 0.9);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
   }
 }
 
@@ -661,8 +708,9 @@
  * off line by line reads as the window being killed rather than closing. Faded
  * out over the first third of the collapse, so what shrinks into the notch is
  * an empty panel. Faster than the collapse for exactly that reason. */
-.overlay-root[data-exiting] .ask {
+.overlay-root[data-exiting] .ask > * {
   animation: ask-out var(--dur-fast) var(--ease-in) both;
+  animation-delay: 0ms;
 }
 
 @keyframes ask-out {

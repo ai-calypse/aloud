@@ -82,6 +82,24 @@
   --spring-dur: 441ms;
   --spring-dur-slow: 588ms;
   --spring-pop-dur: 654ms;
+
+  /* --- The drop-down panel's spring -------------------------------------
+   *
+   * Not baked into a `linear()` like the three above, because its target
+   * changes while it is still moving — a phase lands mid-flight three times a
+   * dictation, and an answer retargets it once a frame while it streams. A
+   * baked curve redirected halfway restarts from zero velocity; `lib/spring.ts`
+   * integrates these live so the motion carries through. Same two parameters,
+   * read from here so that every motion value in the app is in one file.
+   *
+   * One damping ratio and two responses: the close is deliberately slower than
+   * the open. That asymmetry is not a detail — an equal open and close reads as
+   * a box toggling, where a lingering close reads as something with mass
+   * settling back. Damping below 1 lets it overshoot slightly on arrival, which
+   * is the "landing" part of the feel. */
+  --panel-damping: 0.77;
+  --panel-open: 0.45;
+  --panel-close: 0.55;
 }
 
 /* One global switch. Every animation in the app is expected to be covered by

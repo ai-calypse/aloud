@@ -10,6 +10,7 @@ import { CheckIcon, CopyIcon, XIcon } from "lucide-react";
 import { commands, events, type OverlayStyle, type Phase } from "./lib/bindings";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { notchPath } from "./lib/notch-shape";
+import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import { createSpring } from "./lib/spring";
 // Tailwind, which this window used to do without. It earns its place now that
 // the Ask answer streams into this panel: Streamdown styles every element it
@@ -61,15 +62,26 @@ const BAR_PEAKS = Array.from({ length: BAR_COUNT }, (_, i) => {
 
 /**
  * The drop-down panel's motion, ported from the reference implementation's
- * `balanced` preset.
+ * `balanced` preset — now declared in motion.css, alongside every other motion
+ * value in the app, and read from there.
  *
- * One damping ratio for everything and two responses: the close is deliberately
- * slower than the open. That asymmetry is not a detail — an equal open and
- * close reads as a box toggling, where a lingering close reads as something
- * with mass settling back. Damping below 1 lets it overshoot very slightly on
- * arrival, which is the "landing" part of the feel.
+ * The fallbacks are only for a stylesheet that has not applied yet; the numbers
+ * that matter, and the note explaining them, live in `motion.css`.
  */
-const PANEL = { damping: 0.77, open: 0.45, close: 0.55 };
+const PANEL_FALLBACK = { damping: 0.77, open: 0.45, close: 0.55 };
+
+function readPanelSpring(element: Element) {
+  const computed = getComputedStyle(element);
+  const read = (name: string, fallback: number) => {
+    const value = parseFloat(computed.getPropertyValue(name));
+    return Number.isFinite(value) ? value : fallback;
+  };
+  return {
+    damping: read("--panel-damping", PANEL_FALLBACK.damping),
+    open: read("--panel-open", PANEL_FALLBACK.open),
+    close: read("--panel-close", PANEL_FALLBACK.close),
+  };
+}
 
 /**
  * How the corner radii open up as the panel grows past the cutout.
@@ -139,6 +151,11 @@ function useNotchPanel(
     // run), so there is no layout to measure and no growth to start. Measuring
     // here would set the target from a zero-width box.
     if (!contentElement.offsetWidth) return;
+
+    // Read once, here, rather than per retarget: this is a style recalc, and
+    // `remeasure` fires once a frame while an answer streams. Re-read on every
+    // rebuild, so a `run` bump is what applies a change from the tuning page.
+    const PANEL = readPanelSpring(surfaceElement);
 
     let base = { width: NOTCH_FALLBACK.width, height: NOTCH_FALLBACK.height };
     let target = base;
@@ -344,6 +361,9 @@ const ASK_PREVIEW: Ask = {
   done: true,
 };
 
+/** How fast `ask: "stream"` types, in ms between chunks. */
+const STREAM_MS = 45;
+
 /**
  * The recording pill. Rust drives the window's visibility, so this only ever
  * renders the current phase.
@@ -520,6 +540,57 @@ function Overlay() {
     });
     return () => {
       unlisten.then((off) => off());
+    };
+  }, []);
+
+  // The tuning page's hatch; see PreviewCommand. Inert in the real app, which
+  // never dispatches it.
+  useEffect(() => {
+    let typing = 0;
+    const stream = () => {
+      clearInterval(typing);
+      const chunks = ASK_PREVIEW.answer.match(/\S+\s*/g) ?? [];
+      let at = 0;
+      setAsk({ ...ASK_PREVIEW, answer: "", done: false });
+      typing = window.setInterval(() => {
+        if (at >= chunks.length) {
+          clearInterval(typing);
+          setAsk((a) => a && { ...a, done: true });
+          return;
+        }
+        const chunk = chunks[at++];
+        setAsk((a) => a && { ...a, answer: a.answer + chunk });
+      }, STREAM_MS);
+    };
+
+    const onPreview = (event: Event) => {
+      const command = (event as CustomEvent<PreviewCommand>).detail;
+      if (command.style) setStyle(command.style);
+      if (command.phase) {
+        setPhase(command.phase);
+        setDismissing(false);
+        if (command.phase === "recording") {
+          clearInterval(typing);
+          setAsk(null);
+          setError(null);
+          setRun((previous) => previous + 1);
+        }
+      }
+      if (command.ask === "open") setAsk(ASK_PREVIEW);
+      if (command.ask === "close") {
+        clearInterval(typing);
+        setAsk(null);
+      }
+      if (command.ask === "stream") stream();
+      if (command.dismissing !== undefined) setDismissing(command.dismissing);
+      // Last, so it applies on top of whatever else this command changed.
+      if (command.restart) setRun((previous) => previous + 1);
+    };
+
+    window.addEventListener(PREVIEW_EVENT, onPreview);
+    return () => {
+      window.removeEventListener(PREVIEW_EVENT, onPreview);
+      clearInterval(typing);
     };
   }, []);
 
