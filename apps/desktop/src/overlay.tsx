@@ -1,8 +1,22 @@
-import React, { useEffect, useRef, useState, type ReactNode } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import ReactDOM from "react-dom/client";
-import { events, type OverlayStyle, type Phase } from "./lib/bindings";
+import { CheckIcon, CopyIcon, XIcon } from "lucide-react";
+import { commands, events, type OverlayStyle, type Phase } from "./lib/bindings";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { notchPath } from "./lib/notch-shape";
 import { createSpring } from "./lib/spring";
+// Tailwind, which this window used to do without. It earns its place now that
+// the Ask answer streams into this panel: Streamdown styles every element it
+// emits with utilities (see the `@source` note in index.css), and hand-rolling
+// a second markdown stylesheet here would be the same answer looking different
+// in this window and in the agent panel.
+import "./index.css";
 import "./styles/overlay.css";
 
 const LABEL: Record<Phase, string> = {
@@ -96,7 +110,13 @@ const PANEL_WIDTH_FACTOR = 1.5;
  * nodes. No React state is involved — 60 renders a second is exactly what the
  * app's motion rule forbids, and the subtree would rebuild under the animation.
  */
-function useNotchPanel(style: OverlayStyle, run: number, dismissing: boolean) {
+function useNotchPanel(
+  style: OverlayStyle,
+  run: number,
+  dismissing: boolean,
+  /** Called with the box the panel is settling to, whenever that changes. */
+  onTarget: (width: number, height: number) => void,
+) {
   const surface = useRef<HTMLDivElement>(null);
   const shape = useRef<SVGSVGElement>(null);
   const path = useRef<SVGPathElement>(null);
@@ -161,6 +181,7 @@ function useNotchPanel(style: OverlayStyle, run: number, dismissing: boolean) {
         ),
         height: settledHeight,
       };
+      onTarget(target.width, target.height);
     };
 
     const topRadiusAt = (height: number) =>
@@ -294,6 +315,36 @@ function useMorphWidth(style: OverlayStyle) {
 }
 
 /**
+ * A question and the answer streaming in under it, or null when the panel is
+ * just a status pill.
+ *
+ * There is no separate Ask window any more: the panel that has been saying
+ * "Listening…" grows into the answer, so the two read as one thing rather than
+ * as a second surface arriving over the first.
+ */
+type Ask = {
+  question: string;
+  answer: string;
+  /** Set instead of an answer when the request failed. */
+  error: string | null;
+  /** The stream has finished — stops the follow-to-bottom and re-arms input. */
+  done: boolean;
+};
+
+/**
+ * Dev/QA: `?ask` reaches the answer state without speaking into a mic, and
+ * `?ask=<ms>` arrives that late — the only way to watch the panel grow from a
+ * status word into an answer, which is the transition the whole change is for.
+ */
+const ASK_PREVIEW: Ask = {
+  question: "What is the difference between a spring and an easing curve?",
+  answer:
+    "An **easing curve** is a shape someone drew; a **spring** is a shape physics produced.\n\n- a bezier decelerates on a schedule\n- a spring *settles*, and can be redirected mid-flight without restarting\n\nThat second property is why retargetable motion has to integrate a real oscillator rather than replay a baked curve.",
+  error: null,
+  done: true,
+};
+
+/**
  * The recording pill. Rust drives the window's visibility, so this only ever
  * renders the current phase.
  */
@@ -313,6 +364,12 @@ function Overlay() {
   );
   const [error, setError] = useState<string | null>(null);
   const [download, setDownload] = useState<number | null>(null);
+  const [ask, setAsk] = useState<Ask | null>(null);
+  // The phase listener subscribes once and has to know whether an answer is on
+  // screen. A ref rather than the state it mirrors: re-subscribing on every
+  // streamed token would tear down and rebuild the listener 50 times an answer.
+  const askOpen = useRef(ask !== null);
+  askOpen.current = ask !== null;
   // Rust tells us the window is about to go away, so the panel can collapse
   // back into the notch while there is still a surface to draw it on.
   const [dismissing, setDismissing] = useState(false);
@@ -330,13 +387,40 @@ function Overlay() {
     const timer = setTimeout(() => setDismissing(true), dismissAfter);
     return () => clearTimeout(timer);
   }, [dismissAfter]);
+  // The answer's own hatch; see ASK_PREVIEW.
+  const askAfter = new URLSearchParams(location.search).get("ask");
+  useEffect(() => {
+    if (askAfter === null) return;
+    const timer = setTimeout(() => setAsk(ASK_PREVIEW), Number(askAfter) || 0);
+    return () => clearTimeout(timer);
+  }, [askAfter]);
   // Sizes the glass capsule to its own content. The wings are two fixed tabs
   // welded to a measured cutout, so they are deliberately not morphed.
   const { surface, content } = useMorphWidth(style);
-  const panel = useNotchPanel(style, run, dismissing);
+  // Rust decides when this window may take clicks by testing the pointer
+  // against the panel's box (see `track_cursor` in overlay.rs), so it needs the
+  // box. Reported from the one place that already computes it, and only when
+  // it changes: the target moves on every remeasure, which while an answer is
+  // streaming is roughly once a frame.
+  const reported = useRef("");
+  const reportBox = useCallback((width: number, height: number) => {
+    const box = `${Math.round(width)}x${Math.round(height)}`;
+    if (box === reported.current) return;
+    reported.current = box;
+    // Absent in the browser preview, where `invoke` throws synchronously. This
+    // is measured from inside the panel's own layout pass, so letting that
+    // escape would take the whole overlay down rather than just the reporting.
+    try {
+      void commands.setPanelBox(width, height);
+    } catch {
+      /* no Tauri; nothing is polling the pointer either */
+    }
+  }, []);
+  const panel = useNotchPanel(style, run, dismissing, reportBox);
   // The root, not the bar row: --level inherits, so the wings style can draw
   // two waves off one write.
   const root = useRef<HTMLDivElement>(null);
+  const answerRef = useRef<HTMLDivElement>(null);
 
   // Levels land every 50ms. Writing --level straight onto the node keeps them
   // out of React entirely: at 20 renders a second the pill would rebuild its
@@ -364,7 +448,11 @@ function Overlay() {
       // `idle`, which used to blank the surface in the same frame the collapse
       // was asked to start.
       if (e.payload === "idle") {
-        setDismissing(true);
+        // …unless an answer is on screen. Both Ask paths end the run on
+        // `idle`, and the run ending is exactly when the answer is finished
+        // and wants reading. Rust suppresses the matching window hide for the
+        // same reason (ANSWERING in overlay.rs); this is its other half.
+        if (!askOpen.current) setDismissing(true);
         return;
       }
 
@@ -375,6 +463,9 @@ function Overlay() {
       // A new run clears the last run’s message.
       if (e.payload === "recording") {
         setError(null);
+        // A dictation started over the top of an answer takes the panel back;
+        // `overlay::show` has already cleared its side of the same state.
+        setAsk(null);
         // Rebuilds the panel so it grows out of the notch again rather than
         // resuming from wherever the last run's springs were left.
         setRun((previous) => previous + 1);
@@ -406,6 +497,50 @@ function Overlay() {
       unlistenDownload.then((off) => off());
     };
   }, []);
+
+  // The answer stream. Separate from the phase listener above because it is
+  // not a phase: the run is over by the time the last token lands.
+  useEffect(() => {
+    const unlisten = events.ask.listen(({ payload }) => {
+      switch (payload.kind) {
+        case "question":
+          // A follow-up reuses the panel, so a new question resets it.
+          setAsk({ question: payload.value, answer: "", error: null, done: false });
+          break;
+        case "delta":
+          setAsk((a) => a && { ...a, answer: a.answer + payload.value });
+          break;
+        case "done":
+          setAsk((a) => a && { ...a, done: true });
+          break;
+        case "failed":
+          setAsk((a) => a && { ...a, error: payload.value, done: true });
+          break;
+      }
+    });
+    return () => {
+      unlisten.then((off) => off());
+    };
+  }, []);
+
+  // Escape dismisses the answer. Only while one is up: the window is
+  // click-through and unfocused otherwise, so this cannot fire, but the guard
+  // keeps a stray keystroke from asking Rust to hide a pill mid-dictation.
+  useEffect(() => {
+    if (!ask) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") void commands.closeAsk();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ask]);
+
+  // Follow the stream to the bottom, and stop once it finishes — the same
+  // simpler-than-tracking-manual-scroll choice the old Ask window made.
+  useEffect(() => {
+    const el = answerRef.current;
+    if (el && ask && !ask.done) el.scrollTop = el.scrollHeight;
+  }, [ask]);
 
   // The live transcript is no longer shown here — it has its own panel. The
   // pill is back to a status word plus the wave.
@@ -470,7 +605,12 @@ function Overlay() {
       // voice-dict's drop-down pill: a solid-black panel welded to the top,
       // rounded only along the bottom, with the wave and status sitting just
       // below the notch (the __notch spacer is the measured cutout height).
-      <div className={`drop-pill drop-pill--${phase}`} ref={panel.surface}>
+      // Not `--idle` while an answer is up, whatever the phase says: `--idle`
+      // is `display: none`, and the run that produced the answer has ended.
+      <div
+        className={`drop-pill drop-pill--${ask ? "answering" : phase}`}
+        ref={panel.surface}
+      >
         {/* The panel's whole silhouette. A path and not a border-radius,
             because the two top corners are concave — see lib/notch-shape.ts. */}
         <svg
@@ -482,13 +622,22 @@ function Overlay() {
           <path ref={panel.path} fill="var(--notch-fill)" />
         </svg>
         <span className="drop-pill__notch" aria-hidden />
-        <div className="drop-pill__body" ref={panel.content}>
-          <PhaseSwap phase={phase}>
-            <Indicator phase={phase} />
-            <span className="label" title={error ?? undefined}>
-              {label}
-            </span>
-          </PhaseSwap>
+        <div
+          className={`drop-pill__body${ask ? " drop-pill__body--ask" : ""}`}
+          ref={panel.content}
+        >
+          {ask ? (
+            // Keyed on the question so a new one resets the copied state and
+            // the follow-up field.
+            <Answer key={ask.question} ask={ask} answerRef={answerRef} />
+          ) : (
+            <PhaseSwap phase={phase}>
+              <Indicator phase={phase} />
+              <span className="label" title={error ?? undefined}>
+                {label}
+              </span>
+            </PhaseSwap>
+          )}
         </div>
       </div>
     ) : (
@@ -508,6 +657,94 @@ function Overlay() {
         </div>
       </div>
     )}
+    </div>
+  );
+}
+
+/**
+ * The question and its streaming answer, inside the drop-down panel.
+ *
+ * Nothing here sizes anything: this is the panel's measured content node's only
+ * child, so the springs in `useNotchPanel` see it grow through the same
+ * ResizeObserver that already tracked the status word, and the panel settles
+ * around it. That is the whole reason the answer moved into this window —
+ * asking a question *grows* the thing already on screen instead of putting a
+ * second one over it.
+ */
+function Answer({
+  ask,
+  answerRef,
+}: {
+  ask: Ask;
+  answerRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [typed, setTyped] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // DOM focus only, never a window focus request: `show_answer` already made
+  // the overlay key when the answer opened, and it is the only thing that takes
+  // focus from the app being dictated into.
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [ask.question]);
+
+  return (
+    <div className="ask">
+      <p className="ask__question">{ask.question}</p>
+      <div className="ask__answer" ref={answerRef}>
+        {ask.error ? (
+          <p className="ask__error">{ask.error}</p>
+        ) : ask.answer ? (
+          <MessageResponse>{ask.answer}</MessageResponse>
+        ) : (
+          <span className="dot dot--transcribing" aria-hidden />
+        )}
+      </div>
+      <div className="ask__footer">
+        <input
+          ref={inputRef}
+          className="ask__input"
+          // Not "Ask a follow-up": `stream_answer` builds a fresh
+          // [system, user] pair with no prior turn, so there is no conversation
+          // to follow up on. Promising one and then answering "and what about
+          // Friday?" with no context is worse than not offering it.
+          placeholder="Ask a question…"
+          value={typed}
+          // Disabled mid-answer: two streams write Delta into the same panel,
+          // and the second one's Question event resets the answer to "" while
+          // the first keeps appending — the two answers splice together.
+          disabled={!ask.done}
+          onChange={(e) => setTyped(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || !typed.trim() || !ask.done) return;
+            // Cleared here rather than waiting for the backend's `question`
+            // event to echo back: until that lands the text sits in the field
+            // and is trivially re-submittable.
+            const question = typed;
+            setTyped("");
+            // The same backend entry point the spoken trigger uses, so the two
+            // paths cannot answer differently.
+            void commands.askText(question);
+          }}
+        />
+        <button
+          className="ask__button"
+          aria-label={copied ? "Copied" : "Copy"}
+          onClick={() =>
+            void navigator.clipboard.writeText(ask.answer).then(() => setCopied(true))
+          }
+        >
+          {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+        </button>
+        <button
+          className="ask__button"
+          aria-label="Close"
+          onClick={() => void commands.closeAsk()}
+        >
+          <XIcon size={14} />
+        </button>
+      </div>
     </div>
   );
 }

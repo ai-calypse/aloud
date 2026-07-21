@@ -4,12 +4,13 @@
 
 /* The recording pill. The window itself is transparent; only the pill paints.
  *
- * This window deliberately does not load Tailwind: it renders one component
- * onto an always-on-top surface, so the whole utility layer would be dead
- * weight. It does load the shared tokens, which is why no colour below is a
- * literal — before, this file carried its own private copy of the palette.
+ * This window used to skip Tailwind — one component on an always-on-top
+ * surface did not need a utility layer. It loads it now (see overlay.tsx),
+ * because the Ask answer streams into this panel and Streamdown styles the
+ * markdown it emits entirely in utilities. Everything below is still
+ * hand-written CSS; Tailwind is here for the answer's contents, not the pill.
  */
-/* The window is a fixed 1000x420 transparent canvas, deliberately far larger
+/* The window is a fixed 1000x720 transparent canvas, deliberately far larger
  * than anything drawn in it, and it is never resized. Growing an NSWindow per
  * frame stutters; growing a shape inside a still window does not. Everything
  * here therefore anchors to the canvas's top edge and animates its own size.
@@ -213,6 +214,151 @@
   width: max-content;
   align-self: center;
   flex: none;
+}
+
+/* Answer mode. The status body hugs a word; this one is a column at a fixed
+   width, so only its height changes as the answer streams — a body that also
+   grew sideways per token would have the panel's shoulders crawling outward
+   the whole time it was reading. */
+.drop-pill__body--ask {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
+  width: 480px;
+  height: auto;
+  padding: 0;
+}
+
+/* Deliberately slower than the .phase-swap status swap: that fires three times
+   a dictation and has to stay out of the way, while this is the thing the user
+   asked for and is allowed to arrive. It runs *while* the panel is still
+   springing open around it, which is why it only fades and settles — content
+   travelling inside a box that is itself travelling reads as two animations. */
+.ask {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 18px 12px;
+  animation: ask-in var(--dur-base) var(--ease-out) both;
+}
+
+@keyframes ask-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: scale(0.97, 0.9);
+  }
+}
+
+/* What was heard, above the rule. Quieter than the answer on purpose: it is
+   there to confirm the question, not to be read again. */
+.ask__question {
+  margin: 0 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+  color: rgb(255 255 255 / 0.55);
+  font-size: 13px;
+  font-weight: 500;
+  /* Two lines, then an ellipsis — a rambling spoken question must not push the
+     answer off the bottom of the panel. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* The answer scrolls past the cap rather than growing the panel forever. The
+   cap plus the chrome around it has to stay inside the overlay window's fixed
+   canvas (720pt tall, see tauri.conf.json) with room for the spring to
+   overshoot — that is what sets this number. */
+.ask__answer {
+  max-height: 380px;
+  overflow-y: auto;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  /* Answers arrive as markdown, and the browser's own defaults are most of
+     what makes a list read as a list; only the outermost margins are stripped
+     so the block sits flush against the rule above and the footer below. */
+  & > :first-child {
+    margin-top: 0;
+  }
+  & > :last-child {
+    margin-bottom: 0;
+  }
+
+  /* Streamdown sizes headings for a full-width chat column; in a 480pt panel
+     hung off the notch they have to stay close to the body text. Everything
+     else about the markdown is its own. */
+  & :is(h1, h2, h3, h4) {
+    font-size: 15px;
+  }
+
+  /* A wide code block must scroll rather than push the panel out past the
+     answer it belongs to. */
+  & pre {
+    overflow-x: auto;
+  }
+}
+
+.ask__error {
+  margin: 0;
+  color: var(--sys-orange);
+}
+
+.ask__footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 12px;
+}
+
+.ask__input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 0.06);
+  color: var(--pill-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  outline: none;
+}
+
+.ask__input::placeholder {
+  color: rgb(255 255 255 / 0.35);
+}
+
+.ask__input:focus {
+  border-color: rgb(255 255 255 / 0.28);
+}
+
+.ask__input:disabled {
+  opacity: 0.5;
+}
+
+.ask__button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 0.08);
+  color: var(--pill-ink);
+  cursor: default;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.ask__button:hover {
+  background: rgb(255 255 255 / 0.16);
 }
 
 /* The wave has to fit a menu bar rather than a 52px pill, so it is scaled
@@ -505,6 +651,24 @@
     opacity: 0;
     transform: translateY(6px) scale(0.96);
     filter: blur(4px);
+  }
+}
+
+/* The answer leaves ahead of the panel that carries it.
+ *
+ * The panel collapses back into the cutout on its own spring, and it clips
+ * whatever is inside — fine for a status word, but a paragraph of text sliced
+ * off line by line reads as the window being killed rather than closing. Faded
+ * out over the first third of the collapse, so what shrinks into the notch is
+ * an empty panel. Faster than the collapse for exactly that reason. */
+.overlay-root[data-exiting] .ask {
+  animation: ask-out var(--dur-fast) var(--ease-in) both;
+}
+
+@keyframes ask-out {
+  to {
+    opacity: 0;
+    filter: blur(3px);
   }
 }
 

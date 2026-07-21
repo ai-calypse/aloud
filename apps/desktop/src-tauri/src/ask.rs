@@ -1,16 +1,20 @@
-//! The Ask answer panel: a floating window that streams a markdown answer.
+//! Ask: streams a markdown answer into the overlay's drop-down panel.
 //!
-//! Unlike the recording pill this one takes focus — the user reads and scrolls
-//! it, and Escape dismisses it.
+//! There is no Ask window any more. The panel the user has been watching say
+//! "Listening…" is the same surface the answer grows into, so the question and
+//! its answer read as one continuous thing rather than as a second window
+//! appearing over the first. `overlay::show_answer` owns the hand-off; this
+//! module only produces the text.
 
 use aloud_store::Settings;
 use anyhow::{bail, Result};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tauri_specta::Event;
 
-const LABEL: &str = "ask";
+/// The window these events go to — the overlay's, not one of Ask's own.
+const LABEL: &str = "overlay";
 
 /// Streamed to the panel as the answer arrives.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
@@ -33,7 +37,7 @@ fn emit(app: &AppHandle, event: AskEvent) {
 
 /// Shows the panel and streams an answer to `question` into it.
 pub async fn answer(app: &AppHandle, question: String, settings: &Settings) -> Result<()> {
-    show(app);
+    crate::overlay::show_answer(app);
     emit(app, AskEvent::Question(question.clone()));
 
     match stream_answer(app, &question, settings).await {
@@ -69,28 +73,6 @@ async fn stream_answer(app: &AppHandle, question: &str, settings: &Settings) -> 
     Ok(())
 }
 
-/// Gap between the screen top and the panel, per the Swift answer panel.
-const TOP_GAP: f64 = 12.0;
-
-fn show(app: &AppHandle) {
-    let Some(window) = app.get_webview_window(LABEL) else {
-        tracing::warn!("ask window missing");
-        return;
-    };
-    // Anchor the top edge; the frontend grows the window downward to fit.
-    if let Err(e) = crate::overlay::position_top_center(&window, TOP_GAP) {
-        tracing::warn!(%e, "could not position ask panel");
-    }
-    let _ = window.show();
-    // Unlike the pill, this window is read and scrolled, so it takes focus.
-    let _ = window.set_focus();
-}
-
-pub fn hide(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(LABEL) {
-        let _ = window.hide();
-    }
-}
 
 /// Answers a question the user typed into the panel.
 ///
@@ -115,9 +97,9 @@ pub async fn ask_text(
         .map_err(|e| format!("{e:#}"))
 }
 
-/// Lets the panel dismiss itself on Escape or a click outside.
+/// Lets the panel dismiss itself on Escape or the close button.
 #[tauri::command]
 #[specta::specta]
 pub fn close_ask(app: AppHandle) {
-    hide(&app);
+    crate::overlay::end_answer(&app);
 }
