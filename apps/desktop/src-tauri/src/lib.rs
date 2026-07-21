@@ -129,6 +129,7 @@ pub fn run() {
             overlay::DictationPartial,
             overlay::ModelDownload,
             overlay::OverlayStyleChanged,
+            overlay::OverlayDismiss,
             HotkeysPermitted,
             ConnectorsUpdated,
         ]);

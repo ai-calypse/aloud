@@ -7,6 +7,8 @@
 use crate::pipeline::Phase;
 use aloud_store::settings::{OverlayDisplay, OverlayStyle};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_specta::Event;
 
@@ -41,6 +43,16 @@ pub struct DictationPartial(pub String);
 #[tauri_specta(event_name = "overlay-error")]
 pub struct OverlayError(pub String);
 
+/// Tells the overlay to play its exit, ahead of the window actually going away.
+///
+/// The window is what makes the pill visible, so hiding it is a hard cut — the
+/// panel cannot animate itself out of existence after the surface it is drawn
+/// on has gone. This event is the gap: the pill collapses back into the notch
+/// while the window is still up, and [`hide`] takes the window away once it has.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
+#[tauri_specta(event_name = "overlay-dismiss")]
+pub struct OverlayDismiss;
+
 /// The style the overlay window should draw, pushed on every show.
 ///
 /// Sent rather than read from settings by the webview: the overlay has no
@@ -62,8 +74,15 @@ const LABEL: &str = "overlay";
 /// The streaming-transcript panel, shown below the pill while recording with
 /// streaming transcription on. Separate window so the pill stays small.
 const TRANSCRIPT_LABEL: &str = "transcript";
-/// Distance from the top of the screen, in logical pixels. Clears the menu bar.
-const TOP_MARGIN: f64 = 48.0;
+/// The glass pill's top edge, in logical pixels from the top of the screen.
+///
+/// This is the pill's own edge and not the window's centre line: the overlay
+/// canvas is a fixed 640x420 that nothing is centred in any more (see
+/// `.overlay-root` in overlay.css), so the window's top edge and the pill's top
+/// edge are now the same point. 70 rather than the old 48 keeps the pill
+/// exactly where it has always been — it used to be centred in a 96pt window
+/// at margin 48, which put its edge at 48 + (96 - 52) / 2.
+const TOP_MARGIN: f64 = 70.0;
 /// The transcript panel drops below the pill; the pill is ~52pt tall at
 /// `TOP_MARGIN`, so this clears it with a little air.
 const TRANSCRIPT_TOP_MARGIN: f64 = 116.0;
@@ -160,6 +179,10 @@ pub fn show(app: &AppHandle, phase: Phase) {
         return;
     };
 
+    // Cancels a pending exit before it can hide the window out from under the
+    // dictation that is starting now.
+    HIDE_GENERATION.fetch_add(1, Ordering::SeqCst);
+
     let (style, notch) = style_for(&window, phase);
     // Wings weld to the top edge; both pills hang below the menu bar. Same
     // window, same positioning — only the anchor changes.
@@ -196,10 +219,50 @@ pub fn show(app: &AppHandle, phase: Phase) {
     }
 }
 
+/// How long the pill gets to collapse before the window is taken away.
+///
+/// Slightly shorter than the close spring's full settle: the last frames of a
+/// spring move sub-pixel distances, and waiting for them only delays the window
+/// teardown by time the user cannot see. Long enough that the collapse reads;
+/// short enough that a dictation ending does not feel like it hangs.
+const EXIT_MS: u64 = 260;
+
+/// Distinguishes "the hide I scheduled" from "a hide that has been overtaken".
+///
+/// Both [`show`] and [`hide`] bump this. A hide captures the value it produced
+/// and, when its timer fires, only acts if nothing has happened since. Without
+/// it, starting a dictation inside the exit window would show the pill and then
+/// have the previous run's timer hide it again ~260ms later — a live recording
+/// with no overlay, which is exactly the failure the user cannot diagnose.
+static HIDE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
 pub fn hide(app: &AppHandle) {
-    if let Some(window) = window(app) {
-        let _ = window.hide();
+    if window(app).is_none() {
+        return;
     }
+
+    let generation = HIDE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+
+    // If nothing is listening the event is dropped and the window still goes
+    // away on the timer, so a failure here costs the animation, never the hide.
+    if let Err(e) = OverlayDismiss.emit_to(app, LABEL) {
+        tracing::warn!(%e, "could not send overlay dismiss");
+    }
+
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(EXIT_MS)).await;
+
+        // A show() landed while we were waiting: the pill on screen belongs to
+        // a newer dictation and is not ours to hide.
+        if HIDE_GENERATION.load(Ordering::SeqCst) != generation {
+            return;
+        }
+
+        if let Some(window) = window(&app) {
+            let _ = window.hide();
+        }
+    });
 }
 
 /// Index of the monitor called `wanted`, or None when nothing is called that.

@@ -211,6 +211,7 @@ export const events = {
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
+	overlayDismiss: makeEvent<OverlayDismiss>("overlay-dismiss"),
 	overlayError: makeEvent<OverlayError>("overlay-error"),
 	overlayStyle: makeEvent<OverlayStyleChanged>("overlay-style"),
 };
@@ -489,6 +490,16 @@ export type Note = {
 };
 
 /**
+ *  Tells the overlay to play its exit, ahead of the window actually going away.
+ * 
+ *  The window is what makes the pill visible, so hiding it is a hard cut — the
+ *  panel cannot animate itself out of existence after the surface it is drawn
+ *  on has gone. This event is the gap: the pill collapses back into the notch
+ *  while the window is still up, and [`hide`] takes the window away once it has.
+ */
+export type OverlayDismiss = null;
+
+/**
  *  Which monitor the overlay appears on.
  * 
  *  `Named` stores the OS monitor name rather than an index: indices are
@@ -553,7 +564,13 @@ export type PermissionStatus = {
 /**  What the UI reflects. Mirrors the Swift overlay's phases. */
 export type Phase = "idle" | "recording" | "transcribing" | 
 /**  Text was pasted. */
-"done" | "error";
+"done" | 
+/**
+ *  Silence or filler only. A normal result, so not `Error` — but its own
+ *  phase rather than `Idle`, because the overlay has to say *something*
+ *  while it dismisses, and "Pasted" would be a lie.
+ */
+"noSpeech" | "error";
 
 export type SearchResult = {
 	note: Note,

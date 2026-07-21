@@ -46,6 +46,10 @@ pub enum Phase {
     Transcribing,
     /// Text was pasted.
     Done,
+    /// Silence or filler only. A normal result, so not `Error` — but its own
+    /// phase rather than `Idle`, because the overlay has to say *something*
+    /// while it dismisses, and "Pasted" would be a lie.
+    NoSpeech,
     Error,
 }
 
@@ -224,7 +228,9 @@ impl Pipeline {
             Phase::Recording => Some(crate::sound::Chime::Start),
             Phase::Transcribing => Some(crate::sound::Chime::Stop),
             Phase::Error => Some(crate::sound::Chime::Error),
-            Phase::Done | Phase::Idle => None,
+            // Silence is not a failure, so it does not get the error chime —
+            // the stop chime has already sounded and the pill says the rest.
+            Phase::Done | Phase::Idle | Phase::NoSpeech => None,
         };
         if let Some(chime) = chime {
             let settings = self.settings();
@@ -244,7 +250,7 @@ impl Pipeline {
             // Leave the result on screen briefly, then dismiss. Re-shown, not
             // merely left visible: an error in the wings style has to move
             // back down to the pill's anchor, and only `show` repositions.
-            Phase::Done | Phase::Error => {
+            Phase::Done | Phase::NoSpeech | Phase::Error => {
                 crate::overlay::show(&self.app, phase);
                 let app = self.app.clone();
                 let linger = if matches!(phase, Phase::Error) {
@@ -558,13 +564,14 @@ impl Pipeline {
         }
 
         match &result {
-            // Silence is a normal outcome, but reporting "Pasted" when nothing
-            // was pasted would be a lie: go back to Idle instead.
             Ok(Outcome::Pasted) => self.emit(Phase::Done),
-            // The Ask panel is the feedback; the pill would just cover it.
-            Ok(Outcome::Asked) | Ok(Outcome::NoSpeech) | Ok(Outcome::Cancelled) => {
-                self.emit(Phase::Idle)
-            }
+            // Silence is a normal outcome, but reporting "Pasted" when nothing
+            // was pasted would be a lie. It says so itself instead — the user
+            // held the key and deserves to know why nothing arrived.
+            Ok(Outcome::NoSpeech) => self.emit(Phase::NoSpeech),
+            // The Ask panel is the feedback; the pill would just cover it. A
+            // cancel is the user's own doing and needs no report.
+            Ok(Outcome::Asked) | Ok(Outcome::Cancelled) => self.emit(Phase::Idle),
             Err(e) => {
                 tracing::error!(%e, "dictation failed");
                 self.emit_error(e);
