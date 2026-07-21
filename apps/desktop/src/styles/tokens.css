@@ -155,3 +155,28 @@
   --pill-rim-light: inset 0 1px 1px rgb(255 255 255 / 0.6);
   --pill-rim-shade: inset 0 -1px 2px rgb(0 0 0 / 0.6);
 }
+
+/* macOS Accessibility → "Reduce transparency".
+ *
+ * Most of this app's surfaces are deliberately translucent so the native
+ * vibrancy shows through, and the recording pill is glass over the live
+ * desktop. That is precisely what this setting exists to switch off: for a
+ * user who has asked for it, text over a moving blurred backdrop is the
+ * problem, not the feature.
+ *
+ * Handled here in the palette rather than per-component, so a surface that
+ * gets its colour from a token is covered without knowing this exists. The
+ * blurs themselves are dropped alongside their colours (overlay.css).
+ */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --bg: #f2f2f4;
+  }
+
+  :root[data-surface="floating"] {
+    /* Opaque, and no longer a material: the pill becomes a plain dark capsule
+       with the same rim, so it still reads as the same object. */
+    --pill-fill: #1c1c1e;
+    --pill-rim: rgb(255 255 255 / 0.22);
+  }
+}
