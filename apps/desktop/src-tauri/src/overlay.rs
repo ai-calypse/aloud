@@ -513,20 +513,42 @@ fn resolve_monitor(window: &WebviewWindow) -> tauri::Result<Option<tauri::Monito
 /// Top-centres `window` on the monitor the user picked. Shared with the
 /// ask/agent panels, which drop from the top the way the Swift app's answer
 /// panel does — and follow the same display, so the three never split up.
+/// Done entirely in physical pixels, and that is the point.
+///
+/// Every input here is already physical — `Monitor::size`, `Monitor::position`
+/// and `Window::outer_size` all are — so converting them to logical first only
+/// creates a way to be wrong. It used to divide all three by the *monitor's*
+/// scale factor, including the window size, which is reported against whatever
+/// screen the window is currently on. Any disagreement between those two scales
+/// centred the window against a width it does not have; at 2x against 1x that
+/// is half a window's width of error, which is the difference between the wings
+/// sitting on the notch and sitting a third of the way across the menu bar.
+///
+/// Only the caller's margin is logical, because it is a design measurement.
 pub fn position_top_center(window: &WebviewWindow, top_margin: f64) -> tauri::Result<()> {
     let Some(monitor) = resolve_monitor(window)? else {
         return Ok(()); // headless; leave it wherever it is
     };
 
-    let scale = monitor.scale_factor();
-    let screen = monitor.size().to_logical::<f64>(scale);
-    let origin = monitor.position().to_logical::<f64>(scale);
-    let size = window.outer_size()?.to_logical::<f64>(scale);
+    let screen = monitor.size();
+    let origin = monitor.position();
+    let size = window.outer_size()?;
+    let x = origin.x + (screen.width as i32 - size.width as i32) / 2;
+    let y = origin.y + (top_margin * monitor.scale_factor()) as i32;
 
-    window.set_position(tauri::LogicalPosition::new(
-        origin.x + (screen.width - size.width) / 2.0,
-        origin.y + top_margin,
-    ))?;
+    // The one input that is not a constant of the display, and the only thing
+    // that can move a window nobody resized. Logged so that a misplaced overlay
+    // is a line to read rather than a thing to reproduce.
+    tracing::debug!(
+        screen_w = screen.width,
+        window_w = size.width,
+        scale = monitor.scale_factor(),
+        x,
+        y,
+        "positioning overlay"
+    );
+
+    window.set_position(tauri::PhysicalPosition::new(x, y))?;
     Ok(())
 }
 
