@@ -150,7 +150,7 @@ fn target_notch(window: &WebviewWindow) -> Option<crate::notch::Notch> {
 fn style_for(window: &WebviewWindow, phase: Phase) -> (OverlayStyle, Option<crate::notch::Notch>) {
     match settings(window.app_handle()).overlay_style {
         OverlayStyle::LiquidGlass => (OverlayStyle::LiquidGlass, None),
-        OverlayStyle::Pill => (OverlayStyle::Pill, target_notch(window)),
+        OverlayStyle::DropPill => (OverlayStyle::DropPill, target_notch(window)),
         OverlayStyle::Wings => match (matches!(phase, Phase::Error), target_notch(window)) {
             (false, Some(notch)) => (OverlayStyle::Wings, Some(notch)),
             _ => (OverlayStyle::LiquidGlass, None),
@@ -189,7 +189,7 @@ pub fn show(app: &AppHandle, phase: Phase) {
     let margin = match style {
         // Both top-welded styles anchor at the screen edge; only the floating
         // glass pill drops below the menu bar.
-        OverlayStyle::Wings | OverlayStyle::Pill => 0.0,
+        OverlayStyle::Wings | OverlayStyle::DropPill => 0.0,
         OverlayStyle::LiquidGlass => TOP_MARGIN,
     };
     if let Err(e) = position_top_center(&window, margin) {

@@ -177,7 +177,7 @@ rebuild:
 
 ```sh
 cd apps/desktop && pnpm exec vite --port 5199
-open "http://localhost:5199/overlay.html?style=pill&phase=recording"
+open "http://localhost:5199/overlay.html?style=dropPill&phase=recording"
 ```
 
 `?phase=`, `?style=` and `?dismiss=<ms>` drive it. Build the same kind of hatch

@@ -129,10 +129,17 @@ function useNotchPanel(style: OverlayStyle, run: number, dismissing: boolean) {
     // changes and never from inside a frame.
     const measure = () => {
       const computed = getComputedStyle(surfaceElement);
-      const notchWidth =
-        parseFloat(computed.getPropertyValue("--notch-w")) || NOTCH_FALLBACK.width;
-      const notchHeight =
-        parseFloat(computed.getPropertyValue("--notch-h")) || NOTCH_FALLBACK.height;
+      // A screen with no notch reports a real zero, which is different from the
+      // variable being absent (the browser preview, where there is no Rust to
+      // measure anything). `||` conflates the two and would invent a cutout on
+      // an iMac — the panel then reserves space to clear a notch that is not
+      // there and carries a strip of dead black. Only a non-number falls back.
+      const measured = (name: string, fallback: number) => {
+        const value = parseFloat(computed.getPropertyValue(name));
+        return Number.isFinite(value) ? value : fallback;
+      };
+      const notchWidth = measured("--notch-w", NOTCH_FALLBACK.width);
+      const notchHeight = measured("--notch-h", NOTCH_FALLBACK.height);
 
       // The reference's `baseRadius`: the cutout's own rounding, which every
       // other radius here is measured from.
@@ -298,9 +305,11 @@ function Overlay() {
   const [phase, setPhase] = useState<Phase>(preview ?? "idle");
   // Rust picks the style and pushes it on every show — including the swap back
   // to the pill for an error, which no wing is wide enough to show.
+  // Only what is drawn before Rust's first style event lands, so it matches the
+  // default in `Settings` rather than being a second opinion about it.
   const [style, setStyle] = useState<OverlayStyle>(
     (new URLSearchParams(location.search).get("style") as OverlayStyle) ??
-      "liquidGlass",
+      "dropPill",
   );
   const [error, setError] = useState<string | null>(null);
   const [download, setDownload] = useState<number | null>(null);
@@ -457,7 +466,7 @@ function Overlay() {
           )}
         </span>
       </div>
-    ) : style === "pill" ? (
+    ) : style === "dropPill" ? (
       // voice-dict's drop-down pill: a solid-black panel welded to the top,
       // rounded only along the bottom, with the wave and status sitting just
       // below the notch (the __notch spacer is the measured cutout height).
