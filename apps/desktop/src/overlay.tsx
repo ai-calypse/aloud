@@ -6,16 +6,25 @@ import React, {
   type ReactNode,
 } from "react";
 import ReactDOM from "react-dom/client";
-import {
-  CheckIcon,
-  CopyIcon,
-  LoaderCircleIcon,
-  TriangleAlertIcon,
-  XIcon,
-} from "lucide-react";
+import { CheckIcon, CopyIcon, LoaderCircleIcon, XIcon } from "lucide-react";
+import type { ToolUIPart } from "ai";
 import { commands, events, type OverlayStyle, type Phase } from "./lib/bindings";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import {
+  Tool,
+  ToolContent,
+  ToolHeader,
+  ToolInput,
+  ToolOutput,
+} from "@/components/ai-elements/tool";
+import {
+  Confirmation,
+  ConfirmationAction,
+  ConfirmationActions,
+  ConfirmationRequest,
+  ConfirmationTitle,
+} from "@/components/ai-elements/confirmation";
 import {
   pendingStep,
   withCall,
@@ -1008,51 +1017,59 @@ function AgentRun({
         </p>
       )}
 
-      {/* One line per tool: what is running and how it went. The arguments are
-          deliberately not shown here — they are a wall of JSON, and the only
-          moment they matter is when approving a write, below. */}
-      {run.steps.length > 0 && (
-        <ul className="agent__steps">
-          {run.steps.map((step, i) => (
-            <li key={`${step.name}-${i}`}>
-              <span className="agent__step">
-                <StepIcon step={step} pending={step === pending} />
-                <span className="agent__name">{labelFor(step.name, step.args)}</span>
-                <span className="agent__state">
-                  {stepStatus(step, step === pending)}
-                </span>
-              </span>
-              {/* Only what this tool is worth showing. A step with no
-                  registered view renders its label and nothing else. */}
-              {step !== pending && (
-                <span className="agent__body">{bodyFor(step.name, step.args)}</span>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      {/* One Tool per call. The state mapping is exact — AI Elements happens
+          to name the same five outcomes an Aloud run has, including the denied
+          one a cancelled confirmation produces. */}
+      {run.steps.map((step, i) => (
+        <Tool
+          key={`${step.name}-${i}`}
+          // Open on the step that is waiting for a decision, and on a failure.
+          // Everything else stays folded: a finished run is a list of things
+          // that worked, and expanding all of them buries the answer.
+          defaultOpen={step === pending || step.result?.success === false}
+        >
+          <ToolHeader
+            type={`tool-${step.name}`}
+            state={stateFor(step, step === pending)}
+            // The curated label, not the raw tool name. `tool-views` turns
+            // GMAIL_SEND_EMAIL and its arguments into "Sending an email to
+            // priya", and that is the whole reason it exists.
+            title={labelFor(step.name, step.args)}
+          />
+          <ToolContent>
+            {/* The registered view first, because it is the readable one; the
+                raw parameters sit under it for when they matter. */}
+            {bodyFor(step.name, step.args)}
+            <ToolInput input={step.args} />
+            {step.result && (
+              <ToolOutput
+                output={step.result.success ? step.result.message : undefined}
+                errorText={step.result.success ? undefined : step.result.message}
+              />
+            )}
+          </ToolContent>
+        </Tool>
+      ))}
 
       {pending && (
-        <div className="agent__confirm" role="group">
-          <p className="agent__confirm-title">
+        <Confirmation approval={{ id: pending.name }} state="approval-requested">
+          <ConfirmationTitle>
             {labelFor(pending.name, pending.args)} — this writes to {pending.app}.
-          </p>
-          {/* Approving a write without seeing what it will do is not a gate, so
-              the body shows here even though the step list is otherwise quiet. */}
-          <div className="agent__body">{bodyFor(pending.name, pending.args)}</div>
-          <div className="agent__actions">
-            <button className="agent__action" onClick={() => confirm(false)}>
-              Cancel
-            </button>
-            <button
-              className="agent__action agent__action--go"
-              autoFocus
-              onClick={() => confirm(true)}
-            >
-              Confirm
-            </button>
-          </div>
-        </div>
+          </ConfirmationTitle>
+          <ConfirmationRequest>
+            {/* Approving a write without seeing what it will do is not a gate,
+                so the body shows here even though the step list is quiet. */}
+            <div className="mb-3">{bodyFor(pending.name, pending.args)}</div>
+            <ConfirmationActions>
+              <ConfirmationAction variant="outline" onClick={() => confirm(false)}>
+                Cancel
+              </ConfirmationAction>
+              <ConfirmationAction autoFocus onClick={() => confirm(true)}>
+                Confirm
+              </ConfirmationAction>
+            </ConfirmationActions>
+          </ConfirmationRequest>
+        </Confirmation>
       )}
 
       {run.status && (
@@ -1069,25 +1086,17 @@ function AgentRun({
   );
 }
 
-function stepStatus(step: Step, pending: boolean): string {
-  if (step.result) return step.result.success ? "done" : "failed";
-  if (step.confirmed === false) return "cancelled";
-  if (pending) return "needs approval";
-  return "running…";
-}
-
-function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
-  if (step.result) {
-    return step.result.success ? (
-      <CheckIcon className="agent__icon" size={14} />
-    ) : (
-      <XIcon className="agent__icon agent__icon--bad" size={14} />
-    );
-  }
-  if (step.confirmed === false) return <XIcon className="agent__icon" size={14} />;
-  if (pending)
-    return <TriangleAlertIcon className="agent__icon agent__icon--warn" size={14} />;
-  return <LoaderCircleIcon className="agent__icon animate-spin" size={14} />;
+/**
+ * An Aloud step in the vocabulary `ToolHeader` speaks.
+ *
+ * The five states line up one-for-one, which is the reason this is a lookup
+ * and not an adapter: a call is running, waiting on the user, done, denied by
+ * that user, or failed.
+ */
+function stateFor(step: Step, pending: boolean): ToolUIPart["state"] {
+  if (step.result) return step.result.success ? "output-available" : "output-error";
+  if (step.confirmed === false) return "output-denied";
+  return pending ? "approval-requested" : "input-available";
 }
 
 /**
