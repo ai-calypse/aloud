@@ -640,11 +640,11 @@ export function SettingsView({
             {IS_MAC && (
               <Row
                 label="Style"
-                hint="Liquid glass floats below the menu bar; the drop-down pill and wings weld to the top edge. An error always uses a pill — a wing is too small to read one in."
+                hint="Both weld to the top edge. Wings stay inside the menu bar, and hand over to the drop-down pill whenever there is something to show that will not fit in one — a live transcript, an answer, or an error."
               >
                 <Value>
                   <Select
-                    value={settings.overlayStyle ?? "liquidGlass"}
+                    value={settings.overlayStyle ?? "dropPill"}
                     onValueChange={(v) =>
                       update({ overlayStyle: v as Settings["overlayStyle"] })
                     }
@@ -654,7 +654,6 @@ export function SettingsView({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="dropPill">Drop-down pill</SelectItem>
-                      <SelectItem value="liquidGlass">Liquid glass</SelectItem>
                       <SelectItem value="wings">Menu bar wings</SelectItem>
                     </SelectContent>
                   </Select>

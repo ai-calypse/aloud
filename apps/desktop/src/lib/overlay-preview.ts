@@ -22,6 +22,12 @@ export type PreviewCommand = {
   style?: OverlayStyle;
   /** `stream` types the answer in, so the panel can be watched chasing it. */
   ask?: "open" | "close" | "stream";
+  /**
+   * The live dictation transcript. `stream` includes a mid-way revision,
+   * because that is what whisper actually does and it is the case that can
+   * make the panel jitter — a preview that only ever grew would not show it.
+   */
+  partial?: "stream" | "clear";
   dismissing?: boolean;
   /** Rebuilds the panel's springs, which is how a changed --panel-* applies. */
   restart?: boolean;

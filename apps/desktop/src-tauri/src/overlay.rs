@@ -71,21 +71,6 @@ pub struct OverlayStyleChanged {
 }
 
 const LABEL: &str = "overlay";
-/// The streaming-transcript panel, shown below the pill while recording with
-/// streaming transcription on. Separate window so the pill stays small.
-const TRANSCRIPT_LABEL: &str = "transcript";
-/// The glass pill's top edge, in logical pixels from the top of the screen.
-///
-/// This is the pill's own edge and not the window's centre line: the overlay
-/// canvas is a fixed 640x420 that nothing is centred in any more (see
-/// `.overlay-root` in overlay.css), so the window's top edge and the pill's top
-/// edge are now the same point. 70 rather than the old 48 keeps the pill
-/// exactly where it has always been — it used to be centred in a 96pt window
-/// at margin 48, which put its edge at 48 + (96 - 52) / 2.
-const TOP_MARGIN: f64 = 70.0;
-/// The transcript panel drops below the pill; the pill is ~52pt tall at
-/// `TOP_MARGIN`, so this clears it with a little air.
-const TRANSCRIPT_TOP_MARGIN: f64 = 116.0;
 
 fn window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(LABEL)
@@ -144,16 +129,21 @@ fn target_notch(window: &WebviewWindow) -> Option<crate::notch::Notch> {
 /// and pads its content below the notch, so it takes the measurement but works
 /// on any screen. Wings *flank* the notch, so they only make sense on a notched
 /// macOS screen: off macOS, on an external display, or on an error (a wing is
-/// 40pt wide and the message would be invisible) they collapse to the glass
+/// 40pt wide and the message would be invisible) they fall back to the drop
 /// pill, exactly as `RecordingOverlay.swift` guards on `screenHasNotch` and
 /// `forceDropDownPill`.
+///
+/// The fallback used to be the glass capsule. It is the drop pill now that the
+/// capsule is gone — which is the better answer anyway: both weld to the top
+/// edge, so a wings user who hits one of these cases sees the same surface move
+/// rather than a different one appear somewhere else.
 fn style_for(window: &WebviewWindow, phase: Phase) -> (OverlayStyle, Option<crate::notch::Notch>) {
+    let notch = target_notch(window);
     match settings(window.app_handle()).overlay_style {
-        OverlayStyle::LiquidGlass => (OverlayStyle::LiquidGlass, None),
-        OverlayStyle::DropPill => (OverlayStyle::DropPill, target_notch(window)),
-        OverlayStyle::Wings => match (matches!(phase, Phase::Error), target_notch(window)) {
+        OverlayStyle::DropPill => (OverlayStyle::DropPill, notch),
+        OverlayStyle::Wings => match (matches!(phase, Phase::Error), notch) {
             (false, Some(notch)) => (OverlayStyle::Wings, Some(notch)),
-            _ => (OverlayStyle::LiquidGlass, None),
+            _ => (OverlayStyle::DropPill, notch),
         },
     }
 }
@@ -187,15 +177,10 @@ pub fn show(app: &AppHandle, phase: Phase) {
     ANSWERING.store(false, Ordering::SeqCst);
 
     let (style, notch) = style_for(&window, phase);
-    // Wings weld to the top edge; both pills hang below the menu bar. Same
-    // window, same positioning — only the anchor changes.
-    let margin = match style {
-        // Both top-welded styles anchor at the screen edge; only the floating
-        // glass pill drops below the menu bar.
-        OverlayStyle::Wings | OverlayStyle::DropPill => 0.0,
-        OverlayStyle::LiquidGlass => TOP_MARGIN,
-    };
-    if let Err(e) = position_top_center(&window, margin) {
+    // Every remaining style welds to the screen's top edge, so the anchor no
+    // longer depends on which one was picked. It did while the glass capsule
+    // floated below the menu bar.
+    if let Err(e) = position_top_center(&window, 0.0) {
         tracing::warn!(%e, "could not position overlay");
     }
     // Click-through: the pill must never steal focus or clicks from the app
@@ -557,40 +542,17 @@ pub fn send_level(app: &AppHandle, level: f32) {
     let _ = AudioLevel(level).emit_to(app, LABEL);
 }
 
-/// Sends the previewed words so far to the live-transcript panel.
+/// Sends the previewed words so far to the pill, which grows to fit them.
 ///
-/// The pill deliberately no longer shows this — a clipped 60-char line was a
-/// poor place to read a growing transcript, and the panel is the surface for it.
+/// This used to go to a second window that dropped below the pill. It goes to
+/// the pill itself now: the words are what the user is watching, and a panel
+/// welded to the notch can grow to hold them, which is the thing a fixed-width
+/// status line never could.
+///
+/// An empty string is how a caller says "there is no preview any more" — the
+/// pill falls back to its status word.
 pub fn send_partial(app: &AppHandle, text: &str) {
-    let _ = DictationPartial(text.to_string()).emit_to(app, TRANSCRIPT_LABEL);
-}
-
-/// Shows the streaming-transcript panel below the pill.
-///
-/// Click-through and never focused, so it cannot steal keystrokes from the app
-/// being dictated into. Called only where a preview has just been armed to fill
-/// it — the caller owns that decision, because it is the one that knows whether
-/// this capture is a dictation at all.
-pub fn show_transcript(app: &AppHandle) {
-    let Some(window) = app.get_webview_window(TRANSCRIPT_LABEL) else {
-        return;
-    };
-    if let Err(e) = position_top_center(&window, TRANSCRIPT_TOP_MARGIN) {
-        tracing::warn!(%e, "could not position transcript panel");
-    }
-    let _ = window.set_ignore_cursor_events(true);
-    let _ = window.show();
-    // Clear the last run's text *after* the show: a hidden window's webview is
-    // created lazily, so an event sent before it would land before anything is
-    // listening and the panel would flash the previous dictation. The panel
-    // treats an empty partial as "Listening…".
-    let _ = DictationPartial(String::new()).emit_to(app, TRANSCRIPT_LABEL);
-}
-
-pub fn hide_transcript(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(TRANSCRIPT_LABEL) {
-        let _ = window.hide();
-    }
+    let _ = DictationPartial(text.to_string()).emit_to(app, LABEL);
 }
 
 /// Sends the message the pill shows instead of a bare "Failed".

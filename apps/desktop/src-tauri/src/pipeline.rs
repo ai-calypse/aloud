@@ -128,15 +128,17 @@ impl Session {
     }
 }
 
-/// Whether a role's capture gets the live-transcript panel.
+/// Whether a role's capture gets the live transcript in the pill.
 ///
-/// Dictation only. Ask and agent already put the words in their own window, a
+/// Dictation only. Ask and agent grow the same panel into their own answer, a
 /// rewrite replaces a selection the user is looking at, and a meeting runs for
-/// an hour in the background — for all four the panel is a second, contradicting
-/// surface, and the preview behind it is a core spent on nothing.
+/// an hour in the background — for all four the running words would contradict
+/// what the panel is there to say, and the preview behind them is a core spent
+/// on nothing.
 fn shows_transcript(role: Option<Role>) -> bool {
     matches!(role, Some(Role::Hold | Role::Toggle))
 }
+
 
 /// What a stop takes out of the session: the capture, when it began, and the
 /// live preview that has been running alongside it.
@@ -261,16 +263,9 @@ impl Pipeline {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(linger).await;
                     crate::overlay::hide(&app);
-                    // Hidden with the pill so the finished transcript is
-                    // readable for the same linger, not yanked the instant the
-                    // paste lands.
-                    crate::overlay::hide_transcript(&app);
                 });
             }
-            Phase::Idle => {
-                crate::overlay::hide(&self.app);
-                crate::overlay::hide_transcript(&self.app);
-            }
+            Phase::Idle => crate::overlay::hide(&self.app),
         }
     }
 
@@ -375,7 +370,11 @@ impl Pipeline {
                 // an ask, and the panel and its preview go back with it.
                 if !shows_transcript(Some(role)) {
                     session.preview = None;
-                    crate::overlay::hide_transcript(&self.app);
+                    // The pill is now the transcript, so it is not hidden — it
+                    // is told the preview is over and falls back to its status
+                    // word. Without this it keeps showing the words the
+                    // superseded dictation had reached.
+                    crate::overlay::send_partial(&self.app, "");
                 }
             }
             return Ok(());
@@ -445,10 +444,6 @@ impl Pipeline {
                     Box::new(move |partial| crate::overlay::send_partial(&app, partial)),
                 )
             });
-        if preview.is_some() {
-            crate::overlay::show_transcript(&self.app);
-        }
-
         let tap = preview.as_ref().map(|p| p.tap());
         let recorder =
             match aloud_audio::Recorder::start(settings.selected_microphone.as_deref(), tap) {
