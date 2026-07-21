@@ -174,7 +174,7 @@ pub fn show(app: &AppHandle, phase: Phase) {
     HIDE_GENERATION.fetch_add(1, Ordering::SeqCst);
     // A dictation started over the top of an answer takes the window back: the
     // pill is click-through and drives its own dismissal again from here.
-    ANSWERING.store(false, Ordering::SeqCst);
+    PANEL_OPEN.store(false, Ordering::SeqCst);
 
     let (style, notch) = style_for(&window, phase);
     // Every remaining style welds to the screen's top edge, so the anchor no
@@ -242,28 +242,30 @@ static HIDE_GENERATION: AtomicU64 = AtomicU64::new(0);
 /// read, scrolled and dismissed by the user, not by the run that produced it.
 /// So the run's hide is suppressed while this is set, and only [`end_answer`]
 /// (Escape, the close button) or a new [`show`] takes the window away.
-static ANSWERING: AtomicBool = AtomicBool::new(false);
+static PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 
-/// Hands the overlay to the Ask panel, in place.
+/// Hands the overlay to Ask or Agent, in place.
 ///
 /// The drop-down panel is already on screen and already grown — it has been
 /// saying "Transcribing…" — so this only changes what the panel is allowed to
-/// do. The answer itself arrives as `AskEvent`s and the panel springs to fit
-/// it, which is the whole point of answering here instead of in a second window
+/// do. The content itself arrives as events and the panel springs to fit it,
+/// which is the whole point of answering here instead of in a second window
 /// that would appear over the top of this one.
-pub fn show_answer(app: &AppHandle) {
+pub fn show_panel(app: &AppHandle) {
     let Some(window) = window(app) else {
         tracing::warn!("overlay window missing");
         return;
     };
 
     HIDE_GENERATION.fetch_add(1, Ordering::SeqCst);
-    ANSWERING.store(true, Ordering::SeqCst);
+    PANEL_OPEN.store(true, Ordering::SeqCst);
 
     let notch = target_notch(&window);
-    // Forced rather than read from settings: the answer is drawn inside the
-    // drop-down panel's silhouette, and neither the glass capsule nor a 40pt
-    // wing has anywhere to put it.
+    // Forced rather than read from settings: the content is drawn inside the
+    // drop-down panel's silhouette, and a 40pt wing has nowhere to put it. The
+    // frontend makes the same call for the live transcript — see
+    // `effectiveStyle` in overlay.tsx — so a wings user sees the same notch
+    // pull down for a dictation, a question and an agent run alike.
     let style = OverlayStyleChanged {
         style: OverlayStyle::DropPill,
         notch_width: notch.map_or(0.0, |n| n.width),
@@ -331,7 +333,7 @@ fn track_cursor(app: &AppHandle) {
         let mut clickable = false;
         loop {
             tokio::time::sleep(CURSOR_POLL).await;
-            if !ANSWERING.load(Ordering::SeqCst) {
+            if !PANEL_OPEN.load(Ordering::SeqCst) {
                 return;
             }
             let Some(window) = window(&app) else { return };
@@ -389,9 +391,9 @@ fn point_in_panel(
         && cursor.1 <= origin.1 + height
 }
 
-/// Dismisses the answer panel, letting it collapse back into the notch first.
-pub fn end_answer(app: &AppHandle) {
-    if !ANSWERING.swap(false, Ordering::SeqCst) {
+/// Dismisses the panel, letting it collapse back into the notch first.
+pub fn end_panel(app: &AppHandle) {
+    if !PANEL_OPEN.swap(false, Ordering::SeqCst) {
         return;
     }
     if let Some(window) = window(app) {
@@ -408,8 +410,8 @@ pub fn hide(app: &AppHandle) {
     if window(app).is_none() {
         return;
     }
-    // The run that produced the answer is over, but the answer is not.
-    if ANSWERING.load(Ordering::SeqCst) {
+    // The run that produced the panel is over, but the panel is not.
+    if PANEL_OPEN.load(Ordering::SeqCst) {
         return;
     }
 

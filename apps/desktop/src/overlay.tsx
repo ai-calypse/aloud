@@ -6,9 +6,24 @@ import React, {
   type ReactNode,
 } from "react";
 import ReactDOM from "react-dom/client";
-import { CheckIcon, CopyIcon, XIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CopyIcon,
+  LoaderCircleIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from "lucide-react";
 import { commands, events, type OverlayStyle, type Phase } from "./lib/bindings";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { Shimmer } from "@/components/ai-elements/shimmer";
+import {
+  pendingStep,
+  withCall,
+  withResult,
+  type Run,
+  type Step,
+} from "./lib/agent-steps";
+import { bodyFor, labelFor } from "./lib/tool-views";
 import { notchPath } from "./lib/notch-shape";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import { createSpring } from "./lib/spring";
@@ -363,6 +378,27 @@ const PARTIAL_PREVIEW = [
 /** How fast `partial: "stream"` advances, in ms between revisions. */
 const PARTIAL_MS = 320;
 
+/** A canned agent run for the tuning page; see PreviewCommand. */
+const AGENT_PREVIEW: Run = {
+  heard: "Send Priya the release notes and draft a reply to Sam",
+  steps: [
+    {
+      name: "GMAIL_SEND_EMAIL",
+      app: "Gmail",
+      args: { recipient_email: "priya@example.com", subject: "Release notes" },
+      requiresConfirmation: true,
+      confirmed: true,
+      result: { success: true, message: "Sent" },
+    },
+    {
+      name: "GMAIL_CREATE_EMAIL_DRAFT",
+      app: "Gmail",
+      args: { recipient_email: "sam@example.com", subject: "Re: Thursday" },
+      requiresConfirmation: true,
+    },
+  ],
+};
+
 /**
  * The recording pill. Rust drives the window's visibility, so this only ever
  * renders the current phase.
@@ -390,11 +426,15 @@ function Overlay() {
   // Latched once a run has produced words; see `effectiveStyle`.
   const [droppedDown, setDroppedDown] = useState(false);
   const [ask, setAsk] = useState<Ask | null>(null);
-  // The phase listener subscribes once and has to know whether an answer is on
+  const [agent, setAgent] = useState<Run | null>(null);
+  // Either of them owns the panel; almost everything below cares only that one
+  // of them does, not which.
+  const panelOpen = ask !== null || agent !== null;
+  // The phase listener subscribes once and has to know whether a panel is on
   // screen. A ref rather than the state it mirrors: re-subscribing on every
   // streamed token would tear down and rebuild the listener 50 times an answer.
-  const askOpen = useRef(ask !== null);
-  askOpen.current = ask !== null;
+  const openRef = useRef(panelOpen);
+  openRef.current = panelOpen;
   // Rust tells us the window is about to go away, so the panel can collapse
   // back into the notch while there is still a surface to draw it on.
   const [dismissing, setDismissing] = useState(false);
@@ -424,7 +464,7 @@ function Overlay() {
   // box. Reported from the one place that already computes it, and only when
   // it changes: the target moves on every remeasure, which while an answer is
   // streaming is roughly once a frame.
-  const transcript = !ask && phase === "recording" && partial.trim().length > 0;
+  const transcript = !panelOpen && phase === "recording" && partial.trim().length > 0;
 
   /**
    * The style actually drawn, which is not always the one that was chosen.
@@ -440,7 +480,7 @@ function Overlay() {
    * before the panel has anything to say about the result.
    */
   const effectiveStyle: OverlayStyle =
-    style === "wings" && (droppedDown || ask) ? "dropPill" : style;
+    style === "wings" && (droppedDown || panelOpen) ? "dropPill" : style;
 
   const reported = useRef("");
   const reportBox = useCallback((width: number, height: number) => {
@@ -493,7 +533,7 @@ function Overlay() {
         // `idle`, and the run ending is exactly when the answer is finished
         // and wants reading. Rust suppresses the matching window hide for the
         // same reason (ANSWERING in overlay.rs); this is its other half.
-        if (!askOpen.current) setDismissing(true);
+        if (!openRef.current) setDismissing(true);
         return;
       }
 
@@ -507,6 +547,7 @@ function Overlay() {
         // A dictation started over the top of an answer takes the panel back;
         // `overlay::show` has already cleared its side of the same state.
         setAsk(null);
+        setAgent(null);
         // Rust no longer sends an empty partial to clear the last run: there is
         // no separate window to show, so there is no show to hang it off.
         setPartial("");
@@ -622,6 +663,7 @@ function Overlay() {
         if (command.phase === "recording") {
           clearInterval(typing);
           setAsk(null);
+          setAgent(null);
           setError(null);
           setPartial("");
           setDroppedDown(false);
@@ -632,9 +674,24 @@ function Overlay() {
       if (command.ask === "close") {
         clearInterval(typing);
         setAsk(null);
+        setAgent(null);
       }
       if (command.ask === "stream") stream();
       if (command.partial === "stream") dictate();
+      if (command.agent === "run") {
+        setAsk(null);
+        setAgent({
+          ...AGENT_PREVIEW,
+          steps: [AGENT_PREVIEW.steps[0]],
+          finished:
+            "Sent the release notes to Priya. The reply to Sam is drafted and waiting in Gmail.",
+        });
+      }
+      if (command.agent === "pending") {
+        setAsk(null);
+        setAgent(AGENT_PREVIEW);
+      }
+      if (command.agent === "close") setAgent(null);
       if (command.partial === "clear") {
         clearInterval(typing);
         setPartial("");
@@ -651,17 +708,59 @@ function Overlay() {
     };
   }, []);
 
-  // Escape dismisses the answer. Only while one is up: the window is
+  // An agent run. Its own listener beside the ask one, because they are
+  // separate event streams that happen to share a surface.
+  useEffect(() => {
+    const unlisten = events.agent.listen(({ payload }) => {
+      switch (payload.kind) {
+        case "runStarted":
+          // A new run resets the panel; it is reused, not recreated.
+          setAgent({ heard: payload.value, steps: [] });
+          break;
+        case "toolCall":
+          setAgent((r) => r && { ...r, steps: withCall(r.steps, payload.value), status: undefined });
+          break;
+        case "toolResult":
+          setAgent((r) => r && { ...r, steps: withResult(r.steps, payload.value), status: undefined });
+          break;
+        case "status":
+          setAgent((r) => r && { ...r, status: payload.value });
+          break;
+        case "runFinished":
+          // The panel stays up: a run is something you check succeeded, and
+          // Rust suppresses the hide the finishing run would otherwise trigger.
+          setAgent((r) => r && { ...r, finished: payload.value, status: undefined });
+          break;
+        case "runError":
+          setAgent((r) => r && { ...r, error: payload.value, status: undefined });
+          break;
+      }
+    });
+    return () => {
+      unlisten.then((off) => off());
+    };
+  }, []);
+
+  // Follow a long run to its newest step, the same as the answer stream.
+  useEffect(() => {
+    const el = answerRef.current;
+    if (el && agent && !agent.finished) el.scrollTop = el.scrollHeight;
+  }, [agent]);
+
+  // Escape dismisses the panel. Only while one is up: the window is
   // click-through and unfocused otherwise, so this cannot fire, but the guard
   // keeps a stray keystroke from asking Rust to hide a pill mid-dictation.
   useEffect(() => {
-    if (!ask) return;
+    if (!panelOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") void commands.closeAsk();
+      // `closeAgent` is not `closeAsk`: it also abandons any pending
+      // confirmation, which is what makes Escape read as "no" rather than
+      // leaving a write waiting on a channel nobody will answer.
+      if (e.key === "Escape") void (agent ? commands.closeAgent() : commands.closeAsk());
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ask]);
+  }, [panelOpen, agent]);
 
   // Follow the stream to the bottom, and stop once it finishes — the same
   // simpler-than-tracking-manual-scroll choice the old Ask window made.
@@ -733,7 +832,7 @@ function Overlay() {
       // Not `--idle` while an answer is up, whatever the phase says: `--idle`
       // is `display: none`, and the run that produced the answer has ended.
       <div
-        className={`drop-pill drop-pill--${ask ? "answering" : phase}`}
+        className={`drop-pill drop-pill--${panelOpen ? "answering" : phase}`}
         ref={panel.surface}
       >
         {/* The panel's whole silhouette. A path and not a border-radius,
@@ -749,7 +848,11 @@ function Overlay() {
         <span className="drop-pill__notch" aria-hidden />
         <div
           className={`drop-pill__body${
-            ask ? " drop-pill__body--ask" : transcript ? " drop-pill__body--transcript" : ""
+            panelOpen
+              ? " drop-pill__body--ask"
+              : transcript
+                ? " drop-pill__body--transcript"
+                : ""
           }`}
           ref={panel.content}
         >
@@ -757,6 +860,8 @@ function Overlay() {
             // Keyed on the question so a new one resets the copied state and
             // the follow-up field.
             <Answer key={ask.question} ask={ask} answerRef={answerRef} />
+          ) : agent ? (
+            <AgentRun key={agent.heard} run={agent} bodyRef={answerRef} />
           ) : (
             <PhaseSwap phase={phase}>
               <Indicator phase={phase} />
@@ -799,30 +904,23 @@ function Answer({
   ask: Ask;
   answerRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  const [copied, setCopied] = useState(false);
   const [typed, setTyped] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // DOM focus only, never a window focus request: `show_answer` already made
-  // the overlay key when the answer opened, and it is the only thing that takes
+  // DOM focus only, never a window focus request: `show_panel` already made the
+  // overlay key when the answer opened, and it is the only thing that takes
   // focus from the app being dictated into.
   useEffect(() => {
     inputRef.current?.focus();
   }, [ask.question]);
 
   return (
-    <div className="ask">
-      <p className="ask__question">{ask.question}</p>
-      <div className="ask__answer" ref={answerRef}>
-        {ask.error ? (
-          <p className="ask__error">{ask.error}</p>
-        ) : ask.answer ? (
-          <MessageResponse>{ask.answer}</MessageResponse>
-        ) : (
-          <span className="dot dot--transcribing" aria-hidden />
-        )}
-      </div>
-      <div className="ask__footer">
+    <Panel
+      title={ask.question}
+      bodyRef={answerRef}
+      copyText={ask.answer}
+      onClose={() => void commands.closeAsk()}
+      footer={
         <input
           ref={inputRef}
           className="ask__input"
@@ -849,20 +947,197 @@ function Answer({
             void commands.askText(question);
           }}
         />
-        <button
-          className="ask__button"
-          aria-label={copied ? "Copied" : "Copy"}
-          onClick={() =>
-            void navigator.clipboard.writeText(ask.answer).then(() => setCopied(true))
-          }
-        >
-          {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-        </button>
-        <button
-          className="ask__button"
-          aria-label="Close"
-          onClick={() => void commands.closeAsk()}
-        >
+      }
+    >
+      {ask.error ? (
+        <p className="ask__error">{ask.error}</p>
+      ) : ask.answer ? (
+        <MessageResponse>{ask.answer}</MessageResponse>
+      ) : (
+        <span className="dot dot--transcribing" aria-hidden />
+      )}
+    </Panel>
+  );
+}
+
+
+/**
+ * An agent run, in the notch panel: what was heard, the tools it resolved to,
+ * the approval a write has to pass, and the closing answer.
+ *
+ * Ported from the Agent window rather than rewritten — the flow and its
+ * comments were right, only the surface changed. The one part that did get
+ * rewritten is the confirmation, which used to be a shadcn Alert inside a
+ * card: a bordered box within a black panel reads as a card someone dropped
+ * in, where this surface wants the approval to be part of it.
+ */
+function AgentRun({
+  run,
+  bodyRef,
+}: {
+  run: Run;
+  bodyRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const pending = pendingStep(run);
+
+  const confirm = (approved: boolean) => void commands.confirmAgent(approved);
+
+  return (
+    <Panel
+      title={run.heard}
+      bodyRef={bodyRef}
+      // Nothing to copy until the run has said something.
+      copyText={run.finished || undefined}
+      onClose={() => void commands.closeAgent()}
+      footer={
+        <span className="agent__trail">
+          {run.steps.length > 0
+            ? labelFor(
+                run.steps[run.steps.length - 1].name,
+                run.steps[run.steps.length - 1].args,
+              )
+            : ""}
+        </span>
+      }
+    >
+      {/* Before any tool call resolves, we're still parsing the transcript. */}
+      {run.steps.length === 0 && !run.error && !run.status && (
+        <p className="agent__status">
+          <LoaderCircleIcon className="size-4 animate-spin" />
+          <Shimmer>Understanding…</Shimmer>
+        </p>
+      )}
+
+      {/* One line per tool: what is running and how it went. The arguments are
+          deliberately not shown here — they are a wall of JSON, and the only
+          moment they matter is when approving a write, below. */}
+      {run.steps.length > 0 && (
+        <ul className="agent__steps">
+          {run.steps.map((step, i) => (
+            <li key={`${step.name}-${i}`}>
+              <span className="agent__step">
+                <StepIcon step={step} pending={step === pending} />
+                <span className="agent__name">{labelFor(step.name, step.args)}</span>
+                <span className="agent__state">
+                  {stepStatus(step, step === pending)}
+                </span>
+              </span>
+              {/* Only what this tool is worth showing. A step with no
+                  registered view renders its label and nothing else. */}
+              {step !== pending && (
+                <span className="agent__body">{bodyFor(step.name, step.args)}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {pending && (
+        <div className="agent__confirm" role="group">
+          <p className="agent__confirm-title">
+            {labelFor(pending.name, pending.args)} — this writes to {pending.app}.
+          </p>
+          {/* Approving a write without seeing what it will do is not a gate, so
+              the body shows here even though the step list is otherwise quiet. */}
+          <div className="agent__body">{bodyFor(pending.name, pending.args)}</div>
+          <div className="agent__actions">
+            <button className="agent__action" onClick={() => confirm(false)}>
+              Cancel
+            </button>
+            <button
+              className="agent__action agent__action--go"
+              autoFocus
+              onClick={() => confirm(true)}
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
+      )}
+
+      {run.status && (
+        <p className="agent__status">
+          <LoaderCircleIcon className="size-4 animate-spin" />
+          <Shimmer>{run.status}</Shimmer>
+        </p>
+      )}
+
+      {/* The run's closing answer — the whole point of the run. */}
+      {run.finished && <MessageResponse>{run.finished}</MessageResponse>}
+      {run.error && <p className="ask__error">{run.error}</p>}
+    </Panel>
+  );
+}
+
+function stepStatus(step: Step, pending: boolean): string {
+  if (step.result) return step.result.success ? "done" : "failed";
+  if (step.confirmed === false) return "cancelled";
+  if (pending) return "needs approval";
+  return "running…";
+}
+
+function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
+  if (step.result) {
+    return step.result.success ? (
+      <CheckIcon className="agent__icon" size={14} />
+    ) : (
+      <XIcon className="agent__icon agent__icon--bad" size={14} />
+    );
+  }
+  if (step.confirmed === false) return <XIcon className="agent__icon" size={14} />;
+  if (pending)
+    return <TriangleAlertIcon className="agent__icon agent__icon--warn" size={14} />;
+  return <LoaderCircleIcon className="agent__icon animate-spin" size={14} />;
+}
+
+/**
+ * The chrome both Ask and Agent draw inside the notch panel: what was heard,
+ * a rule, the scrolling body, and a footer.
+ *
+ * This is what `components/ui/panel-shell` was for the two windows that no
+ * longer exist. It is not that component moved here — that one is a shadcn
+ * Card sized to a window, and none of that survives the move to a surface
+ * welded to the notch. What is shared is the shape, so only the shape is.
+ */
+function Panel({
+  title,
+  bodyRef,
+  /** Omit to hide the copy button — there is nothing worth copying yet. */
+  copyText,
+  onClose,
+  footer,
+  children,
+}: {
+  title: string;
+  bodyRef?: React.RefObject<HTMLDivElement | null>;
+  copyText?: string;
+  onClose: () => void;
+  /** Sits left of copy/close. */
+  footer?: ReactNode;
+  children: ReactNode;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <div className="ask">
+      <p className="ask__question">{title}</p>
+      <div className="ask__answer" ref={bodyRef}>
+        {children}
+      </div>
+      <div className="ask__footer">
+        {footer}
+        {copyText !== undefined && (
+          <button
+            className="ask__button"
+            aria-label={copied ? "Copied" : "Copy"}
+            onClick={() =>
+              void navigator.clipboard.writeText(copyText).then(() => setCopied(true))
+            }
+          >
+            {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+          </button>
+        )}
+        <button className="ask__button" aria-label="Close" onClick={onClose}>
           <XIcon size={14} />
         </button>
       </div>

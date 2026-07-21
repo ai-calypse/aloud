@@ -37,7 +37,7 @@ fn emit(app: &AppHandle, event: AskEvent) {
 
 /// Shows the panel and streams an answer to `question` into it.
 pub async fn answer(app: &AppHandle, question: String, settings: &Settings) -> Result<()> {
-    crate::overlay::show_answer(app);
+    crate::overlay::show_panel(app);
     emit(app, AskEvent::Question(question.clone()));
 
     match stream_answer(app, &question, settings).await {
@@ -101,5 +101,5 @@ pub async fn ask_text(
 #[tauri::command]
 #[specta::specta]
 pub fn close_ask(app: AppHandle) {
-    crate::overlay::end_answer(&app);
+    crate::overlay::end_panel(&app);
 }

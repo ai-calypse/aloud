@@ -5,10 +5,13 @@
 //!
 //!   transcribe → parse intent → (confirm if it writes) → dispatch → report
 //!
-//! Reads run straight through; writes surface a confirmation panel and wait
-//! for a yes. The panel mirrors `ask.rs`: a focused, always-on-top window that
-//! Escape dismisses. The difference is it collects a decision, so it holds a
-//! one-shot channel that the approve/reject commands resolve.
+//! Reads run straight through; writes surface a confirmation and wait for a
+//! yes. There is no Agent window: like Ask, the run is drawn in the overlay's
+//! drop-down panel, which grows out of the notch and holds the step list, the
+//! confirmation and the closing answer. The difference from Ask is that this
+//! one collects a decision, so it holds a one-shot channel that the
+//! approve/reject commands resolve — and that the panel has to take a click
+//! part way through a run rather than only at the end.
 
 use aloud_store::Settings;
 use anyhow::{bail, Result};
@@ -19,7 +22,8 @@ use tauri_specta::Event;
 use tokio::sync::oneshot;
 use tracing::Instrument;
 
-const LABEL: &str = "agent";
+/// The window these events go to — the overlay's, not one of Agent's own.
+const LABEL: &str = "overlay";
 /// How long a write waits for a yes before giving up and declining.
 const CONFIRM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
@@ -101,7 +105,7 @@ fn emit(app: &AppHandle, event: AgentEvent) {
 
 /// Runs the full agent flow for a transcript. Called by the pipeline.
 pub async fn run(app: &AppHandle, transcript: String, settings: &Settings) -> Result<()> {
-    show(app);
+    crate::overlay::show_panel(app);
     emit(app, AgentEvent::RunStarted(transcript.clone()));
 
     match execute(app, &transcript, settings).await {
@@ -296,23 +300,8 @@ pub fn confirm_agent(app: AppHandle, approved: bool) {
     }
 }
 
-fn show(app: &AppHandle) {
-    let Some(window) = app.get_webview_window(LABEL) else {
-        tracing::warn!("agent window missing");
-        return;
-    };
-    // Same top-centre drop as the ask panel; the frontend grows it downward.
-    if let Err(e) = crate::overlay::position_top_center(&window, 12.0) {
-        tracing::warn!(%e, "could not position agent panel");
-    }
-    let _ = window.show();
-    let _ = window.set_focus();
-}
-
 pub fn hide(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(LABEL) {
-        let _ = window.hide();
-    }
+    crate::overlay::end_panel(app);
 }
 
 /// Lets the panel dismiss itself on Escape or after showing a result.

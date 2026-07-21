@@ -408,6 +408,143 @@
   }
 }
 
+/* --- An agent run -------------------------------------------------------
+ *
+ * Everything here lives inside the shared panel chrome above, so this is only
+ * the run's own content: the step list, the approval a write has to pass, and
+ * the thinking line between them. */
+
+/* One line per tool. Quiet on purpose — the closing answer is the payload, and
+   the steps are there to show the run is moving and where it got to. */
+.agent__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent__step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent__state {
+  flex: none;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.45);
+}
+
+.agent__icon {
+  flex: none;
+  color: rgb(255 255 255 / 0.55);
+}
+
+.agent__icon--bad {
+  color: var(--sys-red);
+}
+
+.agent__icon--warn {
+  color: var(--warning);
+}
+
+/* Indented under its step's label rather than its icon, so the eye reads a
+   tool and then what that tool is about to do. */
+.agent__body {
+  display: block;
+  padding-left: 22px;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.7);
+}
+
+.agent__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: rgb(255 255 255 / 0.6);
+}
+
+/* The approval gate.
+ *
+ * Deliberately not a bordered card: a box inside a black panel reads as
+ * something dropped in from another surface. A hairline above it and a warmer
+ * ink are enough to say "this one is different and it is waiting on you",
+ * which is the whole job — the panel is already the thing in front of them. */
+.agent__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgb(255 255 255 / 0.1);
+}
+
+.agent__confirm .agent__body {
+  padding-left: 0;
+}
+
+.agent__confirm-title {
+  margin: 0;
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.agent__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.agent__action {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 0.06);
+  color: var(--pill-ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: default;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.agent__action:hover {
+  background: rgb(255 255 255 / 0.16);
+}
+
+/* The one that fires the write. Solid, because a confirm that looks the same
+   as its cancel is a coin toss. */
+.agent__action--go {
+  border-color: transparent;
+  background: var(--sys-blue);
+}
+
+.agent__action--go:hover {
+  background: color-mix(in srgb, var(--sys-blue) 85%, white);
+}
+
+/* The last tool that ran, in the footer beside copy/close — a one-line "where
+   is it up to" that survives the step list being scrolled out of view. */
+.agent__trail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ask__error {
   margin: 0;
   color: var(--sys-orange);
