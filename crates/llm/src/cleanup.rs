@@ -87,6 +87,7 @@ pub async fn clean(options: Options<'_>, raw: &str) -> Result<String> {
             // contain it *at the time*, and the list has been edited since —
             // the span is the only record of what the prompt actually saw.
             vocabulary = %options.vocabulary.join(", "),
+            usage = tracing::field::Empty,
         ))
         .await?;
 
