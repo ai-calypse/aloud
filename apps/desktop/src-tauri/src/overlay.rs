@@ -58,37 +58,12 @@ pub struct OverlayStyleChanged {
     pub notch_height: f64,
 }
 
-/// Sent just before the overlay window is hidden, so it can animate out.
-///
-/// The window is hidden by the OS, which cannot be animated — it blinks out on
-/// whatever frame `hide()` lands. This gives the webview a fixed window in
-/// which to play its exit before that happens.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
-#[tauri_specta(event_name = "overlay-dismiss")]
-pub struct OverlayDismiss;
-
 const LABEL: &str = "overlay";
 /// The streaming-transcript panel, shown below the pill while recording with
 /// streaming transcription on. Separate window so the pill stays small.
 const TRANSCRIPT_LABEL: &str = "transcript";
 /// Distance from the top of the screen, in logical pixels. Clears the menu bar.
 const TOP_MARGIN: f64 = 48.0;
-/// How long the webview gets to play its exit before the window is hidden.
-///
-/// Must stay in step with the `--leaving` animations in `styles/overlay.css`,
-/// which is a duplicated constant across two languages and no build step will
-/// catch a drift. Too short truncates the exit mid-flight; too long leaves an
-/// invisible window sitting on screen. Exits are deliberately quicker than the
-/// entrances they mirror — the user is done, and waiting to be told so.
-const EXIT: std::time::Duration = std::time::Duration::from_millis(200);
-
-/// Bumped by every show and every hide.
-///
-/// A hide is now delayed by [`EXIT`], and in that gap the user can press the
-/// hotkey again — the pipeline re-shows the window, and the delayed hide would
-/// then blank a pill that is live. The delayed hide only fires if this still
-/// reads what it did when the hide was scheduled.
-static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// The transcript panel drops below the pill; the pill is ~52pt tall at
 /// `TOP_MARGIN`, so this clears it with a little air.
 const TRANSCRIPT_TOP_MARGIN: f64 = 116.0;
@@ -185,9 +160,6 @@ pub fn show(app: &AppHandle, phase: Phase) {
         return;
     };
 
-    // Cancels a hide still waiting out its exit animation (see `hide`).
-    GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
     let (style, notch) = style_for(&window, phase);
     // Wings weld to the top edge; both pills hang below the menu bar. Same
     // window, same positioning — only the anchor changes.
@@ -224,37 +196,10 @@ pub fn show(app: &AppHandle, phase: Phase) {
     }
 }
 
-/// Plays the overlay's exit, then hides the window [`EXIT`] later.
-///
-/// `WebviewWindow::hide` is the OS removing the window, so there is no frame in
-/// which the webview could animate: the pill was on screen and then simply was
-/// not. Emitting first and hiding on a timer is what gives the exit somewhere
-/// to happen.
 pub fn hide(app: &AppHandle) {
-    let Some(overlay) = window(app) else { return };
-
-    let generation = GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-
-    // If the webview cannot be told, hiding late would just leave the pill on
-    // screen for an extra 200ms with no animation to show for it.
-    if let Err(e) = OverlayDismiss.emit_to(app, LABEL) {
-        tracing::warn!(%e, "could not send overlay dismiss");
-        let _ = overlay.hide();
-        return;
+    if let Some(window) = window(app) {
+        let _ = window.hide();
     }
-
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(EXIT).await;
-        // A dictation started during the exit: the pipeline has already
-        // re-shown the window, and hiding it here would blank a live pill.
-        if GENERATION.load(std::sync::atomic::Ordering::SeqCst) != generation {
-            return;
-        }
-        if let Some(window) = window(&app) {
-            let _ = window.hide();
-        }
-    });
 }
 
 /// Index of the monitor called `wanted`, or None when nothing is called that.
