@@ -192,8 +192,10 @@ export const commands = {
 	 *  streaming, the panel or the credential check is duplicated to serve one.
 	 */
 	askText: (question: string) => typedError<null, string>(__TAURI_INVOKE("ask_text", { question })),
-	/**  Lets the panel dismiss itself on Escape or a click outside. */
+	/**  Lets the panel dismiss itself on Escape or the close button. */
 	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
+	/**  Records the panel's settled box, so the click region can be exactly it. */
+	setPanelBox: (width: number | null, height: number | null) => __TAURI_INVOKE<void>("set_panel_box", { width, height }),
 	/**  Resolves the pending confirmation. Called by the panel's Yes/No buttons. */
 	confirmAgent: (approved: boolean) => __TAURI_INVOKE<void>("confirm_agent", { approved }),
 	/**  Lets the panel dismiss itself on Escape or after showing a result. */

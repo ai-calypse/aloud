@@ -7,7 +7,7 @@
 use crate::pipeline::Phase;
 use aloud_store::settings::{OverlayDisplay, OverlayStyle};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_specta::Event;
@@ -182,6 +182,9 @@ pub fn show(app: &AppHandle, phase: Phase) {
     // Cancels a pending exit before it can hide the window out from under the
     // dictation that is starting now.
     HIDE_GENERATION.fetch_add(1, Ordering::SeqCst);
+    // A dictation started over the top of an answer takes the window back: the
+    // pill is click-through and drives its own dismissal again from here.
+    ANSWERING.store(false, Ordering::SeqCst);
 
     let (style, notch) = style_for(&window, phase);
     // Wings weld to the top edge; both pills hang below the menu bar. Same
@@ -225,7 +228,17 @@ pub fn show(app: &AppHandle, phase: Phase) {
 /// spring move sub-pixel distances, and waiting for them only delays the window
 /// teardown by time the user cannot see. Long enough that the collapse reads;
 /// short enough that a dictation ending does not feel like it hangs.
-const EXIT_MS: u64 = 260;
+/// One hold for both a 40pt status pill and a 330pt answer panel, which is not
+/// the compromise it looks like: a spring's time to reach its target is set by
+/// its response, not by how far it has to travel, so both land on the cutout at
+/// the same moment. Measured at ~250ms for each (the sampling recipe in the
+/// aloud-motion skill), with a little margin here.
+///
+/// There is an upper bound too, and it is closer than it used to be. The close
+/// spring rings past the cutout and back out to ~44pt around 600ms; the drawn
+/// size is floored so the undershoot never shows, but the return *would* — the
+/// panel would visibly re-inflate. The window has to be gone well before that.
+const EXIT_MS: u64 = 280;
 
 /// Distinguishes "the hide I scheduled" from "a hide that has been overtaken".
 ///
@@ -236,8 +249,182 @@ const EXIT_MS: u64 = 260;
 /// with no overlay, which is exactly the failure the user cannot diagnose.
 static HIDE_GENERATION: AtomicU64 = AtomicU64::new(0);
 
+/// True while the Ask panel owns the overlay window.
+///
+/// Every dictation ends by emitting a phase, and both Ask paths end on
+/// `Phase::Idle` — which hides the overlay. That is right when the overlay is a
+/// status pill and wrong now that the answer is drawn *in* it: the panel is
+/// read, scrolled and dismissed by the user, not by the run that produced it.
+/// So the run's hide is suppressed while this is set, and only [`end_answer`]
+/// (Escape, the close button) or a new [`show`] takes the window away.
+static ANSWERING: AtomicBool = AtomicBool::new(false);
+
+/// Hands the overlay to the Ask panel, in place.
+///
+/// The drop-down panel is already on screen and already grown — it has been
+/// saying "Transcribing…" — so this only changes what the panel is allowed to
+/// do. The answer itself arrives as `AskEvent`s and the panel springs to fit
+/// it, which is the whole point of answering here instead of in a second window
+/// that would appear over the top of this one.
+pub fn show_answer(app: &AppHandle) {
+    let Some(window) = window(app) else {
+        tracing::warn!("overlay window missing");
+        return;
+    };
+
+    HIDE_GENERATION.fetch_add(1, Ordering::SeqCst);
+    ANSWERING.store(true, Ordering::SeqCst);
+
+    let notch = target_notch(&window);
+    // Forced rather than read from settings: the answer is drawn inside the
+    // drop-down panel's silhouette, and neither the glass capsule nor a 40pt
+    // wing has anywhere to put it.
+    let style = OverlayStyleChanged {
+        style: OverlayStyle::DropPill,
+        notch_width: notch.map_or(0.0, |n| n.width),
+        notch_height: notch.map_or(0.0, |n| n.height),
+    };
+    // Only moves anything if the run was drawing the glass pill, which hangs
+    // below the menu bar rather than welding to it.
+    if let Err(e) = position_top_center(&window, 0.0) {
+        tracing::warn!(%e, "could not position answer panel");
+    }
+    let _ = window.show();
+    if let Err(e) = style.emit_to(app, LABEL) {
+        tracing::warn!(%e, "could not send overlay style");
+    }
+    // Keys but not clicks, yet. The panel is typed into and dismissed with
+    // Escape, and `ignoresMouseEvents` does not gate the keyboard, so it can
+    // take focus while still letting every click through to whatever is
+    // underneath. Clicks are handed to it only while the pointer is actually
+    // over it — see [`track_cursor`].
+    let _ = window.set_ignore_cursor_events(true);
+    let _ = window.set_focus();
+    track_cursor(app);
+}
+
+/// How often the pointer is checked against the panel while an answer is up.
+///
+/// The pointer has to be somewhere for a frame or two before a click can
+/// follow it, so this is imperceptible in the direction that matters. Only
+/// runs while an answer is on screen.
+const CURSOR_POLL: Duration = Duration::from_millis(60);
+
+/// The settled size of the drop-down panel, in logical pixels, reported by the
+/// panel itself. Rounded — this decides which side of an edge the pointer is
+/// on, not layout.
+static PANEL_W: AtomicU32 = AtomicU32::new(0);
+static PANEL_H: AtomicU32 = AtomicU32::new(0);
+
+/// Records the panel's settled box, so the click region can be exactly it.
+#[tauri::command]
+#[specta::specta]
+pub fn set_panel_box(width: f64, height: f64) {
+    PANEL_W.store(width.max(0.0) as u32, Ordering::Relaxed);
+    PANEL_H.store(height.max(0.0) as u32, Ordering::Relaxed);
+}
+
+/// Gives the window clicks only while the pointer is over the answer panel.
+///
+/// The overlay's canvas is deliberately far larger than anything drawn in it
+/// (see overlay.css), which is free while it is click-through and ruinous the
+/// moment it is not: a 1000x720 rectangle over the top of the screen that
+/// swallows every click and keystroke aimed at the app underneath. macOS has
+/// no per-region hit testing — `ignoresMouseEvents` is the whole window — and
+/// a window that is ignoring the mouse cannot see it move, so the pointer
+/// cannot be tracked from inside the webview either. Polling it from out here
+/// is the way round that, and it is why this is a loop rather than an event.
+///
+/// ponytail: a poll. `NSTrackingArea` on the panel's own rect would be
+/// event-driven, at the cost of maintaining an AppKit view that shadows a box
+/// the web layer already owns.
+fn track_cursor(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // Matches what `show_answer` just set, so the first poll only acts if
+        // the pointer really is over the panel.
+        let mut clickable = false;
+        loop {
+            tokio::time::sleep(CURSOR_POLL).await;
+            if !ANSWERING.load(Ordering::SeqCst) {
+                return;
+            }
+            let Some(window) = window(&app) else { return };
+            let over = cursor_over_panel(&window).unwrap_or(false);
+            if over != clickable {
+                clickable = over;
+                let _ = window.set_ignore_cursor_events(!over);
+            }
+        }
+    });
+}
+
+/// Whether the pointer is inside the panel's box. Just the OS reads; the
+/// decision itself is [`point_in_panel`].
+fn cursor_over_panel(window: &WebviewWindow) -> tauri::Result<bool> {
+    let panel = (
+        f64::from(PANEL_W.load(Ordering::Relaxed)),
+        f64::from(PANEL_H.load(Ordering::Relaxed)),
+    );
+    let scale = window.scale_factor()?;
+    let origin = window.outer_position()?.to_logical::<f64>(scale);
+    let canvas = window.outer_size()?.to_logical::<f64>(scale);
+    let cursor = window.cursor_position()?.to_logical::<f64>(scale);
+
+    Ok(point_in_panel(
+        (cursor.x, cursor.y),
+        (origin.x, origin.y),
+        canvas.width,
+        panel,
+    ))
+}
+
+/// Whether `cursor` is over the panel drawn in a window at `origin`.
+///
+/// The panel is welded to the top of its window and centred across it, so its
+/// box follows from the window's frame and the size the panel reported. Pure,
+/// because this is the whole of the decision and every input is a number the
+/// OS hands over — staging it live would mean parking a pointer by hand.
+fn point_in_panel(
+    cursor: (f64, f64),
+    origin: (f64, f64),
+    canvas_width: f64,
+    panel: (f64, f64),
+) -> bool {
+    let (width, height) = panel;
+    // Nothing reported yet: stay click-through. Guessing a box here would put
+    // the dead zone back, which is the bug this exists to prevent.
+    if width <= 0.0 || height <= 0.0 {
+        return false;
+    }
+    let left = origin.0 + (canvas_width - width) / 2.0;
+    cursor.0 >= left
+        && cursor.0 <= left + width
+        && cursor.1 >= origin.1
+        && cursor.1 <= origin.1 + height
+}
+
+/// Dismisses the answer panel, letting it collapse back into the notch first.
+pub fn end_answer(app: &AppHandle) {
+    if !ANSWERING.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    if let Some(window) = window(app) {
+        // Click-through again immediately rather than after the collapse: the
+        // window lingers for EXIT_MS, and a transparent canvas swallowing
+        // clicks for a quarter second is worse than anything the last frames
+        // of the animation buy.
+        let _ = window.set_ignore_cursor_events(true);
+    }
+    hide(app);
+}
+
 pub fn hide(app: &AppHandle) {
     if window(app).is_none() {
+        return;
+    }
+    // The run that produced the answer is over, but the answer is not.
+    if ANSWERING.load(Ordering::SeqCst) {
         return;
     }
 
@@ -326,20 +513,42 @@ fn resolve_monitor(window: &WebviewWindow) -> tauri::Result<Option<tauri::Monito
 /// Top-centres `window` on the monitor the user picked. Shared with the
 /// ask/agent panels, which drop from the top the way the Swift app's answer
 /// panel does — and follow the same display, so the three never split up.
+/// Done entirely in physical pixels, and that is the point.
+///
+/// Every input here is already physical — `Monitor::size`, `Monitor::position`
+/// and `Window::outer_size` all are — so converting them to logical first only
+/// creates a way to be wrong. It used to divide all three by the *monitor's*
+/// scale factor, including the window size, which is reported against whatever
+/// screen the window is currently on. Any disagreement between those two scales
+/// centred the window against a width it does not have; at 2x against 1x that
+/// is half a window's width of error, which is the difference between the wings
+/// sitting on the notch and sitting a third of the way across the menu bar.
+///
+/// Only the caller's margin is logical, because it is a design measurement.
 pub fn position_top_center(window: &WebviewWindow, top_margin: f64) -> tauri::Result<()> {
     let Some(monitor) = resolve_monitor(window)? else {
         return Ok(()); // headless; leave it wherever it is
     };
 
-    let scale = monitor.scale_factor();
-    let screen = monitor.size().to_logical::<f64>(scale);
-    let origin = monitor.position().to_logical::<f64>(scale);
-    let size = window.outer_size()?.to_logical::<f64>(scale);
+    let screen = monitor.size();
+    let origin = monitor.position();
+    let size = window.outer_size()?;
+    let x = origin.x + (screen.width as i32 - size.width as i32) / 2;
+    let y = origin.y + (top_margin * monitor.scale_factor()) as i32;
 
-    window.set_position(tauri::LogicalPosition::new(
-        origin.x + (screen.width - size.width) / 2.0,
-        origin.y + top_margin,
-    ))?;
+    // The one input that is not a constant of the display, and the only thing
+    // that can move a window nobody resized. Logged so that a misplaced overlay
+    // is a line to read rather than a thing to reproduce.
+    tracing::debug!(
+        screen_w = screen.width,
+        window_w = size.width,
+        scale = monitor.scale_factor(),
+        x,
+        y,
+        "positioning overlay"
+    );
+
+    window.set_position(tauri::PhysicalPosition::new(x, y))?;
     Ok(())
 }
 
@@ -446,5 +655,38 @@ mod tests {
 
         // Headless: nothing to position against, and no panic.
         assert_eq!(chosen_monitor(&named, &[], None, None), None);
+    }
+
+    /// The reported bug: with an answer open, most of the screen stopped
+    /// taking clicks.
+    ///
+    /// The overlay's canvas is far larger than the panel drawn in it, and
+    /// handing the window the mouse handed it the whole canvas — a 1000x720
+    /// rectangle across the top of the screen that swallowed every click and
+    /// keystroke meant for the app underneath. Everything outside the panel's
+    /// own box has to read as "not over the panel".
+    #[test]
+    fn only_the_panel_itself_takes_clicks() {
+        // A 512x332 panel centred in the 1000x720 canvas, window at the top
+        // left of a screen — i.e. what a real answer measures.
+        let origin = (200.0, 0.0);
+        let canvas = 1000.0;
+        let panel = (512.0, 332.0);
+        let over = |x, y| point_in_panel((x, y), origin, canvas, panel);
+
+        // The panel spans x 444..956, y 0..332.
+        assert!(over(700.0, 160.0), "the middle of the panel takes clicks");
+        assert!(over(444.0, 0.0), "and so does its top-left corner");
+
+        // The three regions the bug covered. Below is the big one: the canvas
+        // ran 388pt further down the screen than the panel ever did.
+        assert!(!over(700.0, 500.0), "below the panel must click through");
+        assert!(!over(300.0, 160.0), "left of the panel must click through");
+        assert!(!over(950.0, 400.0), "the canvas corner must click through");
+
+        // Before the panel has reported a size there is no box to be inside,
+        // and the fallback has to be click-through rather than the old
+        // whole-canvas behaviour.
+        assert!(!point_in_panel((700.0, 160.0), origin, canvas, (0.0, 0.0)));
     }
 }

@@ -62,9 +62,9 @@
   /* Critically damped: the default for anything a user did not throw. */
   --spring: cubic-bezier(0.22, 0.61, 0.36, 1);
   --spring: linear(
-    0, 0.0438, 0.1419, 0.2604, 0.3801, 0.4909, 0.5883, 0.6712, 0.74, 0.7961,
-    0.8412, 0.8771, 0.9053, 0.9274, 0.9445, 0.9578, 0.968, 0.9758, 0.9817,
-    0.9862, 0.9896, 0.9922, 0.9942, 0.9956, 0.9967, 0.9976, 0.9982, 0.9987, 1
+    0, 0.0439, 0.1421, 0.2607, 0.3804, 0.4912, 0.5887, 0.6716, 0.7404, 0.7964,
+    0.8415, 0.8773, 0.9055, 0.9276, 0.9447, 0.9579, 0.9681, 0.9758, 0.9818,
+    0.9863, 0.9897, 0.9923, 0.9942, 0.9957, 0.9968, 0.9976, 0.9982, 0.9987, 1
   );
 
   /* damping 0.62 — overshoots 8.4%, for things that should feel like an object
@@ -73,15 +73,42 @@
      in reads as noise. */
   --spring-pop: cubic-bezier(0.34, 1.42, 0.64, 1);
   --spring-pop: linear(
-    0, 0.0575, 0.1948, 0.3681, 0.5455, 0.7068, 0.8404, 0.9423, 1.0131, 1.0566,
+    0, 0.0575, 0.1949, 0.3681, 0.5456, 0.7068, 0.8405, 0.9423, 1.0131, 1.0566,
     1.0782, 1.0835, 1.0779, 1.0661, 1.0515, 1.0367, 1.0234, 1.0125, 1.0042,
     0.9985, 0.995, 0.9934, 0.993, 0.9936, 0.9946, 0.9958, 0.997, 0.9981, 1
   );
 
-  /* response 0.3 / 0.4 / 0.4 respectively. */
-  --spring-dur: 441ms;
-  --spring-dur-slow: 588ms;
-  --spring-pop-dur: 654ms;
+  /* response 0.31 / 0.35 / 0.37 respectively — chosen in tune.html, and
+     regenerated from those three numbers by lib/spring-curve.ts. Do not
+     hand-edit the samples above; change the response and re-run the tuner. */
+  --spring-dur: 456ms;
+  --spring-dur-slow: 515ms;
+  --spring-pop-dur: 605ms;
+
+  /* --- The drop-down panel's spring -------------------------------------
+   *
+   * Not baked into a `linear()` like the three above, because its target
+   * changes while it is still moving — a phase lands mid-flight three times a
+   * dictation, and an answer retargets it once a frame while it streams. A
+   * baked curve redirected halfway restarts from zero velocity; `lib/spring.ts`
+   * integrates these live so the motion carries through. Same two parameters,
+   * read from here so that every motion value in the app is in one file.
+   *
+   * One damping ratio and two responses: the close is deliberately slower than
+   * the open — half again as slow here. That asymmetry is not a detail; an
+   * equal open and close reads as a box toggling, where a lingering close reads
+   * as something with mass settling back.
+   *
+   * 0.45 overshoots a full 20% of its travel, which on an answer panel is ~60pt
+   * past the target before it settles. That is the point — it is what makes the
+   * panel read as thrown out of the notch rather than resized — but it is also
+   * why `draw` floors the drawn size at the cutout. Ring that far on a *close*
+   * and the panel passes clean through the notch it is welded to, showing the
+   * hardware either side of it. At the old 0.77 that undershoot was 6pt and the
+   * missing floor never showed. */
+  --panel-damping: 0.45;
+  --panel-open: 0.44;
+  --panel-close: 0.66;
 }
 
 /* One global switch. Every animation in the app is expected to be covered by

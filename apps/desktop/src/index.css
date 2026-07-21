@@ -1,5 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+/* Streamdown renders the Ask and Agent answers, and styles every element it
+ * emits with utilities — including `<span data-streamdown="strong">`, which is
+ * a span precisely because the class is meant to carry the weight. Tailwind v4
+ * does not scan node_modules, so without this none of those classes are
+ * generated and a streamed answer loses its bold, its bullets and its spacing
+ * with nothing in the console to say so. */
+@source "../node_modules/streamdown/dist";
 @import "./styles/tokens.css";
 @import "./styles/base.css";
 @import "./styles/motion.css";

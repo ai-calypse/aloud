@@ -116,6 +116,7 @@ pub fn run() {
             commands::disconnect_connector,
             ask::ask_text,
             ask::close_ask,
+            overlay::set_panel_box,
             agent::confirm_agent,
             agent::close_agent,
         ])

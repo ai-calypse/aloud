@@ -1,0 +1,452 @@
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import ReactDOM from "react-dom/client";
+import { overshoot, springCurve } from "./lib/spring-curve";
+import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
+import "./index.css";
+
+/**
+ * The motion tuner. Dev-only: not a Tauri window, not a build input, served
+ * only by `vite` in dev.
+ *
+ *     cd apps/desktop && pnpm exec vite --port 5199
+ *     open http://localhost:5199/tune.html
+ *
+ * Every animated surface in this app is driven by tokens in styles/motion.css,
+ * and the honest way to choose those numbers is to watch them, not to reason
+ * about them. This frames the *real* overlay window in an iframe — the shipping
+ * code, not a mock — writes candidate tokens onto its document, and drives it
+ * through the states that are otherwise only reachable by holding a key and
+ * speaking. What comes out is a block of CSS to paste into motion.css.
+ *
+ * The two spring `linear()` tokens are regenerated here from the same solver
+ * that produced the ones in the file (lib/spring-curve.ts, which is pinned
+ * against them by a test), so what is previewed is exactly what gets pasted.
+ */
+
+/** Everything tunable, and what motion.css currently ships. */
+const DEFAULTS = {
+  springDamping: 1,
+  springResponse: 0.31,
+  springSlowResponse: 0.35,
+  popDamping: 0.62,
+  popResponse: 0.37,
+  panelDamping: 0.45,
+  panelOpen: 0.44,
+  panelClose: 0.66,
+  durFast: 160,
+  durBase: 240,
+  askThrow: 12,
+  askStagger: 45,
+};
+
+type Settings = typeof DEFAULTS;
+
+/** Which surface the stage is showing. */
+type Stage = "dropPill" | "liquidGlass" | "wings";
+
+const SLIDERS: {
+  key: keyof Settings;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  unit?: string;
+  hint?: string;
+}[] = [
+  // --- the baked curves, used by every CSS animation in the app -------------
+  {
+    key: "springDamping",
+    label: "Spring damping",
+    min: 0.4,
+    max: 1,
+    step: 0.01,
+    hint: "--spring · the default. 1 = no overshoot",
+  },
+  {
+    key: "springResponse",
+    label: "Spring response",
+    min: 0.15,
+    max: 0.7,
+    step: 0.01,
+    unit: "s",
+    hint: "--spring-dur",
+  },
+  {
+    key: "springSlowResponse",
+    label: "Spring response (slow)",
+    min: 0.15,
+    max: 0.9,
+    step: 0.01,
+    unit: "s",
+    hint: "--spring-dur-slow · the pill's width morph",
+  },
+  {
+    key: "popDamping",
+    label: "Pop damping",
+    min: 0.35,
+    max: 1,
+    step: 0.01,
+    hint: "--spring-pop · things that land. Lower = bouncier",
+  },
+  {
+    key: "popResponse",
+    label: "Pop response",
+    min: 0.15,
+    max: 0.9,
+    step: 0.01,
+    unit: "s",
+    hint: "--spring-pop-dur",
+  },
+  // --- the live spring, integrated per frame --------------------------------
+  {
+    key: "panelDamping",
+    label: "Panel damping",
+    min: 0.35,
+    max: 1,
+    step: 0.01,
+    hint: "the notch panel growing and collapsing",
+  },
+  {
+    key: "panelOpen",
+    label: "Panel open",
+    min: 0.15,
+    max: 0.9,
+    step: 0.01,
+    unit: "s",
+    hint: "lower = faster out of the notch",
+  },
+  {
+    key: "panelClose",
+    label: "Panel close",
+    min: 0.15,
+    max: 1.2,
+    step: 0.01,
+    unit: "s",
+    hint: "keep it above open — a close with mass lingers",
+  },
+  // --- durations and the answer's own entrance ------------------------------
+  {
+    key: "durFast",
+    label: "Fast duration",
+    min: 60,
+    max: 400,
+    step: 5,
+    unit: "ms",
+    hint: "--dur-fast · the phase swap, seen 3x a dictation",
+  },
+  {
+    key: "durBase",
+    label: "Base duration",
+    min: 100,
+    max: 600,
+    step: 5,
+    unit: "ms",
+    hint: "--dur-base",
+  },
+  {
+    key: "askThrow",
+    label: "Answer throw",
+    min: 0,
+    max: 40,
+    step: 1,
+    unit: "px",
+    hint: "how far each part of the answer rises from",
+  },
+  {
+    key: "askStagger",
+    label: "Answer stagger",
+    min: 0,
+    max: 160,
+    step: 5,
+    unit: "ms",
+    hint: "gap between question, answer and footer",
+  },
+];
+
+/** The tokens `settings` resolves to, as a `:root` block. */
+function tokensFor(settings: Settings): Record<string, string> {
+  const spring = springCurve(settings.springDamping, settings.springResponse);
+  const springSlow = springCurve(
+    settings.springDamping,
+    settings.springSlowResponse,
+  );
+  const pop = springCurve(settings.popDamping, settings.popResponse);
+  return {
+    "--spring": spring.curve,
+    "--spring-pop": pop.curve,
+    "--spring-dur": `${spring.durationMs}ms`,
+    "--spring-dur-slow": `${springSlow.durationMs}ms`,
+    "--spring-pop-dur": `${pop.durationMs}ms`,
+    "--panel-damping": String(settings.panelDamping),
+    "--panel-open": String(settings.panelOpen),
+    "--panel-close": String(settings.panelClose),
+    "--dur-fast": `${settings.durFast}ms`,
+    "--dur-base": `${settings.durBase}ms`,
+    "--ask-throw": `${settings.askThrow}px`,
+    "--ask-stagger": `${settings.askStagger}ms`,
+  };
+}
+
+function Tuner() {
+  const [settings, setSettings] = useState<Settings>(DEFAULTS);
+  const [stage, setStage] = useState<Stage>("dropPill");
+  const [copied, setCopied] = useState(false);
+  const frame = useRef<HTMLIFrameElement>(null);
+
+  const tokens = tokensFor(settings);
+
+  /** Writes the current tokens onto the framed window. Same origin. */
+  const apply = useCallback(() => {
+    const doc = frame.current?.contentDocument;
+    if (!doc) return;
+    for (const [name, value] of Object.entries(tokens)) {
+      doc.documentElement.style.setProperty(name, value);
+    }
+    // The overlay window is transparent in the app; in a browser base.css
+    // paints it. Clearing it here puts the panel's black against the stage's
+    // checkerboard, which is the only way to judge a surface that is meant to
+    // merge with a physical notch.
+    doc.body.style.background = "transparent";
+  }, [tokens]);
+
+  const send = useCallback(
+    (command: PreviewCommand) => {
+      apply();
+      const win = frame.current?.contentWindow;
+      // `restart` rebuilds the panel's springs, which is the only way a changed
+      // --panel-* reaches a spring that was created when the panel appeared.
+      win?.dispatchEvent(new CustomEvent(PREVIEW_EVENT, { detail: command }));
+    },
+    [apply],
+  );
+
+  // Re-apply on every change, so dragging a slider is visible without replaying
+  // anything. The CSS tokens take effect on the *next* animation; the panel's
+  // live spring needs the restart below.
+  useEffect(apply, [apply]);
+
+  const set = (key: keyof Settings, value: number) =>
+    setSettings((s) => ({ ...s, [key]: value }));
+
+  const css = [
+    "/* paste into src/styles/motion.css */",
+    ...Object.entries(tokens).map(([name, value]) => `  ${name}: ${value};`),
+  ].join("\n");
+
+  return (
+    <div className="flex h-screen bg-canvas text-ink">
+      <aside className="w-[360px] shrink-0 overflow-y-auto border-r border-separator p-5">
+        <h1 className="m-0 text-lg font-semibold">Motion tuner</h1>
+        <p className="mt-1 mb-5 text-ui text-ink-2">
+          The real overlay, framed. Drag, replay, then paste the block at the
+          bottom into <code>styles/motion.css</code>.
+        </p>
+
+        <div className="mb-5 flex flex-wrap gap-1.5">
+          {(["dropPill", "liquidGlass", "wings"] as Stage[]).map((s) => (
+            <button
+              key={s}
+              className={`rounded-full border border-separator px-3 py-1 text-ui ${
+                stage === s ? "bg-brand text-white" : "bg-surface"
+              }`}
+              onClick={() => {
+                setStage(s);
+                send({ style: s, phase: "recording" });
+              }}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
+        <Section title="Replay">
+          <div className="grid grid-cols-2 gap-1.5">
+            <Action onClick={() => send({ style: stage, phase: "recording" })}>
+              Listening
+            </Action>
+            <Action onClick={() => send({ phase: "transcribing" })}>
+              Transcribing
+            </Action>
+            <Action onClick={() => send({ phase: "done" })}>Pasted</Action>
+            <Action onClick={() => send({ phase: "noSpeech" })}>No speech</Action>
+            <Action onClick={() => send({ ask: "open" })}>Answer (whole)</Action>
+            <Action onClick={() => send({ ask: "stream" })}>Answer (stream)</Action>
+            <Action onClick={() => send({ dismissing: true })}>Dismiss</Action>
+            <Action
+              onClick={() =>
+                send({ style: stage, phase: "recording", restart: true })
+              }
+            >
+              Reset
+            </Action>
+          </div>
+          <p className="mt-2 mb-0 text-caption text-ink-2">
+            The full run: Listening → Transcribing → Answer (stream) → Dismiss.
+          </p>
+        </Section>
+
+        <Section title="Springs">
+          {SLIDERS.map(({ key, ...slider }) => (
+            <Slider
+              key={key}
+              {...slider}
+              value={settings[key]}
+              onChange={(v) => set(key, v)}
+              onCommit={() => {
+                // Only the live panel spring is read once and cached; every
+                // other token is picked up by the next animation on its own.
+                if (key.startsWith("panel")) send({ restart: true });
+              }}
+            />
+          ))}
+        </Section>
+
+        <Section title="Result">
+          <dl className="m-0 grid grid-cols-2 gap-x-3 gap-y-1 text-caption">
+            <dt className="text-ink-2">spring overshoot</dt>
+            <dd className="m-0">
+              {(overshoot(settings.springDamping) * 100).toFixed(1)}%
+            </dd>
+            <dt className="text-ink-2">pop overshoot</dt>
+            <dd className="m-0">
+              {(overshoot(settings.popDamping) * 100).toFixed(1)}%
+            </dd>
+            <dt className="text-ink-2">panel overshoot</dt>
+            <dd className="m-0">
+              {(overshoot(settings.panelDamping) * 100).toFixed(1)}%
+            </dd>
+          </dl>
+          <textarea
+            readOnly
+            value={css}
+            className="mt-3 h-40 w-full rounded-card border border-separator bg-surface p-2 font-mono text-[11px] leading-snug"
+          />
+          <div className="mt-2 flex gap-1.5">
+            <Action
+              onClick={() =>
+                void navigator.clipboard.writeText(css).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1200);
+                })
+              }
+            >
+              {copied ? "Copied" : "Copy CSS"}
+            </Action>
+            <Action
+              onClick={() => {
+                setSettings(DEFAULTS);
+                send({ restart: true });
+              }}
+            >
+              Reset to shipped
+            </Action>
+          </div>
+        </Section>
+      </aside>
+
+      {/* The stage. Checkerboard so the panel's black reads against something,
+          the way it does over a desktop rather than over a dark page. */}
+      <main
+        className="relative flex-1 overflow-hidden"
+        style={{
+          backgroundColor: "#2b2b30",
+          backgroundImage:
+            "linear-gradient(45deg, #1e1e22 25%, transparent 25%, transparent 75%, #1e1e22 75%), linear-gradient(45deg, #1e1e22 25%, transparent 25%, transparent 75%, #1e1e22 75%)",
+          backgroundSize: "32px 32px",
+          backgroundPosition: "0 0, 16px 16px",
+        }}
+      >
+        <iframe
+          ref={frame}
+          title="overlay"
+          // Seeded through the query-param hatch rather than by the onLoad
+          // below: `load` fires before the framed React has mounted its
+          // listener, so the first command would land on nothing.
+          src="/overlay.html?style=dropPill&phase=recording"
+          className="absolute left-1/2 top-0 h-[720px] w-[1000px] -translate-x-1/2 border-0"
+          onLoad={() => send({ style: "dropPill", phase: "recording" })}
+        />
+      </main>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="mb-6">
+      <h2 className="m-0 mb-2 text-caption font-semibold tracking-wide text-ink-2 uppercase">
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+function Action({
+  onClick,
+  children,
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="rounded-card border border-separator bg-surface px-2 py-1.5 text-ui"
+    >
+      {children}
+    </button>
+  );
+}
+
+function Slider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  unit,
+  hint,
+  onChange,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  unit?: string;
+  hint?: string;
+  onChange: (value: number) => void;
+  onCommit: () => void;
+}) {
+  return (
+    <label className="mb-3 block">
+      <span className="flex items-baseline justify-between text-ui">
+        {label}
+        <span className="font-mono text-caption text-ink-2">
+          {value}
+          {unit ?? ""}
+        </span>
+      </span>
+      <input
+        type="range"
+        className="mt-1 w-full"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        onPointerUp={onCommit}
+        onKeyUp={onCommit}
+      />
+      {hint && <span className="block text-caption text-ink-2">{hint}</span>}
+    </label>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <Tuner />
+  </React.StrictMode>,
+);
