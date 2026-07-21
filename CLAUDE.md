@@ -42,6 +42,33 @@ pnpm --filter @aloud/desktop typecheck
 Rust lives in `~/.cargo/bin` — `export PATH="$HOME/.cargo/bin:$PATH"` if
 `cargo` is not found. Building `transcribe` needs `cmake` (whisper.cpp).
 
+## Skills — load the one for the layer you are touching
+
+This app is four technologies in one repo, and each has a skill carrying
+conventions that a general answer will not have. **Load the relevant skill
+before writing or reviewing code in that layer**, not after — the point is to
+write it right the first time, and half of what these carry is failure modes
+that compile fine and break at runtime.
+
+| Touching | Skill |
+|---|---|
+| `src-tauri/`, `tauri.conf.json`, capabilities JSON, `#[tauri::command]`, `invoke()`, `@tauri-apps/*`, `cargo tauri …` | `tauri-wisdom` |
+| Anything in `crates/`, or Rust anywhere | `rust-skills` |
+| `apps/desktop/src/**` — components, hooks, state | `vercel:react-best-practices` |
+| Reading the Swift reference app for parity | `swiftui-pro` |
+
+Most work here spans two — a new dictation feature is a Tauri command
+(`tauri-wisdom`) wrapping crate logic (`rust-skills`) surfaced in React
+(`vercel:react-best-practices`). Load both ends, not just the one you started in.
+
+The skill is a floor, not a ceiling. Where it disagrees with a rule written
+down in this file, **this file wins** — it was tuned on this codebase, and the
+`ponytail:` corner-cuts and porting decisions here are deliberate. Say when you
+are overriding a skill and why.
+
+Names are exact. There is no bare `react-best-practices`; the Vercel plugin
+prefix is required or the invocation silently does nothing.
+
 ## How this codebase is organised
 
 **Logic goes in a crate, not in `src-tauri`.** Crates have no Tauri
