@@ -146,6 +146,15 @@ export const commands = {
 	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
 	/**  Records the panel's settled box, so the click region can be exactly it. */
 	setPanelBox: (width: number | null, height: number | null) => __TAURI_INVOKE<void>("set_panel_box", { width, height }),
+	agentHookStatus: () => typedError<HookStatus, string>(__TAURI_INVOKE("agent_hook_status")),
+	/**
+	 *  Installs our hooks, copying the sidecar out of the bundle first.
+	 * 
+	 *  Status events only. Approvals stay off until step 4 can answer them — and
+	 *  on this machine another tool owns that event anyway.
+	 */
+	installAgentHooks: () => typedError<HookStatus, string>(__TAURI_INVOKE("install_agent_hooks")),
+	uninstallAgentHooks: () => typedError<HookStatus, string>(__TAURI_INVOKE("uninstall_agent_hooks")),
 	/**
 	 *  Resolves the pending confirmation. Called by the panel's Cancel/Confirm
 	 *  buttons; `edits` carries any field the user filled in or corrected before
@@ -164,6 +173,7 @@ export const commands = {
 /** Events */
 export const events = {
 	agent: makeEvent<AgentEvent>("agent"),
+	agentSessions: makeEvent<AgentSessions>("agent-sessions"),
 	ask: makeEvent<AskEvent>("ask"),
 	audioLevel: makeEvent<AudioLevel>("audio-level"),
 	connectorsUpdated: makeEvent<ConnectorsUpdated>("connectors-updated"),
@@ -172,6 +182,7 @@ export const events = {
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
+	notchHover: makeEvent<NotchHover>("notch-hover"),
 	overlayDismiss: makeEvent<OverlayDismiss>("overlay-dismiss"),
 	overlayError: makeEvent<OverlayError>("overlay-error"),
 	overlayStyle: makeEvent<OverlayStyleChanged>("overlay-style"),
@@ -203,6 +214,32 @@ export type AgentEvent =
  *  while the run is otherwise silent; cleared by the next event.
  */
 { kind: "status"; value: string } | { kind: "runFinished"; value: string } | { kind: "runError"; value: string };
+
+/**
+ *  One agent session, flattened for the webview.
+ * 
+ *  `tool_input` is deliberately absent: specta will not export
+ *  `serde_json::Value`, and the running tool's arguments are arbitrary JSON.
+ *  The one line worth showing is already flattened to `detail` by the scan —
+ *  the same trick `agent.rs`'s `display_args()` uses.
+ */
+export type AgentSession = {
+	/**
+	 *  The agent's own session id where hooks are installed, else `pid:<n>`.
+	 *  What the UI keys a tab on, so it has to be stable across polls.
+	 */
+	id: string,
+	agent: string,
+	/**  What to call the row: the model's title, the prompt, or the folder. */
+	title: string,
+	cwd: string | null,
+	/**  The tool running right now, already flattened to one line. */
+	tool: string | null,
+	busy: boolean,
+};
+
+/**  The live session list, pushed whenever it actually changes. */
+export type AgentSessions = AgentSession[];
 
 /**  One per-app override. */
 export type AppRule = {
@@ -346,6 +383,16 @@ export type Entry = {
 };
 
 /**
+ *  What the settings pane needs to draw: whether ours are in, and who owns
+ *  approvals if anyone.
+ */
+export type HookStatus = {
+	installed: string[],
+	/**  The command owning `PermissionRequest`, when it is not ours. */
+	conflict: string | null,
+};
+
+/**
  *  Emitted once hotkeys are live, so the UI can clear its permission banner
  *  without the user restarting the app.
  */
@@ -397,6 +444,17 @@ export type MeetingPhase =
 export type ModelDownload = number | null;
 
 export type Modifier = "command" | "control" | "option" | "shift" | "function";
+
+/**
+ *  Whether the pointer is over the notch.
+ * 
+ *  The window ignores the mouse while it is click-through, and a window that
+ *  ignores the mouse cannot see it move — so the webview has no `mouseenter` to
+ *  listen for and the hover has to be pushed in from the cursor poll.
+ */
+export type NotchHover = {
+	over: boolean,
+};
 
 export type Note = {
 	path: string,

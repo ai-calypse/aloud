@@ -44,6 +44,7 @@ version = "0.1.0"
 dependencies = [
  "aloud-agent",
  "aloud-audio",
+ "aloud-bridge",
  "aloud-hotkey",
  "aloud-llm",
  "aloud-meeting",
@@ -51,6 +52,7 @@ dependencies = [
  "aloud-paste",
  "aloud-permissions",
  "aloud-selection",
+ "aloud-sessions",
  "aloud-store",
  "aloud-transcribe",
  "aloud-volume",

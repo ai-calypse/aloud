@@ -5,6 +5,7 @@ mod meeting;
 mod notch;
 mod overlay;
 mod pipeline;
+mod sessions;
 mod sound;
 mod tray;
 
@@ -122,6 +123,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             ask::ask_text,
             ask::close_ask,
             overlay::set_panel_box,
+            sessions::agent_hook_status,
+            sessions::install_agent_hooks,
+            sessions::uninstall_agent_hooks,
             agent::confirm_agent,
             agent::answer_agent,
             agent::close_agent,
@@ -137,6 +141,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::ModelDownload,
             overlay::OverlayStyleChanged,
             overlay::OverlayDismiss,
+            overlay::NotchHover,
+            sessions::AgentSessions,
             HotkeysPermitted,
             ConnectorsUpdated,
         ])
@@ -214,6 +220,11 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             // Main thread required. A floating-level window is clamped below
             // the menu bar, which the wings style has to sit in.
             overlay::raise_over_menu_bar(app.handle());
+
+            // The notch is permanent: an agent can start at any time, and a
+            // notch that only exists during a dictation cannot show one.
+            overlay::show_notch(app.handle());
+            sessions::start(app.handle());
 
             tray::init(app)?;
 

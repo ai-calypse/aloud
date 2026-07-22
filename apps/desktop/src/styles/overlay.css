@@ -854,6 +854,148 @@
   display: none;
 }
 
+/* --- The resting notch ---------------------------------------------------
+ *
+ * The overlay window no longer goes away between dictations, so there is a
+ * state that did not exist before: nothing being said, no panel, the notch
+ * just sitting in the menu bar. It draws the cutout and nothing else, which
+ * on a notched screen is invisible against the hardware — which is the point.
+ *
+ * `--idle` above is `display: none`; this is deliberately not, or there would
+ * be nothing to hover.
+ */
+.drop-pill--resting {
+  /* No transition here: the growth is the shape spring in useNotchPanel, and
+     a CSS transition on the same box would fight it. */
+  cursor: default;
+}
+
+/* Hovered, the panel has grown by one row and the row fades up into it. The
+   fade is opacity only — the movement is the panel getting taller underneath,
+   so animating position here would be two things moving at once. */
+.drop-pill--resting[data-hover] {
+  cursor: pointer;
+}
+
+.notch-peek {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 2px 14px 8px;
+  max-width: 340px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--pill-ink);
+  white-space: nowrap;
+  animation: peek-in var(--dur-fast) var(--ease-out) both;
+}
+
+.notch-peek--empty {
+  opacity: 0.55;
+}
+
+@keyframes peek-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Busy: the same pulse the recording dot uses, so "something is happening"
+   reads the same way everywhere in this window. */
+.notch-peek__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sys-green, #32d74b);
+  /* `breathe` is what the recording dot already uses; a second pulse keyframe
+     with its own timing would drift out of step with it. */
+  animation: breathe 1.6s var(--ease-in-out) infinite;
+}
+
+.notch-peek__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notch-peek__count {
+  flex: none;
+  opacity: 0.5;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- The agent list ------------------------------------------------------ */
+
+.agents {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 320px;
+}
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  font-size: 13px;
+}
+
+/* A ring when idle, filled and pulsing when mid-turn — a shape change rather
+   than only a colour one, so it survives being read at a glance. */
+.agent-row__state {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--pill-ink);
+  opacity: 0.4;
+}
+
+.agent-row__state[data-busy] {
+  background: var(--sys-green, #32d74b);
+  box-shadow: none;
+  opacity: 1;
+  animation: breathe 1.6s var(--ease-in-out) infinite;
+}
+
+.agent-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.agent-row__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The command it is running right now. Monospace because it is one. */
+.agent-row__tool {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-row__agent {
+  flex: none;
+  font-size: 11px;
+  opacity: 0.45;
+}
+
 /* --- Exits ---------------------------------------------------------------
  *
  * Rust holds the window open for EXIT_MS after a run ends (overlay.rs), so

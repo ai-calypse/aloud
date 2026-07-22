@@ -15,7 +15,13 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
-import { commands, events, type OverlayStyle, type Phase } from "./lib/bindings";
+import {
+  commands,
+  events,
+  type AgentSession,
+  type OverlayStyle,
+  type Phase,
+} from "./lib/bindings";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
@@ -386,8 +392,11 @@ function Overlay() {
   const [droppedDown, setDroppedDown] = useState(false);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [agent, setAgent] = useState<Run | null>(null);
-  // Either of them owns the panel; almost everything below only cares that one does.
-  const panelOpen = ask !== null || agent !== null;
+  // The notch opened by clicking it rather than by speaking. Its own state
+  // because it belongs to no dictation and must survive `run` changing.
+  const [browsing, setBrowsing] = useState(false);
+  // Any of them owns the panel; almost everything below only cares that one does.
+  const panelOpen = ask !== null || agent !== null || browsing;
   // A ref, not the state it mirrors: the phase listener subscribes once, and
   // depending on `panelOpen` would rebuild it on every streamed token.
   const openRef = useRef(panelOpen);
@@ -398,6 +407,13 @@ function Overlay() {
   // Bumped once per dictation: the panel keys its springs off this, and the
   // phase alone cannot say "a new run began".
   const [run, setRun] = useState(0);
+  // The agents currently running, pushed from Rust. Independent of any
+  // dictation: the whole point of the resting notch is that these are visible
+  // when nothing is being said.
+  const [sessions, setSessions] = useState<AgentSession[]>([]);
+  // Pointer over the notch, from Rust's cursor poll — a click-through window
+  // cannot see the mouse, so there is no `mouseenter` to use here.
+  const [hovering, setHovering] = useState(false);
   const [tabs, setTabs] = useState<Tab[]>(FIRST_TABS);
   const [activeTab, setActiveTab] = useState(0);
   const nextTabId = useRef(1);
@@ -408,6 +424,37 @@ function Overlay() {
     setTabs(FIRST_TABS);
     setActiveTab(0);
   }, [run]);
+
+  // Dev/QA: `?agents=2` fakes a session list and `?hover` holds the peek row
+  // open, so the resting notch's two states are reachable in a browser. The
+  // real ones only arrive from Rust, and the hover only from a cursor poll.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const count = Number(params.get("agents"));
+    if (count > 0) {
+      setSessions(
+        Array.from({ length: count }, (_, i) => ({
+          id: `preview:${i}`,
+          agent: i % 2 ? "codex" : "claude",
+          title: i === 0 ? "Add tab system to agent notch" : `Session ${i + 1}`,
+          cwd: "/Users/y/dev/aloud-tauri",
+          tool: i === 0 ? "Bash: cargo test --workspace" : null,
+          busy: i === 0,
+        })),
+      );
+    }
+    if (params.has("hover")) setHovering(true);
+  }, []);
+
+  // Agents and hover, both independent of any dictation.
+  useEffect(() => {
+    const sessionsOff = events.agentSessions.listen((e) => setSessions(e.payload));
+    const hoverOff = events.notchHover.listen((e) => setHovering(e.payload.over));
+    return () => {
+      void sessionsOff.then((off) => off());
+      void hoverOff.then((off) => off());
+    };
+  }, []);
 
   // The cap is enforced here rather than in each button, so no caller can get
   // past it — the buttons only hide themselves so the strip stops offering.
@@ -461,6 +508,14 @@ function Overlay() {
    */
   const effectiveStyle: OverlayStyle =
     style === "wings" && (droppedDown || panelOpen) ? "dropPill" : style;
+
+  /**
+   * Nothing is being said and no panel is up: the notch is just sitting there.
+   * This is the state that did not exist before — the window used to be hidden
+   * entirely between dictations.
+   */
+  const resting = !panelOpen && phase === "idle" && !dismissing;
+  const busyCount = sessions.filter((s) => s.busy).length;
 
   // Rust tests the pointer against this box to decide when the window takes
   // clicks (`track_cursor` in overlay.rs). Reported only when it changes: the
@@ -917,8 +972,14 @@ function Overlay() {
       // measured cutout height. Never `--idle` while an answer is up, whatever
       // the phase says — `--idle` is `display: none`.
       <div
-        className={`drop-pill drop-pill--${panelOpen ? "answering" : phase}`}
+        className={`drop-pill drop-pill--${panelOpen ? "answering" : resting ? "resting" : phase}`}
+        data-hover={resting && hovering ? "" : undefined}
         ref={panel.surface}
+        // Only ever reaches the DOM while the pointer is over the panel — Rust
+        // hands the window clicks exactly then (`track_cursor`).
+        onClick={() => {
+          if (resting && sessions.length > 0) setBrowsing(true);
+        }}
       >
         {/* The panel's whole silhouette. A path and not a border-radius,
             because the two top corners are concave — see lib/notch-shape.ts. */}
@@ -941,12 +1002,24 @@ function Overlay() {
           }`}
           ref={panel.content}
         >
-          {panelOpen ? (
+          {resting ? (
+            // At rest the panel is exactly the cutout and this is empty, so
+            // there is nothing to see; hovering grows it by the height of this
+            // row. The spring in `useNotchPanel` does the growing — this only
+            // states what it is growing around.
+            hovering && <NotchPeek sessions={sessions} busy={busyCount} />
+          ) : panelOpen ? (
             <>
               <TabStrip
                 tabs={tabs}
                 active={activeTab}
-                title={ask?.question ?? agent?.heard ?? "Aloud"}
+                title={
+                  ask?.question ??
+                  agent?.heard ??
+                  // Opened from the notch rather than by speaking, so there is
+                  // no utterance to name the tab after.
+                  (browsing ? "Agents" : "Aloud")
+                }
                 onSelect={setActiveTab}
                 onClose={closeTab}
                 onClosed={dropTab}
@@ -956,6 +1029,8 @@ function Overlay() {
                   than having the content appear already settled. */}
               {tabs.find((tab) => tab.id === activeTab)?.blank ? (
                 <div className="tab-blank" key={activeTab} />
+              ) : browsing && !ask && !agent ? (
+                <AgentList sessions={sessions} onClose={() => setBrowsing(false)} />
               ) : ask ? (
                 // Keyed on the question so a new one resets copy state and input.
                 <Answer
@@ -993,6 +1068,77 @@ function Overlay() {
       </div>
     )}
     </div>
+  );
+}
+
+/**
+ * What the resting notch shows on hover: one line saying what the agents are
+ * doing, and that it can be clicked.
+ *
+ * Deliberately one row. The notch grows by exactly this element's height, and
+ * a hover that unfurls a whole list is a panel opening by accident — the click
+ * is what opens the list.
+ */
+function NotchPeek({
+  sessions,
+  busy,
+}: {
+  sessions: AgentSession[];
+  busy: number;
+}) {
+  if (sessions.length === 0) {
+    return <p className="notch-peek notch-peek--empty">No agents running</p>;
+  }
+  // The busy one is what the user is waiting on; `sessions` arrives busy-first
+  // from Rust, so the head of the list is the right one to name.
+  const lead = sessions[0];
+  return (
+    <p className="notch-peek">
+      {busy > 0 && <span className="notch-peek__dot" aria-hidden />}
+      <span className="notch-peek__title">{lead.tool ?? lead.title}</span>
+      {sessions.length > 1 && (
+        <span className="notch-peek__count">+{sessions.length - 1}</span>
+      )}
+    </p>
+  );
+}
+
+/**
+ * The agent sessions, once the notch has been clicked open.
+ *
+ * Sizes nothing: like every other panel body it is the measured content node's
+ * only child, and the springs settle around it through the ResizeObserver.
+ */
+function AgentList({
+  sessions,
+  onClose,
+}: {
+  sessions: AgentSession[];
+  onClose: () => void;
+}) {
+  return (
+    <Panel title="Agents" onClose={onClose}>
+      <ul className="agents">
+        {sessions.map((session) => (
+          <li className="agent-row" key={session.id}>
+            <span
+              className="agent-row__state"
+              data-busy={session.busy || undefined}
+              aria-hidden
+            />
+            <span className="agent-row__text">
+              <span className="agent-row__title">{session.title}</span>
+              {/* What it is doing right now, from the transcript's orphan
+                  tool_use. Absent between tools, which is normal. */}
+              {session.tool && (
+                <span className="agent-row__tool">{session.tool}</span>
+              )}
+            </span>
+            <span className="agent-row__agent">{session.agent}</span>
+          </li>
+        ))}
+      </ul>
+    </Panel>
   );
 }
 
