@@ -7,6 +7,30 @@
  * sits in a black panel hanging off a menu bar, because an idea that only
  * works in a 900px column is not an idea for this app. */
 
+/* base.css locks the document — `height: 100%; overflow: hidden` — because
+   every other surface in this app is a fixed-size window that must never
+   scroll. This is the one page meant to be read top to bottom.
+ *
+ * Carried on a class rather than a bare `html, body` selector, which ties with
+ * base.css on specificity and then loses or wins on whichever order Vite
+ * injects the two stylesheets. The tie is also why this bug was easy to
+ * mis-test: `overflow: hidden` still permits programmatic scrollTo, so the
+ * document measured as scrollable while the wheel did nothing. */
+/* The rule being beaten is `:root[data-surface="floating"] body`, which this
+   page opts into for the always-dark palette and then does not want the rest
+   of: floating windows are click-through and drag-only, so base.css locks
+   their height, kills scrolling and turns off text selection. A reading page
+   wants all three back, and the selector has to out-specify (0,2,1) to say so.
+ *
+ * The scroll half of this was easy to mis-diagnose: `overflow: hidden` still
+ * permits programmatic scrollTo, so the document measures as scrollable while
+ * the wheel does nothing. Check the computed style, not scrollY. */
+:root[data-surface] body.ideas {
+  height: auto;
+  overflow: visible;
+  user-select: text;
+}
+
 body {
   margin: 0;
   background: #0b0b0d;
