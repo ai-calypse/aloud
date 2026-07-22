@@ -1074,7 +1074,16 @@ impl Pipeline {
         }
         // Tolerate a trigger phrase said out of habit while holding the key.
         let command = aloud_agent::command_from_trigger(&command).unwrap_or(command);
-        crate::agent::run(&self.app, command, &settings).await
+        // The same generation gate the paste path uses: an Escape bumps the
+        // counter, so a run holding a stale one knows to stop. Polled rather
+        // than raced against a `select!` because a dropped agent future would
+        // abandon the loop mid-tool, and the loop wants to stop *between*
+        // tools — after the one in flight, before the next.
+        let generation = self.generation();
+        crate::agent::run(&self.app, command, &settings, || {
+            self.generation() != generation
+        })
+        .await
     }
 
     /// Cancels an in-flight session, discarding the audio and abandoning any

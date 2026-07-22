@@ -4,6 +4,10 @@
 //! Bounded rounds — the last forbids tools, so the model must answer rather than
 //! loop forever. Write tools pause for an explicit confirmation before they run;
 //! that is the one non-negotiable gate.
+//!
+//! The model stopping is not the same as the model being done: asked to draft
+//! *and* send, it will draft, announce success and fall silent. So a stop is
+//! graded against the original command before it is accepted — see [`verify`].
 
 use crate::composio::{ComposioClient, ToolDef};
 use aloud_llm::{LlmClient, LlmError, Message};
@@ -69,6 +73,11 @@ fn ask_user_schema() -> serde_json::Value {
     })
 }
 
+/// How many times the verifier may send the model back for an unfinished
+/// sub-goal. Two: one nudge covers "drafted it but never sent it", and a model
+/// still unfinished after two is looping rather than working.
+const MAX_VERIFIER_RETRIES: usize = 2;
+
 /// Progress events for the panel, in AG-UI tool-call vocabulary. The caller
 /// maps these onto its own UI events.
 #[derive(Debug, Clone)]
@@ -105,6 +114,11 @@ the tool list offers). Only call a tool when the command asks for such an \
 action or needs that data; otherwise just answer. \
 The command is a transcription of speech and may contain minor errors; act on \
 the intent. After acting, confirm what you did in one short plain sentence. \
+Finish the whole command before you stop. A command that names two actions \
+(\"draft it and send it\", \"file the issue and assign it to me\") is not done \
+when the first one is — carry out every part, and only stop once each has \
+actually been performed by a tool call that succeeded. Do not describe an \
+action you have not taken as though you have taken it. \
 If a tool result was not successful or contains an error, say the action \
 failed and why — never claim it worked. But if it failed because an argument \
 was invalid, fix that argument and retry once before reporting failure. \
@@ -152,6 +166,52 @@ repeat it in full rather than leaving the second one blank. Omit optional \
 arguments you have no real value for — use the schema's default rather than \
 inventing identifiers.";
 
+/// 0…0.4s of jitter, off the nanosecond clock rather than a `rand` dependency
+/// added for four bytes. Not uniform and not worth being: the only requirement
+/// is that two clients retrying the same limit do not wake together.
+fn jitter() -> f64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    f64::from(nanos % 400) / 1000.0
+}
+
+/// The backoff schedule for an error, or `None` if it is not worth retrying.
+/// Attempt `n` sleeps `schedule[n]` before retrying, so the length is the retry
+/// count. Overload (429/529) backs off hard because the limit is a budget that
+/// needs time to refill; a 5xx is usually one bad box behind a load balancer,
+/// where a near-immediate retry lands on a different one.
+fn backoff(error: &LlmError) -> Option<&'static [f64]> {
+    const OVERLOADED: &[f64] = &[1.0, 4.0, 16.0];
+    const TRANSIENT: &[f64] = &[0.25, 1.0];
+    match error {
+        LlmError::RateLimited { .. } => Some(OVERLOADED),
+        LlmError::Failed { status: 529, .. } => Some(OVERLOADED),
+        LlmError::Failed {
+            status: 500 | 502 | 503 | 504,
+            ..
+        } => Some(TRANSIENT),
+        _ => None,
+    }
+}
+
+/// How long to wait before retry attempt `attempt`. A server-sent `retry-after`
+/// outranks the schedule — it knows the real budget — but is capped so a
+/// "come back in an hour" cannot strand a spoken command; past the cap we would
+/// rather fail and tell the user than hold the panel open.
+///
+/// The jitter matters more here than it looks: the daily-limit path retries
+/// every dictation at the same schedule, so without it a burst of commands
+/// syncs up and re-hits the limit together.
+fn retry_delay(error: &LlmError, schedule: &[f64], attempt: usize, jitter: f64) -> Duration {
+    const CAP: Duration = Duration::from_secs(30);
+    if let LlmError::RateLimited { retry_after, .. } = error {
+        return (*retry_after).min(CAP);
+    }
+    Duration::from_secs_f64(schedule[attempt] + jitter).min(CAP)
+}
+
 /// The model has no clock: without this, "tomorrow at 4pm" landed on
 /// 2023-07-20T09:00-07:00 — right time of day, wrong year, stamped UTC. Naming
 /// the zone alone is not enough either; told only "(Asia/Calcutta)" it still
@@ -170,6 +230,58 @@ fn now_line() -> String {
     )
 }
 
+const VERIFIER_PROMPT: &str = "\
+You are grading whether an assistant finished a spoken command. You are given \
+the command and the assistant's final answer. Decide only whether every action \
+the command asked for was actually carried out — not whether it was done well. \
+An answer that stops because the assistant asked the user something and got \
+no reply is FINISHED: it is waiting on a person, and nothing it does next can \
+change that. A command naming two actions is unfinished if the answer only \
+evidences one \
+(asked to draft and send, the answer says a draft was created). An answer \
+saying an action failed is FINISHED: the failure is reported honestly and the \
+assistant cannot do more. An answer that simply refuses, or that puts a \
+question to the user in the answer itself rather than having asked during the \
+run, is UNFINISHED. \
+Reply with exactly one word, FINISHED or UNFINISHED, then — only \
+if UNFINISHED — a colon and a short phrase naming what is still undone.";
+
+/// Whether the model's final answer actually completed `command`, and if not,
+/// what is missing. One cheap call, no tools.
+///
+/// Fails open. A grader that errors, times out or answers in a shape we do not
+/// recognise returns `None` and the answer stands — the failure mode of a
+/// broken grader must be an unverified answer, never a command trapped in a
+/// loop it cannot leave. This is why the check is "does it start with
+/// UNFINISHED" rather than "is it FINISHED": every unexpected output accepts.
+async fn verify(llm: &LlmClient, model: &str, command: &str, answer: &str) -> Option<String> {
+    let messages = [
+        Message::system(VERIFIER_PROMPT),
+        Message::user(format!("COMMAND: {command}\n\nFINAL ANSWER: {answer}")),
+    ];
+    let turn = llm
+        .chat_with_tools(model, &messages, None, Some(0.0))
+        .instrument(tracing::info_span!("verify", model))
+        .await
+        .map_err(|e| tracing::warn!(%e, "completion verifier failed; accepting the answer"))
+        .ok()?;
+
+    unfinished_reason(&turn.content?)
+}
+
+/// Parses the grader's verdict into "what is still undone", or `None` to
+/// accept the answer. Split out from [`verify`] because the fail-open
+/// direction is the whole safety property and deserves a test without a live
+/// model behind it.
+fn unfinished_reason(verdict: &str) -> Option<String> {
+    let rest = verdict.trim().strip_prefix("UNFINISHED")?;
+    Some(
+        rest.trim_start_matches([':', '.', ' ', '\n'])
+            .trim()
+            .to_string(),
+    )
+}
+
 /// Runs the loop for `command`. Returns the model's final answer.
 ///
 /// `on_event` fires for each tool call so the panel can show progress.
@@ -177,9 +289,16 @@ fn now_line() -> String {
 /// the user declines, or to the arguments to run with — which are not
 /// necessarily the ones passed in, because the gate lets a field be filled in
 /// or corrected before approving.
-// ponytail: eight arguments, five of them the run's inputs and three its
-// callbacks. A `Callbacks { on_event, confirm, ask }` struct is the fix if a
-// fourth ever appears; at three it would be ceremony around the same tuple.
+///
+/// `cancelled` is polled at the top of each round and between individual tool
+/// dispatches, so Escape during a six-tool round stops after the tool in
+/// flight rather than running the other five.
+// ponytail: nine arguments, five of them the run's inputs and four its
+// callbacks — the fourth the previous comment here said would justify a
+// `Callbacks { on_event, confirm, ask, cancelled }` struct. Left as-is because
+// there is still exactly one real construction site (the Tauri command; the
+// example is the other) and a struct would be ceremony around the same tuple.
+// Worth doing the moment a second caller has to assemble this list.
 #[allow(clippy::too_many_arguments)]
 pub async fn run<F, A>(
     llm: &LlmClient,
@@ -190,6 +309,7 @@ pub async fn run<F, A>(
     mut on_event: impl FnMut(LoopEvent),
     confirm: impl Fn(String, serde_json::Value) -> F,
     ask: impl Fn(String) -> A,
+    cancelled: impl Fn() -> bool,
 ) -> Result<String>
 where
     F: Future<Output = Option<serde_json::Value>>,
@@ -213,8 +333,12 @@ where
         std::collections::HashMap::new();
     let mut budget: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut asked = 0usize;
+    let mut verifier_retries = 0;
 
     for round in 0..MAX_ROUNDS {
+        if cancelled() {
+            anyhow::bail!("cancelled");
+        }
         let is_last = round == MAX_ROUNDS - 1;
         let chat = || {
             llm.chat_with_tools(
@@ -233,36 +357,55 @@ where
             ))
         };
 
-        // A 429 mid-loop is retried once after a capped `retry-after`: the loop
-        // makes several calls in a row and a per-minute budget can trip between
-        // rounds. Here rather than in the llm crate so the panel can show the
-        // wait instead of looking hung.
-        let turn = match chat().await {
-            Err(e) => match e.downcast_ref::<LlmError>() {
-                Some(LlmError::RateLimited { retry_after, .. }) => {
-                    let wait = (*retry_after).min(Duration::from_secs(30));
-                    on_event(LoopEvent::RateLimited {
-                        seconds: wait.as_secs(),
-                    });
-                    async {
-                        tokio::time::sleep(wait).await;
-                        chat().await
-                    }
-                    .instrument(tracing::info_span!(
-                        "tool_select_retry",
-                        round,
-                        waited_s = wait.as_secs()
-                    ))
-                    .await?
-                }
-                _ => return Err(e),
-            },
-            Ok(turn) => turn,
+        // Per round, not per run: a run that survived a 429 in round one still
+        // deserves a full ladder if round three trips a different limit.
+        let mut attempts = 0usize;
+
+        // Overload and transient 5xx are retried on a backoff ladder: the loop
+        // makes several calls in a row, so a per-minute budget can trip between
+        // rounds and a single bad upstream box can end a command that was
+        // otherwise going fine. Here rather than in the llm crate so the panel
+        // can show the wait instead of looking hung.
+        let turn = loop {
+            let error = match chat().await {
+                Ok(turn) => break turn,
+                Err(e) => e,
+            };
+            let Some(schedule) = error.downcast_ref::<LlmError>().and_then(backoff) else {
+                return Err(error);
+            };
+            let attempt = attempts;
+            if attempt >= schedule.len() {
+                return Err(error);
+            }
+            attempts += 1;
+
+            let llm_error = error.downcast_ref::<LlmError>().expect("matched above");
+            let wait = retry_delay(llm_error, schedule, attempt, jitter());
+            // The panel says "rate limited" for every retried class: to someone
+            // waiting on a spoken command, a 503 and a 429 are the same event —
+            // the machine is busy, it will try again. The real status is logged.
+            tracing::warn!(%error, attempt, wait_s = wait.as_secs_f64(), "retrying chat");
+            on_event(LoopEvent::RateLimited {
+                seconds: wait.as_secs().max(1),
+            });
+            async { tokio::time::sleep(wait).await }
+                .instrument(tracing::info_span!(
+                    "tool_select_retry",
+                    round,
+                    attempt,
+                    waited_s = wait.as_secs_f64()
+                ))
+                .await;
+            if cancelled() {
+                anyhow::bail!("cancelled");
+            }
         };
 
         if turn.tool_calls.is_empty() {
-            return Ok(turn
+            let answer = turn
                 .content
+                .clone()
                 .filter(|c| !c.trim().is_empty())
                 .unwrap_or_else(|| {
                     if any_failed {
@@ -270,7 +413,33 @@ where
                     } else {
                         "Done.".to_string()
                     }
-                }));
+                });
+
+            // The model stopping is only a claim to be done. Grade it against
+            // the original command, and if a named action never happened, put
+            // that back to the model rather than telling the user it is done.
+            // Skipped once the budget is spent and on the last round, where
+            // tools are forbidden and a nudge could not be acted on anyway.
+            if verifier_retries < MAX_VERIFIER_RETRIES && !is_last && !cancelled() {
+                if let Some(missing) = verify(llm, model, command, &answer).await {
+                    verifier_retries += 1;
+                    tracing::info!(%missing, verifier_retries, "answer graded unfinished");
+                    messages.push(Message {
+                        role: aloud_llm::Role::Assistant,
+                        content: Some(answer),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    });
+                    messages.push(Message::user(format!(
+                        "You have not finished the command yet: {missing}. \
+                         Do it now with the tools available, then confirm. \
+                         If it genuinely cannot be done, say plainly why."
+                    )));
+                    continue;
+                }
+            }
+
+            return Ok(answer);
         }
 
         // The model must see its own request alongside the results appended
@@ -294,6 +463,13 @@ where
         }
 
         for call in &turn.tool_calls {
+            // Between dispatches, not just at the top of the round: a round
+            // holding six calls otherwise runs all six after Escape, and the
+            // ones that matter — the writes — tend to come last.
+            if cancelled() {
+                anyhow::bail!("cancelled");
+            }
+
             let name = call.function.name.clone();
             let args: serde_json::Value = serde_json::from_str(&call.function.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
@@ -330,6 +506,13 @@ where
                 let answer = ask(question)
                     .instrument(tracing::info_span!("ask_user"))
                     .await;
+                // Escape while the question was on screen. Checked here as well
+                // as at the top of the round because this is the one await that
+                // can hold a run open indefinitely — the user is being waited
+                // on, and dismissing the panel is how they say no.
+                if cancelled() {
+                    anyhow::bail!("cancelled");
+                }
                 let result = match answer {
                     Some(text) => serde_json::json!({ "answer": text }).to_string(),
                     // Dismissed. Reported as a result rather than an error so the
@@ -540,6 +723,124 @@ mod tests {
         // transport failures have no `successful`, just an error string
         assert!(!tool_succeeded(r#"{"error":"no active gmail connection"}"#));
         assert!(!tool_succeeded("not json"));
+    }
+
+    /// The verifier must fail open. A grader that answers in a shape we did
+    /// not anticipate has to accept the answer, because the alternative is a
+    /// spoken command that cannot leave the loop.
+    #[test]
+    fn the_verifier_only_reopens_on_an_explicit_unfinished() {
+        assert_eq!(
+            unfinished_reason("UNFINISHED: the email was drafted but never sent"),
+            Some("the email was drafted but never sent".to_string())
+        );
+        assert_eq!(
+            unfinished_reason("  UNFINISHED — never sent\n"),
+            Some("— never sent".to_string())
+        );
+        // A bare UNFINISHED still reopens; the nudge just carries no detail.
+        assert_eq!(unfinished_reason("UNFINISHED"), Some(String::new()));
+
+        assert_eq!(unfinished_reason("FINISHED"), None);
+        assert_eq!(unfinished_reason(""), None);
+        // Everything unrecognised accepts, including a grader that editorialises
+        // or answers in the wrong case rather than the one word it was asked for.
+        assert_eq!(unfinished_reason("I think it looks unfinished?"), None);
+        assert_eq!(unfinished_reason("unfinished: lowercase"), None);
+        assert_eq!(unfinished_reason("The answer is UNFINISHED"), None);
+    }
+
+    #[test]
+    fn only_overload_and_transient_server_errors_are_retried() {
+        let rate_limited = LlmError::RateLimited {
+            model: "m".into(),
+            retry_after: Duration::from_secs(2),
+        };
+        assert_eq!(backoff(&rate_limited).map(<[f64]>::len), Some(3));
+        assert_eq!(
+            backoff(&LlmError::Failed {
+                status: 529,
+                body: String::new()
+            })
+            .map(<[f64]>::len),
+            Some(3)
+        );
+        assert_eq!(
+            backoff(&LlmError::Failed {
+                status: 503,
+                body: String::new()
+            })
+            .map(<[f64]>::len),
+            Some(2)
+        );
+        // A bad request or a bad key will fail identically forever; retrying
+        // one only makes the user wait longer for the same error.
+        for status in [400, 401, 403, 404] {
+            assert!(
+                backoff(&LlmError::Failed {
+                    status,
+                    body: String::new()
+                })
+                .is_none(),
+                "{status} should not be retried"
+            );
+        }
+        assert!(backoff(&LlmError::EmptyOutput).is_none());
+    }
+
+    /// A server that says "come back in an hour" must not hold a spoken
+    /// command open for an hour.
+    #[test]
+    fn retry_after_outranks_the_schedule_but_is_capped() {
+        let schedule = backoff(&LlmError::RateLimited {
+            model: "m".into(),
+            retry_after: Duration::ZERO,
+        })
+        .unwrap();
+
+        let polite = LlmError::RateLimited {
+            model: "m".into(),
+            retry_after: Duration::from_secs(5),
+        };
+        assert_eq!(
+            retry_delay(&polite, schedule, 0, 0.0),
+            Duration::from_secs(5)
+        );
+
+        let hostile = LlmError::RateLimited {
+            model: "m".into(),
+            retry_after: Duration::from_secs(3600),
+        };
+        assert_eq!(
+            retry_delay(&hostile, schedule, 0, 0.0),
+            Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn the_5xx_ladder_grows_and_stays_under_the_cap() {
+        let err = LlmError::Failed {
+            status: 500,
+            body: String::new(),
+        };
+        let schedule = backoff(&err).unwrap();
+        let first = retry_delay(&err, schedule, 0, 0.0);
+        let second = retry_delay(&err, schedule, 1, 0.0);
+        assert!(
+            first < second,
+            "{first:?} should be shorter than {second:?}"
+        );
+        assert!(second <= Duration::from_secs(30));
+        // Jitter is additive, and must not push a rung over the cap either.
+        assert!(retry_delay(&err, schedule, 1, 0.4) <= Duration::from_secs(30));
+    }
+
+    #[test]
+    fn jitter_stays_inside_its_advertised_range() {
+        for _ in 0..100 {
+            let j = jitter();
+            assert!((0.0..0.4).contains(&j), "got {j}");
+        }
     }
 
     #[test]

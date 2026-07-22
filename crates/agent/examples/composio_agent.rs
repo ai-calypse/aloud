@@ -85,6 +85,8 @@ async fn main() -> anyhow::Result<()> {
             println!("  [asked, unanswered] {question}");
             None
         },
+        // Nothing to cancel from here: the example runs to completion or errors.
+        || false,
     )
     .await?;
 

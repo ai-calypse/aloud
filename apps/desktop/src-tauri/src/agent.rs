@@ -113,19 +113,39 @@ fn emit(app: &AppHandle, event: AgentEvent) {
     }
 }
 
-/// Runs the full agent flow for a transcript. Called by the pipeline.
-pub async fn run(app: &AppHandle, transcript: String, settings: &Settings) -> Result<()> {
+/// Runs the full agent flow for a transcript. Called by the pipeline, which
+/// owns `cancelled` — the loop polls it between tool calls so Escape stops a
+/// multi-tool round part-way instead of after all of it.
+pub async fn run(
+    app: &AppHandle,
+    transcript: String,
+    settings: &Settings,
+    cancelled: impl Fn() -> bool,
+) -> Result<()> {
     crate::overlay::show_panel(app);
     emit(app, AgentEvent::RunStarted(transcript.clone()));
 
-    match execute(app, &transcript, settings).await {
+    match execute(app, &transcript, settings, cancelled).await {
         Ok(message) => emit(app, AgentEvent::RunFinished(message)),
+        // A cancel is the user's own doing: close the panel rather than
+        // showing them an error for the thing they just asked to stop.
+        Err(e) if is_cancelled(&e) => {
+            tracing::info!("agent cancelled");
+            hide(app);
+        }
         Err(e) => {
             tracing::error!(%e, "agent failed");
             emit(app, AgentEvent::RunError(format!("{e:#}")));
         }
     }
     Ok(())
+}
+
+/// Whether a failure is the loop's own cancellation, which is not an error to
+/// report. Matched on the message because the loop returns `anyhow::Error` and
+/// a typed error for one string is not worth the crate boundary.
+fn is_cancelled(error: &anyhow::Error) -> bool {
+    error.to_string() == "cancelled"
 }
 
 // Gemini, not Groq: a multi-round tool loop makes several chat calls in a row
@@ -139,7 +159,12 @@ const GEMINI_MODEL: &str = "gemini-3.1-flash-lite";
     skip_all,
     fields(tool_count = tracing::field::Empty)
 )]
-async fn execute(app: &AppHandle, transcript: &str, settings: &Settings) -> Result<String> {
+async fn execute(
+    app: &AppHandle,
+    transcript: &str,
+    settings: &Settings,
+    cancelled: impl Fn() -> bool,
+) -> Result<String> {
     if settings.gemini_api_key.trim().is_empty() {
         bail!("Agent mode is unavailable — no Gemini credential is configured");
     }
@@ -184,6 +209,7 @@ async fn execute(app: &AppHandle, transcript: &str, settings: &Settings) -> Resu
         // The question itself already went out through `on_event`; this only
         // opens the reply channel and waits on it.
         |_question| await_answer(app),
+        cancelled,
     )
     .await
 }
