@@ -1,15 +1,9 @@
 import type { Binding, Key, Modifier } from "../../lib/bindings";
 
 /**
- * Renders a `Binding` as a label carrying both the word and the symbol —
- * "Cmd ⌘ + D" — mirroring the Swift app's `orderedDisplayNames`. The symbol
- * alone ("⌘D") is compact but the word is what most people actually read.
- *
- * Side is always spelled out — "Left Option ⌥", "Right Option ⌥" — because a
- * recorded chord pins to one side, and a bare "Option ⌥" would be
- * indistinguishable from the side-agnostic modifier (which is exactly what the
- * generic `MODIFIER_LABEL` below is for). Both sides get a prefix so neither
- * reads as the default.
+ * Renders a `Binding` as word plus symbol — "Cmd ⌘ + D". Side is always
+ * spelled out, both sides, because a bare "Option ⌥" would be
+ * indistinguishable from the side-agnostic modifier in `MODIFIER_LABEL`.
  */
 
 const MODIFIER_LABEL: Record<Modifier, string> = {
@@ -46,10 +40,9 @@ function keyLabel(key: Key): string {
 export function describeBinding(binding: Binding | null): string {
   if (!binding || binding.kind === "disabled") return "Not set";
 
-  // A recorded chord pins to specific sides, so render those keys (Right Option
-  // reads distinctly from the left) rather than the side-agnostic modifier. An
-  // empty set — presets, hand-written bindings — falls back to the logical
-  // symbols, which is either-side by design.
+  // A recorded chord pins to specific sides, so those keys win over the
+  // side-agnostic modifier. An empty set (presets, hand-written bindings)
+  // falls back to the logical symbols, which are either-side by design.
   const exact = binding.exact_modifiers ?? [];
   const modifiers =
     exact.length > 0

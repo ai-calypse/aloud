@@ -8,12 +8,8 @@ import { SearchField } from "@/components/ui/search-field";
 import { formatDate } from "@/lib/format";
 import "./notes.css";
 
-/**
- * Search-first notes browsing, ported from `NotesSearchView.swift`.
- *
- * Ranking lives in Rust (`notes::search`), so results here are already in the
- * right order — this only renders them.
- */
+/** Search-first notes browsing. Ranking lives in Rust (`notes::search`), so
+ * results arrive already ordered — this only renders them. */
 export function NotesView() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -24,9 +20,8 @@ export function NotesView() {
   // exactly what scored.
   const terms = useMemo(() => query.split(/\s+/).filter(Boolean), [query]);
 
-  // Fetched on mount, then again on window focus and whenever a meeting
-  // finishes saving — the list went stale when a note landed while this view
-  // was already open.
+  // Refetched on focus and when a meeting finishes saving: a note can land
+  // while this view is already open.
   useEffect(() => {
     const refresh = () =>
       or(commands.recentNotes(20), [], "loading notes").then(setRecent);
@@ -114,8 +109,6 @@ export function NoteReader({
   onBack: () => void;
   backLabel?: string;
 }) {
-  // Reading is the common case; the source is there for copying a section out
-  // or checking what the summarizer actually wrote.
   const [source, setSource] = useState(false);
 
   return (
@@ -136,15 +129,13 @@ export function NoteReader({
       <time className="text-ui text-ink-2">{formatDate(note.date)}</time>
 
       {source ? (
-        /* Source view: the raw markdown, monospaced so the syntax lines up. */
         <pre className="mt-[0.8rem] overflow-y-auto font-mono text-[0.82rem] leading-[1.55] break-words whitespace-pre-wrap">
           {note.content}
         </pre>
       ) : (
-        /* Streamdown parses the markdown to React elements — no innerHTML, so
-           a note staying untrusted input costs nothing. Same renderer the ask
-           and agent panels use. `reader__rendered` is only a hook for the
-           descendant rules in notes.css; its own box is utilities. */
+        /* Streamdown parses markdown to React elements — no innerHTML, so a
+           note stays untrusted input safely. `reader__rendered` is only a hook
+           for the descendant rules in notes.css. */
         <MessageResponse className="reader__rendered mt-[0.8rem] overflow-y-auto text-[0.9rem] leading-[1.6]">
           {note.content}
         </MessageResponse>

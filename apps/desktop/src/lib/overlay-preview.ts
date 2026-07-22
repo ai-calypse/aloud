@@ -2,20 +2,14 @@ import type { OverlayStyle, Phase } from "./bindings";
 
 /**
  * The contract between the motion tuner (tune.html) and the overlay window.
- *
- * Its own module rather than an export from overlay.tsx, which mounts a React
- * root at import time: anything importing the event name from there would
- * silently start a second overlay inside the page framing it.
+ * Its own module because overlay.tsx mounts a React root at import time —
+ * importing the event name from there would start a second overlay.
  */
 
 /**
- * What the tuning page can ask the overlay to do.
- *
- * Every state here is normally reached by holding a key and speaking, which is
- * not a thing you can do forty times while dragging a slider — and the `?phase=`
- * query params only set a state at load, which loses the transition into it.
- * That transition *is* the motion being tuned, so it has to be reachable
- * without a reload.
+ * What the tuning page can ask the overlay to do. `?phase=` only sets a state
+ * at load, which loses the transition into it — and that transition is the
+ * motion being tuned.
  */
 export type PreviewCommand = {
   phase?: Phase;
@@ -23,16 +17,11 @@ export type PreviewCommand = {
   /** `stream` types the answer in, so the panel can be watched chasing it. */
   ask?: "open" | "close" | "stream";
   /**
-   * The live dictation transcript. `stream` includes a mid-way revision,
-   * because that is what whisper actually does and it is the case that can
-   * make the panel jitter — a preview that only ever grew would not show it.
+   * The live dictation transcript. `stream` includes a mid-way revision, which
+   * is the case that can make the panel jitter.
    */
   partial?: "stream" | "clear";
-  /**
-   * An agent run. `pending` stops on the approval gate — the one state that
-   * needs a click mid-run, and the reason the panel takes the mouse before it
-   * has finished rather than after.
-   */
+  /** An agent run. `pending` stops on the approval gate. */
   agent?: "run" | "pending" | "planned" | "close";
   dismissing?: boolean;
   /** Rebuilds the panel's springs, which is how a changed --panel-* applies. */

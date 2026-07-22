@@ -3,8 +3,8 @@
 //! `cargo run -p aloud-paste --example paste_probe`, then click into a text
 //! field before the countdown ends.
 //!
-//! Unit tests cannot cover this: the clipboard and the paste chord are OS
-//! state, and `preserve_clipboard` is only meaningfully wrong on real hardware.
+//! The clipboard and the paste chord are OS state; `preserve_clipboard` is only
+//! meaningfully wrong on real hardware.
 
 use anyhow::Result;
 use std::{thread::sleep, time::Duration};

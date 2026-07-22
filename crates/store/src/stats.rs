@@ -1,4 +1,4 @@
-//! Lifetime dictation stats, ported from `DictationStats.swift`.
+//! Lifetime dictation stats.
 
 use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDate};
@@ -14,8 +14,7 @@ const TYPING_WPM: f64 = 40.0;
 /// duration is not available at the success hook.
 const SPEAKING_WPM: f64 = 150.0;
 
-/// See [`crate::history::Entry`] on why u64 exports as `number`: a lifetime
-/// word count will not reach 2^53.
+/// See [`crate::history::Entry`] on why u64 exports as `number`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Stats {
@@ -26,31 +25,28 @@ pub struct Stats {
     pub total_spoken_seconds: f64,
     pub current_streak_days: u32,
     pub best_streak_days: u32,
-    /// Local calendar day of the last dictation, as `YYYY-MM-DD`.
-    ///
-    /// A string rather than a `NaiveDate` so it crosses the specta boundary
-    /// as a plain TS string; [`Self::last_day`] parses it back.
+    /// Local calendar day of the last dictation, as `YYYY-MM-DD`. A string so it
+    /// crosses the specta boundary; [`Self::last_day`] parses it back.
     pub last_dictation_day: Option<String>,
 }
 
 impl Stats {
-    /// `<app-data>/Aloud/stats.json`. A file of its own rather than a corner of
-    /// settings.json: this is rewritten after every dictation, and a torn write
-    /// must not be able to take the user's API keys with it.
+    /// `<app-data>/Aloud/stats.json`. Its own file, not a corner of
+    /// settings.json: rewritten after every dictation, and a torn write must not
+    /// take the API keys with it.
     pub fn path() -> Result<PathBuf> {
         Ok(aloud_notes::data_dir()?.join("stats.json"))
     }
 
-    /// Lifetime stats from disk, or zeroes when the file is absent or corrupt.
-    /// Losing a streak must never stop the app from starting.
+    /// Lifetime stats from disk, or zeroes when absent or corrupt — losing a
+    /// streak must never stop the app starting.
     pub fn load() -> Self {
         Self::path()
             .map(|p| Self::load_from(&p))
             .unwrap_or_default()
     }
 
-    /// Temp file + rename, as for settings: this is written after every
-    /// dictation, so a crash mid-write would otherwise zero a lifetime streak.
+    /// Temp + rename: a crash mid-write would otherwise zero a lifetime streak.
     pub fn save(&self) -> Result<()> {
         self.save_to(&Self::path()?)
     }
@@ -89,8 +85,6 @@ impl Stats {
 
     /// Records one dictation. Consecutive calendar days extend the streak, a
     /// same-day repeat keeps it, any gap resets it to 1.
-    ///
-    /// `at` is injectable so the streak math is testable.
     pub fn record_session(&mut self, words: u64, seconds: f64, at: DateTime<Local>) {
         if words == 0 {
             return;
@@ -99,8 +93,8 @@ impl Stats {
         self.total_sessions += 1;
         self.total_spoken_seconds += seconds;
 
-        // Compare calendar days, not elapsed hours: a DST shift makes
-        // consecutive days 23 or 25 hours apart, and both must count as one.
+        // Calendar days, not elapsed hours: a DST shift makes consecutive days
+        // 23 or 25 hours apart, and both must count as one.
         let today = at.date_naive();
         self.current_streak_days = match self.last_day() {
             Some(last) => match (today - last).num_days() {
@@ -114,12 +108,10 @@ impl Stats {
         self.last_dictation_day = Some(today.to_string());
     }
 
-    /// The last dictation day, parsed. None if unset or unparseable.
     pub fn last_day(&self) -> Option<NaiveDate> {
         self.last_dictation_day.as_deref()?.parse().ok()
     }
 
-    /// Words in a transcript, for `record_session`.
     pub fn word_count(text: &str) -> u64 {
         text.split_whitespace().count() as u64
     }
@@ -155,8 +147,6 @@ mod tests {
         assert_eq!(stats.current_streak_days, 1, "same day is still one day");
     }
 
-    /// Consecutive days are 23 or 25 hours apart across a DST boundary, so the
-    /// streak must be computed on calendar days, not elapsed time.
     #[test]
     fn consecutive_days_increment_across_dst() {
         let mut stats = Stats::default();
@@ -181,7 +171,6 @@ mod tests {
     #[test]
     fn time_saved_clamps_at_zero() {
         let mut stats = Stats::default();
-        // Rambling: far more speaking time than the typing equivalent.
         stats.record_session(10, 600.0, day(2026, 3, 1));
         assert_eq!(stats.time_saved_seconds(), 0.0);
     }
@@ -206,9 +195,8 @@ mod tests {
         assert_eq!(stats, Stats::default(), "silence must not count");
     }
 
-    /// The whole point of persisting: a relaunch must not zero a lifetime
-    /// streak. This is the regression for stats being rebuilt as `default()`
-    /// on every launch.
+    /// Guards: stats were rebuilt as `default()` on every launch, zeroing the
+    /// lifetime streak.
     #[test]
     fn stats_survive_a_round_trip_to_disk() {
         let dir = tempfile::tempdir().unwrap();

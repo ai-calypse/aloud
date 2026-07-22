@@ -1,9 +1,4 @@
-/* Document-level rules shared by every window.
- *
- * Each window used to carry its own copy of the same `html, body` reset in
- * App.css, panel.css and overlay.css; they had drifted apart on `overflow` and
- * `height` for no reason anyone recorded.
- */
+/* Document-level rules shared by every window. */
 
 body {
   margin: 0;
@@ -25,13 +20,8 @@ body {
   height: 100%;
 }
 
-/* Tailwind v4's Preflight sets `cursor: default` on buttons to match the raw
- * browser behaviour, which left every control in the app showing an arrow. Put
- * the hand back once, rather than hanging cursor-pointer on each element.
- *
- * The role selectors cover the controls that are not <button>: Radix and cmdk
- * render list options as divs. Disabled buttons keep the arrow — they are not
- * clickable, and saying otherwise is a lie the pointer tells.
+/* Tailwind v4 Preflight sets `cursor: default` on buttons; put the hand back
+ * once. Role selectors cover Radix/cmdk controls that are divs, not <button>.
  */
 @layer base {
   button:not(:disabled),

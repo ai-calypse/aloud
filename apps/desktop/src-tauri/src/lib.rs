@@ -23,10 +23,9 @@ const PERMISSION_POLL: std::time::Duration = std::time::Duration::from_secs(1);
 #[tauri_specta(event_name = "hotkeys-permitted")]
 pub struct HotkeysPermitted(pub bool);
 
-/// Pushed when a background revalidation finds the connector list has changed.
-///
-/// The Connectors pane paints from cache immediately, so this is how a service
-/// connected in the browser reaches a window that already rendered.
+/// Pushed when a background revalidation finds the connector list has changed —
+/// the pane paints from cache, so this is how a browser connection reaches a
+/// window that already rendered.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type, Event)]
 #[tauri_specta(event_name = "connectors-updated")]
 pub struct ConnectorsUpdated(pub Vec<commands::Connector>);
@@ -35,29 +34,23 @@ pub struct ConnectorsUpdated(pub Vec<commands::Connector>);
 pub struct AppState {
     pub settings: Arc<Mutex<Settings>>,
     pub pipeline: Arc<pipeline::Pipeline>,
-    /// The running meeting session, if any. A one-shot hotkey toggles it.
     pub meeting: Arc<Mutex<Option<meeting::Meeting>>>,
-    /// The live hotkey config the listener reads. Shared with the listener
-    /// thread so a rebind from Settings applies without a restart.
+    /// Shared with the listener thread, so a rebind from Settings applies
+    /// without a restart.
     pub hotkey_config: Arc<Mutex<aloud_hotkey::model::Config>>,
     /// Arms binding capture in the listener thread. The recorder pane sets it;
     /// the listener clears it as soon as a gesture commits.
     pub hotkey_capture: aloud_hotkey::CaptureSlot,
-    /// Composio reads held across opens of the Connectors pane, so it paints
-    /// from memory instead of a round-trip. See `aloud_agent::ResponseCache`.
     pub connectors: commands::ConnectorCache,
-    /// Per-stage latency, written by the tracing layer and read by the dev
-    /// panel. Shared with the layer, which owns the writes.
+    /// Per-stage latency, written by the tracing layer and read by the dev panel.
     pub timings: Arc<Mutex<aloud_store::Timings>>,
-    /// Notch geometry per attached screen, measured once on the main thread at
-    /// launch. The wings overlay reads it to weld to the cutout; empty on a Mac
-    /// with no notch, and on Windows.
+    /// Measured once on the main thread at launch; empty without a notch.
     pub notch: Vec<notch::Notch>,
 }
 
 pub fn run() {
-    // Spans go two places: the terminal, as before, and `timings.sqlite`, so
-    // the waterfall survives the process and reads offline.
+    // Spans go two places: the terminal, and `timings.sqlite` so the waterfall
+    // survives the process.
     let timings = aloud_notes::data_dir()
         .and_then(|dir| aloud_store::Timings::open(&dir.join("timings.sqlite")))
         .unwrap_or_else(|e| {
@@ -74,8 +67,7 @@ pub fn run() {
                     .unwrap_or_else(|_| "aloud=info,aloud_hotkey=info".into()),
             ),
         )
-        // Unfiltered on purpose: the layer records only spans that descend
-        // from an utterance, and an env filter tuned for readable logs would
+        // Unfiltered on purpose: an env filter tuned for readable logs would
         // silently punch holes in the waterfall.
         .with(aloud_store::TimingLayer::new(timings.clone()))
         .init();
@@ -146,9 +138,7 @@ pub fn run() {
         .expect("failed to export typescript bindings");
 
     tauri::Builder::default()
-        // Opens the Composio OAuth URL when connecting a connector.
         .plugin(tauri_plugin_opener::init())
-        // MacosLauncher is ignored off macOS; no launch args are needed.
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -158,8 +148,6 @@ pub fn run() {
         .setup(move |app| {
             builder.mount_events(app);
 
-            // Check for an update on launch, in the background. A no-op until a
-            // signing pubkey is configured — see `check_for_update`.
             spawn_update_check(app.handle().clone());
 
             // Before loading settings: a first launch should find the Swift
@@ -172,8 +160,7 @@ pub fn run() {
                         "imported data from the Swift app"
                     );
                 }
-                // Never block startup on a failed import: the user's data is
-                // untouched either way, and they can still use the app.
+                // Never block startup on a failed import.
                 Err(e) => tracing::warn!(%e, "could not import legacy data"),
                 _ => {}
             }
@@ -187,8 +174,6 @@ pub fn run() {
             // first dictation. Returns immediately; the work is spawned.
             pipeline.warm_up();
             let meeting: Arc<Mutex<Option<meeting::Meeting>>> = Arc::new(Mutex::new(None));
-            // The live hotkey config, shared between AppState (written on a
-            // rebind) and the listener thread (which reads it every event).
             let hotkey_config = Arc::new(Mutex::new(
                 settings
                     .lock()
@@ -204,29 +189,23 @@ pub fn run() {
                 hotkey_capture: hotkey_capture.clone(),
                 connectors: Default::default(),
                 timings: timings.clone(),
-                // Main thread here (Tauri's setup callback), which NSScreen
-                // requires. Measured once; see the note in `notch.rs`.
+                // Tauri's setup callback is the main thread, which NSScreen requires.
                 notch: notch::notched_screens(),
             });
             app.manage(agent::PendingConfirmation::default());
 
-            // Lift the overlay above the menu bar (main thread here) so the
-            // wings style can weld into the notch instead of being clamped
-            // below it.
+            // Main thread required. A floating-level window is clamped below
+            // the menu bar, which the wings style has to sit in.
             overlay::raise_over_menu_bar(app.handle());
 
             tray::init(app)?;
 
-            // Warm the installed-apps cache off the critical path: the App
-            // Rules picker then opens against a populated cache instead of
-            // paying for ~70 `sips` spawns on first click.
+            // Off the critical path: the App Rules picker otherwise pays for
+            // ~70 `sips` spawns on first click.
             std::thread::spawn(|| {
                 let _ = aloud_selection::installed_apps();
             });
 
-            // Same for connectors, so the first open is warm too. Only for
-            // users who have configured a key — otherwise there is nothing to
-            // fetch and no reason to touch the network on launch.
             commands::warm_connectors(app.handle().clone());
 
             spawn_hotkey_listener(
@@ -238,14 +217,10 @@ pub fn run() {
                 hotkey_capture,
             );
 
-            // Closing the window must hide it, not destroy it. This is a
-            // menu-bar app: the window is reopened from the tray, and a
-            // destroyed window makes `get_webview_window("main")` return None,
-            // so "Open Aloud" silently does nothing. Hide and prevent the close.
+            // Closing must hide, not destroy: a destroyed window makes
+            // `get_webview_window("main")` return None, so the tray's "Open
+            // Aloud" silently does nothing.
             if let Some(main) = app.get_webview_window("main") {
-                // Native macOS Liquid Glass: a sidebar-material NSVisualEffectView
-                // behind the transparent webview. The frontend paints the sidebar
-                // and cards with translucent fills so the vibrancy shows through.
                 #[cfg(target_os = "macos")]
                 {
                     use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
@@ -265,9 +240,8 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            // If the app died mid-dictation with the output muted, the saved
-            // level is still on disk and this is the only thing that will put
-            // it back — the user has no in-app control that would.
+            // If the app died mid-dictation with the output muted, this is the
+            // only thing that puts the level back.
             if let Err(e) = aloud_volume::restore() {
                 tracing::warn!(%e, "could not restore the system volume from a previous run");
             }
@@ -277,10 +251,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, _event| {
-            // Reopening the app — double-clicking it in Finder while it is
-            // already running — raises the window. This is the recovery path
-            // that makes hiding the menu-bar icon safe: with no dock icon and
-            // no status item, it is otherwise the only way back to settings.
+            // Double-clicking the app while it is already running raises the
+            // window — the only way back to settings once the menu-bar icon is
+            // hidden, since there is no dock icon either.
             //
             // TODO: unverified — test this against a real build (`pnpm build`),
             // not `pnpm dev`. `applicationShouldHandleReopen` is delivered by
@@ -297,15 +270,10 @@ pub fn run() {
         });
 }
 
-/// Checks for an update on launch and installs one if the user agrees.
-///
-/// A no-op until a signing pubkey is configured in `tauri.conf.json`: without
-/// it the updater cannot verify a download, so there is nothing safe to do.
-/// The check itself is best-effort — a failure is logged, never surfaced, so a
-/// release server being down never blocks the app.
+/// Checks for an update on launch. Best-effort — a failure is logged, never
+/// surfaced, so a release server being down never blocks the app.
 fn spawn_update_check(app: tauri::AppHandle) {
-    // The pubkey is baked into the config at build time; an empty one means
-    // updates are not set up for this build, so skip the whole thing.
+    // No pubkey means the updater cannot verify a download; skip the whole thing.
     let configured = app
         .config()
         .plugins
@@ -354,14 +322,10 @@ fn spawn_hotkey_listener(
     config: Arc<Mutex<aloud_hotkey::model::Config>>,
     capture: aloud_hotkey::CaptureSlot,
 ) {
-    // `config` is the same Arc AppState holds, so a rebind from Settings is
-    // seen here on the next key event — no restart needed.
     let settings = settings.clone();
     std::thread::spawn(move || {
-        // Granting Accessibility does not restart the app, and macOS gives no
-        // signal when it happens, so wait for the grant rather than giving up
-        // at launch. Without this the user grants permission, sees nothing
-        // change, and has to quit and reopen to get working hotkeys.
+        // macOS gives no signal when Accessibility is granted and does not
+        // restart the app, so wait for it rather than giving up at launch.
         if !aloud_hotkey::is_permitted() {
             tracing::warn!("accessibility permission not granted; waiting for it");
             while !aloud_hotkey::is_permitted() {
@@ -369,7 +333,6 @@ fn spawn_hotkey_listener(
             }
             tracing::info!("accessibility permission granted; starting hotkeys");
         }
-        // Tell the UI so the banner can clear itself without a restart.
         if let Err(e) = HotkeysPermitted(true).emit(&app) {
             tracing::warn!(%e, "could not publish hotkey permission");
         }
@@ -396,11 +359,8 @@ fn handle_hotkey(
     match event {
         Event::Activated(Role::Hold) => {
             // Note anything selected before recording begins: with a selection
-            // the utterance rewrites it, without one it is dictated. A
-            // selection is the only signal — the extra-modifier gesture came
-            // out, because the Rewrite hotkey covers rewriting on demand. A
-            // poisoned lock falls back to looking, which is the behaviour that
-            // predates the toggle, rather than dropping the selection silently.
+            // the utterance rewrites it, without one it is dictated. A poisoned
+            // lock falls back to looking rather than dropping the selection.
             if settings.lock().map_or(true, |s| s.command_mode_enabled) {
                 pipeline.note_selection_if_any();
             }
@@ -423,9 +383,7 @@ fn handle_hotkey(
                 }
             });
         }
-        // Tap to start, tap again to stop — the same flow as Hold, but with two
-        // presses instead of a press and a release, so there is no Deactivated
-        // edge to hang the stop on.
+        // Tap to start, tap again to stop: no Deactivated edge to hang it on.
         Event::Activated(Role::Toggle) => {
             if pipeline.is_recording() {
                 let pipeline = pipeline.clone();
@@ -455,9 +413,8 @@ fn handle_hotkey(
             });
         }
         Event::Activated(Role::Rewrite) => {
-            // Read the selection now, before recording moves focus. The
-            // thorough read: this key means the user asked for a rewrite, so
-            // the clipboard fallback is worth its cost.
+            // Before recording moves focus. The thorough read — an explicit
+            // rewrite is worth the clipboard fallback's cost.
             pipeline.capture_selection();
             if let Err(e) = pipeline.start(Role::Rewrite) {
                 tracing::error!(%e, "could not start recording");
@@ -495,8 +452,6 @@ fn handle_hotkey(
                 tracing::error!(%e, "could not paste again");
             }
         }
-        // Meeting notes is a one-shot toggle: start a session, or stop and
-        // save the one in flight.
         Event::Activated(Role::MeetingNotes) => toggle_meeting(app, settings, meeting),
         Event::Cancelled => pipeline.cancel(),
         other => tracing::debug!(?other, "unhandled hotkey event"),
@@ -509,17 +464,13 @@ pub(crate) fn toggle_meeting(
     settings: &Arc<Mutex<Settings>>,
     meeting: &Arc<Mutex<Option<meeting::Meeting>>>,
 ) {
-    // One guard across the whole toggle. Taking the lock, dropping it, and
-    // re-taking it to store the new session let two toggles land in the gap:
-    // the tray fires this on the main thread and the hotkey fires it on the
-    // event-tap thread, so both could see None, both open a recorder, and the
-    // second store would orphan the first with no way to stop it. Nothing here
-    // awaits, so holding the guard costs nothing — `Pipeline::start` already
-    // does it this way, which is why it has never had the same race.
+    // One guard across the whole toggle: the tray fires this on the main thread
+    // and the hotkey on the event-tap thread, so releasing between the take and
+    // the store lets both open a recorder and orphans the first.
     let mut slot = meeting.lock().unwrap();
     match slot.take() {
         Some(session) => {
-            // Stop and save off-thread: summarizing is a network round-trip.
+            // Off-thread: summarizing is a network round-trip.
             tauri::async_runtime::spawn(async move {
                 match session.stop().await {
                     Ok(path) => tracing::info!(note = %path.display(), "meeting note saved"),

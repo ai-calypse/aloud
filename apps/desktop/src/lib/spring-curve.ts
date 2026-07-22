@@ -1,16 +1,11 @@
 /**
- * The spring solution behind the `linear()` tokens in motion.css.
+ * The spring solution behind the `linear()` tokens in motion.css: the same
+ * oscillator `lib/spring.ts` integrates, solved analytically instead of
+ * stepped, so a baked curve and the live spring beside it are the same motion.
+ * `spring-curve.test.ts` pins that by regenerating the shipped tokens.
  *
- * Those tokens are real springs sampled into a fixed curve, and until now the
- * sampling lived wherever they were first generated — so changing the feel of
- * the app meant hand-editing 29 numbers, or trusting a number someone typed.
- * This is the same oscillator `lib/spring.ts` integrates, solved analytically
- * instead of stepped, so a curve and the live spring beside it are the same
- * motion. `spring-curve.test.ts` pins that by regenerating the shipped tokens.
- *
- * Parameters are Apple's two, as everywhere else here: a damping ratio (1 =
- * settles without overshoot, below 1 = overshoots on arrival) and a response
- * in seconds.
+ * Parameters are Apple's two: a damping ratio (1 = settles without overshoot)
+ * and a response in seconds.
  */
 
 /** Below this the motion is over; the tail moves sub-pixel distances. */
@@ -44,16 +39,12 @@ export function springValue(t: number, damping: number, response: number): numbe
 
 /**
  * How long a spring of this damping takes to settle, as a multiple of its
- * response.
+ * response — settle time scales linearly with response, which is what lets
+ * `--spring` be one curve run at two durations.
  *
- * A multiple rather than a duration because settle time scales linearly with
- * response — which is what lets `--spring` be one curve run at two durations.
- *
- * Walked backwards rather than solved: an underdamped spring crosses the rest
- * threshold several times on the way down, once per half cycle, and only the
- * last crossing is the answer. Coarse pass to find which half cycle it is in,
- * then bisect inside it — a scan fine enough to place the crossing directly
- * would be ~10⁶ steps, and this runs on every drag of a tuning slider.
+ * Walked backwards because an underdamped spring crosses the rest threshold
+ * once per half cycle and only the last crossing is the answer: coarse pass,
+ * then bisect. A direct scan would be ~10⁶ steps, on every drag of a slider.
  */
 export function settleRatio(damping: number): number {
   const step = 1e-4;
@@ -80,15 +71,9 @@ export function settleRatio(damping: number): number {
 
 /**
  * A `linear()` easing tracing this spring, plus the duration to run it over.
- *
- * The duration is the FULL settle, which is why it looks long next to the
- * motion it describes: a spring is perceptually done well before it stops.
- *
- * Rounded UP, and then sampled over the rounded value rather than the raw one.
- * Both halves matter: a CSS duration is whole milliseconds, so sampling over
- * anything else puts every keyframe fractionally out of step with the clock
- * that plays it, and rounding down would end the curve a hair short of the
- * target — which reads as the animation stopping just before it lands.
+ * The duration is the FULL settle, so it looks long next to the motion it
+ * describes. Rounded UP and then sampled over the rounded value: a CSS duration
+ * is whole milliseconds, and rounding down ends the curve short of the target.
  */
 export function springCurve(
   damping: number,

@@ -1,17 +1,13 @@
-//! Dictation history, ported from `PipelineHistoryStore.swift`.
-//!
-//! rusqlite (bundled SQLite) replaces Core Data. The Swift version built its
-//! model programmatically, so there is no schema to migrate — just a table.
+//! Dictation history, in a bundled-SQLite table.
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::path::Path;
 
-/// Specta forbids exporting i64 by default, since JS loses precision past
-/// 2^53. These are row ids, unix seconds and millisecond durations — all
-/// many orders of magnitude below that — so `number` is exact here and
-/// BigInt would only make the frontend painful.
+/// The i64s are exported as `number`: specta forbids that by default (JS loses
+/// precision past 2^53), but row ids, unix seconds and ms durations are all far
+/// below it, and BigInt would only make the frontend painful.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
@@ -24,28 +20,21 @@ pub struct Entry {
     pub raw_transcript: String,
     /// What was actually pasted, after cleanup.
     pub final_transcript: String,
-    /// Which app had focus, for per-app rules and debugging.
     pub app_name: Option<String>,
     #[specta(type = specta_typescript::Number)]
     pub duration_ms: i64,
-    /// Joins this row to its `timings` spans. Null on every row written
-    /// before the column existed — those runs simply have no breakdown, which
-    /// is why the Run Log has to treat its absence as normal rather than as
-    /// missing data.
+    /// Joins this row to its `timings` spans. Null on rows written before the
+    /// column existed, so its absence is normal, not missing data.
     #[specta(type = Option<specta_typescript::Number>)]
     pub utterance_id: Option<i64>,
-    /// The recording this run was transcribed from, while it survives the
-    /// audio budget. Null on runs from before recordings were kept, on the
-    /// modes that deliberately do not keep one, and on every run whose audio
-    /// has since been evicted — the transcript outlives the WAV.
+    /// The recording this run came from, while it survives the audio budget.
+    /// The transcript outlives the WAV, so this is often null.
     pub audio_path: Option<String>,
 }
 
-/// What the history is allowed to keep.
-///
-/// Entries are capped by count, recordings by size and age: a WAV is four
-/// orders of magnitude larger than the row describing it, so one number cannot
-/// bound both without either throwing away transcripts or filling the disk.
+/// What the history is allowed to keep. Entries are capped by count,
+/// recordings by size and age: a WAV is four orders of magnitude larger than
+/// its row, so one number cannot bound both.
 #[derive(Debug, Clone, Copy)]
 pub struct Retention {
     pub entries: usize,
@@ -56,7 +45,7 @@ pub struct Retention {
 }
 
 impl Retention {
-    /// For tests and callers that only care about the row count.
+    /// For callers that only care about the row count.
     pub fn entries(entries: usize) -> Self {
         Self {
             entries,
@@ -66,11 +55,8 @@ impl Retention {
     }
 }
 
-/// Removes a recording, tolerating one that is already gone.
-///
-/// A missing WAV must never fail a prune: pruning is what keeps the disk
-/// bounded, and refusing to run because of a file someone deleted by hand
-/// would wedge every dictation after it.
+/// Removes a recording, tolerating one already gone: a file deleted by hand
+/// must not wedge the prune that keeps the disk bounded.
 fn remove_recording(path: &str) {
     match std::fs::remove_file(path) {
         Ok(()) => {}
@@ -113,15 +99,11 @@ impl History {
         )
         .context("creating history schema")?;
 
-        // The statement above is the *original* table and deliberately stays
-        // that way: `CREATE TABLE IF NOT EXISTS` is a no-op against a database
-        // that already exists, so a column listed there would only ever reach
-        // fresh installs and every upgraded machine would fail at the first
-        // SELECT. Columns are added by ALTER below instead, which runs on both.
-        //
-        // `user_version` rather than a swallowed "duplicate column" error: a
-        // real failure has to stay visible, and Phase 5 adds a second column
-        // on top of this.
+        // The batch above is the *original* table and must stay that way:
+        // `CREATE TABLE IF NOT EXISTS` is a no-op on an existing database, so a
+        // column added there reaches fresh installs only and every upgraded
+        // machine fails at the first SELECT. New columns go in the ALTERs below,
+        // gated on `user_version` so a real failure still surfaces.
         let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         if version < 1 {
             conn.execute_batch(
@@ -188,12 +170,8 @@ impl History {
             .context("reading a history entry")
     }
 
-    /// Applies the retention budget.
-    ///
-    /// Two different evictions, because they lose different things. Size and
-    /// age only take the *recording*: the transcript is small, it is what the
-    /// Run Log is for, and dropping it to reclaim a WAV would be a bad trade.
-    /// The entry count takes the whole row, recording included.
+    /// Applies the retention budget. Size and age take only the *recording*;
+    /// the entry count takes the whole row, recording included.
     fn prune(&self, retention: Retention) -> Result<()> {
         let cutoff = if retention.audio_days > 0 {
             chrono::Utc::now().timestamp() - retention.audio_days * 86_400
@@ -201,8 +179,7 @@ impl History {
             i64::MIN
         };
 
-        // Newest first: the budget is spent on the recordings most likely to
-        // be played back or retried.
+        // Newest first: spend the budget on what is likeliest to be replayed.
         let mut doomed: Vec<(i64, String)> = Vec::new();
         let mut kept: u64 = 0;
         let mut over = false;
@@ -225,8 +202,8 @@ impl History {
                 // a `bytes` column written at insert is the upgrade path if
                 // the cap ever grows.
                 //
-                // A recording that has vanished counts as zero rather than
-                // aborting: the row still needs its now-dead path cleared.
+                // A vanished recording counts as zero rather than aborting: the
+                // row still needs its now-dead path cleared.
                 let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                 if !over && created_at >= cutoff {
                     kept += size;
@@ -234,8 +211,7 @@ impl History {
                         continue;
                     }
                     // This one tipped the budget, so it and everything older
-                    // than it go. Skipping it and keeping a smaller older one
-                    // would leave holes nobody can predict.
+                    // go — keeping a smaller older one would leave holes.
                     over = true;
                 }
                 doomed.push((id, path));
@@ -245,12 +221,9 @@ impl History {
             self.release_audio(id, &path)?;
         }
 
-        // Unlink before the DELETE, never after. A crash between the two
-        // leaves a file no row points at, and a sweep of the media directory
-        // can find and remove that. The reverse order leaves a row pointing at
-        // a file that is gone, and nothing can recover it: the path is the
-        // only record of where the audio was, and the Run Log's player and
-        // transcription retry both fail on it with no way back.
+        // Unlink before the DELETE, never after: a crash between the two leaves
+        // an orphan file a directory sweep can find, where the reverse leaves a
+        // row pointing at nothing and no record of where the audio was.
         self.unlink_and_delete(
             "SELECT audio_path FROM history WHERE audio_path IS NOT NULL AND id NOT IN (
                 SELECT id FROM history ORDER BY created_at DESC, id DESC LIMIT ?1)",
@@ -260,9 +233,8 @@ impl History {
         )
     }
 
-    /// Unlinks a recording and only then forgets where it was. See the
-    /// ordering note in [`History::prune`] for why that direction is the
-    /// recoverable one.
+    /// Unlinks a recording and only then forgets where it was — see the
+    /// ordering note in [`History::prune`].
     fn release_audio(&self, id: i64, path: &str) -> Result<()> {
         remove_recording(path);
         self.conn
@@ -270,8 +242,8 @@ impl History {
         Ok(())
     }
 
-    /// Removes every recording `select` names, then runs `delete`. One helper
-    /// so no row-deleting path can forget the order.
+    /// Removes every recording `select` names, then runs `delete`. One helper so
+    /// no row-deleting path can forget the order.
     fn unlink_and_delete(
         &self,
         select: &str,
@@ -293,12 +265,10 @@ impl History {
     }
 
     /// Removes one entry and its recording. A missing id is not an error: the
-    /// Run Log paints from a snapshot, so two windows deleting the same row
-    /// must both succeed.
+    /// Run Log paints from a snapshot, so two windows deleting the same row must
+    /// both succeed. The recording goes too — a transcript is plausibly deleted
+    /// *because* it was sensitive.
     pub fn delete(&self, id: i64) -> Result<()> {
-        // The recording goes with the row. A transcript is plausibly deleted
-        // *because* it was sensitive, and leaving the audio of it on disk
-        // would make the button a lie.
         self.unlink_and_delete(
             "SELECT audio_path FROM history WHERE id = ?1 AND audio_path IS NOT NULL",
             "DELETE FROM history WHERE id = ?1",
@@ -306,20 +276,15 @@ impl History {
         )
     }
 
-    /// Replaces the pasted text after a cleanup re-run. `raw_transcript` is
-    /// left alone — it is the transcriber's output, which a cleanup retry
-    /// never re-derives, and overwriting it would destroy the before/after the
-    /// Run Log exists to show.
+    /// Replaces the pasted text after a cleanup re-run. `raw_transcript` is left
+    /// alone: a cleanup retry never re-derives it.
     pub fn update_final(&self, id: i64, text: &str) -> Result<()> {
         self.update_transcripts(id, None, text)
     }
 
-    /// Writes back a retry. `raw` is `None` for a cleanup re-run and `Some`
-    /// for a transcription re-run, which is the one case that does produce a
-    /// new transcriber output — leaving the old one would make "Heard" and
-    /// "Pasted" describe two different runs.
-    ///
-    /// One statement behind both so the pair cannot drift.
+    /// Writes back a retry. `raw` is `Some` only for a transcription re-run, the
+    /// one case that produces new transcriber output. One statement behind both
+    /// so the pair cannot drift.
     pub fn update_transcripts(&self, id: i64, raw: Option<&str>, final_text: &str) -> Result<()> {
         self.conn.execute(
             "UPDATE history
@@ -339,8 +304,7 @@ impl History {
     }
 }
 
-/// The column list every read shares, so a new column cannot reach one query
-/// and not the other.
+/// Shared by every read, so a new column cannot reach one query and not another.
 const SELECT: &str = "SELECT id, created_at, raw_transcript, final_transcript, app_name,
                              duration_ms, utterance_id, audio_path FROM history";
 
@@ -377,7 +341,6 @@ mod tests {
             .unwrap();
     }
 
-    /// A recording of `bytes` bytes, and the entry that points at it.
     fn insert_with_audio(
         history: &History,
         dir: &Path,
@@ -426,8 +389,6 @@ mod tests {
         assert_eq!(all[0].final_transcript, "entry 9");
     }
 
-    /// Entries written within the same second must still order deterministically,
-    /// which is why id breaks the tie.
     #[test]
     fn same_timestamp_orders_by_insertion() {
         let history = History::open_in_memory().unwrap();
@@ -476,8 +437,7 @@ mod tests {
         assert_eq!(history.recent(10).unwrap().len(), 1);
     }
 
-    /// A retry rewrites the paste, never the transcriber's output: losing
-    /// `raw_transcript` would leave the run with nothing to retry from again.
+    /// Losing `raw_transcript` leaves the run with nothing to retry from.
     #[test]
     fn update_final_leaves_the_raw_transcript_alone() {
         let history = History::open_in_memory().unwrap();
@@ -491,16 +451,15 @@ mod tests {
         assert_eq!(row.raw_transcript, "um so like the thing");
     }
 
-    /// The failure this prevents: `utterance_id` was added to the schema's
-    /// `CREATE TABLE IF NOT EXISTS`, which is a no-op against a database that
-    /// already exists — so every machine that had ever dictated opened fine
-    /// and then failed at the first SELECT with "no such column".
+    /// Guards: `utterance_id` added to `CREATE TABLE IF NOT EXISTS` is a no-op
+    /// on an existing database, so every upgraded machine failed at the first
+    /// SELECT with "no such column".
     #[test]
     fn opens_a_database_written_before_utterance_id_existed() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history.sqlite");
 
-        // Byte-for-byte the pre-migration schema, with a row already in it.
+        // Byte-for-byte the pre-migration schema, with a row in it.
         {
             let old = Connection::open(&path).unwrap();
             old.execute_batch(
@@ -524,17 +483,14 @@ mod tests {
         assert_eq!(rows[0].final_transcript, "legacy");
         assert_eq!(rows[0].utterance_id, None, "no breakdown to join to");
 
-        // New rows on the migrated database carry the id, and reopening must
-        // not try to add the column a second time.
+        // Reopening must not try to add the column a second time.
         insert(&history, 200, "after", 50);
         drop(history);
         let reopened = History::open(&path).unwrap();
         assert_eq!(reopened.recent(10).unwrap()[0].utterance_id, Some(200));
     }
 
-    /// The failure this prevents: a WAV per dictation with nothing evicting
-    /// them fills the disk. Filling the budget must unlink the oldest
-    /// recordings and leave their transcripts behind.
+    /// Guards: a WAV per dictation with nothing evicting them fills the disk.
     #[test]
     fn filling_the_audio_budget_evicts_the_oldest_recordings() {
         let dir = tempfile::tempdir().unwrap();
@@ -542,8 +498,7 @@ mod tests {
         let media = dir.path().join("media");
         std::fs::create_dir_all(&media).unwrap();
 
-        // Three 100-byte recordings into a 250-byte budget: the third insert
-        // prunes the first.
+        // Three 100-byte recordings into a 250-byte budget: #3 prunes #1.
         let budget = Retention {
             entries: 50,
             audio_bytes: 250,
@@ -564,8 +519,7 @@ mod tests {
         assert!(rows[0].audio_path.is_some());
     }
 
-    /// Age evicts independently of size: a small enough recording still goes
-    /// once it is old, because the point is not keeping months of speech.
+    /// Age evicts independently of size.
     #[test]
     fn recordings_past_the_age_limit_go_even_when_the_size_fits() {
         let dir = tempfile::tempdir().unwrap();
@@ -587,9 +541,7 @@ mod tests {
         assert_eq!(history.recent(10).unwrap().len(), 2);
     }
 
-    /// The failure this prevents: pruning the row before its file leaves a
-    /// path nothing points at and audio nothing can reach. Deleting an entry —
-    /// plausibly *because* it was sensitive — must take the recording too.
+    /// Guards: pruning the row before its file leaves audio nothing can reach.
     #[test]
     fn deleting_an_entry_takes_its_recording_with_it() {
         let dir = tempfile::tempdir().unwrap();
@@ -608,8 +560,6 @@ mod tests {
         assert!(history.recent(10).unwrap().is_empty());
     }
 
-    /// Same contract for Clear all, which is the button a user reaches for
-    /// when they want the machine to forget.
     #[test]
     fn clearing_removes_every_recording() {
         let dir = tempfile::tempdir().unwrap();
@@ -627,8 +577,7 @@ mod tests {
         assert!(!a.exists() && !b.exists());
     }
 
-    /// Dropping a row for the entry cap must unlink first. Losing the file is
-    /// survivable; losing the path while the file lives is not.
+    /// Losing the file is survivable; losing the path while the file lives is not.
     #[test]
     fn the_entry_cap_unlinks_before_it_forgets_the_path() {
         let dir = tempfile::tempdir().unwrap();
@@ -647,10 +596,7 @@ mod tests {
         assert_eq!(history.recent(10).unwrap().len(), 2);
     }
 
-    /// The Phase 4 failure, one schema version on: `audio_path` added to the
-    /// `CREATE TABLE IF NOT EXISTS` would be a no-op on every database that
-    /// already exists, and each of those machines would fail at the next
-    /// SELECT with "no such column".
+    /// The same "no such column" failure, one schema version on.
     #[test]
     fn opens_a_database_written_before_audio_path_existed() {
         let dir = tempfile::tempdir().unwrap();
@@ -682,8 +628,7 @@ mod tests {
         assert_eq!(rows[0].audio_path, None, "an old run has no recording");
     }
 
-    /// A transcription retry replaces both halves; a cleanup retry only ever
-    /// the second. Sharing one statement is what keeps that true.
+    /// A transcription retry replaces both halves; a cleanup retry only the second.
     #[test]
     fn a_transcription_retry_replaces_the_raw_transcript_too() {
         let history = History::open_in_memory().unwrap();

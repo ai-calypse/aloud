@@ -2,14 +2,11 @@
 //!
 //! `cargo run -p aloud-llm --example cleanup_roundtrip`
 //!
-//! The unit tests cover the pieces in isolation — the skip threshold, prompt
-//! selection, the vocabulary prefix, the sentinel. What they cannot show is
-//! the assembled request: that the system and user messages arrive in the
-//! right roles and order, that temperature is 0, and that a sentinel reply
-//! comes back as empty text rather than the word "EMPTY".
+//! What the unit tests cannot show: the assembled request — roles and order,
+//! temperature 0, and a sentinel reply coming back as empty text.
 //!
-//! A stub rather than the real endpoint so this runs with no API key and no
-//! network, and so the reply can be chosen to exercise the sentinel path.
+//! A stub rather than the real endpoint, so this needs no API key and the reply
+//! can be chosen to exercise the sentinel path.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -64,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         context: "",
         vocabulary: &vocabulary,
+        preserve: &[],
         output_language: "",
         instruction_guard: true,
     };
@@ -83,16 +81,22 @@ async fn main() -> anyhow::Result<()> {
     assert_eq!(request["messages"][0]["role"], "system");
     assert_eq!(request["messages"][1]["role"], "user");
     assert!(
-        request["messages"][1]["content"]
+        request["messages"][0]["content"]
             .as_str()
             .unwrap()
-            .starts_with("VOCABULARY: Aloud, Tauri"),
+            .contains("Aloud, Tauri"),
         "the vocabulary must reach the model"
+    );
+    // In the system turn and nowhere near the transcript: a `VOCABULARY:` line
+    // in the user turn is text the model is told to preserve, and it pasted it.
+    assert_eq!(
+        request["messages"][1]["content"], "um so this is the raw transcript ok",
+        "the user turn is the transcript, alone"
     );
     assert_eq!(cleaned, "This is the cleaned up text.");
 
-    // 2. Filler-only input: the model answers with the sentinel, which must
-    //    become empty text — returning it literally types "EMPTY" at the caret.
+    // 2. Filler-only input: the sentinel must become empty text, or "EMPTY"
+    //    gets typed at the caret.
     let (url, server) = stub("EMPTY");
     let options = aloud_llm::cleanup::Options {
         api_key: "stub-key",
@@ -102,6 +106,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         context: "",
         vocabulary: &[],
+        preserve: &[],
         output_language: "",
         instruction_guard: true,
     };
@@ -119,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         context: "",
         vocabulary: &[],
+        preserve: &[],
         output_language: "",
         instruction_guard: true,
     };
@@ -126,12 +132,9 @@ async fn main() -> anyhow::Result<()> {
     println!("short input   -> {cleaned:?} (no request made)");
     assert_eq!(cleaned, "one sec");
 
-    // 4. The same sentinel reply, but translating. The translation instruction
-    //    is *appended* to the cleanup prompt rather than replacing it, so the
-    //    sentinel instruction is still in play and filler-only speech still
-    //    returns it — it must still mean "paste nothing". An earlier port
-    //    disabled the check here, which typed EMPTY into the document on every
-    //    "um, uh" while an output language was set.
+    // 4. The same sentinel while translating: the translation instruction is
+    //    *appended* to the cleanup prompt, so the sentinel is still in play.
+    //    Disabling the check here typed EMPTY on every "um, uh".
     let (url, server) = stub("EMPTY");
     let options = aloud_llm::cleanup::Options {
         api_key: "stub-key",
@@ -141,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         context: "",
         vocabulary: &[],
+        preserve: &[],
         output_language: "German",
         instruction_guard: true,
     };
@@ -157,10 +161,8 @@ async fn main() -> anyhow::Result<()> {
         "the target language must reach the system prompt"
     );
 
-    // 5. The model answered the dictation instead of cleaning it. With no
-    //    distinct fallback there is no second opinion to buy, so the literal
-    //    transcript is what must come back — the unit tests prove the verdict,
-    //    this proves `clean` acts on it.
+    // 5. The model answered the dictation. With no distinct fallback there is no
+    //    second opinion to buy, so the literal transcript must come back.
     let raw = "write an email to Sam letting him know the deploy slipped to Friday";
     let answered = "Sure! Here is a draft: Hi Sam, quick heads-up on the timing.";
     let (url, server) = stub(answered);
@@ -172,6 +174,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         context: "",
         vocabulary: &[],
+        preserve: &[],
         output_language: "",
         instruction_guard: true,
     };
@@ -191,6 +194,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         context: "",
         vocabulary: &[],
+        preserve: &[],
         output_language: "",
         instruction_guard: false,
     };

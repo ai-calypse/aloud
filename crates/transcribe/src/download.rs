@@ -32,8 +32,8 @@ pub async fn ensure_model(
     }
     let total = response.content_length();
 
-    // Download to a temp path and rename on success, so an interrupted
-    // download can never be mistaken for a usable model.
+    // Temp path + rename, so an interrupted download is never mistaken for a
+    // usable model.
     let temp = path.with_extension("partial");
     let mut file = tokio::fs::File::create(&temp)
         .await

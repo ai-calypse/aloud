@@ -1,21 +1,14 @@
 /**
  * A spring you can redirect mid-flight without it losing its momentum.
  *
- * Almost all motion in this app is CSS, and should stay CSS — the compositor
- * owns those frames, so they do not stutter while React renders (see
- * styles/motion.css). This module exists for the one thing CSS cannot express.
+ * Almost all motion here is CSS and should stay CSS (styles/motion.css). This
+ * exists for the one thing CSS cannot express: a transition interrupted halfway
+ * retargets from where it is, but restarts its curve from zero speed — the chip
+ * travels, stalls for a frame, sets off again. A spring carries its velocity
+ * through a retarget, because the target is only a term in the acceleration.
  *
- * A CSS transition interrupted halfway *does* retarget from where it is, but it
- * restarts its easing curve from zero speed. Click one sidebar row and then
- * another before the first move lands and you see it: the chip is travelling,
- * then stalls for a frame, then sets off again. A real object does not do that.
- * A spring carries its velocity through a change of target, because the target
- * is just a term in the acceleration — nothing about a retarget resets the
- * state. That property is the entire reason this file is not a CSS transition.
- *
- * Parameters are Apple's two, matching the tokens in motion.css: a damping
- * ratio (1 = settles without overshoot) and a response in seconds (how quickly
- * it reaches the target — not a duration; a spring has no fixed duration).
+ * Parameters are Apple's two, matching motion.css: a damping ratio (1 = settles
+ * without overshoot) and a response in seconds — not a duration.
  */
 
 /** Below this distance and speed the motion is not visible; stop integrating. */
@@ -23,11 +16,9 @@ const REST = 0.01;
 
 /**
  * One step of a damped harmonic oscillator, in isolation so it can be tested
- * without a display.
- *
- * Semi-implicit Euler: velocity is updated first and the *new* velocity moves
- * the position. Explicit Euler (position first) feeds energy into the system
- * and a stiff spring visibly gains amplitude instead of settling.
+ * without a display. Semi-implicit Euler: velocity first, and the *new*
+ * velocity moves the position — explicit Euler feeds energy in, and a stiff
+ * spring visibly gains amplitude instead of settling.
  */
 export function integrate(
   position: number,
@@ -49,21 +40,16 @@ export function integrate(
 }
 
 /**
- * Integration step, in seconds.
- *
- * A frame is ~16ms, but integrating a stiff spring in one 16ms jump overshoots
- * badly enough to oscillate — the error grows with omega·dt. Sub-stepping at
- * 240Hz keeps it stable at any response we would plausibly use, and costs a
- * handful of multiplications per frame.
+ * Integration step, in seconds. One 16ms jump overshoots a stiff spring badly
+ * enough to oscillate (the error grows with omega·dt); sub-stepping at 240Hz is
+ * stable at any response we would plausibly use.
  */
 const SUB_STEP = 1 / 240;
 
 export type Spring = {
   /**
    * Animate towards `value`, keeping whatever velocity is already in flight.
-   *
-   * `response` retunes the spring for this leg and every leg after it, without
-   * disturbing the motion already underway.
+   * `response` retunes the spring for this leg and every leg after it.
    */
   to(value: number, response?: number): void;
   /** Jump to `value` with no motion and no residual velocity. */
@@ -73,11 +59,9 @@ export type Spring = {
 };
 
 /**
- * Drives `onFrame` with a spring towards whatever target is current.
- *
- * `onFrame` is called on the animation frame, so it should write a `transform`
- * straight onto a node — not set React state, which would put a render between
- * every frame and defeat the point.
+ * Drives `onFrame` with a spring towards whatever target is current. `onFrame`
+ * runs on the animation frame, so it should write straight onto a node — React
+ * state would put a render between every frame.
  */
 export function createSpring(
   onFrame: (value: number) => void,
@@ -97,14 +81,10 @@ export function createSpring(
   let previous = 0;
 
   const step = (now: number) => {
-    // A window that was hidden (App Nap suspends this webview) returns with a
-    // multi-second gap. Clamping keeps that from teleporting the element.
-    //
-    // Floored at zero as well, because a negative dt does not merely stall the
-    // spring — it integrates it *backwards*, away from the target. An animation
-    // frame carries the time the frame began, which can be marginally earlier
-    // than a `performance.now()` read moments before it in `start`, so the very
-    // first step of any motion is the one exposed to this.
+    // App Nap returns a hidden window with a multi-second gap; clamping stops
+    // that teleporting the element. Floored at zero too: a frame carries the
+    // time it began, which can precede the `performance.now()` in `start`, and
+    // a negative dt integrates the spring *backwards*.
     const dt = Math.max(0, Math.min((now - previous) / 1000, 1 / 30));
     previous = now;
 
@@ -141,18 +121,14 @@ export function createSpring(
 
   return {
     to(value, retargetResponse) {
-      // Retuning on the way to a new target, not on the way to the same one:
-      // opening and closing are allowed to have different characters (a close
-      // that lingers slightly longer than the open is what reads as weight),
-      // and the spring keeps its velocity across the change because only omega
-      // moves — position and velocity are untouched.
+      // Opening and closing may have different characters (a close that
+      // lingers reads as weight). Only omega moves, so the velocity carries.
       if (retargetResponse !== undefined) {
         omega = (2 * Math.PI) / retargetResponse;
       }
       if (value === target) return;
       target = value;
-      // Reduced motion is not "a faster spring" — it is no travel at all. The
-      // OS setting is the user saying movement makes them unwell.
+      // Reduced motion is not "a faster spring" — it is no travel at all.
       if (reducedMotion) {
         this.jump(value);
         return;

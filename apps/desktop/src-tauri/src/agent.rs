@@ -1,17 +1,11 @@
 //! Agent mode: run a spoken command across apps.
 //!
-//! The flow, ported from the agent crate's design principle "an action never
-//! fires without explicit approval":
-//!
 //!   transcribe → parse intent → (confirm if it writes) → dispatch → report
 //!
-//! Reads run straight through; writes surface a confirmation and wait for a
-//! yes. There is no Agent window: like Ask, the run is drawn in the overlay's
-//! drop-down panel, which grows out of the notch and holds the step list, the
-//! confirmation and the closing answer. The difference from Ask is that this
-//! one collects a decision, so it holds a one-shot channel that the
-//! approve/reject commands resolve — and that the panel has to take a click
-//! part way through a run rather than only at the end.
+//! An action never fires without explicit approval: reads run straight through,
+//! writes surface a confirmation and wait for a yes. Drawn in the overlay's
+//! drop-down panel, like Ask, but this one collects a decision — hence the
+//! one-shot channel the approve/reject commands resolve.
 
 use aloud_store::Settings;
 use anyhow::{bail, Result};
@@ -27,54 +21,35 @@ const LABEL: &str = "overlay";
 /// How long a write waits for a yes before giving up and declining.
 const CONFIRM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
-/// Holds the pending confirmation's reply channel, so the frontend's
-/// approve/reject command can wake the awaiting dispatch. Only one confirmation
-/// is ever in flight — a new agent command replaces any stale pending one.
+/// The pending confirmation's reply channel, so approve/reject can wake the
+/// awaiting dispatch. Only one is ever in flight; a new command replaces it.
 #[derive(Default)]
 pub struct PendingConfirmation(Mutex<Option<oneshot::Sender<bool>>>);
 
-/// Streamed to the agent panel.
-///
-/// The event vocabulary follows the AG-UI protocol's tool-call lifecycle
-/// (https://docs.ag-ui.com) — a parsed action *is* a tool call, so `run` /
-/// `tool-call` / `tool-result` map its shape onto AI Elements' tool renderer.
-/// It is the AG-UI *vocabulary*, not the wire protocol: these stay
-/// tauri-specta-typed Tauri events, not an SSE stream, because there is one
-/// in-process client. Args are sent whole (not streamed as deltas) since the
-/// parse returns the whole action at once.
+/// Streamed to the agent panel. Names follow the AG-UI protocol's tool-call
+/// lifecycle (https://docs.ag-ui.com) so the shape maps onto AI Elements' tool
+/// renderer — the vocabulary only, not the wire protocol.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "value")]
 #[tauri_specta(event_name = "agent")]
 pub enum AgentEvent {
-    /// AG-UI RUN_STARTED — the transcript, echoed so the panel shows what it heard.
+    /// The transcript, echoed so the panel shows what it heard.
     RunStarted(String),
-    /// The tools this round intends to run, before the first one starts.
-    ///
-    /// Not an AG-UI event: AG-UI has no vocabulary for a batch the model has
-    /// returned but the loop has not begun. It is the same information the
-    /// panel would otherwise learn one call at a time, arriving at the only
-    /// moment it can still be acted on — a run that is about to send mail is
-    /// worth reading before the send, not after.
-    ///
-    /// Only sent when a round holds more than one call.
+    /// The batch a round intends to run, sent before the first call so a run
+    /// about to send mail can still be read. Only when a round holds >1 call.
     Planned(Vec<PlannedCall>),
-    /// AG-UI TOOL_CALL_START + ARGS — a parsed action, with its args, awaiting
-    /// dispatch. A write pauses here for confirmation (AG-UI human-in-the-loop).
+    /// A parsed action awaiting dispatch. A write pauses here for confirmation.
     ToolCall(ToolCall),
-    /// AG-UI TOOL_CALL_RESULT — the dispatcher's outcome for the pending call.
     ToolResult(ToolResult),
     /// A transient status line (e.g. "rate limited, retrying in 30s") shown
     /// while the run is otherwise silent; cleared by the next event.
     Status(String),
-    /// AG-UI RUN_FINISHED — the run's closing message.
     RunFinished(String),
-    /// AG-UI RUN_ERROR — the run failed before producing a result.
     RunError(String),
 }
 
 /// A tool the run intends to call. No arguments: they arrive with the call
-/// itself, which is also the point it stops being a plan and starts being an
-/// action.
+/// itself, which is where it stops being a plan and starts being an action.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PlannedCall {
@@ -82,32 +57,22 @@ pub struct PlannedCall {
     pub app: String,
 }
 
-/// An AG-UI tool call: the action name, the app it targets, and the parsed
-/// args. Kept separate from `ParsedAction` so the UI contract does not leak
-/// parser internals.
+/// A tool call for display. Kept separate from `ParsedAction` so the UI
+/// contract does not leak parser internals.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCall {
-    /// The tool name, AG-UI's `toolCallName`, e.g. "github.create_issue".
+    /// e.g. "github.create_issue".
     pub name: String,
     /// The target app, e.g. "github".
     pub app: String,
-    /// The arguments the model chose, field by field.
-    ///
-    /// A map rather than pre-formatted lines so the panel can decide what a
-    /// given tool is worth showing — a draft's body as prose, an inbox fetch as
-    /// nothing at all — instead of dumping every field including `user_id`.
-    ///
-    /// Values are strings because the panel only ever renders text, and because
-    /// `serde_json::Value` cannot cross specta: its number type is i64-backed,
-    /// which specta forbids exporting rather than silently lose precision.
-    /// Non-string values are JSON-encoded, so a nested object still displays.
+    /// Args as strings, not `serde_json::Value`: specta refuses to export its
+    /// i64-backed number type. Non-string values keep their JSON form.
     pub args: std::collections::BTreeMap<String, String>,
     /// Whether this call pauses for confirmation before it runs (every write).
     pub requires_confirmation: bool,
 }
 
-/// An AG-UI tool result: whether the call succeeded and its message.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolResult {
@@ -116,8 +81,6 @@ pub struct ToolResult {
 }
 
 fn emit(app: &AppHandle, event: AgentEvent) {
-    // Typed emit from the tauri-specta `Event` derive: the payload type and the
-    // "agent" event name are the same ones the generated bindings listen on.
     if let Err(e) = event.emit_to(app, LABEL) {
         tracing::warn!(%e, "could not send to agent panel");
     }
@@ -138,11 +101,9 @@ pub async fn run(app: &AppHandle, transcript: String, settings: &Settings) -> Re
     Ok(())
 }
 
-// The tool loop runs on Gemini, not Groq: a multi-round tool loop makes several
-// chat calls in a row and Groq's tokens-per-minute limit throttles it. Gemini
-// serves an OpenAI-compatible endpoint, so the same LlmClient works unchanged,
-// and flash-lite supports function calling. Cerebras served this role before
-// and was itself rate-limiting mid-command.
+// Gemini, not Groq: a multi-round tool loop makes several chat calls in a row
+// and Groq's tokens-per-minute limit throttles it mid-command. The endpoint is
+// OpenAI-compatible, so the same LlmClient works unchanged.
 const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
 const GEMINI_MODEL: &str = "gemini-3.1-flash-lite";
 
@@ -162,11 +123,8 @@ async fn execute(app: &AppHandle, transcript: &str, settings: &Settings) -> Resu
     let llm = aloud_llm::LlmClient::new(&settings.gemini_api_key, Some(GEMINI_BASE_URL))?;
     let composio = aloud_agent::ComposioClient::new(&settings.composio_api_key)?;
 
-    // Discover the tools the user actually has connected, ranked for this
-    // command. Empty means nothing is connected — say so rather than letting
-    // the model flail.
-    // Discovery is a Composio round-trip on every command, before the model
-    // is even asked — invisible in any per-tool timing, so it gets its own span.
+    // A Composio round-trip on every command, before the model is even asked —
+    // invisible in any per-tool timing, so it gets its own span.
     let tools = composio
         .available_tools(transcript)
         .instrument(tracing::info_span!(
@@ -185,11 +143,9 @@ async fn execute(app: &AppHandle, transcript: &str, settings: &Settings) -> Resu
         &composio,
         transcript,
         &tools,
-        // Each tool call surfaces on the panel as it happens (AG-UI lifecycle).
         |event| emit(app, event_of(event)),
-        // A write tool waits for an explicit yes; this is the safety gate. The
-        // offered tools carry their toolkit, so the gate names the real app
-        // rather than deriving one from the slug.
+        // The safety gate. The offered tools carry their toolkit, so it names
+        // the real app rather than deriving one from the slug.
         |name, args| {
             let toolkit = tools
                 .iter()
@@ -224,9 +180,6 @@ async fn confirm_write(
 }
 
 /// Flattens a tool's argument object into displayable string fields.
-///
-/// Strings pass through unquoted; anything else keeps its JSON form so a
-/// number or nested object is still readable.
 fn display_args(args: &serde_json::Value) -> std::collections::BTreeMap<String, String> {
     args.as_object()
         .map(|map| {
@@ -243,7 +196,6 @@ fn display_args(args: &serde_json::Value) -> std::collections::BTreeMap<String, 
         .unwrap_or_default()
 }
 
-/// Maps a loop event to the panel's AG-UI event vocabulary.
 fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
     match event {
         aloud_agent::LoopEvent::Planned { names } => AgentEvent::Planned(
@@ -279,23 +231,13 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
 }
 
 /// The toolkit a Composio tool slug belongs to, for display.
-///
-/// This was a two-way branch from when Gmail and GitHub were the only
-/// toolkits, so every other one — calendar, Slack, Notion — was announced as
-/// "this writes to github" on the confirmation the user is meant to read
-/// before approving. Naming the wrong app on a write gate is worse than naming
-/// none. The agent crate already derives this from the slug prefix.
 fn tool_app(slug: &str) -> String {
     aloud_agent::toolkit_of_slug(slug)
 }
 
 /// Blocks until the panel approves or rejects. A dropped sender (panel closed,
-/// new command started) reads as a rejection — the safe default for a write.
-///
-/// Times out rather than waiting forever. A gate that can hang is a gate that
-/// wedges the whole agent: a panel bug once left a second write blocked on a
-/// button that was never drawn, with no way out but quitting the app. Expiring
-/// as "declined" fails in the safe direction.
+/// new command started) or a timeout reads as a rejection — a gate that can
+/// hang wedges the whole agent, and declining fails in the safe direction.
 async fn await_confirmation(app: &AppHandle) -> bool {
     let (tx, rx) = oneshot::channel();
     if let Some(state) = app.try_state::<PendingConfirmation>() {
@@ -319,8 +261,7 @@ async fn await_confirmation(app: &AppHandle) -> bool {
 pub fn confirm_agent(app: AppHandle, approved: bool) {
     if let Some(state) = app.try_state::<PendingConfirmation>() {
         if let Some(tx) = state.0.lock().unwrap().take() {
-            // The receiver is gone only if the flow was already abandoned;
-            // ignore the send error in that case.
+            // A gone receiver means the flow was already abandoned.
             let _ = tx.send(approved);
         }
     }
@@ -337,8 +278,8 @@ pub fn hide(app: &AppHandle) {
 #[tauri::command]
 #[specta::specta]
 pub fn close_agent(app: AppHandle) {
-    // Closing the panel abandons any pending confirmation, which reads as a
-    // rejection — the write never fires.
+    // Abandoning a pending confirmation reads as a rejection; the write never
+    // fires.
     if let Some(state) = app.try_state::<PendingConfirmation>() {
         state.0.lock().unwrap().take();
     }

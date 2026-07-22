@@ -1,13 +1,9 @@
-//! How long after `Recorder::start` returns does audio actually arrive?
+//! How long after `Recorder::start` returns does audio actually arrive? That
+//! dead window is what clips the first word of a short utterance.
 //!
 //! `cargo run -p aloud-audio --example first_sample_latency`
 //!
-//! This is the window in which a user is told "recording" — pill up, chime
-//! played — while nothing is being captured. Anything spoken inside it is
-//! lost, which is what clips the first word of a short utterance.
-//!
-//! Run it twice in a row: the first open of the microphone is the expensive
-//! one, because CoreAudio has to start the device.
+//! The first open is the expensive one — CoreAudio has to start the device.
 
 use std::{
     sync::{

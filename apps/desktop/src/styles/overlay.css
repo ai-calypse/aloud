@@ -2,30 +2,17 @@
 @import "./base.css";
 @import "./motion.css";
 
-/* The recording pill. The window itself is transparent; only the pill paints.
+/* The recording overlay. The window is a fixed 1000x720 transparent canvas,
+ * never resized — growing an NSWindow per frame stutters, growing a shape
+ * inside a still window does not. Everything anchors to the canvas's top edge
+ * (Rust anchors the window at margin 0) and animates its own size, so the
+ * canvas can be enlarged without moving anything drawn in it.
  *
- * This window used to skip Tailwind — one component on an always-on-top
- * surface did not need a utility layer. It loads it now (see overlay.tsx),
- * because the Ask answer streams into this panel and Streamdown styles the
- * markdown it emits entirely in utilities. Everything below is still
- * hand-written CSS; Tailwind is here for the answer's contents, not the pill.
+ * Tailwind is loaded (see overlay.tsx) only because Streamdown styles the Ask
+ * answer's markdown in utilities; everything below is hand-written CSS.
  */
-/* The window is a fixed 1000x720 transparent canvas, deliberately far larger
- * than anything drawn in it, and it is never resized. Growing an NSWindow per
- * frame stutters; growing a shape inside a still window does not. Everything
- * here therefore anchors to the canvas's top edge and animates its own size.
- * The width has to clear the widest the panel can get — three notches, or a
- * 90-character error, whichever wins — with room to spare.
- *
- * `flex-start`, not `center`: centring tied every style's vertical position to
- * the window height, so enlarging the canvas would move surfaces that have
- * nothing to do with the change. Both remaining styles weld to the top edge, so
- * that edge is the one fixed reference and Rust anchors the window at margin 0
- * for all of them.
- */
-/* The answer's entrance, in the two terms that have to be seen to be chosen.
-   On :root rather than on `.ask` so tune.html can override them from an inline
-   style on the document element, which a rule here would otherwise outrank. */
+/* On :root rather than `.ask` so tune.html can override them from an inline
+   style on the document element, which a rule here would outrank. */
 :root {
   --ask-throw: 12px;
   --ask-stagger: 45ms;
@@ -39,26 +26,11 @@
   height: 100%;
 }
 
-/* The wings style: two slim tabs welded to the top edge of the screen,
- * flanking where the notch is — voice-dict's minimalist overlay. Rust anchors
- * the window at top margin 0 for this, so `top: 0` here is the screen's top
- * edge. The left wing carries the waveform, the right a small recording light.
- *
- * The gap is a fixed 200px because no cross-platform API reports the notch
- * width (see overlay.rs). On a 14"/16" MacBook that brackets it; on a screen
- * with no notch the pair simply straddles the middle of the menu bar, which
- * still reads as deliberate.
- *
- * 24px tall so the tabs stay inside a standard menu bar rather than hanging
- * below it — the whole point of this style over the panel.
- */
 /* One continuous solid-black bar: [waveform wing][notch][light wing]. The
-   centre is exactly the measured cutout width, so the physical notch sits
-   inside the black and vanishes into the strip — the whole bar reads as an
-   extension of the notch. Welded to the top edge; the window sits at the
-   screen-saver level so it can paint over the menu bar (see overlay.rs).
-   The centre gap and the bar height are the native measurement; the fallbacks
-   are only for the `?style=wings` browser preview. */
+   centre is exactly the measured cutout, so the physical notch vanishes into
+   the strip. The window sits at screen-saver level to paint over the menu bar
+   (see overlay.rs); the var fallbacks are only for the `?style=wings` browser
+   preview, where no native measurement exists. */
 .wings {
   position: absolute;
   top: 0;
@@ -68,9 +40,8 @@
   justify-content: center;
   align-items: stretch;
   height: var(--notch-h, 24px);
-  /* The strip itself only fades; the tabs below do the travelling. Sliding the
-     whole bar up out of the menu bar would move the notch fill too, and that
-     is meant to be nailed to the cutout. */
+  /* The strip only fades; the tabs travel. Sliding the whole bar would move
+     the notch fill, which must stay nailed to the cutout. */
   animation: wings-in var(--dur-fast) var(--ease-out) both;
 }
 
@@ -80,14 +51,9 @@
   }
 }
 
-/* The tabs grow outward from behind the notch, because that is where they
- * appear to come from — a thing that emerges from the cutout should emerge
- * from the cutout's edge, not fade in place or rise from below.
- *
- * clip-path rather than scaleX: scaling would stretch the waveform inside the
- * left tab, and the whole point of the wave is that its bar widths are
- * deliberate. A clip reveals the tab at its true size.
- */
+/* The tabs grow outward from behind the notch. clip-path rather than scaleX:
+ * scaling would stretch the waveform inside the left tab, whose bar widths are
+ * deliberate; a clip reveals the tab at its true size. */
 .wing {
   display: flex;
   align-items: center;
@@ -99,15 +65,10 @@
   animation: wing-extend var(--spring-pop-dur) var(--spring-pop) both;
 }
 
-/* Eaten from the left: the left tab is revealed from its right edge — the one
-   touching the notch — outward. The right tab mirrors it.
- *
- * Both ends state an explicit `inset()`, and that is load-bearing rather than
- * tidiness. Left implicit, the far end resolves to the element's own
- * `clip-path: none`, and `none` does not interpolate with an inset — the
- * browser falls back to a discrete swap, so the tab jumped out at full width
- * instead of extending. It read as a fade because the strip's own opacity
- * animation was the only thing actually moving. */
+/* Revealed from the edge touching the notch, outward; the right tab mirrors it.
+ * Both ends state an explicit `inset()`: an implicit end resolves to
+ * `clip-path: none`, which does not interpolate with an inset, so the tab
+ * discretely jumps to full width instead of extending. */
 @keyframes wing-extend {
   from {
     clip-path: inset(0 0 0 100%);
@@ -126,8 +87,7 @@
   }
 }
 
-/* Round only the two outer bottom corners so the whole strip — wings plus
-   notch — has the notch's rounded bottom, not four separate tabs. */
+/* Only the two outer bottom corners, so the strip reads as one shape. */
 .wing--left {
   border-radius: 0 0 0 10px;
 }
@@ -137,36 +97,22 @@
   animation-name: wing-extend-right;
 }
 
-/* The notch fill between the wings: same black, exactly the cutout's width. */
+/* The notch fill between the wings: exactly the cutout's width. */
 .wing-notch {
   width: var(--notch-w, 200px);
   height: 100%;
   background: var(--notch-fill);
 }
 
-/* voice-dict's drop-down pill: a solid-black panel welded to the top edge with
-   only its bottom corners rounded, so it reads as dropping out of the menu bar.
-   The __notch spacer is the measured cutout height, which drops the wave and
-   status below the notch line; the black merges with the notch above it. Wider
-   than the cutout so the notch sits inside the panel. Falls back to a menu-bar
-   height and a comfortable width for the `?style=dropPill` browser preview. */
-/* Its size and its silhouette are both written per frame from JS (see
- * useNotchPanel in overlay.tsx), so almost nothing about its geometry is
- * declared here. What is left is the box the content sits in.
+/* The drop-down panel, welded to the notch. Its size and silhouette are both
+ * written per frame from JS (useNotchPanel in overlay.tsx), so barely any
+ * geometry is declared here.
  *
- * No background and no border-radius: the `<svg>` below paints the whole
- * shape, because the two top corners are concave and CSS radii only round
- * corners outward. No `min-width` either — the panel's floor is now the notch
- * cutout itself, which is what makes it look like it grew out of the hardware
- * rather than appearing at some arbitrary minimum.
- *
- * No shadow: a translucent black blur reads as a grey halo against a bright
- * desktop, which is exactly the "grey, not black" a welded panel must avoid.
- * It merges with the notch by being pure #000.
- *
- * No entrance animation either. It used to slide down from behind the menu
- * bar; it now *grows out of the cutout*, which is the same idea done properly,
- * and running both would fight.
+ * Deliberately absent: background and border-radius (the `<svg>` below paints
+ * the shape — the top corners are concave and CSS radii only round outward);
+ * min-width (the floor is the cutout itself); shadow (a translucent blur reads
+ * as a grey halo, and this must merge with the #000 cutout); and any entrance
+ * animation (it grows out of the cutout from JS, which would fight one).
  */
 .drop-pill {
   position: absolute;
@@ -178,15 +124,14 @@
   font-size: 14px;
   font-weight: 500;
   letter-spacing: 0.01em;
-  /* While the panel is still smaller than its contents — every frame of the
-     opening — the label would otherwise spill out over the desktop. */
+  /* The panel is smaller than its contents for every frame of the opening;
+     without this the label spills out over the desktop. */
   overflow: hidden;
 }
 
-/* The silhouette. `preserveAspectRatio="none"` is deliberately paired with a
-   viewBox rewritten to the panel's exact pixel size on every frame: the path is
-   authored in real pixels, so the two always agree and nothing is ever actually
-   stretched. Behind the content, and never a hit target. */
+/* The silhouette. `preserveAspectRatio="none"` is safe only because the
+   viewBox is rewritten to the panel's exact pixel size every frame, and the
+   path is authored in real pixels — the two always agree. */
 .drop-pill__shape {
   position: absolute;
   inset: 0;
@@ -195,21 +140,16 @@
   pointer-events: none;
 }
 
-/* Spacer that pushes the content clear of the physical cutout, so the wave and
-   the status word sit below the notch rather than behind the camera. */
+/* Pushes the content clear of the physical cutout, not behind the camera. */
 .drop-pill__notch {
   flex: none;
   height: var(--notch-h, 24px);
 }
 
-/* The node the panel is sized *from*: `max-content` so it stays the size of its
-   own content and never inherits the width it is driving, which would stall the
-   measurement in a loop. `align-self` centres it between the two shoulders,
-   since the panel is wider than the body by twice the top radius.
-
-   `flex: none` because the panel spends the whole opening animation shorter
-   than this body; without it the column would compress the body to fit and the
-   label would jiggle as the panel grows. */
+/* The node the panel is sized *from*. `max-content` so it never inherits the
+   width it is driving, which would stall the measurement in a loop.
+   `flex: none` because the panel is shorter than this body for the whole
+   opening; without it the column compresses and the label jiggles. */
 .drop-pill__body {
   display: flex;
   align-items: center;
@@ -222,19 +162,10 @@
   flex: none;
 }
 
-/* Live-transcript mode, while dictating.
- *
- * Same row as the status body — wave on the left, text on the right — because
- * that continuity *is* the transition: the wave does not move, and "Listening…"
- * simply becomes the words. Laying the transcript out any other way would make
- * the first partial a re-layout rather than a growth.
- *
- * Fixed width so the text wraps and only the height changes. Left over as
- * `max-content` the panel would run off toward the screen edges one word at a
- * time, which is the shape of a ticker, not of something that has words in it.
- *
- * `flex-start`, so the wave sits on the first line rather than drifting to the
- * middle of a growing block. */
+/* Live-transcript mode. Same row as the status body so "Listening…" simply
+ * becomes the words rather than re-laying out. Fixed width, not `max-content`,
+ * so the text wraps and only the height changes; `flex-start` keeps the wave
+ * on the first line instead of drifting down a growing block. */
 .drop-pill__body--transcript {
   align-items: flex-start;
   width: 420px;
@@ -242,11 +173,8 @@
   padding: 12px 22px;
 }
 
-/* `.phase-swap` carries its own `align-items: center`, which is right for a
-   one-line status and wrong here — it floats the wave to the middle of a
-   growing block of text instead of leaving it on the first line, so the wave
-   appears to drift downwards as the user keeps talking. Width so the text has
-   the full body to wrap in rather than shrinking to fit. */
+/* Overrides `.phase-swap`'s `align-items: center`, which floats the wave to
+   the middle of a growing text block so it drifts down as the user talks. */
 .drop-pill__body--transcript .phase-swap {
   align-items: flex-start;
   width: 100%;
@@ -256,18 +184,14 @@
   flex: 1;
   min-width: 0;
   margin: 0;
-  /* Roughly five lines, then it scrolls instead of growing — past that the
-     panel is a wall of text hanging off the menu bar, and the words that
-     matter are the last ones anyway (see the follow-to-bottom in overlay.tsx).
-     The cap is also what makes the panel's height stop moving on a long
-     dictation, which is the difference between alive and restless. */
+  /* ~5 lines, then it scrolls (follow-to-bottom in overlay.tsx). The cap is
+     also what stops the panel's height moving on a long dictation. */
   max-height: 100px;
   overflow-y: auto;
   font-weight: 400;
   line-height: 1.45;
   text-align: left;
-  /* The preview revises itself, so the text is never final; a lighter ink than
-     the status word says so without a second surface to explain it. */
+  /* Lighter than the status word: the preview revises itself, never final. */
   color: rgb(255 255 255 / 0.92);
   animation: transcript-in var(--dur-fast) var(--ease-out) both;
 }
@@ -283,10 +207,8 @@
   }
 }
 
-/* Answer mode. The status body hugs a word; this one is a column at a fixed
-   width, so only its height changes as the answer streams — a body that also
-   grew sideways per token would have the panel's shoulders crawling outward
-   the whole time it was reading. */
+/* Answer mode: fixed width, so only the height changes as the answer streams
+   rather than the panel's shoulders crawling outward per token. */
 .drop-pill__body--ask {
   flex-direction: column;
   align-items: stretch;
@@ -304,23 +226,10 @@
   padding: 12px 18px 12px;
 }
 
-/* The answer's three parts arrive under their own momentum, one after the
- * next, rather than the block fading in as one piece.
- *
- * Two animations rather than one, because they want different curves: the rise
- * is on the overshooting spring, so each part carries past its resting place
- * and settles back — that overshoot is the "alive" part, and it is the same
- * token every other object-arriving-somewhere in the app uses. The fade is a
- * plain short ease; run on the spring it would bounce through full opacity,
- * which is invisible on the way up and a flicker on the way down.
- *
- * The throw is deliberately small against the ~260pt the panel itself travels
- * underneath. Content moving as far as its container reads as two animations
- * fighting; content moving a fraction of it reads as settling into a box that
- * is still arriving.
- *
- * Both knobs are variables because they are the two that have to be *seen* to
- * be chosen — see tune.html. */
+/* The answer's three parts arrive staggered. Two animations, not one: the rise
+ * wants the overshooting spring, but a fade on that curve bounces through full
+ * opacity and flickers on the way down. The throw stays small against the
+ * ~260pt the panel travels underneath, or the two read as fighting. */
 .ask > * {
   animation:
     ask-rise var(--spring-pop-dur) var(--spring-pop) both,
@@ -357,8 +266,7 @@
   }
 }
 
-/* What was heard, above the rule. Quieter than the answer on purpose: it is
-   there to confirm the question, not to be read again. */
+/* What was heard. Quieter than the answer: it confirms, it is not re-read. */
 .ask__question {
   margin: 0 0 10px;
   padding-bottom: 10px;
@@ -366,27 +274,23 @@
   color: rgb(255 255 255 / 0.55);
   font-size: 13px;
   font-weight: 500;
-  /* Two lines, then an ellipsis — a rambling spoken question must not push the
-     answer off the bottom of the panel. */
+  /* Two lines: a rambling question must not push the answer off the panel. */
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
 
-/* The answer scrolls past the cap rather than growing the panel forever. The
-   cap plus the chrome around it has to stay inside the overlay window's fixed
-   canvas (720pt tall, see tauri.conf.json) with room for the spring to
-   overshoot — that is what sets this number. */
+/* Capped so the answer scrolls instead of growing forever: this number is the
+   overlay canvas (720pt, tauri.conf.json) less chrome and spring overshoot. */
 .ask__answer {
   max-height: 380px;
   overflow-y: auto;
   font-size: 14px;
   font-weight: 400;
   line-height: 1.5;
-  /* Answers arrive as markdown, and the browser's own defaults are most of
-     what makes a list read as a list; only the outermost margins are stripped
-     so the block sits flush against the rule above and the footer below. */
+  /* Only the outermost margins are stripped — the browser's markdown defaults
+     are most of what makes a list read as a list. */
   & > :first-child {
     margin-top: 0;
   }
@@ -394,26 +298,19 @@
     margin-bottom: 0;
   }
 
-  /* Streamdown sizes headings for a full-width chat column; in a 480pt panel
-     hung off the notch they have to stay close to the body text. Everything
-     else about the markdown is its own. */
+  /* Streamdown sizes headings for a full-width chat column; too big at 480pt. */
   & :is(h1, h2, h3, h4) {
     font-size: 15px;
   }
 
-  /* A wide code block must scroll rather than push the panel out past the
-     answer it belongs to. */
+  /* A wide code block scrolls rather than widening the panel. */
   & pre {
     overflow-x: auto;
   }
 }
 
-/* --- An agent run -------------------------------------------------------
- *
- * The step list, its approval gate and the tool detail are all AI Elements
- * (`Tool`, `Confirmation`) rendering their own design, so there is almost
- * nothing here — deliberately. What is left is the two bits of the run that
- * are Aloud's rather than the registry's. */
+/* --- An agent run. The step list, approval gate and tool detail are AI
+ * Elements rendering their own design; only Aloud's own bits live here. */
 
 .agent__status {
   display: flex;
@@ -423,8 +320,8 @@
   color: rgb(255 255 255 / 0.6);
 }
 
-/* The last tool that ran, in the footer beside copy/close — a one-line "where
-   is it up to" that survives the step list being scrolled out of view. */
+/* The last tool that ran — a "where is it up to" that survives the step list
+   being scrolled out of view. */
 .agent__trail {
   flex: 1;
   min-width: 0;
@@ -494,8 +391,7 @@
   background: rgb(255 255 255 / 0.16);
 }
 
-/* The wave has to fit a menu bar rather than a 52px pill, so it is scaled
-   down here rather than given a second set of keyframes. */
+/* The wave scaled to fit a menu bar, rather than a second set of keyframes. */
 .wing .bars {
   gap: 2px;
   height: 13px;
@@ -509,32 +405,15 @@
   white-space: nowrap;
 }
 
-/* The wave/dot and the status word swap together on every phase change, which
- * on a normal dictation is three times in a couple of seconds. Cut hard, that
- * is three visible jump-cuts on the one piece of UI the user is watching.
+/* The wave/dot and status word swap on every phase change — three times in a
+ * couple of seconds on a normal dictation, hence --dur-fast: anything longer
+ * leaves the pill perpetually mid-transition. The blur sells it as one thing
+ * changing; a plain crossfade at this speed shows both states overlapping.
+ * `gap: inherit` because this sits inside two parents that space differently.
  *
- * Short and movement-free on purpose: this is frequent, system-driven status,
- * not something the user asked to see animate — anything longer than a beat
- * would put the pill perpetually mid-transition. The blur is what sells it as
- * one thing changing rather than two things swapping; a plain opacity
- * crossfade at this speed shows both states overlapping.
- *
- * `gap: inherit` so the wrapper reproduces whichever gap its parent set — the
- * capsule and the drop-down panel space their contents differently, and this
- * sits inside both.
- *
- * The scale is anisotropic, and that asymmetry is the whole point: vertical
- * compresses about three times harder than horizontal, so the content reads as
- * being squeezed out of a slot rather than zoomed. It is the signature of the
- * Dynamic Island's content swap (which crushes 0.4 wide against 0.2 tall — far
- * more than works here, where the subject is one dot and one word rather than a
- * whole panel). Tune the *ratio* between the two, not either number alone;
- * equal values immediately read as a generic scale-in.
- *
- * Still on --dur-fast: this fires three times a dictation, and the earlier note
- * about never being perpetually mid-transition is the binding constraint. The
- * squash makes the same 160ms read as physical without spending any longer.
- */
+ * The scale is anisotropic on purpose — vertical crushes ~3x harder than
+ * horizontal, so it reads as squeezed out of a slot rather than zoomed. Tune
+ * the ratio, not either number; equal values read as a generic scale-in. */
 .phase-swap {
   display: inline-flex;
   align-items: center;
@@ -550,42 +429,24 @@
   }
 }
 
-/* The listening wave.
+/* The listening wave: a travelling wave the voice scales but never drives.
+ * Each bar runs the same keyframe with a NEGATIVE delay, so the row is fully
+ * formed on its first frame instead of rippling up from flat.
  *
- * A continuous travelling wave that the voice scales but never drives. Each
- * bar runs the same keyframe with a small NEGATIVE delay, so it is already
- * part way through its cycle when the row appears: the phase offset between
- * neighbours is what makes a wave travel, and starting mid-cycle means it is
- * fully formed on the first frame rather than rippling up from flat.
- *
- * The bar count and the delay step together set how much wave fits across the
- * row, and the right answer depends on the count. -185ms a bar over a 1.6s
- * cycle is 0.58 of a wavelength across five bars: neighbours sit ~52 degrees
- * apart, so one crest sweeps through and the row reads as a wave. The Swift
- * app landed in the same place (0.78 rad a bar over its ~1s cycle, 0.62 of a
- * wavelength) from a completely different implementation.
- *
- * More than about one wavelength is wrong at this count — neighbouring bars
- * approach antiphase and the row reads as blinking rather than travelling,
- * which is what made an earlier six-bar version look like a spinner. Fourteen
- * thin bars tolerated 1.5 wavelengths precisely because each step was small.
- *
- * Pure CSS, so nothing re-renders and the compositor owns every frame.
- */
+ * -185ms a bar over a 1.6s cycle is 0.58 of a wavelength across five bars.
+ * Past ~one wavelength at this bar count, neighbours approach antiphase and
+ * the row reads as blinking rather than travelling. Retune the delay if the
+ * bar count changes. */
 .bars {
   display: flex;
   align-items: center;
   gap: 3px;
   height: 22px;
 
-  /* The voice sets the wave's amplitude, not its motion — the same split the
-     Swift app used. At silence the row still travels at half height, so the
-     pill never looks frozen; a loud syllable opens it to full. JS only writes
-     --level, so the wave itself stays entirely on the compositor.
-
-     The transition is the meter ballistics: levels land every 50ms, and
-     crossfading between them over --dur-fast is what stops the row strobing
-     between syllables. It replaces the old attack/release buffer. */
+  /* The voice sets amplitude, not motion: at silence the row still travels at
+     half height so the pill never looks frozen. JS writes only --level.
+     The transition is the meter ballistics — levels land every 50ms, and
+     crossfading them stops the row strobing between syllables. */
   transform: scaleY(calc(0.5 + 0.5 * var(--level, 0)));
   transition: transform var(--dur-fast) var(--ease-out);
 }
@@ -596,8 +457,7 @@
   border-radius: var(--radius-pill);
   background: var(--pill-ink);
   transform-origin: center;
-  /* --peak is a per-bar envelope set in the TSX: taller in the middle, so the
-     row reads as a waveform rather than a uniform ribbon. */
+  /* --peak is a per-bar envelope set in the TSX: taller in the middle. */
   transform: scaleY(calc(var(--peak, 1) * 0.45));
   animation: wave 1.6s ease-in-out infinite;
   animation-delay: calc(var(--i, 0) * -185ms);
@@ -621,11 +481,8 @@
   background: var(--sys-grey);
 }
 
-/* The right wing's recording light: a small solid-red dot, the way voice-dict
-   marks a live capture. Steady, not breathing — the waveform already moves.
-   It has to sit *below* the `.dot` base rule: it used to be declared up with
-   the wing styles it belongs to, where the base's grey — same specificity,
-   later in the file — silently won and the light was never red. */
+/* Must stay *below* the `.dot` base rule — same specificity, so declared any
+   earlier the base's grey wins and the recording light is never red. */
 .dot--recording {
   background: var(--sys-red);
 }
@@ -649,9 +506,8 @@
   }
 }
 
-/* Nothing to show before the first run; Rust hides the window anyway.
-   `.wings--idle` is also how the wings step aside once they have handed over
-   to the panel — see `effectiveStyle` in overlay.tsx. */
+/* Also how the wings step aside once they have handed over to the panel —
+   see `effectiveStyle` in overlay.tsx. */
 .drop-pill--idle,
 .wings--idle {
   display: none;
@@ -659,28 +515,14 @@
 
 /* --- Exits ---------------------------------------------------------------
  *
- * Rust holds the window open for EXIT_MS after a run ends (overlay.rs) so the
- * overlay can leave under its own power instead of being cut off mid-frame.
- * That hold applies to every style, so every style owes an exit — a capsule
- * sitting motionless for a quarter second and then blinking out is worse than
- * the hard cut it replaced.
- *
- * The drop-down panel is absent here on purpose: it collapses back into the
- * cutout from JS, on the same springs that opened it — and when the wings have
- * handed over to it, that collapse is the only exit playing.
- *
- * Each exit is the entrance run backwards, which is the rule the drop-panel's
- * old entrance broke and was fixed for: a thing should leave by the path it
- * arrived on. Faster than the entrance, though — an exit is the acknowledgement
- * of something already finished, and lingering over it reads as latency.
+ * Rust holds the window open for EXIT_MS after a run ends (overlay.rs), so
+ * every style owes an exit or it sits motionless and then blinks out. Each is
+ * the entrance run backwards, but faster. The drop-down panel is absent on
+ * purpose: it collapses into the cutout from JS on the springs that opened it.
  */
-/* The answer leaves ahead of the panel that carries it.
- *
- * The panel collapses back into the cutout on its own spring, and it clips
- * whatever is inside — fine for a status word, but a paragraph of text sliced
- * off line by line reads as the window being killed rather than closing. Faded
- * out over the first third of the collapse, so what shrinks into the notch is
- * an empty panel. Faster than the collapse for exactly that reason. */
+/* The answer must be gone before the panel collapses over it — the collapse
+   clips its contents, and a paragraph sliced off line by line reads as the
+   window being killed. Faster than the collapse for that reason. */
 .overlay-root[data-exiting] .ask > * {
   animation: ask-out var(--dur-fast) var(--ease-in) both;
   animation-delay: 0ms;
@@ -693,9 +535,8 @@
   }
 }
 
-/* Back into the notch it grew out of: the tabs are eaten from the outside in,
-   mirroring wing-extend, while the cutout fill holds until the last moment so
-   the strip never appears to detach from the hardware. */
+/* Mirrors wing-extend; the cutout fill holds until last so the strip never
+   appears to detach from the hardware. */
 .overlay-root[data-exiting] .wing--left {
   animation: wing-retract var(--dur-fast) var(--ease-in) both;
 }
@@ -734,7 +575,4 @@
   }
 }
 
-/* Nothing here answers to "Reduce transparency" any more. Both remaining
-   surfaces are pure opaque black by design — they merge with the physical
-   cutout — so there is no translucency for that setting to switch off. The
-   block that used to live here was entirely about the glass capsule. */
+/* No "Reduce transparency" block: both surfaces here are opaque black. */

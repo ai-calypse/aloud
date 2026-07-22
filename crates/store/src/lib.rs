@@ -1,8 +1,5 @@
-//! Settings, history and stats persistence.
-//!
-//! Replaces the Swift app's three-way split (UserDefaults + a `.settings`
-//! JSON file + a Core Data store) with two files: `settings.json` and
-//! `history.sqlite`, both in the app data directory.
+//! Settings, history and stats persistence: `settings.json` and
+//! `history.sqlite` in the app data directory.
 
 pub mod history;
 pub mod macros;

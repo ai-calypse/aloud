@@ -5,9 +5,8 @@
 //! `utterance_id` field, which is what makes the rows reassemble into a
 //! waterfall instead of a pile of unrelated durations.
 //!
-//! Local-only on purpose: this is for reading on a plane, not for aggregation.
-//! `tracing-opentelemetry` is the upgrade path if cross-user percentiles are
-//! ever wanted — this layer composes with it rather than blocking it.
+//! ponytail: local-only, no aggregation. `tracing-opentelemetry` composes with
+//! this layer if cross-user percentiles are ever wanted.
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
@@ -21,20 +20,16 @@ use tracing_subscriber::layer::Context as LayerContext;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 
-/// Utterances kept before the oldest are pruned. Sized for days of use, not
-/// one session: per-mode averages need a population, and a heavy dictation
-/// day alone runs past a couple of hundred. Rows are a few hundred bytes.
+/// Utterances kept before the oldest are pruned. Sized for days of use: a heavy
+/// dictation day alone runs past a couple of hundred, and rows are tiny.
 const RETAIN_UTTERANCES: i64 = 5000;
 
-/// Hands out utterance ids. Seeded from the database on open, because the
-/// rows outlive the process: a fresh in-process counter restarted at 0 every
-/// launch and reissued ids the previous session had already used, which
-/// merged unrelated runs into one waterfall and left the prune query
-/// comparing against a maximum that never grew.
+/// Hands out utterance ids, seeded from the database on open: an in-process
+/// counter restarted at 0 each launch and reissued ids, merging unrelated runs
+/// into one waterfall.
 static NEXT_UTTERANCE: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
-/// The next unused utterance id. Monotonic within a process and, thanks to
-/// the seed, across restarts too.
+/// The next unused utterance id. Monotonic across restarts, thanks to the seed.
 pub fn next_utterance_id() -> i64 {
     NEXT_UTTERANCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
@@ -43,8 +38,7 @@ pub fn next_utterance_id() -> i64 {
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Span {
-    /// Groups the stages of one dictation. Monotonic, so ordering by it is
-    /// ordering by time.
+    /// Groups the stages of one dictation; monotonic, so it orders by time.
     #[specta(type = specta_typescript::Number)]
     pub utterance_id: i64,
     /// The span name: `utterance`, `transcribe`, `cleanup`, …
@@ -55,7 +49,7 @@ pub struct Span {
     #[specta(type = specta_typescript::Number)]
     pub duration_ms: i64,
     pub success: bool,
-    /// The span's fields, as JSON. Whatever the call site recorded.
+    /// The span's fields, as JSON.
     pub fields: String,
 }
 
@@ -81,10 +75,8 @@ impl Timings {
         Ok(Self { conn })
     }
 
-    /// Resumes the id sequence past whatever is already on disk.
-    ///
-    /// Only ever moves the counter forward: an id must never be reissued, and
-    /// a second `open` (tests, a future second store) must not walk it back.
+    /// Resumes the id sequence past whatever is on disk. Only ever moves the
+    /// counter forward, so a second `open` cannot walk it back.
     fn seed_utterance_ids(&self) -> Result<()> {
         let next: i64 = self.conn.query_row(
             "SELECT COALESCE(MAX(utterance_id), -1) + 1 FROM timings",
@@ -138,8 +130,8 @@ impl Timings {
         Ok(())
     }
 
-    /// The newest `utterances` utterances, every stage of each, oldest stage
-    /// first within an utterance so the caller can lay them out directly.
+    /// The newest `utterances` utterances, oldest stage first within each so the
+    /// caller can lay them out directly.
     pub fn recent(&self, utterances: usize) -> Result<Vec<Span>> {
         let mut stmt = self.conn.prepare(
             "SELECT utterance_id, stage, started_at, duration_ms, success, fields
@@ -163,7 +155,6 @@ impl Timings {
     }
 }
 
-/// What the layer stashes on each tracked span.
 struct Timing {
     utterance_id: i64,
     started: Instant,
@@ -194,9 +185,8 @@ where
         let mut fields = serde_json::Map::new();
         attrs.record(&mut JsonVisitor(&mut fields));
 
-        // A span joins the trace either by declaring an `utterance_id` (the
-        // root) or by descending from one that did. Anything else is ordinary
-        // logging and is not ours to record.
+        // A span joins the trace by declaring an `utterance_id` or descending
+        // from one that did; anything else is ordinary logging.
         let utterance_id = match fields.remove("utterance_id").and_then(|v| v.as_i64()) {
             Some(root) => root,
             None => {
@@ -238,8 +228,7 @@ where
             stage: span.name().to_string(),
             started_at: timing.started_at,
             duration_ms: timing.started.elapsed().as_millis() as i64,
-            // The call site sets `ok = false` on the way out of a failed
-            // stage; a stage that never said otherwise succeeded.
+            // The call site sets `ok = false` on the way out of a failed stage.
             success: timing
                 .fields
                 .get("ok")
@@ -256,8 +245,7 @@ where
     }
 }
 
-/// Flattens span fields into JSON. `tracing` has no typed field access, so
-/// every primitive gets its own visit method.
+/// Flattens span fields into JSON; `tracing` has no typed field access.
 struct JsonVisitor<'a>(&'a mut serde_json::Map<String, serde_json::Value>);
 
 impl tracing::field::Visit for JsonVisitor<'_> {
@@ -286,9 +274,8 @@ mod tests {
     use super::*;
     use tracing_subscriber::prelude::*;
 
-    /// The bug this is named for: the id counter lived in the process while
-    /// the rows lived on disk, so a restart reissued ids the previous session
-    /// had already used and two unrelated runs became one waterfall.
+    /// Guards: an in-process id counter over on-disk rows reissued ids after a
+    /// restart, and two unrelated runs became one waterfall.
     #[test]
     fn utterance_ids_do_not_restart_with_the_process() {
         let dir = tempfile::tempdir().unwrap();
@@ -316,9 +303,7 @@ mod tests {
         assert_eq!(reopened.recent(20).unwrap().len(), 4, "data must survive");
     }
 
-    /// Drives real spans through a real subscriber: the correlation and the
-    /// nesting are the whole point, and neither is visible from unit-testing
-    /// the SQL alone.
+    /// Correlation and nesting are the point, and neither shows up in the SQL.
     #[test]
     fn nested_spans_share_the_root_utterance_id() {
         let db = Arc::new(Mutex::new(Timings::open_in_memory().unwrap()));

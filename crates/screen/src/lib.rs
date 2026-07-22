@@ -1,51 +1,31 @@
-//! What the user is looking at, in a form the cleanup prompt can use.
+//! What the user is looking at, filling in the context clause in
+//! `prompts/cleanup.md`.
 //!
-//! `prompts/cleanup.md` has always carried a context clause — "if the context
-//! clearly shows email recipients or participants, use those visible names as
-//! a strong spelling reference" — ported verbatim from Swift's
-//! `PostProcessingService`. Nothing ever filled it in. This crate is what
-//! fills it in.
+//! Two halves: a **text summary** (frontmost app and window title — free, and
+//! covered by the Accessibility grant hotkeys already need), and a
+//! **screenshot** as a JPEG data URI, which needs the Screen Recording grant
+//! and is off by default — see [`Context::screenshot`].
 //!
-//! Two halves, deliberately unequal:
-//!
-//! * A **text summary** — the frontmost app and its window title. Free, needs
-//!   no permission beyond the Accessibility one hotkeys already require, and
-//!   is exactly what that clause asks for: a mail window's title carries the
-//!   subject and usually the correspondent.
-//! * A **screenshot**, as a JPEG data URI. Needs the Screen Recording TCC
-//!   grant, which Aloud has never asked for, so it is off by default and
-//!   nothing in the dictation path consumes the image yet — see
-//!   [`Context::screenshot`].
-//!
-//! Everything here returns None rather than failing. A denied permission, a
-//! locked screen and an app with no titled window all look the same to the
-//! caller, and all mean the same thing: dictate without context, which is what
-//! every dictation did before this crate existed.
+//! Everything returns None rather than failing: a denial, a locked screen and an
+//! untitled window all mean the same thing, dictate without context.
 
-/// Longest edge of the captured screenshot, in pixels.
-///
-/// A 5K display is tens of megabytes, which base64 grows by a third — an
-/// unsendable data URI and a very slow one to build. 1024 is what the Swift
-/// app settled on (`AppContextService.defaultScreenshotMaxDimension`) and is
-/// still legible enough to read a mail header off.
+/// Longest edge of the captured screenshot. A 5K display is tens of megabytes,
+/// which base64 grows by a third; 1024 is still legible enough to read a mail
+/// header off.
 pub const DEFAULT_MAX_DIMENSION: u32 = 1024;
 
 /// A snapshot of what has focus.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Context {
-    /// One line naming the app and window, or empty when nothing is known.
-    /// Empty is the signal to send no context at all rather than to send the
-    /// word "unknown", which the model would treat as a fact about the screen.
+    /// One line naming the app and window. Empty means send no context at all,
+    /// rather than an "unknown" the model treats as a fact about the screen.
     pub summary: String,
     /// `data:image/jpeg;base64,…`, or None when not requested, not permitted,
     /// or not captured.
     ///
-    /// ponytail: no consumer in the dictation path. Cleanup is a text-only
-    /// call, and feeding an image to it means a vision model, a second prompt
-    /// and a second round-trip in front of every paste — Swift's design, and a
-    /// much larger decision than this crate. The upgrade path is a context
-    /// synthesis step (Swift's `AppContextService.currentActivity`) that turns
-    /// this image into `summary` before cleanup runs.
+    /// ponytail: no consumer in the dictation path — cleanup is a text-only
+    /// call. The upgrade path is a synthesis step turning this image into
+    /// `summary` before cleanup runs.
     pub screenshot: Option<String>,
 }
 
@@ -60,8 +40,7 @@ pub fn capture(with_screenshot: bool) -> Context {
     }
 }
 
-/// The frontmost app and window title as one line, or empty when neither can
-/// be read.
+/// The frontmost app and window title as one line, or empty.
 pub fn summary() -> String {
     compose(
         aloud_selection::frontmost_app().map(|a| a.name).as_deref(),
@@ -69,15 +48,14 @@ pub fn summary() -> String {
     )
 }
 
-/// Builds the summary line. Separated from the OS reads because this is the
-/// half that can be silently wrong — a summary that says the wrong thing is
-/// worse than no summary, since the prompt treats it as ground truth.
+/// Builds the summary line, separated from the OS reads because this is the half
+/// that can be silently wrong and the prompt treats it as ground truth.
 fn compose(app: Option<&str>, title: Option<&str>) -> String {
     let app = app.map(str::trim).filter(|s| !s.is_empty());
     let title = title.map(str::trim).filter(|s| !s.is_empty());
     match (app, title) {
-        // Plenty of apps put their own name in the title bar ("Inbox — Mail").
-        // Repeating it reads as two different facts about the screen.
+        // Apps put their own name in the title bar ("Inbox — Mail"); repeating
+        // it reads as two different facts about the screen.
         (Some(app), Some(title)) if title.contains(app) => title.to_string(),
         (Some(app), Some(title)) => format!("{app} — {title}"),
         (Some(app), None) => app.to_string(),
@@ -108,27 +86,20 @@ mod macos {
     use base64::Engine;
 
     /// ponytail: shells out to `screencapture` rather than binding
-    /// ScreenCaptureKit. It hits the same TCC bucket, needs no framework
-    /// bindings and is twenty lines instead of several hundred — the ceiling
-    /// is that it costs a process spawn plus two file writes (~200 ms) and
-    /// cannot capture a single window or exclude our own overlay.
-    /// `SCScreenshotManager.captureImage` is the upgrade path when either of
-    /// those starts to matter.
+    /// ScreenCaptureKit — same TCC bucket, twenty lines instead of hundreds. The
+    /// ceiling is ~200ms and no way to capture one window or exclude our own
+    /// overlay; `SCScreenshotManager.captureImage` is the upgrade path.
     pub fn screenshot_data_uri(max_dimension: u32) -> Option<String> {
-        // Preflight, because a denial here is not an error: `screencapture`
-        // with Screen Recording denied still exits 0 and still writes a PNG —
-        // of the desktop wallpaper, with every window missing. Handing that to
-        // the model as "what the user is looking at" is worse than no context.
+        // Preflight: with Screen Recording denied, `screencapture` still exits 0
+        // and still writes a PNG — of the wallpaper, every window missing.
         if !aloud_permissions::is_granted(aloud_permissions::Permission::ScreenRecording) {
             tracing::debug!("screen recording not granted; no screenshot");
             return None;
         }
 
-        // Unique per capture, not per process: two dictations can overlap (the
-        // capture is spawned at recording start and takes ~200ms), and a shared
-        // path means one run's `screencapture` overwrites while the other's
-        // `sips` reads — a truncated JPEG sent to the model as "what the user
-        // is looking at".
+        // Unique per capture, not per process: overlapping dictations on a
+        // shared path means one run's `screencapture` overwrites what the
+        // other's `sips` is reading.
         let out = std::env::temp_dir().join(format!(
             "aloud-screen-{}-{}.png",
             std::process::id(),
@@ -136,8 +107,8 @@ mod macos {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_nanos())
         ));
-        // -x: no shutter sound. -t png: sips reads it and it is lossless
-        //  going in, so the only quality loss is the downscale below.
+        // -x: no shutter sound. -t png: lossless going in, so the only quality
+        // loss is the downscale below.
         let captured = std::process::Command::new("screencapture")
             .args(["-x", "-t", "png"])
             .arg(&out)
@@ -146,21 +117,16 @@ mod macos {
             .is_some_and(|o| o.status.success());
         if !captured {
             tracing::warn!("screencapture failed");
-            // It may have created the file before failing, and a full-screen
-            // PNG left in temp is not something to leave lying around.
+            // It may have written the file before failing, and a full-screen
+            // PNG is not something to leave in temp.
             let _ = std::fs::remove_file(&out);
             return None;
         }
 
-        // Same tool `aloud-selection` resizes app icons with. In-place, so a
-        // failure leaves the full-resolution PNG — still a valid capture, just
-        // an unsendably large one, hence a warning rather than a bail.
-        //
-        // JPEG, not PNG, and that is not a detail: measured here, a 1024-wide
-        // PNG of a plain desktop is 1.0 MB, which base64 inflates to 1.3M
-        // characters — larger than most context windows before the transcript
-        // is even added. Quality 50 is what Swift's `AppContextService` uses
-        // and is still legible enough to read a mail header off.
+        // In-place, so a failure leaves a valid but unsendably large PNG —
+        // a warning, not a bail. JPEG is not a detail: a 1024-wide PNG of a
+        // plain desktop measured 1.0 MB here, 1.3M characters once base64'd,
+        // larger than most context windows before the transcript is added.
         let resized = std::process::Command::new("sips")
             .args([
                 "-Z",
@@ -189,8 +155,8 @@ mod macos {
             return None;
         }
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        // The extension is a lie after the sips re-encode; the MIME type is
-        // what a model reads, and it has to match the bytes.
+        // The .png extension is a lie after the sips re-encode; the MIME type
+        // is what the model reads and must match the bytes.
         Some(format!("data:image/jpeg;base64,{b64}"))
     }
 }
@@ -199,8 +165,8 @@ mod macos {
 mod tests {
     use super::{capture, compose};
 
-    /// The failure this guards: a summary of "unknown" or "— " reads to the
-    /// model as a fact about the screen. Nothing known must mean nothing sent.
+    /// Guards: a summary of "unknown" or "— " reads to the model as a fact
+    /// about the screen.
     #[test]
     fn nothing_known_yields_no_context_rather_than_a_placeholder() {
         assert_eq!(compose(None, None), "");
@@ -209,9 +175,8 @@ mod tests {
         assert_eq!(compose(Some("Mail"), None), "Mail");
     }
 
-    /// Most macOS title bars already end in the app name. Emitting
-    /// "Mail — Inbox — Mail" spends context tokens on a duplicate and reads as
-    /// two windows.
+    /// "Mail — Inbox — Mail" spends tokens on a duplicate and reads as two
+    /// windows.
     #[test]
     fn an_app_name_already_in_the_title_is_not_repeated() {
         assert_eq!(compose(Some("Mail"), Some("Inbox — Mail")), "Inbox — Mail");
@@ -221,14 +186,9 @@ mod tests {
         );
     }
 
-    /// Asking for no screenshot must produce none, whatever the permission
-    /// says — that is the flag the settings toggle drives.
-    ///
-    /// It deliberately does NOT call `screenshot_data_uri`. On a machine where
-    /// Screen Recording *is* granted — a developer's, or CI on real hardware —
-    /// that spawns `screencapture` and writes a full-screen PNG of whatever is
-    /// on screen. `cargo test` must not photograph the person running it. The
-    /// denial path is covered by the `status` example, which is opt-in.
+    /// Deliberately does not call `screenshot_data_uri`: where Screen Recording
+    /// is granted that would photograph whoever ran `cargo test`. The `status`
+    /// example covers it, opt-in.
     #[test]
     fn asking_for_no_screenshot_takes_none() {
         assert!(capture(false).screenshot.is_none());

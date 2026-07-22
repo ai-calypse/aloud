@@ -1,7 +1,5 @@
 //! Transcription via any OpenAI-compatible `/audio/transcriptions` endpoint.
-//!
-//! Ported from `TranscriptionService.swift`. Defaults to Groq, but the base
-//! URL is configurable so OpenAI or a self-hosted endpoint work unchanged.
+//! Defaults to Groq; the base URL is configurable.
 
 use crate::{hallucination, Transcriber};
 use anyhow::{Context, Result};
@@ -25,20 +23,15 @@ pub struct CloudTranscriber {
     language: Option<String>,
 }
 
-/// One connection pool for the process.
-///
-/// A `CloudTranscriber` is built on every dictation — the pipeline caches only
-/// the local engine, deliberately, because caching this one would freeze the
-/// key and base URL until restart. That is fine, but a fresh
-/// `reqwest::Client` per transcriber also meant a fresh *pool*, so each
-/// dictation paid a full TCP+TLS handshake: 85-130ms measured against Groq.
-/// `reqwest::Client` is an `Arc` inside, so this keeps the per-dictation
-/// construction and shares the connections.
+/// One connection pool for the process. A `CloudTranscriber` is rebuilt every
+/// dictation (caching it would freeze the key and base URL until restart), and
+/// a client per transcriber meant a pool per transcriber: a full TCP+TLS
+/// handshake per dictation, measured at 85-130ms against Groq.
 static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
 
 fn shared_http() -> Result<reqwest::Client> {
-    // The timeout moves to the request: this pool is per process, and 20s is
-    // right for an audio upload but not for everything that might share it.
+    // The timeout moves to the request: 20s suits an audio upload, not
+    // necessarily everything else sharing this pool.
     match HTTP.get() {
         Some(client) => Ok(client.clone()),
         None => {
@@ -50,9 +43,9 @@ fn shared_http() -> Result<reqwest::Client> {
     }
 }
 
-/// A non-2xx from the provider. Typed rather than a formatted `bail!` so a
-/// caller can tell an expired credential or a provider outage from a request
-/// this crate got wrong — see [`crate::is_recoverable_locally`].
+/// A non-2xx from the provider. Typed rather than a formatted `bail!` so callers
+/// can tell a bad credential from a bad request — see
+/// [`crate::is_recoverable_locally`].
 #[derive(Debug, thiserror::Error)]
 #[error("transcription failed ({status}): {body}")]
 pub struct HttpError {
@@ -105,7 +98,7 @@ impl CloudTranscriber {
 
 #[async_trait]
 impl Transcriber for CloudTranscriber {
-    async fn transcribe(&self, wav_path: &Path) -> Result<String> {
+    async fn transcribe(&self, wav_path: &Path, vocabulary: &[String]) -> Result<String> {
         let audio = tokio::fs::read(wav_path)
             .await
             .with_context(|| format!("reading {}", wav_path.display()))?;
@@ -123,11 +116,16 @@ impl Transcriber for CloudTranscriber {
         if let Some(language) = &self.language {
             form = form.text("language", language.clone());
         }
+        // Same field name and same meaning as whisper.cpp's initial prompt —
+        // the OpenAI transcription API exposes it as `prompt`.
+        if let Some(bias) = crate::bias_prompt(vocabulary) {
+            form = form.text("prompt", bias);
+        }
 
         let response = self
             .client
             .post(format!("{}/audio/transcriptions", self.base_url))
-            // Per request: the client is process-wide now.
+            // Per request: the client is process-wide.
             .timeout(TIMEOUT)
             .bearer_auth(&self.api_key)
             .multipart(form)

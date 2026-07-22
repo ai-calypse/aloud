@@ -1,53 +1,27 @@
 //! Settings, persisted as JSON in the app data directory.
 //!
-//! Mirrors the Swift app's `.settings` file: one JSON document holding both
-//! preferences and API keys, deliberately not the OS keychain. Written
-//! atomically (temp file + rename) so a crash mid-write cannot corrupt it.
+//! One document holding both preferences and API keys, deliberately not the OS
+//! keychain. Written atomically (temp + rename) so a crash cannot corrupt it.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
-/// Cleanup model defaults, matching voice-dict's current ones
-/// (`AppState.defaultPostProcessingModel` / `…FallbackModel`).
 const DEFAULT_CLEANUP_MODEL: &str = "openai/gpt-oss-20b";
 const DEFAULT_FALLBACK_MODEL: &str = "qwen/qwen3.6-27b";
 
-/// Longest single vocabulary term accepted from the clipboard.
-///
-/// A vocabulary term is a proper noun or a piece of jargon — "Kubernetes",
-/// "Anthropic". Anything longer is a sentence the user happened to have
-/// copied, and every term is re-sent with every cleanup request, so a stray
-/// paragraph would be paid for on each dictation until someone noticed.
+/// Longest vocabulary term accepted from the clipboard. Every term is re-sent
+/// with every cleanup request, so a stray copied paragraph is paid for forever.
 const MAX_TERM_CHARS: usize = 48;
 
-/// How the recording overlay draws itself.
+/// How the recording overlay draws itself. `DropPill` grows out of the notch
+/// and has room for content; `Wings` are two menu-bar tabs (macOS only, and
+/// they fall back to the pill with no notch or text too long for a 40pt tab).
 ///
-/// - `DropPill` is voice-dict's drop-down pill: a panel that grows out of the
-///   notch, wearing its silhouette. The default, and the only one with room for
-///   content — a live transcript, an Ask answer — rather than a status word.
-/// - `Wings` is voice-dict's minimalist overlay: two slim tabs welded to the
-///   top edge, flanking the notch, staying inside the menu bar. It is the drop
-///   pill collapsed to nothing, and hands over to it the moment there are words
-///   to show.
-///
-/// Wings weld to the menu bar, which only macOS has; off macOS, on a screen
-/// with no notch, and on an error too long to read in a 40pt tab, the style
-/// falls back to the drop pill.
-///
-/// A third variant, `LiquidGlass` — a refractive capsule floating below the
-/// menu bar — was retired. It was the one surface here that could not hold
-/// content: it morphed to its own width, so a sentence stretched it most of the
-/// way across the screen. Files still naming it load as the default; see
-/// `a_retired_overlay_style_falls_back_without_resetting_the_file`.
-///
-/// `DropPill` is stored as `dropPill` and not the `pill` its name suggests.
-/// `pill` is what the glass capsule was called before it was renamed, and while
-/// the loader was still rewriting that value this style silently reverted to
-/// glass on the next launch — see `the_drop_down_pill_survives_a_restart`. The
-/// rewrite is gone, and now so is the capsule, but the names stay apart: a
-/// variant answering to a name another one used first is a trap worth not
-/// rebuilding.
+/// `DropPill` serializes as `dropPill`, never the `pill` its name suggests:
+/// `pill` was the retired glass capsule's stored name, and the collision made
+/// this style revert on every restart — see
+/// `the_drop_down_pill_survives_a_restart`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum OverlayStyle {
@@ -55,29 +29,24 @@ pub enum OverlayStyle {
     Wings,
 }
 
-/// Which monitor the overlay appears on.
-///
-/// `Named` stores the OS monitor name rather than an index: indices are
-/// reassigned when a display is unplugged, so a saved index silently starts
-/// meaning a different screen. A name that no longer resolves falls back to
-/// the primary, which is what stops the overlay rendering off-screen.
+/// Which monitor the overlay appears on. `Named` stores the OS name, not an
+/// index: indices are reassigned on unplug, so a saved index changes meaning.
+/// A name that no longer resolves falls back to the primary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum OverlayDisplay {
-    /// The monitor holding the cursor — the screen the user is working on.
+    /// The monitor holding the cursor.
     Active,
     Primary,
     Named(String),
 }
 
-/// Everything the app remembers between launches.
-///
-/// One coarse struct rather than ~70 individual commands: the whole thing is
-/// a few hundred bytes, and the frontend gets one `get`/`update` pair.
+/// Everything the app remembers between launches. One coarse struct rather
+/// than ~70 commands: it is a few hundred bytes and the frontend gets one
+/// `get`/`update` pair.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
-    // Keys. In the same file as the rest, matching the Swift app.
     pub groq_api_key: String,
     pub composio_api_key: String,
     /// Gemini key. Agent tool-call parsing runs here — Groq's tokens-per-minute
@@ -90,16 +59,9 @@ pub struct Settings {
     pub base_url: String,
     /// BCP-47 code, or empty to auto-detect.
     pub language: String,
-    /// Show the words in the live-transcript panel as they are spoken.
-    ///
-    /// **Preview only, and it changes nothing about what gets pasted**: the
-    /// text still comes from one pass over the whole recording, on the chosen
-    /// engine, cleaned up by the LLM. See [`aloud_transcribe::preview`].
-    ///
-    /// Off by default: it changes the shape of the hot path — the microphone
-    /// callback now feeds a background transcriber — and it runs the local
-    /// model several times a second for the length of the dictation, which is
-    /// real CPU and real battery on a laptop.
+    /// Live-transcript preview. Changes nothing about what gets pasted — see
+    /// [`aloud_transcribe::preview`]. Off by default: it runs the local model
+    /// several times a second, which is real CPU and battery on a laptop.
     pub streaming_transcription: bool,
 
     // Post-processing
@@ -108,36 +70,36 @@ pub struct Settings {
     pub fallback_model: String,
     /// Overrides the built-in cleanup prompt when non-empty.
     pub custom_system_prompt: String,
-    /// The version of the built-in prompt the user last acknowledged. Empty
-    /// means never, which is exactly right for a fork made before this
-    /// existed: they should see the offer once.
+    /// Version of the built-in prompt the user last acknowledged; empty means
+    /// never, so a pre-existing install sees the offer once.
     pub seen_prompt_version: String,
     /// Language the pasted text is written in — distinct from [`language`],
-    /// which is the language *spoken into the mic*. Blank keeps the spoken
-    /// one. Cleanup applies it; transcription never sees it.
+    /// the language *spoken*. Cleanup applies it; transcription never sees it.
     ///
     /// [`language`]: Settings::language
     pub output_language: String,
     /// Reject a cleanup that *answered* the transcript instead of tidying it —
-    /// see [`aloud_llm::guard`]. On by default, matching the Swift app: the
-    /// failure it catches pastes text the user never dictated, and the worst
-    /// a false positive costs is the raw transcript.
+    /// see [`aloud_llm::guard`]. On by default: it catches pasting text the
+    /// user never dictated, and a false positive only costs the raw transcript.
     pub instruction_guard_enabled: bool,
-    /// Proper nouns and jargon fed to the model as a spelling reference.
+    /// Proper nouns and jargon fed to the model as a spelling reference, and to
+    /// the transcriber as a recognition bias. See `aloud_transcribe::bias_prompt`.
     pub vocabulary: Vec<String>,
-    /// Tell cleanup what app and window are in front, so it can spell a
-    /// recipient's name the way the screen already spells it.
+    /// Phrases cleanup must return exactly as spoken — no filler removal, no
+    /// rewording, no punctuation "fixes" inside them.
     ///
-    /// Off by default. It sends the title of whatever window has focus to a
-    /// third party on every dictation, and a window title is not always
-    /// innocuous — it is a document name, a chat participant, a URL. That is
-    /// an opt-in, not something to turn on behind the user's back.
+    /// Distinct from [`vocabulary`], which only steers *spelling* and leaves the
+    /// model free to tidy the sentence around it. "I am um boss" needs the "um"
+    /// kept, and the filler rule would otherwise delete it.
+    ///
+    /// [`vocabulary`]: Settings::vocabulary
+    pub preserve_phrases: Vec<String>,
+    /// Tell cleanup what app and window are in front, so it can spell names the
+    /// way the screen does. Off by default: a window title is a document name,
+    /// a chat participant or a URL, sent to a third party on every dictation.
     pub context_enabled: bool,
-    /// Also capture a screenshot with the context.
-    ///
-    /// Off by default, and separately from [`context_enabled`], because it
-    /// needs the Screen Recording grant Aloud has never asked for. Nothing in
-    /// the dictation path reads the image yet — see `aloud_screen::Context`.
+    /// Also capture a screenshot with the context. Separate from
+    /// [`context_enabled`] because it needs the Screen Recording grant.
     ///
     /// [`context_enabled`]: Settings::context_enabled
     pub context_screenshot_enabled: bool,
@@ -147,19 +109,12 @@ pub struct Settings {
     pub app_rules: Vec<crate::rules::AppRule>,
 
     // Command mode — dictating over a selection rewrites it instead.
-    /// Whether a selection can turn a dictation into a rewrite at all.
+    /// Whether a selection can turn a dictation into a rewrite. A selection is
+    /// the *only* signal — no extra-modifier gesture, which collided with the
+    /// dictate key. Explicit rewrite is [`aloud_hotkey::model::Role::Rewrite`].
     ///
-    /// A selection is the *only* signal: there is no extra-modifier gesture.
-    /// Swift offered one, and it was removed here because it collided with the
-    /// dictate key in three of the four modifier choices and had to be
-    /// defended by a conflict-detection routine that could only ever tell the
-    /// user their setting does nothing. An explicit rewrite that does not
-    /// depend on a selection is [`aloud_hotkey::model::Role::Rewrite`], which
-    /// has its own hotkey.
-    ///
-    /// **Defaults to on, where the Swift app defaults to off.** Aloud shipped
-    /// selection-aware rewriting with no way to disable it, so defaulting to
-    /// off would silently remove a working feature from every existing user.
+    /// On by default: the feature shipped with no toggle, so defaulting to off
+    /// would silently remove it from every existing user.
     pub command_mode_enabled: bool,
 
     // Behaviour
@@ -170,41 +125,35 @@ pub struct Settings {
     /// system sounds have no per-sound volume, so it is ignored there.
     pub sound_volume: f32,
     pub press_enter_command: bool,
-    /// Wait this long after the hotkey before capture begins, so the first
-    /// syllable is not clipped by a key that is still travelling. 0 disables.
+    /// Delay before capture begins, so a key still travelling does not clip the
+    /// first syllable. 0 disables.
     #[specta(type = specta_typescript::Number)]
     pub shortcut_start_delay_ms: u64,
-    /// Silence system output while recording, so music does not end up in the
-    /// transcript. Restored when capture stops, and on the next launch if the
-    /// app died first. macOS only.
+    /// Silence system output while recording. Restored when capture stops, and
+    /// on the next launch if the app died first. macOS only.
     pub mute_system_audio: bool,
-    /// Show the menu-bar icon. Hiding it leaves hotkeys working; the way back
-    /// to the window is to open the app again, which macOS turns into a
-    /// reopen event rather than a second instance.
+    /// Show the menu-bar icon. Hiding it leaves hotkeys working; opening the app
+    /// again is the way back to the window (macOS turns that into a reopen).
     pub show_menu_bar_icon: bool,
-    /// Drop-down pill or menu-bar wings. Wings are macOS-only, and hand over to
-    /// the drop pill wherever they cannot say what needs saying.
+    /// Drop-down pill or menu-bar wings; wings are macOS-only.
     pub overlay_style: OverlayStyle,
-    /// Which screen the overlay shows on.
     pub overlay_display: OverlayDisplay,
     /// Put the previous clipboard back after pasting. Off leaves the dictated
     /// text on the clipboard so it can be pasted again.
     pub preserve_clipboard: bool,
     /// Whether the first-run wizard has been completed. False shows it.
     pub onboarded: bool,
-    /// Reveals the latency waterfall. A debugging tool, not a feature — but it
-    /// was built and then hidden behind a build-time flag, which made it
-    /// unreachable in every release the users actually run.
+    /// Reveals the latency waterfall. A runtime toggle, not a build-time flag,
+    /// which made it unreachable in every release users actually run.
     pub developer_tools: bool,
     #[specta(type = specta_typescript::Number)]
     pub history_retention: usize,
-    /// Disk the kept recordings may use, in megabytes. 0 keeps none, which
-    /// also removes the Run Log's player and its transcription retry — both
-    /// read the WAV.
+    /// Disk the kept recordings may use, in MB. 0 keeps none, which also
+    /// removes the Run Log's player and retry — both read the WAV.
     #[specta(type = specta_typescript::Number)]
     pub audio_retention_mb: u64,
-    /// Evict recordings older than this many days whatever the size budget
-    /// says. 0 leaves size as the only limit.
+    /// Evict recordings older than this many days regardless of the size
+    /// budget. 0 leaves size as the only limit.
     pub audio_retention_days: u32,
 }
 
@@ -228,6 +177,7 @@ impl Default for Settings {
             output_language: String::new(),
             instruction_guard_enabled: true,
             vocabulary: Vec::new(),
+            preserve_phrases: Vec::new(),
             context_enabled: false,
             context_screenshot_enabled: false,
             macros: Vec::new(),
@@ -241,27 +191,15 @@ impl Default for Settings {
             shortcut_start_delay_ms: 0,
             mute_system_audio: false,
             show_menu_bar_icon: true,
-            // The glass pill is Aloud's signature look and the only overlay it
-            // has ever shipped, so it stays the default; the two voice-dict
-            // styles are opt-in.
             overlay_style: OverlayStyle::DropPill,
             overlay_display: OverlayDisplay::Active,
             preserve_clipboard: true,
             history_retention: 50,
-            // **Off by default, and deliberately.** `#[serde(default)]` means
-            // an existing settings.json inherits whatever this says, so a
-            // non-zero default would silently start writing raw audio of every
-            // dictation to disk for every current user, on upgrade, with no
-            // prompt. That is a strictly larger disclosure than the window
-            // title two fields up, which this file already argues is "an
-            // opt-in, not something to turn on behind the user's back".
-            //
-            // 250 MB is roughly four hours at 16 kHz mono — the number to type
-            // in when turning it on, and what the settings row suggests.
+            // Off deliberately: `#[serde(default)]` means a non-zero value here
+            // would start writing raw audio to disk for existing users on
+            // upgrade, unprompted. (250 MB ≈ four hours at 16 kHz mono.)
             audio_retention_mb: 0,
             audio_retention_days: 30,
-            // A fresh install has not been through the wizard; a migrated one
-            // is handled below, since the Swift users are already set up.
             onboarded: false,
             developer_tools: false,
         }
@@ -269,9 +207,8 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// The three retention numbers as the history store wants them, so the
-    /// megabyte-to-byte conversion lives in one place rather than at every
-    /// call site that inserts a row.
+    /// Retention as the history store wants it, so the MB-to-byte conversion
+    /// lives in one place.
     pub fn retention(&self) -> crate::history::Retention {
         crate::history::Retention {
             entries: self.history_retention,
@@ -284,11 +221,8 @@ impl Settings {
         Ok(aloud_notes::data_dir()?.join("settings.json"))
     }
 
-    /// Loads settings, falling back to defaults when the file is absent.
-    ///
-    /// A corrupt file also yields defaults rather than an error: the app must
-    /// still start, and `#[serde(default)]` means a partial file keeps
-    /// whatever fields do parse.
+    /// Loads settings; an absent or corrupt file yields defaults rather than an
+    /// error, because the app must still start.
     pub fn load() -> Self {
         let mut settings = Self::load_file();
         settings.migrate_deprecated_models();
@@ -296,11 +230,8 @@ impl Settings {
         settings
     }
 
-    /// Moves a stored *old default* model to the current default, ported from
-    /// voice-dict's deprecated-default handling. A value the user typed
-    /// themselves is untouched; only the exact former defaults migrate (which
-    /// also catches a user who deliberately chose the old default — accepted,
-    /// as in the Swift app).
+    /// Moves a stored *old default* model to the current default. Only the
+    /// exact former defaults migrate; a value the user typed is untouched.
     fn migrate_deprecated_models(&mut self) {
         if self.post_processing_model == "llama-3.3-70b-versatile" {
             self.post_processing_model = DEFAULT_CLEANUP_MODEL.into();
@@ -325,9 +256,8 @@ impl Settings {
 
     /// Parses a settings file, carrying renamed keys forward.
     ///
-    /// `hotkeys.command` became `hotkeys.rewrite`. Without this the field would
-    /// simply deserialize to None and the user's hotkey would stop working with
-    /// no error anywhere — the quietest possible way to break someone's setup.
+    /// `hotkeys.command` became `hotkeys.rewrite`; without this the field
+    /// deserializes to None and the user's hotkey stops working silently.
     pub(crate) fn from_json(text: &str) -> serde_json::Result<Self> {
         let mut raw: serde_json::Value = serde_json::from_str(text)?;
         if let Some(hotkeys) = raw.get_mut("hotkeys").and_then(|h| h.as_object_mut()) {
@@ -335,16 +265,10 @@ impl Settings {
                 hotkeys.entry("rewrite").or_insert(old);
             }
         }
-        // An `overlayStyle` this build does not recognise — `"pill"` from before
-        // the glass capsule was renamed, or any variant retired since — is
-        // dropped so the field falls back to its default.
-        //
-        // This used to be a rename rule per dead value, which is what made the
-        // drop-down pill unusable: it serialized as the very string the rule
-        // rewrote. Asking serde whether the value still parses keeps no list to
-        // maintain and cannot collide with a live name. The whole document must
-        // not fail over one stale enum, because that resets the file — and the
-        // API keys live in it.
+        // An unrecognised `overlayStyle` is dropped so the field defaults.
+        // Asking serde whether it parses beats a per-dead-value rename list,
+        // which once collided with a live name. The document must not fail over
+        // one stale enum — that would reset the file, and the API keys are in it.
         if raw
             .get("overlayStyle")
             .is_some_and(|style| serde_json::from_value::<OverlayStyle>(style.clone()).is_err())
@@ -356,16 +280,12 @@ impl Settings {
         serde_json::from_value(raw)
     }
 
-    /// Fills any *empty* key from the environment. Since the key inputs were
-    /// removed (no BYOK), this is the *only* way a key is ever supplied: a
-    /// `.env` at the repo root, or an exported var, configures a dev build. A
-    /// key already in the settings file still wins, so a migrated Swift install
-    /// keeps its own. Each var is checked in the process environment first,
-    /// then in a `.env` found by walking up from the working directory.
+    /// Fills any *empty* key from the environment or a `.env` walked up to from
+    /// the working directory — the only way a key is supplied (no BYOK inputs).
+    /// A key already in the settings file wins.
     ///
-    /// This does not survive bundling — `current_dir()` is `/` for a `.app`
-    /// launched from Finder, so a shipped build resolves nothing and falls back
-    /// to on-device whisper. Provisioning for release is Phase 12.
+    /// Does not survive bundling: `current_dir()` is `/` for a `.app` launched
+    /// from Finder, so a shipped build falls back to on-device whisper.
     fn fill_keys_from_env(&mut self) {
         for (var, field) in [
             ("GROQ_API_KEY", &mut self.groq_api_key),
@@ -381,16 +301,10 @@ impl Settings {
         }
     }
 
-    /// Appends a vocabulary term, returning whether it was new.
-    ///
-    /// Case-insensitive, matching Swift's `mergedVocabularyTerms`: the list is
-    /// pasted into the prompt as a spelling reference, so "Tauri" and "tauri"
-    /// are the same hint twice and only make the prompt longer. The *first*
-    /// spelling wins, since that is the one the user chose to teach.
-    ///
-    /// `to_lowercase` rather than `eq_ignore_ascii_case`: a vocabulary is
-    /// where names like "Café" live, and the ASCII comparison would happily
-    /// store that twice.
+    /// Appends a vocabulary term, returning whether it was new. Case-insensitive
+    /// — the same hint twice only lengthens every prompt — and the first
+    /// spelling wins. `to_lowercase` not `eq_ignore_ascii_case`: "Café" lives
+    /// here, and the ASCII comparison would store it twice.
     pub fn add_vocabulary_term(&mut self, term: &str) -> bool {
         let term = term.trim();
         if term.is_empty() {
@@ -410,17 +324,10 @@ impl Settings {
         true
     }
 
-    /// Adds every term in `text`, returning how many were new.
-    ///
-    /// Splits on newlines, commas and semicolons, matching Swift's
-    /// `mergedVocabularyTerms`. Without the split, "Tauri, Specta" becomes one
-    /// term — and since the menu item's source is *the clipboard*, whatever
-    /// the user last copied lands here verbatim.
-    ///
-    /// [`MAX_TERM_CHARS`] is why the length bound exists at all: the whole
-    /// vocabulary is prefixed to the user message of every subsequent cleanup
-    /// request, so a copied paragraph or email would be re-sent on each
-    /// dictation for as long as it stayed in the list.
+    /// Adds every term in `text`, returning how many were new. The source is
+    /// the clipboard, so it splits on newlines/commas/semicolons and bounds
+    /// length by [`MAX_TERM_CHARS`] — otherwise a copied paragraph lands whole
+    /// and is re-sent with every later cleanup request.
     pub fn add_vocabulary_terms(&mut self, text: &str) -> usize {
         text.split(['\n', ',', ';'])
             .filter(|t| {
@@ -436,8 +343,7 @@ impl Settings {
         let dir = path.parent().context("settings path has no parent")?;
         fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
 
-        // Temp file + rename: a crash mid-write must not leave a truncated
-        // file holding the user's API keys.
+        // Temp + rename: a crash mid-write must not truncate the API keys.
         let temp = path.with_extension("tmp");
         fs::write(&temp, serde_json::to_string_pretty(self)?)
             .with_context(|| format!("writing {}", temp.display()))?;
@@ -447,11 +353,8 @@ impl Settings {
     }
 }
 
-/// A var from the process environment, or from the first `.env` found walking
-/// up from the working directory. Returns None if unset/empty in both.
-///
-/// No dotenv crate: the file is a handful of `KEY=value` lines and we only read
-/// three keys. Values may be quoted; surrounding quotes and spaces are trimmed.
+/// A var from the process environment, else the first `.env` found walking up
+/// from the working directory. No dotenv crate: three keys, `KEY=value` lines.
 fn env_or_dotenv(var: &str) -> Option<String> {
     if let Ok(value) = std::env::var(var) {
         let trimmed = value.trim();
@@ -474,8 +377,7 @@ fn env_or_dotenv(var: &str) -> Option<String> {
     }
 }
 
-/// Pulls `var`'s value out of `.env` contents, or None. Skips blank/comment
-/// lines; trims surrounding quotes and whitespace from the value.
+/// Pulls `var` out of `.env` contents, trimming surrounding quotes/whitespace.
 fn parse_dotenv_value(contents: &str, var: &str) -> Option<String> {
     let prefix = format!("{var}=");
     for line in contents.lines() {
@@ -493,8 +395,7 @@ fn parse_dotenv_value(contents: &str, var: &str) -> Option<String> {
     None
 }
 
-/// Owner-only (0600) on Unix. On Windows the per-user profile directory is
-/// already ACL'd to the user, which is the practical equivalent.
+/// Owner-only (0600) on Unix. Windows' per-user profile is already ACL'd.
 #[cfg(unix)]
 fn restrict_permissions(path: &std::path::Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -511,15 +412,11 @@ fn restrict_permissions(_path: &std::path::Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// Rewriting on a selection is on out of the box: turning it off is a
-    /// choice, and every existing user had it before the toggle existed.
     #[test]
     fn rewriting_a_selection_is_on_by_default() {
         assert!(Settings::default().command_mode_enabled);
     }
 
-    /// A term added twice in different casing is the same spelling hint said
-    /// twice — it only lengthens every cleanup prompt from then on.
     #[test]
     fn vocabulary_terms_dedupe_ignoring_case() {
         let mut settings = Settings::default();
@@ -535,9 +432,8 @@ mod tests {
         assert_eq!(settings.vocabulary, ["Tauri", "Café"]);
     }
 
-    /// The failure this guards: the source is the clipboard, so "Tauri, Specta"
-    /// arrived as a single term and a copied paragraph arrived whole — and the
-    /// whole vocabulary is prefixed to every later cleanup request.
+    /// Guards: "Tauri, Specta" arriving as one term, and a copied paragraph
+    /// arriving whole.
     #[test]
     fn clipboard_text_is_split_into_terms_and_long_ones_are_dropped() {
         let mut settings = Settings::default();
@@ -548,10 +444,8 @@ mod tests {
         );
         assert_eq!(settings.vocabulary, ["Tauri", "Specta", "Rust", "serde"]);
 
-        // Re-adding the same list is a no-op, so the menu item is idempotent.
         assert_eq!(settings.add_vocabulary_terms("tauri, SPECTA"), 0);
 
-        // A sentence someone happened to have copied is not a proper noun.
         let paragraph = "a".repeat(MAX_TERM_CHARS + 1);
         assert_eq!(settings.add_vocabulary_terms(&paragraph), 0);
         assert_eq!(
@@ -571,7 +465,6 @@ mod tests {
             parse_dotenv_value(env, "CEREBRAS_API_KEY").as_deref(),
             Some("csk_quoted")
         );
-        // Empty value and absent key both yield None.
         assert_eq!(parse_dotenv_value(env, "COMPOSIO_API_KEY"), None);
         assert_eq!(parse_dotenv_value(env, "MISSING"), None);
     }
@@ -613,8 +506,6 @@ mod tests {
         assert_eq!(parsed.hotkeys, settings.hotkeys);
     }
 
-    /// A settings file written by an older version must still load: unknown
-    /// fields are ignored and missing ones take their default.
     #[test]
     fn partial_json_keeps_defaults_for_missing_fields() {
         let parsed: Settings =
@@ -625,7 +516,6 @@ mod tests {
 
     #[test]
     fn corrupt_json_falls_back_to_defaults() {
-        // load() must never panic the app on a mangled file.
         let parsed: Result<Settings, _> = serde_json::from_str("{not json");
         assert!(parsed.is_err(), "sanity: this really is invalid");
     }
@@ -635,9 +525,8 @@ mod tests {
 mod rename_tests {
     use super::*;
 
-    /// The rewrite hotkey was called `command` before. Losing this migration
-    /// would not fail to parse — the field would deserialize to None and the
-    /// user's hotkey would quietly stop working, with nothing logged.
+    /// Losing the `command` → `rewrite` migration does not fail to parse: the
+    /// hotkey quietly stops working, with nothing logged.
     #[test]
     fn an_old_settings_file_keeps_its_rewrite_hotkey() {
         let on_disk = r#"{
@@ -655,12 +544,9 @@ mod rename_tests {
         assert!(settings.hotkeys.hold.is_some(), "other roles are untouched");
     }
 
-    /// A retired `overlayStyle` must cost the user that one field and nothing
-    /// else. `"pill"` is the name the glass capsule went by before it was
-    /// renamed; a file carrying it lands on whatever the current default is.
-    ///
-    /// The failure this guards is not the style: it is the API keys in the same
-    /// document, which a hard parse error would reset.
+    /// A retired `overlayStyle` must cost that one field and nothing else. The
+    /// failure guarded is the API keys in the same document, which a hard parse
+    /// error would reset.
     #[test]
     fn a_retired_overlay_style_falls_back_without_resetting_the_file() {
         let stale = Settings::from_json(r#"{ "overlayStyle": "pill", "groqApiKey": "keep-me" }"#)
@@ -671,16 +557,12 @@ mod rename_tests {
             "the rest of the file survives"
         );
 
-        // The retired glass capsule takes the same path as `"pill"` did: it
-        // loads as the default rather than failing the document it is in.
-        let glass = Settings::from_json(
-            r#"{ "overlayStyle": "liquidGlass", "groqApiKey": "keep-me" }"#,
-        )
-        .expect("a retired style must not fail the document");
+        let glass =
+            Settings::from_json(r#"{ "overlayStyle": "liquidGlass", "groqApiKey": "keep-me" }"#)
+                .expect("a retired style must not fail the document");
         assert_eq!(glass.overlay_style, Settings::default().overlay_style);
         assert_eq!(glass.groq_api_key, "keep-me");
 
-        // Every live name is left exactly alone.
         for style in [OverlayStyle::DropPill, OverlayStyle::Wings] {
             let saved = serde_json::to_string(&style).expect("must serialize");
             let reloaded = Settings::from_json(&format!(r#"{{ "overlayStyle": {saved} }}"#))
@@ -689,12 +571,8 @@ mod rename_tests {
         }
     }
 
-    /// The drop-down pill used to be unable to survive a restart.
-    ///
-    /// It serialized as `"pill"`, which was the exact string the loader rewrote
-    /// to `liquidGlass` — so choosing it in Settings held until the next launch
-    /// and then silently reverted to the glass capsule. Its stored name is now
-    /// `dropPill`, which no retired value can shadow.
+    /// The pill serialized as `"pill"`, the exact string the loader rewrote, so
+    /// it reverted on every launch. `dropPill` cannot be shadowed.
     #[test]
     fn the_drop_down_pill_survives_a_restart() {
         let saved = serde_json::to_string(&OverlayStyle::DropPill).expect("must serialize");
@@ -708,7 +586,6 @@ mod rename_tests {
         assert_eq!(reloaded.overlay_style, OverlayStyle::DropPill);
     }
 
-    /// A file already using the new name must not be disturbed.
     #[test]
     fn a_current_settings_file_is_unchanged() {
         let on_disk = r#"{

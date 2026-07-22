@@ -1,20 +1,17 @@
 //! System prompts and response cleanup.
 //!
-//! The prompts are the Swift app's verbatim, kept as separate files so they
-//! diff cleanly and can be tuned without touching Rust. They encode a lot of
-//! hard-won behaviour (self-corrections, instruction preservation, email
-//! formatting) — treat changes as behavioural, not cosmetic.
+//! Kept as separate files so they diff cleanly and tune without touching Rust.
+//! They encode hard-won behaviour (self-corrections, instruction preservation,
+//! email formatting) — treat changes as behavioural, not cosmetic.
 
 /// Cleans a raw dictation transcript. Returns `EMPTY` for pure filler.
 pub const CLEANUP: &str = include_str!("prompts/cleanup.md");
 
-/// The date [`CLEANUP`] last changed, ported from voice-dict's
-/// `defaultSystemPromptDate`. A user who forked the prompt stops receiving
-/// improvements to it silently; the app compares this against the version they
-/// last acknowledged and offers them the new default. Bump it whenever
-/// `cleanup.md` changes — `cleanup_version_tracks_the_prompt` fails if you
-/// forget.
-pub const CLEANUP_VERSION: &str = "2026-05-13";
+/// The date [`CLEANUP`] last changed. A user who forked the prompt otherwise
+/// stops receiving improvements silently; the app compares this against what
+/// they last acknowledged and offers the new default. Bump it whenever
+/// `cleanup.md` changes — `cleanup_version_tracks_the_prompt` fails if you don't.
+pub const CLEANUP_VERSION: &str = "2026-07-21";
 
 /// Transforms selected text per a spoken editing command.
 pub const COMMAND: &str = include_str!("prompts/command.md");
@@ -23,7 +20,7 @@ pub const COMMAND: &str = include_str!("prompts/command.md");
 pub const MEETING: &str = include_str!("prompts/meeting.md");
 
 /// Removes `<think>...</think>` blocks that reasoning models emit before their
-/// answer. Ported from `ModelConfiguration.stripThinkTags`.
+/// answer.
 pub fn strip_think_tags(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -52,13 +49,11 @@ mod tests {
         assert!(COMMAND.contains("SELECTED_TEXT"));
     }
 
-    /// The banner that offers a forked user the improved default is driven
-    /// entirely by [`CLEANUP_VERSION`], so editing `cleanup.md` without
-    /// bumping it means nobody is ever told — the feature rots in total
-    /// silence. This fails loudly instead.
+    /// Editing `cleanup.md` without bumping [`CLEANUP_VERSION`] means the
+    /// upgrade banner never fires and the feature rots silently.
     ///
-    /// FNV-1a rather than `DefaultHasher`: the standard hasher is explicitly
-    /// not stable across Rust releases, so it would fail on a toolchain bump.
+    /// FNV-1a, not `DefaultHasher`: the standard hasher is explicitly unstable
+    /// across Rust releases and would fail on a toolchain bump.
     #[test]
     fn cleanup_version_tracks_the_prompt() {
         let hash = CLEANUP.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
@@ -66,7 +61,7 @@ mod tests {
         });
         assert_eq!(
             (hash, CLEANUP_VERSION),
-            (0x998e_0b71_0b10_4748, "2026-05-13"),
+            (0xc47c_40d8_dac1_2adb, "2026-07-21"),
             "cleanup.md changed — bump CLEANUP_VERSION and this hash together"
         );
     }

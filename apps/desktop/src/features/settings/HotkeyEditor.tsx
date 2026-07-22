@@ -21,16 +21,13 @@ import { describeBinding } from "./binding-label";
 /**
  * One row per role, each bound by recording a real key gesture.
  *
- * This used to be a <select> of six modifier-only holds, which meant
- * `Binding::Key` — a normal key with modifiers — existed in Rust and could not
- * be reached from the app; anything else showed as "Custom (edit file)".
- * Recording happens in the Rust event tap rather than from DOM keydowns: the
- * browser cannot see a modifier-only press reliably, cannot tell Right Option
- * from Left, never sees Fn at all, and could not stop the hotkey being
- * *replaced* from firing while you record over it.
+ * Recording happens in the Rust event tap, not from DOM keydowns: the browser
+ * cannot see a modifier-only press reliably, cannot tell Right Option from
+ * Left, never sees Fn, and cannot stop the hotkey being replaced from firing
+ * while you record over it.
  *
- * The Config keys are snake_case (copy_again, meeting_notes) because they come
- * straight from the Rust struct, unlike the camelCase Settings fields.
+ * Config keys are snake_case because they come straight from the Rust struct,
+ * unlike the camelCase Settings fields.
  */
 
 /** The roles a user binds, and the Config key each writes to. */
@@ -46,12 +43,8 @@ const ROLES: { key: keyof Config; label: string; mode: string; hint: string }[] 
 
 const DISABLED: Binding = { kind: "disabled" };
 
-/**
- * The factory settings, mirroring Rust's `Config::defaults()`: dictate on a
- * bare Right Option, every other role unbound. Kept in step with that by the
- * one test the Rust side has; there is no runtime source for it because a reset
- * must work without a round-trip.
- */
+/** Mirrors Rust's `Config::defaults()`. Duplicated rather than fetched because
+ * a reset must work without a round-trip; a Rust test keeps the two in step. */
 const DEFAULT_CONFIG: Config = {
   hold: { kind: "modifierKey", key: "rightOption", modifiers: [] },
   toggle: null,
@@ -63,15 +56,10 @@ const DEFAULT_CONFIG: Config = {
 };
 
 /**
- * One-click holds, for the common case where recording a gesture is overkill.
- * All modifier-only (`ModifierKey`), so they fire on a bare hold with no extra
- * key. "Both options"/"both commands" are deliberately absent: a binding holds
- * one side-specific key, and there is no "either/both sides" concept in the
- * matcher — offering them would be offering a setting that does nothing.
- *
- * Option+Fn is keyed on Fn with Option *required*, so either Option side plus
- * Fn fires it — the matcher's exact-match rule then rejects any further
- * modifier, exactly as it does for a bare Right Option.
+ * One-click holds, all modifier-only so they fire on a bare hold. "Both
+ * options" is absent because the matcher has no either/both-sides concept.
+ * Option+Fn is keyed on Fn with Option *required*, so either Option side fires
+ * it and the exact-match rule rejects any further modifier.
  */
 const PRESETS: Binding[] = [
   { kind: "modifierKey", key: "fn", modifiers: [] },
@@ -80,12 +68,8 @@ const PRESETS: Binding[] = [
   { kind: "modifierKey", key: "fn", modifiers: ["option"] },
 ];
 
-/**
- * Custom gestures a user has recorded, kept so they stay in the dropdown even
- * after being cleared or reassigned. This is a UI convenience list, not a
- * setting the app acts on, so it lives in localStorage rather than in the Rust
- * Config — no new field, no migration.
- */
+/** Recorded gestures kept for the dropdown. A UI convenience, not a setting
+ * the app acts on, so localStorage rather than a Config field and a migration. */
 const CUSTOMS_KEY = "aloud.hotkey.customs";
 
 function loadCustoms(): Binding[] {
@@ -115,14 +99,9 @@ function sameBinding(a: Binding | undefined, b: Binding): boolean {
 }
 
 /**
- * Whether another role has the *identical* gesture to this one.
- *
- * Only an exact match is a real clash now. A strict overlap like `fn` vs
- * `⌥fn`, or `⌘D` vs `⌘⇧D`, is resolved by the pipeline: when two bindings are
- * satisfied at once, the more-specific role owns the session and the other's
- * release is dropped (see `Session::owner` / `Pipeline::owns`). So specificity
- * differs → no ambiguity → no warning. Equal modifier sets on the same key are
- * the one case supersede can't break, and the only one worth flagging.
+ * Whether another role has the *identical* gesture. Only an exact match is a
+ * clash: a strict overlap (`fn` vs `⌥fn`) is resolved by the pipeline, where
+ * the more-specific role owns the session (`Session::owner`, `Pipeline::owns`).
  */
 function conflictsWith(config: Config, role: keyof Config): boolean {
   const mine = config[role];
@@ -166,19 +145,13 @@ export function HotkeyEditor({
   config: Config;
   onChange: (config: Config) => void;
 }) {
-  /** Which role is recording, if any. Only one at a time. */
   const [recording, setRecording] = useState<keyof Config | null>(null);
-  // Recorded gestures, added on capture and never dropped, so a shortcut you
-  // built once is one dropdown pick away forever after.
   const [customs, setCustoms] = useState<Binding[]>(loadCustoms);
-  // Rust times capture out on its own, so an abandoned recording cannot hold
-  // the keyboard. This ref is only to ignore a result that arrives after the
-  // user has already moved on to recording a different role.
+  // Ignores a capture that lands after the user moved on to another role.
+  // (Rust times capture out on its own, so nothing can hold the keyboard.)
   const generation = useRef(0);
-  // The live config, for `record` to spread onto. Capture takes up to ten
-  // seconds, and other rows stay editable throughout: spreading the `config`
-  // captured when Record was clicked would undo anything cleared or rebound in
-  // the meantime.
+  // A ref, not the prop: capture takes up to ten seconds and other rows stay
+  // editable, so spreading the `config` from the click would undo them.
   const latest = useRef(config);
   latest.current = config;
 
@@ -225,7 +198,6 @@ export function HotkeyEditor({
     commands.cancelHotkeyCapture();
   }
 
-  /** Back to factory: default bindings, and the recorded-gesture list wiped. */
   function reset() {
     cancel();
     try {
@@ -246,17 +218,15 @@ export function HotkeyEditor({
         const bound = binding.kind !== "disabled";
         const clash = conflictsWith(config, role.key);
 
-        // Presets plus every gesture this user has recorded. A binding already
-        // in the config (e.g. hand-edited) but not yet in `customs` is added so
-        // it still shows as the selected value.
+        // A hand-edited binding not in `customs` is added so it still renders
+        // as the selected value rather than a blank trigger.
         const options = [...PRESETS, ...customs];
         if (bound && !options.some((o) => sameBinding(o, binding))) {
           options.push(binding);
         }
 
-        // An option already taken by another role drops out of this dropdown,
-        // so two commands can't be pointed at the same hold from here. The
-        // role's own current binding stays, so it renders as the value.
+        // Options taken by another role drop out, so two commands cannot be
+        // aimed at one hold. This role's own binding stays, to render as value.
         const takenElsewhere = new Set(
           ROLES.filter((r) => r.key !== role.key)
             .map((r) => config[r.key])
@@ -299,10 +269,6 @@ export function HotkeyEditor({
                 </>
               ) : (
                 <>
-                  {/* The dropdown is the value of the row: it shows what's
-                      bound, and holds the presets plus every gesture recorded
-                      so far. An option used by another role drops out, so you
-                      can't aim two commands at one hold from here. */}
                   <Select
                     value={bound ? describeBinding(binding) : ""}
                     onValueChange={(value) => {

@@ -1,7 +1,6 @@
-//! Read-only probe of the connector paths against the live Composio API.
-//!
-//! Pass a command to see which tools it selects — the whole point of the
-//! per-command ranking is that this output changes with the words:
+//! Read-only probe of the connector paths against the live Composio API. Pass a
+//! command to see which tools it selects — per-command ranking means this output
+//! changes with the words:
 //!
 //!   cargo run -p aloud-agent --example connectors_probe
 //!   cargo run -p aloud-agent --example connectors_probe -- "delete the netflix event from my calendar"

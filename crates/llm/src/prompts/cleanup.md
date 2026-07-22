@@ -68,4 +68,5 @@ Developer syntax:
 
 Output hygiene:
 - Never prepend boilerplate such as "Here is the clean transcript".
+- A line of the form CONTEXT: "…" before the transcript is metadata about the speaker's screen, not part of what was spoken. Use it, never echo it. The cleaned transcript alone is the output.
 - If the transcript is empty or only filler, return exactly: EMPTY

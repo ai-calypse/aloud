@@ -1,16 +1,12 @@
 "use client";
 
 /**
- * Trimmed from the upstream AI Elements `message` component to the one export
- * this app uses.
+ * Trimmed from the upstream AI Elements `message` (448 lines: branch
+ * navigation, attachments, an actions toolbar) to the one export this app
+ * uses — it renders one answer at a time, with no thread to branch. Dropping
+ * the rest also removed the only importers of ui/tooltip and ui/button-group.
  *
- * The original shipped 448 lines: a message row, branch navigation with its
- * own context provider, attachments, an actions toolbar. Aloud renders one
- * answer at a time in the ask and agent panels — there is no thread to branch
- * and no toolbar — so everything but `MessageResponse` was unreachable, and it
- * was the only importer of ui/tooltip and ui/button-group, which went with it.
- *
- * Re-pull from the AI Elements registry if a real conversation view ever lands.
+ * Re-pull from the registry if a real conversation view ever lands.
  */
 
 import { cn } from "@/lib/utils";

@@ -1,23 +1,16 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-/* Streamdown renders the Ask and Agent answers, and styles every element it
- * emits with utilities — including `<span data-streamdown="strong">`, which is
- * a span precisely because the class is meant to carry the weight. Tailwind v4
- * does not scan node_modules, so without this none of those classes are
- * generated and a streamed answer loses its bold, its bullets and its spacing
- * with nothing in the console to say so. */
+/* Tailwind v4 does not scan node_modules, and Streamdown styles every element
+ * it emits with utilities — without this a streamed answer silently loses its
+ * bold, its bullets and its spacing. */
 @source "../node_modules/streamdown/dist";
 @import "./styles/tokens.css";
 @import "./styles/base.css";
 @import "./styles/motion.css";
 
-/* Bridges Aloud's palette (styles/tokens.css) to the two consumers that need
- * names of their own: shadcn's semantic tokens, and Tailwind's utility
- * namespace. Nothing here invents a colour — every value resolves to a token.
- *
- * Adding a colour: put it in styles/tokens.css, then expose it below only if a
- * component needs it as a Tailwind utility.
- */
+/* Bridges Aloud's palette (styles/tokens.css) to shadcn's semantic tokens and
+ * Tailwind's utility namespace. Nothing here invents a colour — add one to
+ * tokens.css, then expose it below if a component needs the utility. */
 
 /* Point `dark:` at the OS, not a `.dark` class — nothing sets that class, so
    every dark: utility silently never fired. Same signal tokens.css flips on. */
@@ -26,17 +19,15 @@
 :root {
   --radius: 0.7rem;
 
-  /* shadcn surfaces. Deliberately TRANSLUCENT so the native macOS vibrancy
-     (NSVisualEffectView, applied in lib.rs) shows through — this is what gives
-     the Liquid Glass look. The app's own grouped cards are solid instead; see
+  /* Deliberately TRANSLUCENT, so the native macOS vibrancy (NSVisualEffectView,
+     applied in lib.rs) shows through. The grouped cards are solid instead; see
      --card-solid in tokens.css. */
   --background: color-mix(in srgb, var(--bg) 55%, transparent);
   --foreground: var(--fg);
   --card: color-mix(in srgb, var(--bg) 45%, transparent);
   --card-foreground: var(--fg);
-  /* Floating surfaces (dialogs, dropdowns, command lists) must read as solid —
-     they hover over content, not over the window vibrancy, so translucency here
-     looks broken. */
+  /* Floating surfaces hover over content, not over the window vibrancy, so
+     translucency here looks broken. */
   --popover: color-mix(in srgb, var(--bg) 98%, transparent);
   --popover-foreground: var(--fg);
 
@@ -78,9 +69,8 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* Aloud's own tokens as utilities, so components write `bg-surface` and
-     `text-muted` instead of `bg-[var(--card-solid)]` and
-     `text-[var(--text2)]`. These names are the vocabulary of the UI. */
+  /* Aloud's own tokens as utilities, so components write `bg-surface` instead
+     of `bg-[var(--card-solid)]`. These names are the vocabulary of the UI. */
   --color-canvas: var(--bg);
   --color-surface: var(--card-solid);
   --color-surface-border: var(--card-border);

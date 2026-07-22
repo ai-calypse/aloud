@@ -2,12 +2,9 @@
 //!
 //! `cargo run -p aloud-transcribe --example live_preview [seconds]`
 //!
-//! The unit test feeds a fake transcriber synthetic tone, which proves the
-//! plumbing and nothing about the thing this feature exists for: **whether the
-//! words keep up with the mouth**. Each line below is stamped with how long its
-//! pass took and how far into the recording it landed — if the pass time
-//! approaches `COMMIT_SECONDS`, the preview is falling behind and the window is
-//! too big for this machine.
+//! The unit test proves the plumbing, not **whether the words keep up with the
+//! mouth**. Each line is stamped with how far into the recording it landed; if
+//! a pass approaches `COMMIT_SECONDS`, the window is too big for this machine.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -40,6 +37,7 @@ async fn main() -> anyhow::Result<()> {
     let preview = aloud_transcribe::preview::Preview::spawn(
         &tokio::runtime::Handle::current(),
         async move { Ok(transcriber) },
+        Vec::new(),
         Box::new(move |partial| {
             println!("[{:>5.1?}] {partial}", started.elapsed());
         }),

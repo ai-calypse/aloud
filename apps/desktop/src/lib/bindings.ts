@@ -15,16 +15,8 @@ export const commands = {
 	defaultPrompt: () => __TAURI_INVOKE<DefaultPrompt>("default_prompt"),
 	/**
 	 *  Runs a prompt against a sample without a dictation, for the Prompts pane.
-	 * 
-	 *  Everything but the prompt comes from live settings, so what this shows is
-	 *  what the next dictation would do — including the model, the fallback and
-	 *  the vocabulary, all of which change the answer.
-	 * 
-	 *  The two ways this can appear broken while working correctly are answered
-	 *  here rather than left as a puzzle: cleanup skips anything at or under
-	 *  [`aloud_llm::cleanup::MIN_WORDS`] and returns it verbatim, which reads as a
-	 *  prompt that did nothing; and a filler-only sample legitimately produces no
-	 *  text at all, which reads as a blank panel.
+	 *  Everything but the prompt comes from live settings, so this shows what the
+	 *  next dictation would do.
 	 */
 	testPrompt: (prompt: string, sample: string) => typedError<string, string>(__TAURI_INVOKE("test_prompt", { prompt, sample })),
 	inputDevices: () => typedError<AudioDevice[], string>(__TAURI_INVOKE("input_devices")),
@@ -33,12 +25,8 @@ export const commands = {
 	 *  there yet); the custom-match field still works everywhere.
 	 * 
 	 *  `async` is load-bearing: Tauri runs a non-async command on the main thread,
-	 *  so the scan froze the whole webview rather than merely showing a spinner.
-	 *  The work is blocking (process spawns), hence `spawn_blocking` rather than
-	 *  parking an async worker on it.
-	 * 
-	 *  Fallible so a scan that dies is distinguishable from a machine with no
-	 *  applications — an empty picker with no error reads as the former.
+	 *  so the scan froze the whole webview. The work is blocking (process spawns),
+	 *  hence `spawn_blocking`.
 	 */
 	installedApps: () => typedError<InstalledApp[], string>(__TAURI_INVOKE("installed_apps")),
 	/**
@@ -49,21 +37,14 @@ export const commands = {
 	/**
 	 *  Every OS permission the app needs, with its current answer. Empty off
 	 *  macOS, which the Permissions card reads as "nothing to show".
-	 * 
-	 *  One command for all of them rather than one per permission: the card asks
-	 *  for the whole set every time it refreshes, and three round-trips to answer
-	 *  one question is three chances for the rows to disagree.
 	 */
 	permissions: () => __TAURI_INVOKE<PermissionStatus[]>("permissions"),
 	/**  Opens the System Settings pane that grants `permission`. */
 	openPermissionSettings: (permission: Permission) => typedError<null, string>(__TAURI_INVOKE("open_permission_settings", { permission })),
 	buildInfo: () => __TAURI_INVOKE<BuildInfo>("build_info"),
 	/**
-	 *  Monitor names, to fill the overlay's "Show on" picker.
-	 * 
-	 *  Unnamed monitors are dropped rather than given a placeholder: the setting
-	 *  stores a name, so an entry with no name could never be matched back to a
-	 *  screen and would be a row that silently does nothing.
+	 *  Monitor names, to fill the overlay's "Show on" picker. Unnamed monitors are
+	 *  dropped: the setting stores a name, so such a row could never match back.
 	 */
 	overlayDisplays: () => typedError<string[], string>(__TAURI_INVOKE("overlay_displays")),
 	/**
@@ -81,20 +62,15 @@ export const commands = {
 	historyDelete: (id: number) => typedError<null, string>(__TAURI_INVOKE("history_delete", { id })),
 	historyClear: () => typedError<null, string>(__TAURI_INVOKE("history_clear")),
 	/**
-	 *  Writes back the output of a cleanup re-run.
-	 * 
-	 *  Separate from [`test_prompt`], which produces the text: a retry is that
-	 *  same call plus this one, so there is no second cleanup path to keep in
-	 *  step with the real pipeline's.
+	 *  Writes back the output of a cleanup re-run. Separate from [`test_prompt`],
+	 *  which produces the text, so a retry is those two calls rather than a second
+	 *  cleanup path to keep in step with the pipeline's.
 	 */
 	historyUpdateFinal: (id: number, text: string) => typedError<null, string>(__TAURI_INVOKE("history_update_final", { id, text })),
 	/**
 	 *  Re-runs transcription against the run's stored recording, optionally on a
-	 *  different engine, and writes both transcripts back.
-	 * 
-	 *  Returns the new pasted text so the Run Log can repaint the row without a
-	 *  refetch. Everything it does lives on the pipeline, which is what makes the
-	 *  retry match the dictation that produced the row.
+	 *  different engine, and writes both transcripts back. Returns the new pasted
+	 *  text so the Run Log can repaint the row without a refetch.
 	 */
 	historyRetryTranscription: (id: number, engine: 
 /**  On-device whisper.cpp. No network, no API key. */
@@ -102,34 +78,27 @@ export const commands = {
 /**  An OpenAI-compatible endpoint (Groq by default). */
 "cloud" | null) => typedError<string, string>(__TAURI_INVOKE("history_retry_transcription", { id, engine })),
 	/**
-	 *  Records the next key gesture and returns it as a binding.
-	 * 
-	 *  Async because it blocks until the user presses something: capture swallows
-	 *  keys while armed, so this owns a `spawn_blocking` thread rather than the
-	 *  main one. Cancelling is `cancel_hotkey_capture`, or simply waiting out
-	 *  [`CAPTURE_TIMEOUT`].
+	 *  Records the next key gesture and returns it as a binding. Blocks until the
+	 *  user presses something, so it owns a `spawn_blocking` thread rather than the
+	 *  main one; cancel with `cancel_hotkey_capture` or wait out the timeout.
 	 */
-	captureHotkey: () => typedError<{ kind: "disabled" } | 
-/**  A regular key, optionally with modifiers held (e.g. Cmd+Shift+D). */
-{ kind: "key"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] } | 
+	captureHotkey: () => typedError<{ kind: "disabled" } | { kind: "key"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] } | 
 /**
- *  A modifier held on its own (e.g. hold Right Option) — the case Tauri's
- *  global-shortcut plugin cannot express, and why this crate exists.
+ *  A modifier held on its own — the case Tauri's global-shortcut plugin
+ *  cannot express, and why this crate exists.
  */
 { kind: "modifierKey"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] } | null, string>(__TAURI_INVOKE("capture_hotkey")),
 	/**  Disarms a recording the user backed out of. */
 	cancelHotkeyCapture: () => typedError<null, string>(__TAURI_INVOKE("cancel_hotkey_capture")),
 	/**
-	 *  The running meeting's elapsed time and word count, or None when idle.
-	 * 
-	 *  The `meeting-phase` event carries the same payload, but it only fires on a
-	 *  state change and on each finished chunk — up to a minute apart. A window
-	 *  opened mid-meeting would show nothing until the next chunk without this.
+	 *  The running meeting's elapsed time and word count, or None when idle. The
+	 *  `meeting-phase` event carries the same payload but fires up to a minute
+	 *  apart, so a window opened mid-meeting needs this to paint.
 	 */
 	meetingStatus: () => __TAURI_INVOKE<
 /**
- *  Re-emitted as each chunk finishes, roughly once a minute, so the
- *  readout re-syncs instead of drifting off a single start event.
+ *  Re-emitted as each chunk finishes so the readout re-syncs instead of
+ *  drifting off a single start event.
  */
 { phase: "recording"; elapsedSecs: number; words: number } | { phase: "saving" } | { phase: "idle" } | null>("meeting_status"),
 	/**
@@ -140,57 +109,38 @@ export const commands = {
 	/**
 	 *  Draws the overlay in `phase` without a real dictation, for the Debug pane.
 	 * 
-	 *  Behind `developer_tools` in the UI only — a command cannot be hidden, but
-	 *  the worst this can do is show and hide a click-through window.
-	 * 
 	 *  ponytail: no update-overlay preview. There is no updater UI to preview
 	 *  until Phase 8 lands a signing keypair; add the case here when it does.
 	 */
 	debugOverlay: (phase: Phase) => __TAURI_INVOKE<void>("debug_overlay", { phase }),
-	/**
-	 *  Plays the start chime, so the volume slider can be judged by ear rather
-	 *  than by guessing at a number.
-	 */
+	/**  Plays the start chime, so the volume slider can be judged by ear. */
 	previewSound: (volume: number | null) => __TAURI_INVOKE<void>("preview_sound", { volume }),
 	/**
-	 *  Whether the OS launches Aloud at login. The autostart plugin owns this
-	 *  state (a login item / registry key), not settings.json — storing a copy
-	 *  would drift the moment the user changed it outside the app.
+	 *  Whether the OS launches Aloud at login. The autostart plugin owns this state
+	 *  (a login item / registry key); a copy in settings.json would drift.
 	 */
 	launchAtLogin: () => typedError<boolean, string>(__TAURI_INVOKE("launch_at_login")),
 	setLaunchAtLogin: (enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("set_launch_at_login", { enabled })),
 	/**
 	 *  Connected toolkits, each with the tools the agent will actually offer.
 	 * 
-	 *  Stale-while-revalidate: a warm cache paints the pane with no network at
-	 *  all, and a background refresh pushes `connectors-updated` if anything moved.
-	 *  A plain TTL would be wrong here — OAuth finishes in the browser, so the user
-	 *  comes back expecting a service that was connected seconds ago.
+	 *  Stale-while-revalidate, not a TTL: OAuth finishes in the browser, so the
+	 *  user comes back expecting a service connected seconds ago.
 	 */
 	listConnectors: () => typedError<Connector[], string>(__TAURI_INVOKE("list_connectors")),
 	/**
-	 *  Toolkits matching `query`, for the add-a-connector search.
-	 * 
-	 *  Cached per query: the pane fires the empty query on every mount to fill
-	 *  "Add a connector", and re-typing a query is common. Composio's catalogue
-	 *  does not move within a session, so this is served from memory once seen.
+	 *  Toolkits matching `query`, for the add-a-connector search. Cached per query:
+	 *  the pane refires the empty one on every mount, and the catalogue does not
+	 *  move within a session.
 	 */
 	searchConnectors: (query: string) => typedError<Connector[], string>(__TAURI_INVOKE("search_connectors", { query })),
 	/**
 	 *  Starts an OAuth connection and opens the consent page in the browser.
-	 * 
-	 *  Composio hosts the callback, so there is nothing to catch here — the user
-	 *  finishes in the browser and the pane picks the new account up on refresh.
+	 *  Composio hosts the callback, so there is nothing to catch here.
 	 */
 	connectConnector: (toolkit: string) => typedError<null, string>(__TAURI_INVOKE("connect_connector", { toolkit })),
 	disconnectConnector: (connectionId: string) => typedError<null, string>(__TAURI_INVOKE("disconnect_connector", { connectionId })),
-	/**
-	 *  Answers a question the user typed into the panel.
-	 * 
-	 *  `answer` already took a plain `String`, so it is the seam: the typed and
-	 *  spoken paths differ only in where the string came from, and nothing about
-	 *  streaming, the panel or the credential check is duplicated to serve one.
-	 */
+	/**  Answers a question the user typed into the panel. */
 	askText: (question: string) => typedError<null, string>(__TAURI_INVOKE("ask_text", { question })),
 	/**  Lets the panel dismiss itself on Escape or the close button. */
 	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
@@ -220,63 +170,34 @@ export const events = {
 
 /* Types */
 /**
- *  Streamed to the agent panel.
- * 
- *  The event vocabulary follows the AG-UI protocol's tool-call lifecycle
- *  (https://docs.ag-ui.com) — a parsed action *is* a tool call, so `run` /
- *  `tool-call` / `tool-result` map its shape onto AI Elements' tool renderer.
- *  It is the AG-UI *vocabulary*, not the wire protocol: these stay
- *  tauri-specta-typed Tauri events, not an SSE stream, because there is one
- *  in-process client. Args are sent whole (not streamed as deltas) since the
- *  parse returns the whole action at once.
+ *  Streamed to the agent panel. Names follow the AG-UI protocol's tool-call
+ *  lifecycle (https://docs.ag-ui.com) so the shape maps onto AI Elements' tool
+ *  renderer — the vocabulary only, not the wire protocol.
  */
 export type AgentEvent = 
-/**  AG-UI RUN_STARTED — the transcript, echoed so the panel shows what it heard. */
+/**  The transcript, echoed so the panel shows what it heard. */
 { kind: "runStarted"; value: string } | 
 /**
- *  The tools this round intends to run, before the first one starts.
- * 
- *  Not an AG-UI event: AG-UI has no vocabulary for a batch the model has
- *  returned but the loop has not begun. It is the same information the
- *  panel would otherwise learn one call at a time, arriving at the only
- *  moment it can still be acted on — a run that is about to send mail is
- *  worth reading before the send, not after.
- * 
- *  Only sent when a round holds more than one call.
+ *  The batch a round intends to run, sent before the first call so a run
+ *  about to send mail can still be read. Only when a round holds >1 call.
  */
 { kind: "planned"; value: PlannedCall[] } | 
-/**
- *  AG-UI TOOL_CALL_START + ARGS — a parsed action, with its args, awaiting
- *  dispatch. A write pauses here for confirmation (AG-UI human-in-the-loop).
- */
-{ kind: "toolCall"; value: ToolCall } | 
-/**  AG-UI TOOL_CALL_RESULT — the dispatcher's outcome for the pending call. */
-{ kind: "toolResult"; value: ToolResult } | 
+/**  A parsed action awaiting dispatch. A write pauses here for confirmation. */
+{ kind: "toolCall"; value: ToolCall } | { kind: "toolResult"; value: ToolResult } | 
 /**
  *  A transient status line (e.g. "rate limited, retrying in 30s") shown
  *  while the run is otherwise silent; cleared by the next event.
  */
-{ kind: "status"; value: string } | 
-/**  AG-UI RUN_FINISHED — the run's closing message. */
-{ kind: "runFinished"; value: string } | 
-/**  AG-UI RUN_ERROR — the run failed before producing a result. */
-{ kind: "runError"; value: string };
+{ kind: "status"; value: string } | { kind: "runFinished"; value: string } | { kind: "runError"; value: string };
 
 /**  One per-app override. */
 export type AppRule = {
-	/**
-	 *  Substring of the app's name to match, e.g. "slack", "code". Empty never
-	 *  matches.
-	 */
+	/**  Substring of the app's name to match. Empty never matches. */
 	app_matches: string,
 	/**
 	 *  The app's `CFBundleIdentifier`, when the rule was written by picking an
-	 *  app rather than typing a name.
-	 * 
-	 *  Additive on purpose: every rule written before this field existed
-	 *  deserialises with None and keeps matching on [`app_matches`], so there
-	 *  is no migration to run and nothing to get wrong. Rules acquire a bundle
-	 *  id lazily, the next time the user edits one.
+	 *  app. Additive: older rules deserialise with None and keep matching on
+	 *  [`app_matches`], so there is no migration.
 	 * 
 	 *  [`app_matches`]: AppRule::app_matches
 	 */
@@ -290,9 +211,7 @@ export type AppRule = {
 /**  Streamed to the panel as the answer arrives. */
 export type AskEvent = 
 /**  The question, echoed so the panel can show what it heard. */
-{ kind: "question"; value: string } | 
-/**  One incremental chunk of the answer. */
-{ kind: "delta"; value: string } | { kind: "done" } | { kind: "failed"; value: string };
+{ kind: "question"; value: string } | { kind: "delta"; value: string } | { kind: "done" } | { kind: "failed"; value: string };
 
 export type AudioDevice = {
 	/**  Stable id, safe to persist in settings. */
@@ -300,37 +219,26 @@ export type AudioDevice = {
 	name: string,
 };
 
-/**
- *  Live input level, 0.0–1.0, driving the pill's waveform. Sent only to the
- *  overlay window and only while recording; the bars were previously a fixed
- *  CSS animation that looked identical in silence.
- */
+/**  Live input level, 0.0–1.0, driving the pill's waveform. Only while recording. */
 export type AudioLevel = number | null;
 
 /**
  *  What triggers a binding.
  * 
- *  `modifiers` is side-agnostic (`Option` matches either Alt key), which is
- *  what the presets want. `exact_modifiers` is the side-specific set a
- *  *recording* captures: when non-empty it pins the chord to exactly those
- *  keys, so Left-Option+Z is not Right-Option+Z. Empty means "either side",
- *  the case for every preset and hand-written binding — matching voice-dict,
- *  where only recorded bindings carry `exactModifierKeyCodes`.
+ *  `modifiers` is side-agnostic (`Option` matches either Alt key). Only a
+ *  *recording* fills `exact_modifiers`, which pins the chord to those exact
+ *  keys so Left-Option+Z is not Right-Option+Z; empty means either side.
  */
-export type Binding = { kind: "disabled" } | 
-/**  A regular key, optionally with modifiers held (e.g. Cmd+Shift+D). */
-{ kind: "key"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] } | 
+export type Binding = { kind: "disabled" } | { kind: "key"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] } | 
 /**
- *  A modifier held on its own (e.g. hold Right Option) — the case Tauri's
- *  global-shortcut plugin cannot express, and why this crate exists.
+ *  A modifier held on its own — the case Tauri's global-shortcut plugin
+ *  cannot express, and why this crate exists.
  */
 { kind: "modifierKey"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] };
 
 /**
- *  Version, commit and build date, for pasting into a bug report.
- * 
- *  The commit and the date are baked in by `build.rs`; a build from a tarball
- *  with no `.git` reports "unknown" rather than failing to compile.
+ *  Version, commit and build date, for pasting into a bug report. Baked in by
+ *  `build.rs`; a tarball with no `.git` reports "unknown" rather than failing.
  */
 export type BuildInfo = {
 	version: string,
@@ -344,10 +252,9 @@ export type Config = {
 	copy_again: Binding | null,
 	ask: Binding | null,
 	/**
-	 *  Rewrite the selected text by voice. Called `command` in settings files
-	 *  written before the rename; `Settings::load` moves those across, rather
-	 *  than a serde alias — an alias makes specta emit a union type, and
-	 *  `keyof Config` on a union is `never`, which breaks the settings UI.
+	 *  Called `command` in older settings files; `Settings::load` migrates them
+	 *  rather than a serde alias, which makes specta emit a union whose
+	 *  `keyof Config` is `never` and breaks the settings UI.
 	 */
 	rewrite: Binding | null,
 	meeting_notes: Binding | null,
@@ -366,19 +273,16 @@ export type Connector = {
 };
 
 /**
- *  Pushed when a background revalidation finds the connector list has changed.
- * 
- *  The Connectors pane paints from cache immediately, so this is how a service
- *  connected in the browser reaches a window that already rendered.
+ *  Pushed when a background revalidation finds the connector list has changed —
+ *  the pane paints from cache, so this is how a browser connection reaches a
+ *  window that already rendered.
  */
 export type ConnectorsUpdated = Connector[];
 
 /**
- *  The shipped cleanup prompt and the date it last changed.
- * 
- *  Both halves serve the Prompts pane: the text backs "View Default", and the
- *  version is what `Settings::seen_prompt_version` is compared against to
- *  decide whether a user who forked the prompt is missing an improvement.
+ *  The shipped cleanup prompt and the date it last changed. `version` is what
+ *  `Settings::seen_prompt_version` is compared against, to tell a user who
+ *  forked the prompt that they are missing an improvement.
  */
 export type DefaultPrompt = {
 	text: string,
@@ -388,11 +292,9 @@ export type DefaultPrompt = {
 /**
  *  The words so far, while the live preview is on.
  * 
- *  **Feedback only — none of this is ever pasted.** It is a rolling re-read of
- *  the last few seconds by the small local model, so it revises itself as a
- *  sentence lands. The panel is the one surface where a revision costs nothing,
- *  so it is the only one that sees this; the paste is a separate, single pass
- *  over the whole recording once the key is up.
+ *  **Feedback only — none of this is ever pasted.** It is a rolling re-read by
+ *  the small local model that revises itself; the paste is a separate single
+ *  pass over the whole recording once the key is up.
  */
 export type DictationPartial = string;
 
@@ -403,10 +305,9 @@ export type Engine =
 "cloud";
 
 /**
- *  Specta forbids exporting i64 by default, since JS loses precision past
- *  2^53. These are row ids, unix seconds and millisecond durations — all
- *  many orders of magnitude below that — so `number` is exact here and
- *  BigInt would only make the frontend painful.
+ *  The i64s are exported as `number`: specta forbids that by default (JS loses
+ *  precision past 2^53), but row ids, unix seconds and ms durations are all far
+ *  below it, and BigInt would only make the frontend painful.
  */
 export type Entry = {
 	id: number,
@@ -416,21 +317,16 @@ export type Entry = {
 	rawTranscript: string,
 	/**  What was actually pasted, after cleanup. */
 	finalTranscript: string,
-	/**  Which app had focus, for per-app rules and debugging. */
 	appName: string | null,
 	durationMs: number,
 	/**
-	 *  Joins this row to its `timings` spans. Null on every row written
-	 *  before the column existed — those runs simply have no breakdown, which
-	 *  is why the Run Log has to treat its absence as normal rather than as
-	 *  missing data.
+	 *  Joins this row to its `timings` spans. Null on rows written before the
+	 *  column existed, so its absence is normal, not missing data.
 	 */
 	utteranceId: number | null,
 	/**
-	 *  The recording this run was transcribed from, while it survives the
-	 *  audio budget. Null on runs from before recordings were kept, on the
-	 *  modes that deliberately do not keep one, and on every run whose audio
-	 *  has since been evicted — the transcript outlives the WAV.
+	 *  The recording this run came from, while it survives the audio budget.
+	 *  The transcript outlives the WAV, so this is often null.
 	 */
 	audioPath: string | null,
 };
@@ -459,25 +355,23 @@ export type InstalledApp = {
 };
 
 /**
- *  A physical key, side-specific where the distinction matters (the Swift app
- *  let you bind Right Option specifically, which is a popular dictation key).
+ *  A physical key, side-specific where the distinction matters — Right Option
+ *  alone is a popular dictation binding.
  */
 export type Key = "leftCommand" | "rightCommand" | "leftShift" | "rightShift" | "leftOption" | "rightOption" | "leftControl" | "rightControl" | 
 /**  macOS only; no Windows equivalent. */
 "fn" | "escape" | "space" | ({ char: string }) & { f?: never } | ({ f: number }) & { char?: never };
 
-/**  One shorthand → expansion pair. */
 export type Macro = {
 	/**  The spoken phrase that triggers expansion, e.g. "my address". */
 	trigger: string,
-	/**  The text it expands to. */
 	expansion: string,
 };
 
 export type MeetingPhase = 
 /**
- *  Re-emitted as each chunk finishes, roughly once a minute, so the
- *  readout re-syncs instead of drifting off a single start event.
+ *  Re-emitted as each chunk finishes so the readout re-syncs instead of
+ *  drifting off a single start event.
  */
 { phase: "recording"; elapsedSecs: number; words: number } | { phase: "saving" } | { phase: "idle" };
 
@@ -495,34 +389,27 @@ export type Note = {
 	title: string,
 	/**
 	 *  Unix seconds; parsed from the file name, falling back to file mtime.
-	 * 
-	 *  Exported as `number`: specta forbids i64 by default over JS precision
-	 *  loss past 2^53, which a unix-second timestamp is nowhere near.
+	 *  Exported as `number` — specta forbids i64 by default over JS precision
+	 *  loss past 2^53, which a unix second is nowhere near.
 	 */
 	date: number,
 	content: string,
 };
 
 /**
- *  Tells the overlay to play its exit, ahead of the window actually going away.
- * 
- *  The window is what makes the pill visible, so hiding it is a hard cut — the
- *  panel cannot animate itself out of existence after the surface it is drawn
- *  on has gone. This event is the gap: the pill collapses back into the notch
- *  while the window is still up, and [`hide`] takes the window away once it has.
+ *  Tells the overlay to play its exit, ahead of the window actually going away:
+ *  the pill collapses while the window is still up, and [`hide`] takes the
+ *  window away once it has.
  */
 export type OverlayDismiss = null;
 
 /**
- *  Which monitor the overlay appears on.
- * 
- *  `Named` stores the OS monitor name rather than an index: indices are
- *  reassigned when a display is unplugged, so a saved index silently starts
- *  meaning a different screen. A name that no longer resolves falls back to
- *  the primary, which is what stops the overlay rendering off-screen.
+ *  Which monitor the overlay appears on. `Named` stores the OS name, not an
+ *  index: indices are reassigned on unplug, so a saved index changes meaning.
+ *  A name that no longer resolves falls back to the primary.
  */
 export type OverlayDisplay = 
-/**  The monitor holding the cursor — the screen the user is working on. */
+/**  The monitor holding the cursor. */
 "active" | "primary" | { named: string };
 
 /**
@@ -532,43 +419,20 @@ export type OverlayDisplay =
 export type OverlayError = string;
 
 /**
- *  How the recording overlay draws itself.
+ *  How the recording overlay draws itself. `DropPill` grows out of the notch
+ *  and has room for content; `Wings` are two menu-bar tabs (macOS only, and
+ *  they fall back to the pill with no notch or text too long for a 40pt tab).
  * 
- *  - `DropPill` is voice-dict's drop-down pill: a panel that grows out of the
- *    notch, wearing its silhouette. The default, and the only one with room for
- *    content — a live transcript, an Ask answer — rather than a status word.
- *  - `Wings` is voice-dict's minimalist overlay: two slim tabs welded to the
- *    top edge, flanking the notch, staying inside the menu bar. It is the drop
- *    pill collapsed to nothing, and hands over to it the moment there are words
- *    to show.
- * 
- *  Wings weld to the menu bar, which only macOS has; off macOS, on a screen
- *  with no notch, and on an error too long to read in a 40pt tab, the style
- *  falls back to the drop pill.
- * 
- *  A third variant, `LiquidGlass` — a refractive capsule floating below the
- *  menu bar — was retired. It was the one surface here that could not hold
- *  content: it morphed to its own width, so a sentence stretched it most of the
- *  way across the screen. Files still naming it load as the default; see
- *  `a_retired_overlay_style_falls_back_without_resetting_the_file`.
- * 
- *  `DropPill` is stored as `dropPill` and not the `pill` its name suggests.
- *  `pill` is what the glass capsule was called before it was renamed, and while
- *  the loader was still rewriting that value this style silently reverted to
- *  glass on the next launch — see `the_drop_down_pill_survives_a_restart`. The
- *  rewrite is gone, and now so is the capsule, but the names stay apart: a
- *  variant answering to a name another one used first is a trap worth not
- *  rebuilding.
+ *  `DropPill` serializes as `dropPill`, never the `pill` its name suggests:
+ *  `pill` was the retired glass capsule's stored name, and the collision made
+ *  this style revert on every restart — see
+ *  `the_drop_down_pill_survives_a_restart`.
  */
 export type OverlayStyle = "dropPill" | "wings";
 
 /**
- *  The style the overlay window should draw, pushed on every show.
- * 
- *  Sent rather than read from settings by the webview: the overlay has no
- *  settings binding of its own, and a style change has to reach a window that
- *  is already mounted. Carries the notch cutout so the wings can weld to it —
- *  zero when not welding (any pill, or a screen with no notch).
+ *  The style the overlay window should draw, pushed on every show — the overlay
+ *  has no settings binding of its own. Notch fields are zero when not welding.
  */
 export type OverlayStyleChanged = {
 	style: OverlayStyle,
@@ -581,30 +445,23 @@ export type OverlayStyleChanged = {
 /**  A capability the app needs the OS to allow. */
 export type Permission = 
 /**  Global hotkeys, synthetic paste, and reading the focused selection. */
-"accessibility" | "microphone" | 
-/**  Screen context. Nothing reads it yet — see ROADMAP Phase 9. */
-"screenRecording";
+"accessibility" | "microphone" | "screenRecording";
 
 export type PermissionStatus = {
 	permission: Permission,
 	granted: boolean,
 };
 
-/**  What the UI reflects. Mirrors the Swift overlay's phases. */
-export type Phase = "idle" | "recording" | "transcribing" | 
-/**  Text was pasted. */
-"done" | 
+export type Phase = "idle" | "recording" | "transcribing" | "done" | 
 /**
- *  Silence or filler only. A normal result, so not `Error` — but its own
- *  phase rather than `Idle`, because the overlay has to say *something*
- *  while it dismisses, and "Pasted" would be a lie.
+ *  Silence or filler only — a normal result, but its own phase rather than
+ *  `Idle` so the overlay can say so instead of claiming "Pasted".
  */
 "noSpeech" | "error";
 
 /**
  *  A tool the run intends to call. No arguments: they arrive with the call
- *  itself, which is also the point it stops being a plan and starts being an
- *  action.
+ *  itself, which is where it stops being a plan and starts being an action.
  */
 export type PlannedCall = {
 	name: string,
@@ -619,10 +476,9 @@ export type SearchResult = {
 };
 
 /**
- *  Everything the app remembers between launches.
- * 
- *  One coarse struct rather than ~70 individual commands: the whole thing is
- *  a few hundred bytes, and the frontend gets one `get`/`update` pair.
+ *  Everything the app remembers between launches. One coarse struct rather
+ *  than ~70 commands: it is a few hundred bytes and the frontend gets one
+ *  `get`/`update` pair.
  */
 export type Settings = {
 	groqApiKey?: string,
@@ -638,16 +494,9 @@ export type Settings = {
 	/**  BCP-47 code, or empty to auto-detect. */
 	language?: string,
 	/**
-	 *  Show the words in the live-transcript panel as they are spoken.
-	 * 
-	 *  **Preview only, and it changes nothing about what gets pasted**: the
-	 *  text still comes from one pass over the whole recording, on the chosen
-	 *  engine, cleaned up by the LLM. See [`aloud_transcribe::preview`].
-	 * 
-	 *  Off by default: it changes the shape of the hot path — the microphone
-	 *  callback now feeds a background transcriber — and it runs the local
-	 *  model several times a second for the length of the dictation, which is
-	 *  real CPU and real battery on a laptop.
+	 *  Live-transcript preview. Changes nothing about what gets pasted — see
+	 *  [`aloud_transcribe::preview`]. Off by default: it runs the local model
+	 *  several times a second, which is real CPU and battery on a laptop.
 	 */
 	streamingTranscription?: boolean,
 	postProcessingEnabled?: boolean,
@@ -656,44 +505,48 @@ export type Settings = {
 	/**  Overrides the built-in cleanup prompt when non-empty. */
 	customSystemPrompt?: string,
 	/**
-	 *  The version of the built-in prompt the user last acknowledged. Empty
-	 *  means never, which is exactly right for a fork made before this
-	 *  existed: they should see the offer once.
+	 *  Version of the built-in prompt the user last acknowledged; empty means
+	 *  never, so a pre-existing install sees the offer once.
 	 */
 	seenPromptVersion?: string,
 	/**
 	 *  Language the pasted text is written in — distinct from [`language`],
-	 *  which is the language *spoken into the mic*. Blank keeps the spoken
-	 *  one. Cleanup applies it; transcription never sees it.
+	 *  the language *spoken*. Cleanup applies it; transcription never sees it.
 	 * 
 	 *  [`language`]: Settings::language
 	 */
 	outputLanguage?: string,
 	/**
 	 *  Reject a cleanup that *answered* the transcript instead of tidying it —
-	 *  see [`aloud_llm::guard`]. On by default, matching the Swift app: the
-	 *  failure it catches pastes text the user never dictated, and the worst
-	 *  a false positive costs is the raw transcript.
+	 *  see [`aloud_llm::guard`]. On by default: it catches pasting text the
+	 *  user never dictated, and a false positive only costs the raw transcript.
 	 */
 	instructionGuardEnabled?: boolean,
-	/**  Proper nouns and jargon fed to the model as a spelling reference. */
+	/**
+	 *  Proper nouns and jargon fed to the model as a spelling reference, and to
+	 *  the transcriber as a recognition bias. See `aloud_transcribe::bias_prompt`.
+	 */
 	vocabulary?: string[],
 	/**
-	 *  Tell cleanup what app and window are in front, so it can spell a
-	 *  recipient's name the way the screen already spells it.
+	 *  Phrases cleanup must return exactly as spoken — no filler removal, no
+	 *  rewording, no punctuation "fixes" inside them.
 	 * 
-	 *  Off by default. It sends the title of whatever window has focus to a
-	 *  third party on every dictation, and a window title is not always
-	 *  innocuous — it is a document name, a chat participant, a URL. That is
-	 *  an opt-in, not something to turn on behind the user's back.
+	 *  Distinct from [`vocabulary`], which only steers *spelling* and leaves the
+	 *  model free to tidy the sentence around it. "I am um boss" needs the "um"
+	 *  kept, and the filler rule would otherwise delete it.
+	 * 
+	 *  [`vocabulary`]: Settings::vocabulary
+	 */
+	preservePhrases?: string[],
+	/**
+	 *  Tell cleanup what app and window are in front, so it can spell names the
+	 *  way the screen does. Off by default: a window title is a document name,
+	 *  a chat participant or a URL, sent to a third party on every dictation.
 	 */
 	contextEnabled?: boolean,
 	/**
-	 *  Also capture a screenshot with the context.
-	 * 
-	 *  Off by default, and separately from [`context_enabled`], because it
-	 *  needs the Screen Recording grant Aloud has never asked for. Nothing in
-	 *  the dictation path reads the image yet — see `aloud_screen::Context`.
+	 *  Also capture a screenshot with the context. Separate from
+	 *  [`context_enabled`] because it needs the Screen Recording grant.
 	 * 
 	 *  [`context_enabled`]: Settings::context_enabled
 	 */
@@ -703,19 +556,12 @@ export type Settings = {
 	/**  Per-app behaviour overrides, applied by the focused app's name. */
 	appRules?: AppRule[],
 	/**
-	 *  Whether a selection can turn a dictation into a rewrite at all.
+	 *  Whether a selection can turn a dictation into a rewrite. A selection is
+	 *  the *only* signal — no extra-modifier gesture, which collided with the
+	 *  dictate key. Explicit rewrite is [`aloud_hotkey::model::Role::Rewrite`].
 	 * 
-	 *  A selection is the *only* signal: there is no extra-modifier gesture.
-	 *  Swift offered one, and it was removed here because it collided with the
-	 *  dictate key in three of the four modifier choices and had to be
-	 *  defended by a conflict-detection routine that could only ever tell the
-	 *  user their setting does nothing. An explicit rewrite that does not
-	 *  depend on a selection is [`aloud_hotkey::model::Role::Rewrite`], which
-	 *  has its own hotkey.
-	 * 
-	 *  **Defaults to on, where the Swift app defaults to off.** Aloud shipped
-	 *  selection-aware rewriting with no way to disable it, so defaulting to
-	 *  off would silently remove a working feature from every existing user.
+	 *  On by default: the feature shipped with no toggle, so defaulting to off
+	 *  would silently remove it from every existing user.
 	 */
 	commandModeEnabled?: boolean,
 	hotkeys?: Config,
@@ -728,28 +574,22 @@ export type Settings = {
 	soundVolume?: number | null,
 	pressEnterCommand?: boolean,
 	/**
-	 *  Wait this long after the hotkey before capture begins, so the first
-	 *  syllable is not clipped by a key that is still travelling. 0 disables.
+	 *  Delay before capture begins, so a key still travelling does not clip the
+	 *  first syllable. 0 disables.
 	 */
 	shortcutStartDelayMs?: number,
 	/**
-	 *  Silence system output while recording, so music does not end up in the
-	 *  transcript. Restored when capture stops, and on the next launch if the
-	 *  app died first. macOS only.
+	 *  Silence system output while recording. Restored when capture stops, and
+	 *  on the next launch if the app died first. macOS only.
 	 */
 	muteSystemAudio?: boolean,
 	/**
-	 *  Show the menu-bar icon. Hiding it leaves hotkeys working; the way back
-	 *  to the window is to open the app again, which macOS turns into a
-	 *  reopen event rather than a second instance.
+	 *  Show the menu-bar icon. Hiding it leaves hotkeys working; opening the app
+	 *  again is the way back to the window (macOS turns that into a reopen).
 	 */
 	showMenuBarIcon?: boolean,
-	/**
-	 *  Drop-down pill or menu-bar wings. Wings are macOS-only, and hand over to
-	 *  the drop pill wherever they cannot say what needs saying.
-	 */
+	/**  Drop-down pill or menu-bar wings; wings are macOS-only. */
 	overlayStyle?: OverlayStyle,
-	/**  Which screen the overlay shows on. */
 	overlayDisplay?: OverlayDisplay,
 	/**
 	 *  Put the previous clipboard back after pasting. Off leaves the dictated
@@ -759,31 +599,26 @@ export type Settings = {
 	/**  Whether the first-run wizard has been completed. False shows it. */
 	onboarded?: boolean,
 	/**
-	 *  Reveals the latency waterfall. A debugging tool, not a feature — but it
-	 *  was built and then hidden behind a build-time flag, which made it
-	 *  unreachable in every release the users actually run.
+	 *  Reveals the latency waterfall. A runtime toggle, not a build-time flag,
+	 *  which made it unreachable in every release users actually run.
 	 */
 	developerTools?: boolean,
 	historyRetention?: number,
 	/**
-	 *  Disk the kept recordings may use, in megabytes. 0 keeps none, which
-	 *  also removes the Run Log's player and its transcription retry — both
-	 *  read the WAV.
+	 *  Disk the kept recordings may use, in MB. 0 keeps none, which also
+	 *  removes the Run Log's player and retry — both read the WAV.
 	 */
 	audioRetentionMb?: number,
 	/**
-	 *  Evict recordings older than this many days whatever the size budget
-	 *  says. 0 leaves size as the only limit.
+	 *  Evict recordings older than this many days regardless of the size
+	 *  budget. 0 leaves size as the only limit.
 	 */
 	audioRetentionDays?: number,
 };
 
 /**  One closed span. */
 export type Span = {
-	/**
-	 *  Groups the stages of one dictation. Monotonic, so ordering by it is
-	 *  ordering by time.
-	 */
+	/**  Groups the stages of one dictation; monotonic, so it orders by time. */
 	utteranceId: number,
 	/**  The span name: `utterance`, `transcribe`, `cleanup`, … */
 	stage: string,
@@ -791,14 +626,11 @@ export type Span = {
 	startedAt: number,
 	durationMs: number,
 	success: boolean,
-	/**  The span's fields, as JSON. Whatever the call site recorded. */
+	/**  The span's fields, as JSON. */
 	fields: string,
 };
 
-/**
- *  See [`crate::history::Entry`] on why u64 exports as `number`: a lifetime
- *  word count will not reach 2^53.
- */
+/**  See [`crate::history::Entry`] on why u64 exports as `number`. */
 export type Stats = {
 	totalWords?: number,
 	totalSessions?: number,
@@ -806,58 +638,38 @@ export type Stats = {
 	currentStreakDays?: number,
 	bestStreakDays?: number,
 	/**
-	 *  Local calendar day of the last dictation, as `YYYY-MM-DD`.
-	 * 
-	 *  A string rather than a `NaiveDate` so it crosses the specta boundary
-	 *  as a plain TS string; [`Self::last_day`] parses it back.
+	 *  Local calendar day of the last dictation, as `YYYY-MM-DD`. A string so it
+	 *  crosses the specta boundary; [`Self::last_day`] parses it back.
 	 */
 	lastDictationDay?: string | null,
 };
 
 /**
- *  [`Stats`] plus the values derived from it.
- * 
- *  Derived rather than stored: `Stats` is written to disk after every
- *  dictation, and persisting a computed field would let the file disagree
- *  with the formula the moment the formula changed.
- * 
- *  It crosses the boundary at all so the frontend does not re-derive it. The
- *  40 wpm rule lived in both `stats.rs` and `App.tsx`, with the constant
- *  inlined on the TS side — changing it in Rust would have silently left the
- *  main window disagreeing with the tray menu.
+ *  [`Stats`] plus the values derived from it. Derived here rather than stored
+ *  or re-derived in TS, so the formula has exactly one home.
  */
 export type StatsView = {
 	timeSavedSeconds: number | null,
 } & Stats;
 
 /**
- *  An AG-UI tool call: the action name, the app it targets, and the parsed
- *  args. Kept separate from `ParsedAction` so the UI contract does not leak
- *  parser internals.
+ *  A tool call for display. Kept separate from `ParsedAction` so the UI
+ *  contract does not leak parser internals.
  */
 export type ToolCall = {
-	/**  The tool name, AG-UI's `toolCallName`, e.g. "github.create_issue". */
+	/**  e.g. "github.create_issue". */
 	name: string,
 	/**  The target app, e.g. "github". */
 	app: string,
 	/**
-	 *  The arguments the model chose, field by field.
-	 * 
-	 *  A map rather than pre-formatted lines so the panel can decide what a
-	 *  given tool is worth showing — a draft's body as prose, an inbox fetch as
-	 *  nothing at all — instead of dumping every field including `user_id`.
-	 * 
-	 *  Values are strings because the panel only ever renders text, and because
-	 *  `serde_json::Value` cannot cross specta: its number type is i64-backed,
-	 *  which specta forbids exporting rather than silently lose precision.
-	 *  Non-string values are JSON-encoded, so a nested object still displays.
+	 *  Args as strings, not `serde_json::Value`: specta refuses to export its
+	 *  i64-backed number type. Non-string values keep their JSON form.
 	 */
 	args: { [key in string]: string },
 	/**  Whether this call pauses for confirmation before it runs (every write). */
 	requiresConfirmation: boolean,
 };
 
-/**  An AG-UI tool result: whether the call succeeded and its message. */
 export type ToolResult = {
 	success: boolean,
 	message: string,

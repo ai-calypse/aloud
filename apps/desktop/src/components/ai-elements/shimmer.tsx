@@ -10,12 +10,9 @@ export type ShimmerProps = {
 };
 
 /**
- * Text with a highlight sweeping across it, for "the agent is working".
- *
- * The sweep is a CSS keyframe (`motion.css`), not a JS animation loop: the
- * compositor owns the frames, and the global reduced-motion switch reaches it.
- * The only thing JS decides is how wide the band is, which depends on the
- * text length and so cannot live in the stylesheet.
+ * Text with a highlight sweeping across it, for "the agent is working". The
+ * sweep is a CSS keyframe (`motion.css`) so reduced-motion reaches it; JS only
+ * sets the band width, which depends on the text length.
  */
 export function Shimmer({
   children,

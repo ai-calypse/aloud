@@ -1,13 +1,7 @@
 import { SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/**
- * The app's search input: a magnifier in a bordered well.
- *
- * Existed twice, byte-identical down to the SVG path data — once in the Notes
- * list, once in the Connectors pane — which is how the two drifted to different
- * vertical padding.
- */
+/** The app's search input: a magnifier in a bordered well. */
 export function SearchField({
   value,
   onChange,

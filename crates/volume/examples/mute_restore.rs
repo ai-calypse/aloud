@@ -2,10 +2,9 @@
 //!
 //! `cargo run -p aloud-volume --example mute_restore`
 //!
-//! Watch the volume HUD (or the Sound menu) while it runs. The second phase is
-//! the one that matters: it simulates a crash by leaving the state file on disk
-//! and calling `restore` as a fresh launch would, which is the path that keeps
-//! a force-quit from leaving the machine silent for good.
+//! Watch the volume HUD while it runs. The second phase is the one that
+//! matters: it leaves the state file on disk and calls `restore` as a fresh
+//! launch would, the path that keeps a force-quit from leaving you muted.
 
 use std::{thread::sleep, time::Duration};
 

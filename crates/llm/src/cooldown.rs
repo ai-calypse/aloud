@@ -1,8 +1,6 @@
-//! Rate-limit circuit breaker, ported from `LLMCooldownManager.swift`.
-//!
-//! When a model returns 429, its reset time is read from the response headers
-//! so the app knows exactly when the model is usable again and can fall back
-//! to another model until then.
+//! Rate-limit circuit breaker: a 429's reset time is read from the response
+//! headers, so the app knows when a model is usable again and can fall back
+//! until then.
 
 use std::{
     collections::HashMap,
@@ -21,12 +19,9 @@ pub struct Cooldown {
     pub is_daily: bool,
 }
 
-/// Reads how long a model is rate-limited from a 429's headers.
-///
-/// Header precedence is deliberate and ported as-is: a spent daily quota is
-/// classified first, *even when* `retry-after` is also present. Checking
-/// `retry-after` first would hide a short near-reset daily window and stop it
-/// from being persisted.
+/// Reads how long a model is rate-limited from a 429's headers. Precedence is
+/// deliberate: a spent daily quota is classified first, *even when*
+/// `retry-after` is present, or a short near-reset daily window is hidden.
 pub fn from_headers(headers: &reqwest::header::HeaderMap) -> Cooldown {
     let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
 
@@ -64,11 +59,9 @@ pub fn from_headers(headers: &reqwest::header::HeaderMap) -> Cooldown {
     }
 }
 
-/// Parses a Groq duration: bare seconds ("2", "7.66"), a single suffixed unit
-/// ("7.66s", "120ms"), or compound forms ("2m59.56s", "1h0m0s").
-///
-/// Returns None for empty, unrecognized, negative or non-finite input, so a
-/// malformed header can never produce a negative or NaN cooldown.
+/// Parses a Groq duration: bare seconds ("7.66"), a suffixed unit ("120ms"), or
+/// compound forms ("2m59.56s"). None for negative or non-finite input, so a
+/// malformed header cannot produce a NaN cooldown.
 fn parse_duration(value: &str) -> Option<Duration> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -151,9 +144,8 @@ impl CooldownTracker {
         self.remaining(model).is_some()
     }
 
-    /// How long `model` stays limited, or `None` if it is usable. Expired
-    /// entries are dropped. The remaining time is what makes a rate-limit
-    /// message actionable — "try again in 40s" rather than "try again".
+    /// How long `model` stays limited, or `None` if usable. Expired entries are
+    /// dropped. The remaining time is what makes "try again in 40s" possible.
     pub fn remaining(&self, model: &str) -> Option<Duration> {
         let Ok(mut map) = self.until.lock() else {
             return None; // a poisoned lock must not block all requests
@@ -220,8 +212,8 @@ mod tests {
         assert_eq!(parse_duration("2m30"), None); // trailing digits, no unit
     }
 
-    /// The precedence that matters: a spent daily quota wins over retry-after,
-    /// so a short near-reset daily window is still classified as daily.
+    /// A spent daily quota outranks retry-after, so a short near-reset daily
+    /// window is still classified daily.
     #[test]
     fn spent_daily_quota_outranks_retry_after() {
         let cooldown = from_headers(&headers(&[

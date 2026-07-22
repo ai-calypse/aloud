@@ -1,8 +1,6 @@
 //! App-managed home for notes: plain markdown files under the OS app-data
-//! directory, keyword-searched by loading every note into memory.
-//!
-//! Port of the Swift `NotesStore`. Search semantics are identical: every query
-//! term must appear somewhere in the note, and title hits outrank body hits.
+//! directory, keyword-searched by loading every note into memory. Every query
+//! term must appear in the note; title hits outrank body hits.
 //!
 //! ponytail: linear scan of all note files per query — plenty for years of
 //! meetings; SQLite FTS is the upgrade path if it ever feels slow.
@@ -25,9 +23,8 @@ pub struct Note {
     pub path: PathBuf,
     pub title: String,
     /// Unix seconds; parsed from the file name, falling back to file mtime.
-    ///
-    /// Exported as `number`: specta forbids i64 by default over JS precision
-    /// loss past 2^53, which a unix-second timestamp is nowhere near.
+    /// Exported as `number` — specta forbids i64 by default over JS precision
+    /// loss past 2^53, which a unix second is nowhere near.
     #[specta(type = specta_typescript::Number)]
     pub date: i64,
     pub content: String,
@@ -45,9 +42,8 @@ pub struct SearchResult {
 /// The app's data directory: `~/Library/Application Support/Aloud` on macOS,
 /// `%APPDATA%\Aloud` on Windows.
 ///
-/// `ProjectDirs::data_dir()` is deliberately not used: on macOS it returns a
-/// reverse-DNS folder (`app.Aloud.Aloud`), but the Swift app writes to a plain
-/// `Aloud` folder, and migrating users' notes in place beats renaming them.
+/// Never `ProjectDirs::data_dir()`: on macOS it yields `app.Aloud.Aloud`, while
+/// existing installs (and migration) read a plain `Aloud` folder.
 pub fn data_dir() -> Result<PathBuf> {
     let base = if cfg!(target_os = "macos") {
         directories::UserDirs::new()
@@ -68,21 +64,16 @@ pub fn directory() -> Result<PathBuf> {
     Ok(data_dir()?.join("Notes"))
 }
 
-/// `<app-data>/Aloud/media`, where kept recordings live.
-///
-/// Its own folder rather than a subfolder of Notes because the asset-protocol
-/// scope in `tauri.conf.json` points the WebView at exactly this path: widening
-/// it to the whole data directory would expose the settings file, the history
-/// database and every note to any script running in a window.
+/// `<app-data>/Aloud/media`, where kept recordings live. Its own folder because
+/// the asset-protocol scope in `tauri.conf.json` points the WebView at exactly
+/// this path; widening it would expose settings, history and every note.
 pub fn media_dir() -> Result<PathBuf> {
     Ok(data_dir()?.join("media"))
 }
 
 /// A unique path for one recording, with the media directory created.
-///
-/// Nanoseconds rather than a counter: two windows of the app, or a restart
-/// mid-second, must not be able to hand out the same name and have one
-/// dictation overwrite another's audio.
+/// Nanoseconds, not a counter: two windows or a restart mid-second must not be
+/// able to hand out the same name and overwrite another dictation's audio.
 pub fn media_wav_path() -> Result<PathBuf> {
     let dir = media_dir()?;
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -144,8 +135,7 @@ pub fn date_from_file_name(name: &str) -> Option<i64> {
         .map(|dt| dt.and_utc().timestamp())
 }
 
-/// Whitespace-separated query terms — shared with the UI so result
-/// highlighting matches what scored.
+/// Query terms, shared with the UI so highlighting matches what scored.
 pub fn terms(query: &str) -> Vec<&str> {
     query.split_whitespace().collect()
 }
@@ -331,8 +321,7 @@ mod tests {
         assert!(date_from_file_name("Untitled").is_none());
     }
 
-    /// Multi-byte characters must not panic the snippet slicer. Real notes
-    /// contain them: this is modelled on a Norwegian meeting note on disk.
+    /// Multi-byte characters must not panic the snippet slicer.
     #[test]
     fn searches_non_ascii_notes() {
         let notes = [note(

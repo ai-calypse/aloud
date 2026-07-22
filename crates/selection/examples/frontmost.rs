@@ -1,16 +1,11 @@
 //! Prints the currently focused app's name, and says which step failed if it
 //! cannot.
 //!
-//! Unit tests can only assert "does not panic with no focus"; the real check is
-//! whether the read returns the right app on real hardware. Run it, then click
-//! into Slack / your editor / a browser and run it again.
-//!
 //!   cargo run -p aloud-selection --example frontmost
 //!
-//! Needs Accessibility permission (the same one hotkeys use). The staged
-//! output exists because this returned None for *every* app for a long time —
-//! it read `AXTitle`, which is empty on an application element — and a bare
-//! "could not determine" gave no way to tell that from a permission denial.
+//! Needs Accessibility permission. The output is staged because this returned
+//! None for *every* app for a long time (it read `AXTitle`, empty on an
+//! application element) and there was no way to tell that from a denial.
 
 fn main() {
     println!("AX trusted: {}", aloud_selection::debug::is_trusted());

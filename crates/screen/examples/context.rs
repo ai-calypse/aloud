@@ -1,10 +1,10 @@
 //! Prints the screen context the cleanup prompt would see, and captures a
 //! screenshot to a file so it can actually be looked at.
 //!
-//! Unit tests can only assert "returns rather than panics". The questions that
-//! matter are whether the summary names the app the user is really in, and
-//! whether the PNG contains their windows or just the wallpaper (which is what
-//! a denied Screen Recording grant produces — `screencapture` still exits 0).
+//! The questions that matter: does the summary name the app the user is really
+//! in, and does the image contain their windows or just the wallpaper — the
+//! latter being what a denied grant produces, since `screencapture` still
+//! exits 0.
 //!
 //!   cargo run -p aloud-screen --example context
 //!
@@ -31,8 +31,7 @@ fn main() {
                 uri.len(),
                 started.elapsed().as_millis()
             );
-            // Written out because the only real check is looking at it: a
-            // wallpaper-only capture is a denied permission, not a bug here.
+            // Written out because the only real check is looking at it.
             let path = std::env::temp_dir().join("aloud-screen-example.jpg");
             use base64::Engine as _;
             match base64::engine::general_purpose::STANDARD.decode(b64) {

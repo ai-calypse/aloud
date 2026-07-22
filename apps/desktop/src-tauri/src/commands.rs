@@ -32,14 +32,12 @@ pub fn update_settings(
 ) -> CmdResult<()> {
     to_string_err(settings.save())?;
 
-    // Push the hotkey slice into the live config the listener reads, so a
-    // rebind takes effect on the next key event rather than at next launch.
+    // Into the live config the listener reads, so a rebind takes effect on the
+    // next key event rather than at next launch.
     if let Ok(mut config) = state.hotkey_config.lock() {
         *config = settings.hotkeys.clone();
     }
 
-    // Applied live rather than at next launch: a toggle that appears to do
-    // nothing reads as broken, and the user would toggle it again.
     crate::tray::set_visible(&app, settings.show_menu_bar_icon);
 
     let mut current = state
@@ -60,16 +58,8 @@ pub fn get_stats(state: State<'_, AppState>) -> StatsView {
     }
 }
 
-/// [`Stats`] plus the values derived from it.
-///
-/// Derived rather than stored: `Stats` is written to disk after every
-/// dictation, and persisting a computed field would let the file disagree
-/// with the formula the moment the formula changed.
-///
-/// It crosses the boundary at all so the frontend does not re-derive it. The
-/// 40 wpm rule lived in both `stats.rs` and `App.tsx`, with the constant
-/// inlined on the TS side — changing it in Rust would have silently left the
-/// main window disagreeing with the tray menu.
+/// [`Stats`] plus the values derived from it. Derived here rather than stored
+/// or re-derived in TS, so the formula has exactly one home.
 #[derive(serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsView {
@@ -95,11 +85,9 @@ pub fn recent_notes(limit: u32) -> CmdResult<Vec<aloud_notes::Note>> {
     Ok(notes)
 }
 
-/// The shipped cleanup prompt and the date it last changed.
-///
-/// Both halves serve the Prompts pane: the text backs "View Default", and the
-/// version is what `Settings::seen_prompt_version` is compared against to
-/// decide whether a user who forked the prompt is missing an improvement.
+/// The shipped cleanup prompt and the date it last changed. `version` is what
+/// `Settings::seen_prompt_version` is compared against, to tell a user who
+/// forked the prompt that they are missing an improvement.
 #[derive(serde::Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DefaultPrompt {
@@ -117,16 +105,8 @@ pub fn default_prompt() -> DefaultPrompt {
 }
 
 /// Runs a prompt against a sample without a dictation, for the Prompts pane.
-///
-/// Everything but the prompt comes from live settings, so what this shows is
-/// what the next dictation would do — including the model, the fallback and
-/// the vocabulary, all of which change the answer.
-///
-/// The two ways this can appear broken while working correctly are answered
-/// here rather than left as a puzzle: cleanup skips anything at or under
-/// [`aloud_llm::cleanup::MIN_WORDS`] and returns it verbatim, which reads as a
-/// prompt that did nothing; and a filler-only sample legitimately produces no
-/// text at all, which reads as a blank panel.
+/// Everything but the prompt comes from live settings, so this shows what the
+/// next dictation would do.
 #[tauri::command]
 #[specta::specta]
 pub async fn test_prompt(
@@ -140,9 +120,8 @@ pub async fn test_prompt(
         return Err("Type a sample transcript to run the prompt against.".into());
     }
     if aloud_llm::cleanup::is_too_short(&sample) {
-        // Worded for both callers: the Prompts pane runs a sample the user can
-        // lengthen, the Run Log retries a stored transcript it cannot. Telling
-        // the second one to "add a few more words" was advice it cannot take.
+        // Worded for both callers: the Run Log retries a stored transcript it
+        // cannot lengthen, so "add a few more words" is advice it cannot take.
         return Err(format!(
             "Too short to clean up. Dictations of {} words or fewer skip cleanup entirely \
              and are pasted as spoken, so the prompt never runs on them.",
@@ -160,17 +139,15 @@ pub async fn test_prompt(
         fallback: Some(settings.fallback_model.as_str()),
         custom_prompt: &prompt,
         vocabulary: &settings.vocabulary,
-        // The Prompts pane runs against a typed sample and the Run Log against
-        // a stored one; in neither case does the window in front now describe
-        // the moment being tested.
+        preserve: &settings.preserve_phrases,
+        // Neither caller is a live dictation, so the window in front now does
+        // not describe the moment being tested.
         context: "",
         output_language: &settings.output_language,
         instruction_guard: settings.instruction_guard_enabled,
     };
-    // An empty result is returned as an empty string, not as prose explaining
-    // it. This command has two callers — the Prompts pane, which explains the
-    // blank, and the Run Log's retry, which *writes the result back into the
-    // user's transcript*. A sentence here becomes their dictation.
+    // An empty result stays an empty string: the Run Log's retry writes this
+    // back into the user's transcript, so a sentence here becomes their text.
     to_string_err(aloud_llm::cleanup::clean(options, &sample).await)
 }
 
@@ -184,12 +161,8 @@ pub fn input_devices() -> CmdResult<Vec<aloud_audio::AudioDevice>> {
 /// there yet); the custom-match field still works everywhere.
 ///
 /// `async` is load-bearing: Tauri runs a non-async command on the main thread,
-/// so the scan froze the whole webview rather than merely showing a spinner.
-/// The work is blocking (process spawns), hence `spawn_blocking` rather than
-/// parking an async worker on it.
-///
-/// Fallible so a scan that dies is distinguishable from a machine with no
-/// applications — an empty picker with no error reads as the former.
+/// so the scan froze the whole webview. The work is blocking (process spawns),
+/// hence `spawn_blocking`.
 #[tauri::command]
 #[specta::specta]
 pub async fn installed_apps() -> CmdResult<Vec<aloud_selection::InstalledApp>> {
@@ -198,11 +171,8 @@ pub async fn installed_apps() -> CmdResult<Vec<aloud_selection::InstalledApp>> {
         .map_err(|e| format!("listing installed apps: {e}"))
 }
 
-/// Monitor names, to fill the overlay's "Show on" picker.
-///
-/// Unnamed monitors are dropped rather than given a placeholder: the setting
-/// stores a name, so an entry with no name could never be matched back to a
-/// screen and would be a row that silently does nothing.
+/// Monitor names, to fill the overlay's "Show on" picker. Unnamed monitors are
+/// dropped: the setting stores a name, so such a row could never match back.
 #[tauri::command]
 #[specta::specta]
 pub fn overlay_displays(app: AppHandle) -> CmdResult<Vec<String>> {
@@ -224,10 +194,6 @@ pub fn hotkeys_permitted() -> bool {
 
 /// Every OS permission the app needs, with its current answer. Empty off
 /// macOS, which the Permissions card reads as "nothing to show".
-///
-/// One command for all of them rather than one per permission: the card asks
-/// for the whole set every time it refreshes, and three round-trips to answer
-/// one question is three chances for the rows to disagree.
 #[tauri::command]
 #[specta::specta]
 pub fn permissions() -> Vec<aloud_permissions::PermissionStatus> {
@@ -241,10 +207,8 @@ pub fn open_permission_settings(permission: aloud_permissions::Permission) -> Cm
     to_string_err(aloud_permissions::open_settings(permission))
 }
 
-/// Version, commit and build date, for pasting into a bug report.
-///
-/// The commit and the date are baked in by `build.rs`; a build from a tarball
-/// with no `.git` reports "unknown" rather than failing to compile.
+/// Version, commit and build date, for pasting into a bug report. Baked in by
+/// `build.rs`; a tarball with no `.git` reports "unknown" rather than failing.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildInfo {
@@ -263,17 +227,15 @@ pub fn build_info() -> BuildInfo {
     }
 }
 
-/// Plays the start chime, so the volume slider can be judged by ear rather
-/// than by guessing at a number.
+/// Plays the start chime, so the volume slider can be judged by ear.
 #[tauri::command]
 #[specta::specta]
 pub fn preview_sound(volume: f32) {
     crate::sound::play(crate::sound::Chime::Start, true, volume);
 }
 
-/// Whether the OS launches Aloud at login. The autostart plugin owns this
-/// state (a login item / registry key), not settings.json — storing a copy
-/// would drift the moment the user changed it outside the app.
+/// Whether the OS launches Aloud at login. The autostart plugin owns this state
+/// (a login item / registry key); a copy in settings.json would drift.
 #[tauri::command]
 #[specta::specta]
 pub fn launch_at_login(app: AppHandle) -> CmdResult<bool> {
@@ -299,10 +261,9 @@ pub struct Connector {
 /// (credential scoping, single-flight revalidation) lives in `aloud_agent`.
 pub type ConnectorCache = std::sync::Arc<aloud_agent::ResponseCache<Connector>>;
 
-/// The configured Composio key, or the error the pane should show.
-///
-/// Read before touching the cache: it doubles as the cache's scope, so an
-/// account swap misses rather than serving the previous account's data.
+/// The configured Composio key, or the error the pane should show. Read before
+/// touching the cache: it doubles as the cache's scope, so an account swap
+/// misses rather than serving the previous account's data.
 fn api_key(state: &State<'_, AppState>) -> CmdResult<String> {
     let key = state
         .settings
@@ -331,10 +292,8 @@ fn to_connector(toolkit: aloud_agent::Toolkit) -> Connector {
     }
 }
 
-/// Fetches the connected toolkits and maps them to the pane's shape.
-///
-/// The pane lists services, not tool names, so this stops at the toolkit
-/// metadata — which is one request, not one per connected service.
+/// Fetches the connected toolkits and maps them to the pane's shape. Stops at
+/// toolkit metadata — one request, not one per connected service.
 async fn fetch_connected(composio: &aloud_agent::ComposioClient) -> anyhow::Result<Vec<Connector>> {
     Ok(composio
         .connected_toolkits()
@@ -344,10 +303,8 @@ async fn fetch_connected(composio: &aloud_agent::ComposioClient) -> anyhow::Resu
         .collect())
 }
 
-/// Refetches in the background and pushes the result only if it changed.
-///
-/// The cache decides both whether to run at all (one revalidation in flight at
-/// a time — every window focus asks for one) and whether the result is news.
+/// Refetches in the background and pushes the result only if it changed. The
+/// cache holds it to one revalidation in flight — every window focus asks.
 fn revalidate(app: AppHandle, key: String, cache: ConnectorCache) {
     if !cache.begin_revalidation() {
         return;
@@ -369,11 +326,9 @@ fn revalidate(app: AppHandle, key: String, cache: ConnectorCache) {
     });
 }
 
-/// Fills the connector cache in the background at startup.
-///
-/// Skipped entirely without a Composio key: there is nothing to fetch, and a
-/// launch should not touch the network for a feature the user has not set up.
-/// Failure is silent — this is a warm-up, and the pane still fetches for real.
+/// Fills the connector cache in the background at startup. Skipped without a
+/// key, so a launch does not touch the network for an unconfigured feature;
+/// failure is silent, since the pane still fetches for real.
 pub fn warm_connectors(app: AppHandle) {
     use tauri::Manager;
 
@@ -394,10 +349,8 @@ pub fn warm_connectors(app: AppHandle) {
 
 /// Connected toolkits, each with the tools the agent will actually offer.
 ///
-/// Stale-while-revalidate: a warm cache paints the pane with no network at
-/// all, and a background refresh pushes `connectors-updated` if anything moved.
-/// A plain TTL would be wrong here — OAuth finishes in the browser, so the user
-/// comes back expecting a service that was connected seconds ago.
+/// Stale-while-revalidate, not a TTL: OAuth finishes in the browser, so the
+/// user comes back expecting a service connected seconds ago.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_connectors(
@@ -418,11 +371,9 @@ pub async fn list_connectors(
     Ok(fresh)
 }
 
-/// Toolkits matching `query`, for the add-a-connector search.
-///
-/// Cached per query: the pane fires the empty query on every mount to fill
-/// "Add a connector", and re-typing a query is common. Composio's catalogue
-/// does not move within a session, so this is served from memory once seen.
+/// Toolkits matching `query`, for the add-a-connector search. Cached per query:
+/// the pane refires the empty one on every mount, and the catalogue does not
+/// move within a session.
 #[tauri::command]
 #[specta::specta]
 pub async fn search_connectors(
@@ -444,9 +395,7 @@ pub async fn search_connectors(
 }
 
 /// Starts an OAuth connection and opens the consent page in the browser.
-///
-/// Composio hosts the callback, so there is nothing to catch here — the user
-/// finishes in the browser and the pane picks the new account up on refresh.
+/// Composio hosts the callback, so there is nothing to catch here.
 #[tauri::command]
 #[specta::specta]
 pub async fn connect_connector(
@@ -468,9 +417,7 @@ pub async fn disconnect_connector(
 ) -> CmdResult<()> {
     let key = api_key(&state)?;
     to_string_err(client(&key)?.disconnect(&connection_id).await)?;
-    // Known-wrong now, so drop it rather than wait for a revalidation to
-    // notice. Searches go too: their rows carry the connection state that this
-    // call just invalidated.
+    // Known-wrong now — including the search rows, which carry connection state.
     state.connectors.clear();
     Ok(())
 }
@@ -519,9 +466,8 @@ pub fn history_delete(app: tauri::AppHandle, state: State<'_, AppState>, id: i32
             .history_db()
             .and_then(|h| h.delete(id as i64)),
     )?;
-    // The tray builds its History submenu from the same table. Without this a
-    // transcript deleted here — plausibly *because* it was sensitive — stays
-    // listed and one click from being pasted until the next dictation.
+    // The tray's History submenu reads the same table; without this a deleted
+    // transcript stays one click from being pasted until the next dictation.
     crate::tray::refresh(&app);
     Ok(())
 }
@@ -534,11 +480,9 @@ pub fn history_clear(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdRe
     Ok(())
 }
 
-/// Writes back the output of a cleanup re-run.
-///
-/// Separate from [`test_prompt`], which produces the text: a retry is that
-/// same call plus this one, so there is no second cleanup path to keep in
-/// step with the real pipeline's.
+/// Writes back the output of a cleanup re-run. Separate from [`test_prompt`],
+/// which produces the text, so a retry is those two calls rather than a second
+/// cleanup path to keep in step with the pipeline's.
 #[tauri::command]
 #[specta::specta]
 pub fn history_update_final(state: State<'_, AppState>, id: i32, text: String) -> CmdResult<()> {
@@ -551,11 +495,8 @@ pub fn history_update_final(state: State<'_, AppState>, id: i32, text: String) -
 }
 
 /// Re-runs transcription against the run's stored recording, optionally on a
-/// different engine, and writes both transcripts back.
-///
-/// Returns the new pasted text so the Run Log can repaint the row without a
-/// refetch. Everything it does lives on the pipeline, which is what makes the
-/// retry match the dictation that produced the row.
+/// different engine, and writes both transcripts back. Returns the new pasted
+/// text so the Run Log can repaint the row without a refetch.
 #[tauri::command]
 #[specta::specta]
 pub async fn history_retry_transcription(
@@ -571,12 +512,9 @@ pub async fn history_retry_transcription(
 /// capture swallows every key while armed, so it must never be indefinite.
 const CAPTURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Records the next key gesture and returns it as a binding.
-///
-/// Async because it blocks until the user presses something: capture swallows
-/// keys while armed, so this owns a `spawn_blocking` thread rather than the
-/// main one. Cancelling is `cancel_hotkey_capture`, or simply waiting out
-/// [`CAPTURE_TIMEOUT`].
+/// Records the next key gesture and returns it as a binding. Blocks until the
+/// user presses something, so it owns a `spawn_blocking` thread rather than the
+/// main one; cancel with `cancel_hotkey_capture` or wait out the timeout.
 #[tauri::command]
 #[specta::specta]
 pub async fn capture_hotkey(
@@ -600,15 +538,10 @@ pub async fn capture_hotkey(
     let capture = state.hotkey_capture.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let captured = rx.recv_timeout(CAPTURE_TIMEOUT).ok();
-        // Disarm on timeout. The listener clears the slot itself on a commit,
-        // so this only matters for the give-up path — but leaving it armed
-        // would swallow the keyboard indefinitely.
-        //
-        // Only if the slot is still *ours*. Retargeting drops this task's
-        // sender, waking it with Disconnected, which reads as "gave up" — and
-        // clearing then disarms the recording that just replaced us. The
-        // second row would sit on "Press keys…" while the keys it captured
-        // fell through to the matcher and started a real dictation.
+        // Disarm on the give-up path, or an abandoned capture swallows the
+        // keyboard indefinitely — but only if the slot is still *ours*.
+        // Retargeting drops this sender, which also wakes us; clearing then
+        // would disarm the recording that just replaced us.
         if captured.is_none() {
             if let Ok(mut slot) = capture.lock() {
                 if slot.as_ref().is_some_and(|c| c.id == id) {
@@ -635,11 +568,9 @@ pub fn cancel_hotkey_capture(state: State<'_, AppState>) -> CmdResult<()> {
     Ok(())
 }
 
-/// The running meeting's elapsed time and word count, or None when idle.
-///
-/// The `meeting-phase` event carries the same payload, but it only fires on a
-/// state change and on each finished chunk — up to a minute apart. A window
-/// opened mid-meeting would show nothing until the next chunk without this.
+/// The running meeting's elapsed time and word count, or None when idle. The
+/// `meeting-phase` event carries the same payload but fires up to a minute
+/// apart, so a window opened mid-meeting needs this to paint.
 #[tauri::command]
 #[specta::specta]
 pub fn meeting_status(state: State<'_, AppState>) -> Option<crate::meeting::MeetingPhase> {
@@ -655,9 +586,6 @@ pub fn toggle_meeting(app: AppHandle, state: State<'_, AppState>) {
 }
 
 /// Draws the overlay in `phase` without a real dictation, for the Debug pane.
-///
-/// Behind `developer_tools` in the UI only — a command cannot be hidden, but
-/// the worst this can do is show and hide a click-through window.
 ///
 /// ponytail: no update-overlay preview. There is no updater UI to preview
 /// until Phase 8 lands a signing keypair; add the case here when it does.

@@ -1,12 +1,8 @@
-//! Composio REST client: discovers the user's connected accounts, whatever the
-//! toolkit, fetches slimmed tool schemas for the model, and executes tool
-//! calls.
+//! Composio REST client: discovers the user's connected accounts, fetches
+//! slimmed tool schemas for the model, and executes tool calls.
 //!
-//! A direct port of voice-dict's `ComposioService.swift`, verified against the
-//! live v3.1 API. Managed auth: the Composio project already holds an auth
-//! config for each managed toolkit, so this
-//! never supplies OAuth credentials — it just reads the connected accounts that
-//! exist and acts through them.
+//! Managed auth throughout — the Composio project already holds an auth config
+//! per toolkit, so this never supplies OAuth credentials.
 //!
 //! Endpoints (all `x-api-key` authed against `backend.composio.dev/api/v3.1`):
 //! - `GET  /connected_accounts`      → items[].{id,status,user_id,toolkit.slug}
@@ -22,19 +18,13 @@ use std::time::Duration;
 
 const API_BASE: &str = "https://backend.composio.dev/api/v3.1";
 
-/// Tools always offered for a toolkit, whatever the command says.
+/// Tools always offered for a toolkit — a floor, not a catalogue; everything
+/// else stays reachable via [`relevance`]. Pins cover what ranking cannot: "what
+/// meetings do I have tomorrow" scores every tool zero, since "meeting" appears
+/// nowhere in `FIND_EVENT`. Pin core verbs only; a long list is a catalogue.
 ///
-/// This is a floor, not a catalogue: everything else in the toolkit is still
-/// reachable, ranked per command by [`relevance`]. Pins exist for the cases
-/// ranking cannot cover — a user says "what meetings do I have tomorrow" and
-/// the word "meeting" appears nowhere in `FIND_EVENT`'s name or description,
-/// so every tool scores zero. Pin the core verbs of a toolkit and nothing
-/// else; a long pin list is the old catalogue by another name.
-///
-/// Composio's own signals cannot do this job: its "important" tag covers 25 of
-/// googlecalendar's 49 tools, so sorting by it falls through to alphabetical
-/// order and yields ACL plumbing, `GITHUB_API_ROOT`, and Gmail without
-/// "send email".
+/// Composio's "important" tag cannot do this job — it covers 25 of
+/// googlecalendar's 49 tools, so it falls through to alphabetical order.
 const PINNED_TOOLS: &[(&str, &[&str])] = &[
     (
         "gmail",
@@ -71,12 +61,8 @@ const STOP_WORDS: &[&str] = &[
     "please", "about", "have", "what", "your", "there",
 ];
 
-/// How many tools per connected toolkit are offered to the model *for one
-/// command*. Not a catalogue: every tool in a connected toolkit is a candidate
-/// on every request, and this is the context budget for choosing among them.
-///
-/// The budget is real. Uncapped, three connected toolkits measured ~77k
-/// tokens of schema, re-sent on every round of the tool loop.
+/// Context budget per connected toolkit for one command. Uncapped, three
+/// toolkits measured ~77k tokens of schema, re-sent every round of the loop.
 pub const TOOLS_PER_TOOLKIT: usize = 8;
 /// Toolkits offered in connector search. Composio has 800+; nobody scrolls
 /// past the first screen of a search.
@@ -104,17 +90,14 @@ impl Connection {
 #[derive(Debug, Clone)]
 pub struct ToolDef {
     pub name: String,
-    /// The toolkit this tool belongs to, as Composio reports it. Carried
-    /// rather than derived: a slug's toolkit cannot be recovered by splitting
-    /// on `_`, since 96 of Composio's 500 toolkits have one in their slug
-    /// (`microsoft_teams`, `google_maps`, `one_drive`).
+    /// Carried, not derived: 96 of Composio's 500 toolkit slugs contain an `_`
+    /// (`microsoft_teams`, `google_maps`), so splitting cannot recover it.
     pub toolkit: String,
     pub description: String,
     /// JSON-schema object for the function's `parameters`.
     pub parameters: Value,
-    /// Whether Composio marks this tool `readOnlyHint`. Anything else — a
-    /// create, an update, a delete, or a tool with no annotation at all —
-    /// counts as a write and must be confirmed before it runs.
+    /// Composio's `readOnlyHint`. Anything else — including no annotation at
+    /// all — counts as a write and must be confirmed before it runs.
     pub read_only: bool,
 }
 
@@ -162,10 +145,8 @@ impl ComposioClient {
         })
     }
 
-    /// Every connected account, any toolkit, all statuses. Filtering to
-    /// gmail,github here is what once made a freshly connected toolkit look
-    /// unconnected everywhere: its Connect button never flipped and its tools
-    /// never loaded.
+    /// Every connected account, any toolkit, all statuses. Filtering by toolkit
+    /// here once made a freshly connected one look unconnected everywhere.
     ///
     /// ponytail: one page of 100 accounts; paginate if anyone connects more.
     pub async fn connections(&self) -> Result<Vec<Connection>> {
@@ -187,15 +168,8 @@ impl ComposioClient {
     }
 
     /// Tools for every toolkit with an ACTIVE connection, chosen for `command`.
-    ///
-    /// Derived from what the user has actually connected rather than a fixed
-    /// list, so connecting Slack in Settings makes Slack's tools available to
-    /// the agent without a code change.
-    ///
-    /// The selection is per command, not per build: every tool in a connected
-    /// toolkit is a candidate, and [`TOOLS_PER_TOOLKIT`] is the context budget
-    /// for this one request. Pass an empty `command` to get the pins plus a
-    /// stable head of the toolkit, which is what the settings pane wants.
+    /// Selection is per command, not per build. Pass an empty `command` for the
+    /// pins plus a stable head of the toolkit, which the settings pane wants.
     pub async fn available_tools(&self, command: &str) -> Result<Vec<ToolDef>> {
         let active: Vec<String> = self
             .connections()
@@ -217,12 +191,10 @@ impl ComposioClient {
     }
 
     /// The `limit` tools of one toolkit most likely to serve `command`: its
-    /// pins, then the best-scoring of everything else.
-    ///
-    /// Pins are fetched by slug rather than picked out of the toolkit page,
-    /// because that page is paginated — GitHub runs past 200 tools, and
-    /// `LIST_REPOSITORY_ISSUES` is on none of the first pages. The two
-    /// requests run concurrently, so this costs the latency of one.
+    /// pins, then the best-scoring of everything else. Pins are fetched by slug
+    /// because the toolkit page is paginated — GitHub runs past 200 tools and
+    /// `LIST_REPOSITORY_ISSUES` is on none of the first pages. Concurrent, so
+    /// this costs the latency of one request.
     pub async fn toolkit_tools(
         &self,
         toolkit: &str,
@@ -270,18 +242,14 @@ impl ComposioClient {
             .collect())
     }
 
-    /// A toolkit's tools, best match for `command` first.
+    /// A toolkit's tools, best match for `command` first. Scored locally
+    /// because Composio's `?search=` ANDs every term, so one unmatched word
+    /// empties the result — "delete the netflix event from my calendar" returns
+    /// nothing live.
     ///
-    /// Composio's `?search=` cannot do this: it ANDs every term, so one word
-    /// that matches no tool empties the result — and a spoken command is full
-    /// of them. "delete the netflix event from my calendar" returns nothing
-    /// live, while "delete event" returns the right two. Scoring locally over
-    /// the page we already fetch has no such cliff, and costs no extra call.
-    ///
-    /// Destructive tools are *not* filtered out. `DELETE_EVENT` carries the
-    /// same `destructiveHint` as `CLEAR_CALENDAR`, so filtering on it made
-    /// "delete that event" impossible to obey. The confirmation gate in the
-    /// tool loop is what makes a destructive call safe, not its absence.
+    /// Destructive tools are *not* filtered out: `DELETE_EVENT` carries the
+    /// same `destructiveHint` as `CLEAR_CALENDAR`, so filtering made "delete
+    /// that event" impossible. The tool loop's confirmation gate is the safety.
     async fn ranked_tools(&self, toolkit: &str, command: &str) -> Result<Vec<ToolDef>> {
         let json = self
             .get(&format!("/tools?toolkit_slug={toolkit}&limit=100"))
@@ -294,11 +262,9 @@ impl ComposioClient {
             .filter_map(|item| Some((relevance(item, &words), tool_def(item)?)))
             .collect();
 
-        // A command the scorer cannot read leaves every tool at zero. Falling
-        // back to reads-and-writes interleaved keeps that case usable: sorting
-        // by Composio's order alone put three Gmail delete tools ahead of
-        // "fetch emails", and a toolkit is only useful if the agent can both
-        // look things up and act.
+        // An all-zero score falls back to reads and writes interleaved:
+        // Composio's own order put three Gmail delete tools ahead of "fetch
+        // emails", and a toolkit needs both halves to be useful.
         if scored.iter().all(|(score, _)| *score == 0) {
             let (reads, writes): (Vec<_>, Vec<_>) = scored
                 .into_iter()
@@ -365,13 +331,10 @@ impl ComposioClient {
             .collect())
     }
 
-    /// Every toolkit the user has an ACTIVE connection to.
-    ///
-    /// Asked for by slug rather than searched, so a connected toolkit always
-    /// shows even if it would fall outside a search page.
-    /// The per-slug lookups run concurrently: they are independent round-trips
-    /// to the same API, so awaiting them in a loop made the Connectors pane
-    /// cost one full latency per connected service.
+    /// Every toolkit the user has an ACTIVE connection to. Asked for by slug,
+    /// not searched, so a connected toolkit shows even outside a search page.
+    /// Concurrent: awaiting in a loop cost the Connectors pane one full latency
+    /// per connected service.
     pub async fn connected_toolkits(&self) -> Result<Vec<Toolkit>> {
         let connected = self.connected_by_slug().await?;
         let mut out: Vec<Toolkit> = futures_util::future::try_join_all(connected.into_iter().map(
@@ -399,21 +362,16 @@ impl ComposioClient {
     }
 
     /// Starts an OAuth connection and returns the URL the user must visit.
-    ///
-    /// Composio needs an auth config per toolkit before an account can be
-    /// linked; this reuses the project's existing one or creates a
-    /// Composio-managed one, so the user never supplies OAuth credentials.
+    /// Composio needs an auth config per toolkit first; this reuses the
+    /// project's or creates a managed one, so the user supplies no credentials.
     pub async fn connect(&self, toolkit: &str) -> Result<String> {
         let auth_config = match self.auth_config_for(toolkit).await? {
             Some(id) => id,
             None => self.create_auth_config(toolkit).await?,
         };
 
-        // Keep new accounts under the same identity as existing ones so a user
-        // ends up with one set of connections, not one per toolkit.
-        //
-        // `POST /connected_accounts` now 400s for Composio-managed OAuth; the
-        // link endpoint is its replacement and returns the same redirect_url.
+        // One identity for all accounts, not one per toolkit. `/link`, because
+        // `POST /connected_accounts` now 400s for Composio-managed OAuth.
         let user_id = self.user_id().await;
         let json = self
             .post(
@@ -506,12 +464,10 @@ impl ComposioClient {
     }
 
     async fn execute_inner(&self, slug: &str, arguments: &Value) -> Result<String> {
-        // Match the tool against the toolkits actually connected rather than
-        // guessing one from the slug. `MICROSOFT_TEAMS_SEND_MESSAGE` split on
-        // the first `_` gives "microsoft", which matches no connection, so
-        // every call on such a toolkit failed with "no active microsoft
-        // connection" while the account sat there connected. Longest match
-        // wins, so a `google` connection cannot shadow `google_maps`.
+        // Match against connected toolkits, not a slug guess:
+        // `MICROSOFT_TEAMS_SEND_MESSAGE` split on `_` gives "microsoft", which
+        // matches nothing while Teams sits connected. Longest match wins, so a
+        // `google` connection cannot shadow `google_maps`.
         let connections = self.connections().await?;
         let connection = connections
             .into_iter()
@@ -531,10 +487,8 @@ impl ComposioClient {
             )
             .await?;
 
-        // Keep only what the model needs; raw payloads are huge (a Gmail
-        // message carries a ~94KB MIME `payload`; GitHub objects dozens of
-        // *_url fields). Compact structurally, then cap — blind truncation cut
-        // JSON mid-string and confused the model.
+        // Raw payloads are huge (a Gmail message carries ~94KB of MIME).
+        // Compact structurally, then cap — blind truncation cut JSON mid-string.
         let mut compact = Map::new();
         compact.insert(
             "successful".into(),
@@ -595,9 +549,8 @@ impl ComposioClient {
     }
 }
 
-/// Composio schemas are bloated (examples, titles, defaults, vendor keys) —
-/// ~5K tokens for six tools, which alone bursts a small tokens-per-minute
-/// budget. Keep only the JSON-schema keys the model needs to fill arguments.
+/// Composio schemas run ~5K tokens for six tools, enough alone to burst a small
+/// tokens-per-minute budget. Keep only the keys the model needs for arguments.
 fn slim_schema(schema: &Value) -> Value {
     let Some(obj) = schema.as_object() else {
         return schema.clone();
@@ -605,9 +558,8 @@ fn slim_schema(schema: &Value) -> Value {
     let mut out = Map::new();
     for (key, value) in obj {
         match key.as_str() {
-            // `default` stays: without it the model invents values for
-            // optional params it should leave alone (calendar_id: "role"
-            // instead of the documented default "primary").
+            // `default` stays: without it the model invents values for optional
+            // params (calendar_id "role" instead of the documented "primary").
             "type" | "required" | "enum" | "format" | "default" => {
                 out.insert(key.clone(), value.clone());
             }
@@ -638,9 +590,8 @@ fn slim_schema(schema: &Value) -> Value {
     Value::Object(out)
 }
 
-/// Recursively strips bulk from tool results: drops raw MIME payloads and
-/// URL-catalog fields, truncates long strings (email bodies keep their first
-/// ~600 chars, plenty for summarizing).
+/// Strips bulk from tool results: drops MIME payloads and URL-catalog fields,
+/// truncates strings to ~600 chars, plenty of an email body to summarize.
 fn compact_value(value: &Value) -> Value {
     match value {
         Value::Object(dict) => {
@@ -666,9 +617,8 @@ fn compact_value(value: &Value) -> Value {
     }
 }
 
-/// Caps a result at ~8000 bytes for the model's context. Backs off to the
-/// nearest char boundary — a raw `&out[..8000]` panics mid-UTF-8, and email
-/// bodies are full of multibyte text.
+/// Caps a result at ~8000 bytes, backing off to a char boundary — a raw
+/// `&out[..8000]` panics mid-UTF-8, and email bodies are full of multibyte text.
 fn cap(out: String) -> String {
     if out.len() <= 8000 {
         return out;
@@ -677,28 +627,23 @@ fn cap(out: String) -> String {
     format!("{}…(truncated)", &out[..cut])
 }
 
-/// The toolkit a tool slug belongs to: Composio prefixes every slug with the
-/// toolkit, so `SLACK_SEND_MESSAGE` is `slack`. Previously hardcoded to the
-/// two toolkits that shipped.
-/// Best-effort only — correct for a single-token toolkit, wrong for the 96 of
-/// Composio's 500 whose slug contains an underscore. Use [`ToolDef::toolkit`]
-/// or [`slug_belongs_to`] wherever the real answer is available; this is the
-/// fallback for a display path that has neither.
+/// The toolkit a tool slug belongs to, best-effort: right for a single-token
+/// toolkit, wrong for the 96 of Composio's 500 whose slug has an underscore.
+/// Prefer [`ToolDef::toolkit`] or [`slug_belongs_to`]; this is the fallback for
+/// a display path with neither.
 pub fn toolkit_of_slug(slug: &str) -> String {
     slug.split('_').next().unwrap_or(slug).to_lowercase()
 }
 
 /// Whether `slug` is one of `toolkit`'s tools. Composio names every tool
-/// `<TOOLKIT>_<VERB>`, so this is a prefix test on the uppercased slug — exact
-/// where splitting on `_` only guesses.
+/// `<TOOLKIT>_<VERB>`, so a prefix test is exact where splitting only guesses.
 pub fn slug_belongs_to(slug: &str, toolkit: &str) -> bool {
     let prefix = format!("{}_", toolkit.to_uppercase());
     slug.to_uppercase().starts_with(&prefix)
 }
 
-/// Percent-encodes a search term. No urlencoding crate for one query param:
-/// anything outside this set is escaped, which is stricter than necessary and
-/// therefore safe.
+/// Percent-encodes a search term — no crate for one query param. Escapes
+/// anything outside the set, stricter than necessary and therefore safe.
 fn urlencode(text: &str) -> String {
     text.chars()
         .flat_map(|c| {
@@ -717,10 +662,9 @@ fn dedup(mut items: Vec<String>) -> Vec<String> {
     items
 }
 
-/// The words of a spoken command worth matching a tool against: lowercased,
-/// short and common words dropped. Proper nouns ("netflix", "sam") survive and
-/// simply match nothing, which costs a point of score but never empties the
-/// result the way Composio's server-side AND search does.
+/// The words of a command worth matching a tool against. Proper nouns survive
+/// and match nothing, costing a point of score rather than emptying the result
+/// the way Composio's server-side AND search does.
 fn keywords(command: &str) -> Vec<String> {
     command
         .split(|c: char| !c.is_alphanumeric())
@@ -729,11 +673,9 @@ fn keywords(command: &str) -> Vec<String> {
         .collect()
 }
 
-/// How well one raw tool object matches `words`.
-///
-/// A word in the tool's own name is worth more than one buried in its
-/// description: every calendar tool mentions "event" somewhere in its prose,
-/// but only `DELETE_EVENT` is named for it.
+/// How well one raw tool object matches `words`. A word in the tool's name
+/// outweighs one in its description: every calendar tool mentions "event"
+/// somewhere in its prose, but only `DELETE_EVENT` is named for it.
 fn relevance(item: &Value, words: &[String]) -> usize {
     let name = item["slug"]
         .as_str()
@@ -770,8 +712,7 @@ fn has_tag(item: &Value, tag: &str) -> bool {
 fn tool_def(item: &Value) -> Option<ToolDef> {
     let name = item["slug"].as_str()?.to_string();
     Some(ToolDef {
-        // Composio reports the toolkit on every tool; falling back to the
-        // slug's first token is only for a malformed item.
+        // Composio reports this on every tool; the split is for malformed items.
         toolkit: item["toolkit"]["slug"]
             .as_str()
             .map(str::to_lowercase)
@@ -797,8 +738,8 @@ fn error_json(message: &str) -> String {
 mod tests {
     use super::*;
 
-    /// Execution routes a tool to its toolkit's connection by slug prefix, so
-    /// this has to work for toolkits nobody hardcoded.
+    /// Execution routes by slug prefix, so this must work for toolkits nobody
+    /// hardcoded.
     #[test]
     fn toolkit_routing_splits_on_the_slug_prefix() {
         assert_eq!(toolkit_of_slug("GMAIL_FETCH_EMAILS"), "gmail");
@@ -808,17 +749,15 @@ mod tests {
         );
         assert_eq!(toolkit_of_slug("SLACK_SEND_MESSAGE"), "slack");
         assert_eq!(toolkit_of_slug("NOTION_CREATE_PAGE"), "notion");
-        // The confirmation panel announced this one as "writes to github".
+        // The confirmation panel once announced this as "writes to github".
         assert_eq!(
             toolkit_of_slug("GOOGLECALENDAR_DELETE_EVENT"),
             "googlecalendar"
         );
     }
 
-    /// 96 of Composio's 500 toolkits have an underscore in their slug, so the
-    /// first-token split silently routed every one of their tools to a
-    /// connection that does not exist: `MICROSOFT_TEAMS_SEND_MESSAGE` looked
-    /// for a "microsoft" account and failed while Teams sat connected.
+    /// Regression: the first-token split routed the 96 underscored toolkits to
+    /// connections that do not exist — Teams failed while sitting connected.
     #[test]
     fn tools_match_their_toolkit_even_when_its_slug_has_an_underscore() {
         assert!(slug_belongs_to(
@@ -829,8 +768,8 @@ mod tests {
         assert!(slug_belongs_to("ONE_DRIVE_CHECKIN_ITEM", "one_drive"));
         assert!(slug_belongs_to("GMAIL_SEND_EMAIL", "gmail"));
 
-        // A shorter toolkit must not claim a longer one's tools; the caller
-        // takes the longest match, but this must not even be a candidate.
+        // A shorter toolkit must not even be a candidate for a longer one's
+        // tools, before the caller's longest-match tiebreak.
         assert!(!slug_belongs_to(
             "GOOGLE_MAPS_AUTOCOMPLETE",
             "googlecalendar"
@@ -852,8 +791,7 @@ mod tests {
             json!({"slug": "GOOGLECALENDAR_CLEAR_CALENDAR", "description": "Deletes every event on a calendar"}),
             json!({"slug": "GOOGLECALENDAR_CREATE_EVENT", "description": "Creates an event"}),
         ];
-        // The live phrasing that returned nothing from Composio's own search:
-        // "netflix" matches no tool, and must not sink the terms that do.
+        // The live phrasing Composio's own search returned nothing for.
         let words = keywords("delete the netflix event from my calendar");
         let best = tools
             .iter()
@@ -898,15 +836,13 @@ mod tests {
         assert_eq!(to["description"], "recipient");
         assert!(to.get("examples").is_none(), "examples must be dropped");
         assert!(to.get("file_uploadable").is_none());
-        // The model invented calendar_id "role" because it couldn't see the
-        // documented default; defaults are model-relevant and must survive.
+        // The model invented calendar_id "role" when the default was stripped.
         assert_eq!(slim["properties"]["calendar_id"]["default"], "primary");
     }
 
     #[test]
     fn cap_never_slices_mid_utf8_char() {
-        // Byte 8000 lands inside the first crab (7999..8003) — the old byte
-        // slice panicked here.
+        // Byte 8000 lands inside the first crab — the old byte slice panicked.
         let s = "x".repeat(7999) + "🦀🦀🦀";
         let capped = cap(s);
         assert!(capped.ends_with("…(truncated)"));

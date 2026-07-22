@@ -1,36 +1,22 @@
-//! Catching the cleanup model *answering* the dictation instead of cleaning it.
+//! Catching the cleanup model *answering* the dictation instead of cleaning it:
+//! dictate "write an email to Sam about Friday" and get the email, pasted into
+//! someone's document before the user can read it.
 //!
-//! Dictate "write an email to Sam about Friday" and a model that reads the
-//! transcript as an instruction returns the email. It looks like a great
-//! response and it is the wrong text entirely — and it lands in someone's
-//! document before the user can read it.
+//! **Every constant here was tuned against real failures on real models** — the
+//! marker list, the stop words, the 0.35 overlap ratio, the preamble pattern.
+//! Each trades a missed catch against a false positive that throws away a
+//! *good* cleanup. Do not retune without the same evidence.
 //!
-//! **Ported verbatim from `appearsToHaveExecutedInstruction` in
-//! `PostProcessingService.swift`,** per the port-intent convention: the marker
-//! list, the stop words, the 0.35 overlap ratio and the assistant-preamble
-//! pattern were all tuned against real failures on real models. Every one of
-//! them trades a missed catch against a false positive that throws away a
-//! *good* cleanup, and the balance is not re-derivable from first principles.
-//! This heuristic was ported, not designed. Do not retune it without the same
-//! evidence.
-//!
-//! **What it does not catch, measured against live Groq.** Given
-//! "write an email to Sam letting him know the deploy slipped to Friday",
-//! gpt-oss-20b returned a formatted email that reuses the dictated nouns —
-//! Sam, Friday, slipped, release notes. That is a 0.62 overlap and no
-//! preamble, so the guard passes it. It catches the model *chatting back*
-//! ("Sure! Here's a draft…") and the model answering with facts the transcript
-//! never contained; it does not catch an instruction executed in the
-//! transcript's own vocabulary. Widening it means lowering [`OVERLAP_RATIO`],
-//! and the same run showed why not: a real transcript *about* writing an email
-//! sits in the same range. Left as ported.
+//! Known gap: an instruction executed in the transcript's own vocabulary
+//! (gpt-oss-20b's email reusing Sam/Friday/release notes scored 0.62 with no
+//! preamble). Lowering [`OVERLAP_RATIO`] to catch it also catches a real
+//! transcript *about* writing an email, which sits in the same range.
 
 use std::collections::HashSet;
 
 /// Words that make a transcript look like it is addressing an assistant. A
-/// transcript containing none of these is never judged, however little it
-/// overlaps its cleanup — that is what keeps an aggressive tidy-up from
-/// tripping the guard.
+/// transcript with none of these is never judged, which is what keeps an
+/// aggressive tidy-up from tripping the guard.
 const INSTRUCTION_MARKERS: &[&str] = &[
     "ask",
     "answer",
@@ -65,13 +51,9 @@ const STOP_WORDS: &[&str] = &[
     "with", "would", "you", "your",
 ];
 
-/// The Swift regex, verbatim:
-/// `(?i)^\s*(sure|certainly|absolutely|here(?:'s| is)|i(?:'d| would) be happy to|i can)\b`
-///
-/// Written out as prefixes rather than compiled: the pattern is a plain
-/// case-insensitive alternation anchored at the start, so `regex` would be a
-/// new dependency for a `starts_with` loop. The `\b` is the boundary check in
-/// [`has_assistant_preamble`].
+/// Prefixes rather than a compiled regex: an anchored case-insensitive
+/// alternation is a `starts_with` loop, not a new dependency. The pattern's
+/// `\b` is the boundary check in [`has_assistant_preamble`].
 const ASSISTANT_PREAMBLES: &[&str] = &[
     "sure",
     "certainly",
@@ -87,13 +69,11 @@ const ASSISTANT_PREAMBLES: &[&str] = &[
 /// tidied version of what was said.
 const OVERLAP_RATIO: f64 = 0.35;
 
-/// Whether `cleaned` looks like an answer to `raw` rather than a tidied copy
-/// of it.
+/// Whether `cleaned` looks like an answer to `raw` rather than a tidied copy.
 ///
-/// Returns false while translating: a translation legitimately shares almost
-/// no tokens with its source, which is exactly the signal the overlap test
-/// reads as an executed instruction. The guard would fire on every single
-/// translated dictation.
+/// False while translating: a translation shares almost no tokens with its
+/// source, which is exactly what the overlap test reads as an executed
+/// instruction, so the guard would fire on every translated dictation.
 pub fn appears_to_have_executed_instruction(
     raw: &str,
     cleaned: &str,
@@ -125,9 +105,8 @@ pub fn appears_to_have_executed_instruction(
         .count();
     let overlap_ratio = overlap as f64 / raw_tokens.len().max(1) as f64;
 
-    // The preamble has to be absent from the raw text to count. "Sure, send it
-    // Friday" is a dictation that legitimately starts that way, and its
-    // cleanup keeps the word.
+    // Absent from the raw text to count: "Sure, send it Friday" is a dictation
+    // that legitimately starts that way, and its cleanup keeps the word.
     let answered_aloud = has_assistant_preamble(cleaned) && !has_assistant_preamble(raw);
 
     answered_aloud || (!preserved_markers && overlap_ratio < OVERLAP_RATIO)
@@ -161,9 +140,8 @@ fn is_word_char(c: char) -> bool {
 mod tests {
     use super::*;
 
-    /// The failure this exists for: the transcript is an instruction, and the
-    /// model carried it out. What would have been pasted is an email nobody
-    /// asked to have written for them.
+    /// The failure this exists for: the model carried out the instruction, and
+    /// the paste would have been an email nobody asked for.
     #[test]
     fn catches_the_model_writing_the_email_it_was_asked_about() {
         let raw = "write an email to Sam letting him know the deploy slipped to \
@@ -174,8 +152,7 @@ mod tests {
         assert!(appears_to_have_executed_instruction(raw, cleaned, ""));
     }
 
-    /// No preamble at all — the model just answered. Caught by the overlap
-    /// test: none of the instruction markers survive and almost no words do.
+    /// No preamble — caught by the overlap test instead: no marker survives.
     #[test]
     fn catches_a_bare_answer_with_no_preamble() {
         let raw = "summarize the quarterly numbers for the board deck and tell me \
@@ -185,9 +162,8 @@ mod tests {
         assert!(appears_to_have_executed_instruction(raw, cleaned, ""));
     }
 
-    /// The one that must not fire. Dictation *about* writing an email is the
-    /// most common transcript containing "write" and "email", and its cleanup
-    /// keeps every word that matters.
+    /// The false positive that matters: dictation *about* writing an email is
+    /// the most common transcript containing "write" and "email".
     #[test]
     fn leaves_a_normal_dictation_about_writing_an_email_alone() {
         let raw = "um so I was going to write an email to Sam about the deploy but \
@@ -197,8 +173,7 @@ mod tests {
         assert!(!appears_to_have_executed_instruction(raw, cleaned, ""));
     }
 
-    /// A transcript with no instruction marker is never judged, however hard
-    /// the cleanup rewrote it — otherwise heavy filler removal trips the guard.
+    /// Never judged without a marker, or heavy filler removal trips the guard.
     #[test]
     fn a_transcript_with_no_marker_is_never_judged() {
         let raw = "um yeah so like the uh thing with the uh Friday thing you know";
@@ -206,8 +181,8 @@ mod tests {
         assert!(!appears_to_have_executed_instruction(raw, cleaned, ""));
     }
 
-    /// Translating rewrites every word by design. Left on, the guard fired on
-    /// every translated dictation and pasted the untranslated transcript.
+    /// Regression: left on, the guard fired on every translated dictation and
+    /// pasted the untranslated transcript.
     #[test]
     fn the_guard_self_disables_while_translating() {
         let raw = "write an email to Sam letting him know the deploy slipped to Friday";
@@ -223,8 +198,8 @@ mod tests {
         );
     }
 
-    /// A dictation that genuinely opens with "Sure," keeps it through cleanup.
-    /// Reading that as a preamble throws away a correct result.
+    /// Reading a "Sure," the user actually said as a preamble throws away a
+    /// correct result.
     #[test]
     fn a_preamble_already_in_the_raw_transcript_is_not_the_models() {
         let raw = "sure tell Sam we can ship it Friday if the tests pass";

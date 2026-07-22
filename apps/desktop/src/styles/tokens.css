@@ -1,15 +1,8 @@
-/* The palette. Every colour in the app resolves here — if a value is not in
- * this file, it should not exist in a component.
+/* The palette, loaded by all four windows. A colour not in this file should
+ * not exist in a component.
  *
- * Loaded by all four windows (main, overlay, ask, agent). Before this file the
- * palette lived in App.css, which only the main window imported, so panel and
- * overlay code re-hardcoded the same hexes and `var(--warning)` silently
- * resolved to nothing in the agent panel.
- *
- * Two tiers, and the distinction matters when adding a colour:
- *   - RAW values (this file) are the macOS system palette.
- *   - SEMANTIC names say what a colour is *for*. Components use only these,
- *     so a re-theme is an edit here rather than a sweep through the tree.
+ * Two tiers: RAW macOS system colours, then SEMANTIC names saying what a
+ * colour is *for*. Components use only the semantic tier.
  */
 
 :root {
@@ -25,18 +18,13 @@
   --sys-grey: #8e8e93;
 
   /* --- Surfaces --------------------------------------------------------- */
-  /* Window canvas. Grouped lists sit on it, so it is never pure white. */
-  --bg: #ececee;
-  /* Cards are deliberately SOLID: the window vibrancy showing through a
-     grouped list washes out the hairlines the design is made of. */
+  --bg: #ececee; /* window canvas; grouped lists sit on it, never pure white */
+  /* Solid, not vibrant: vibrancy through a grouped list washes out hairlines. */
   --card-solid: #ffffff;
   --card-border: rgb(0 0 0 / 0.05);
-  /* Hairline between rows inside a card. */
-  --sep: rgb(60 60 67 / 0.13);
-  /* Filled input wells, inactive toggle tracks, secondary buttons. */
-  --field: rgb(0 0 0 / 0.05);
-  /* Row hover tint. Accent-derived so it reads as selection, not grey. */
-  --hover: rgb(0 122 255 / 0.05);
+  --sep: rgb(60 60 67 / 0.13); /* hairline between rows inside a card */
+  --field: rgb(0 0 0 / 0.05); /* input wells, toggle tracks, secondary buttons */
+  --hover: rgb(0 122 255 / 0.05); /* accent-derived, so it reads as selection */
 
   /* --- Text ------------------------------------------------------------- */
   --fg: #1c1c1e;
@@ -89,9 +77,8 @@
     --sys-red: #ff453a;
     --sys-teal: #64d2ff;
     --sys-purple: #bf5af2;
-    /* The rest of the system palette. Only used as tints (sidebar icons,
-       Timings bars), which is why they went unnoticed as missing — a
-       light-mode indigo on a #2c2c2e card is the muddiest of the set. */
+    /* Tint-only colours (sidebar icons, Timings bars); the light-mode indigo
+       is unreadably muddy on a #2c2c2e card. */
     --sys-orange: #ff9f0a;
     --sys-pink: #ff375f;
     --sys-indigo: #5e5ce6;
@@ -117,10 +104,8 @@
   }
 }
 
-/* Panel and overlay windows are always dark: they float over the user's
-   desktop rather than sitting in the app's own window, so they cannot follow
-   the app appearance without looking like a hole in the screen. Scoped by
-   attribute rather than a second file, so the token list stays in one place. */
+/* Panel and overlay windows are always dark: they float over the desktop, so
+   following the app appearance would read as a hole in the screen. */
 :root[data-surface="floating"] {
   color-scheme: dark;
 
@@ -134,40 +119,26 @@
   --sep: rgb(255 255 255 / 0.1);
   --field: rgb(255 255 255 / 0.06);
 
-  /* Always dark, so it needs the dark warning even when the OS is in light
-     mode — the light amber (#b45309) is near-invisible on this backdrop. */
+  /* Dark values even under a light OS — light amber (#b45309) is invisible here. */
   --sys-blue: #0a84ff;
   --sys-green: #30d158;
   --sys-red: #ff453a;
   --warning: #fbbf24;
   --warning-bg: #422006;
 
-  /* The overlay's two colours. Both surfaces are opaque black welded to the
-     cutout, so this is the whole palette they need — the rim, fill and shadow
-     tokens that used to sit here described the glass capsule, which is gone.
-     Pure black, because the cutout is #000 and anything else reads as a seam. */
+  /* The overlay's whole palette: opaque black welded to the notch cutout, so
+     the fill must be pure #000 or the seam shows. */
   --pill-ink: #f5f5f7;
   --notch-fill: #000;
 }
 
-/* macOS Accessibility → "Reduce transparency".
- *
- * Most of this app's surfaces are deliberately translucent so the native
- * vibrancy shows through, and the recording pill is glass over the live
- * desktop. That is precisely what this setting exists to switch off: for a
- * user who has asked for it, text over a moving blurred backdrop is the
- * problem, not the feature.
- *
- * Handled here in the palette rather than per-component, so a surface that
- * gets its colour from a token is covered without knowing this exists. The
- * blurs themselves are dropped alongside their colours (overlay.css).
+/* macOS Accessibility → "Reduce transparency". Handled in the palette so any
+ * surface coloured from a token is covered; blurs drop in overlay.css.
  */
 @media (prefers-reduced-transparency: reduce) {
   :root {
     --bg: #f2f2f4;
   }
 
-  /* The overlay is deliberately absent here: both its surfaces are already
-     opaque black, so there is no translucency for "Reduce transparency" to
-     take away. The rule that used to sit here made the glass capsule opaque. */
+  /* The overlay needs nothing here — both its surfaces are already opaque. */
 }
