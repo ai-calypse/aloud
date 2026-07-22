@@ -1,8 +1,6 @@
-//! Ambient meeting capture, ported from `MeetingNotesService.swift`.
-//!
-//! Records the mic continuously, transcribes rolling ~60s chunks in the
-//! background, and on stop turns the running transcript into structured
-//! markdown notes saved to the notes directory.
+//! Ambient meeting capture: records the mic continuously, transcribes rolling
+//! ~60s chunks in the background, and on stop turns the running transcript into
+//! markdown notes.
 //!
 //! ponytail: mic-only, as in the Swift app — remote participants are heard
 //! only through the speakers the mic picks up. A system-audio tap is the
@@ -29,21 +27,16 @@ pub struct Meeting {
     recorder: aloud_audio::Recorder,
     chunker: Arc<Mutex<aloud_audio::Chunker>>,
     settings: Settings,
-    /// Chunks go to the worker as they fill. Dropping this closes the channel,
-    /// which is how the worker learns the meeting is over.
+    /// Dropping this closes the channel, which is how the worker learns the
+    /// meeting is over.
     tx: Option<mpsc::UnboundedSender<(usize, Vec<u8>)>>,
-    /// The background transcriber, joined on stop.
     worker: tauri::async_runtime::JoinHandle<Vec<(usize, String)>>,
-    /// When capture began, so elapsed time is one subtraction rather than a
-    /// counter the frontend and the tray could disagree about.
     started_at: Instant,
-    /// Words transcribed so far, written by the worker as each chunk lands.
-    /// Shared rather than returned because the window can open mid-meeting and
-    /// has to be told the total without waiting for the next chunk.
+    /// Shared rather than returned: a window opening mid-meeting has to be told
+    /// the total without waiting for the next chunk.
     words: Arc<AtomicU32>,
-    /// Set the moment `stop` begins, so the worker stops announcing
-    /// `Recording`. Without it the tail chunk's emit lands *after* `Saving`
-    /// and the UI re-arms mid-save — see the comment on the emit itself.
+    /// Set before `stop` emits `Saving`, so the tail chunk's emit cannot land
+    /// after it and re-arm the UI mid-save — see the emit itself.
     stopping: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -51,8 +44,8 @@ pub struct Meeting {
 #[serde(tag = "phase", rename_all = "camelCase")]
 #[tauri_specta(event_name = "meeting-phase")]
 pub enum MeetingPhase {
-    /// Re-emitted as each chunk finishes, roughly once a minute, so the
-    /// readout re-syncs instead of drifting off a single start event.
+    /// Re-emitted as each chunk finishes so the readout re-syncs instead of
+    /// drifting off a single start event.
     #[serde(rename_all = "camelCase")]
     Recording {
         elapsed_secs: u32,
@@ -63,7 +56,6 @@ pub enum MeetingPhase {
 }
 
 impl Meeting {
-    /// The live readout for a running meeting.
     pub fn phase(&self) -> MeetingPhase {
         MeetingPhase::Recording {
             elapsed_secs: self.started_at.elapsed().as_secs() as u32,
@@ -89,8 +81,6 @@ impl Meeting {
             stopping.clone(),
         ));
 
-        // The realtime tap hands us 24 kHz PCM16 as it arrives; accumulate it
-        // and hand off a chunk every 60 seconds.
         let tap_chunker = chunker.clone();
         let tap_tx = tx.clone();
         let recorder = aloud_audio::Recorder::start(
@@ -98,7 +88,7 @@ impl Meeting {
             Some(Box::new(move |bytes: Vec<u8>| {
                 if let Ok(mut chunker) = tap_chunker.lock() {
                     // Send, never transcribe, on this thread: the tap thread
-                    // must never block. An unbounded channel cannot back up.
+                    // must never block.
                     for chunk in chunker.push(&bytes) {
                         let _ = tap_tx.send(chunk);
                     }
@@ -147,9 +137,7 @@ impl Meeting {
         // Stop capture first, so no further chunks can be queued behind us.
         let _ = recorder.stop();
 
-        // Send the trailing audio as a final chunk if it is long enough to be
-        // worth transcribing, then close the channel: that is the worker's
-        // signal to finish what it has and return.
+        // Closing the channel is the worker's signal to finish and return.
         let (tail_index, tail) = chunker.lock().unwrap().take_tail();
         if let Some(tx) = &tx {
             if tail.len() >= MIN_FINAL_CHUNK_BYTES {
@@ -158,8 +146,6 @@ impl Meeting {
         }
         drop(tx);
 
-        // Most chunks are already transcribed; this waits only on whatever was
-        // still in flight, rather than on the whole meeting.
         let done = worker.await.unwrap_or_default();
         let transcript = aloud_meeting::assemble(&aloud_meeting::in_order(done));
         let (markdown, title) = aloud_meeting::notes(model_of(&settings), &transcript).await;
@@ -171,7 +157,6 @@ impl Meeting {
     }
 }
 
-/// The model settings the notes summary runs against.
 fn model_of(settings: &Settings) -> aloud_meeting::Model<'_> {
     aloud_meeting::Model {
         api_key: &settings.groq_api_key,
@@ -181,11 +166,9 @@ fn model_of(settings: &Settings) -> aloud_meeting::Model<'_> {
     }
 }
 
-/// Transcribes chunks as they arrive, returning what it got, indexed.
-///
-/// Runs for the life of the meeting and ends when the channel closes. A failed
-/// chunk is reported in place rather than dropped: a gap in the middle of a
-/// transcript should be visible, not silently closed up.
+/// Transcribes chunks as they arrive, returning what it got, indexed. A failed
+/// chunk is reported in place rather than dropped: a gap in a transcript should
+/// be visible, not silently closed up.
 async fn transcribe_chunks(
     app: AppHandle,
     settings: Settings,
@@ -212,10 +195,6 @@ async fn transcribe_chunks(
         let Some(t) = transcriber.as_deref() else {
             continue;
         };
-        // Staging the chunk as a WAV lives in `aloud_transcribe::stream` now,
-        // shared with the dictation path — a chunk and a whole recording are
-        // the same thing to a `Transcriber`, and there is no reason for two
-        // copies of the code that says so.
         match aloud_transcribe::preview::transcribe_pcm16(t, &chunk).await {
             Ok(text) if !text.trim().is_empty() => segments.push((index, text)),
             Ok(_) => segments.push((index, "[inaudible]".to_string())),
@@ -225,11 +204,8 @@ async fn transcribe_chunks(
             }
         }
 
-        // Counted off the segments, not the assembled transcript — see
-        // `aloud_meeting::word_count`. Summed incrementally rather than
-        // recomputed: the previous version cloned every transcript string on
-        // every chunk, so a two-hour meeting deep-copied a growing Vec 120
-        // times for a number that is a running total.
+        // Summed incrementally rather than recomputed off the assembled
+        // transcript, which cloned every segment on every chunk.
         let counted = words.fetch_add(
             segments
                 .last()
@@ -239,13 +215,9 @@ async fn transcribe_chunks(
             .last()
             .map_or(0, |(_, text)| text.split_whitespace().count() as u32);
 
-        // Not while stopping. `stop` emits `Saving` and *then* sends the tail
-        // chunk, so this emit would land after it and flip the UI back to
-        // "recording" for the whole summarisation — where the still-enabled
-        // "Stop and Save" button opens a brand-new meeting, because `stop`
-        // has already taken the session out of the slot. The tail is long
-        // enough to be sent on almost every meeting, so this is the common
-        // path, not an edge.
+        // `stop` emits `Saving` and *then* sends the tail chunk, so without
+        // this the UI flips back to "recording" for the whole summarisation and
+        // its "Stop and Save" button opens a brand-new meeting.
         if stopping.load(Ordering::Relaxed) {
             continue;
         }

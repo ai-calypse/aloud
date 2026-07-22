@@ -1,7 +1,4 @@
 //! Sample-rate conversion and channel downmixing.
-//!
-//! The Swift app leaned on `AVAudioConverter` for this; cpal hands us raw
-//! frames at whatever rate the device runs, so we do it ourselves.
 
 use anyhow::Result;
 use rubato::{FastFixedIn, PolynomialDegree, Resampler};
@@ -20,10 +17,9 @@ pub fn to_mono(interleaved: &[f32], channels: u16) -> Vec<f32> {
 
 /// Resamples mono f32 from `from_rate` to `to_rate`.
 ///
-/// Fixed-size chunks in, zero-padded tail, trimmed to the exact expected
-/// length so duration is preserved. `FastFixedIn` (polynomial, no FFT) is used
-/// deliberately: the FFT resamplers buffer internally and emit nothing for the
-/// first chunk, which silently produced empty output for short utterances.
+/// `FastFixedIn` (polynomial, no FFT) deliberately: the FFT resamplers buffer
+/// internally and emit nothing for the first chunk, silently producing empty
+/// output for short utterances.
 pub fn resample_mono(input: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>> {
     if from_rate == to_rate || input.is_empty() {
         return Ok(input.to_vec());
@@ -110,10 +106,8 @@ mod tests {
         assert_eq!(out.len(), 2400);
     }
 
-    /// The real capture path: 48 kHz device -> 16 kHz transcription WAV, at a
-    /// length that does not divide evenly into the resampler's chunk size.
-    /// A one-shot `process()` call silently returned zero samples here and
-    /// wrote empty WAVs.
+    /// Regression: a one-shot `process()` returned zero samples for lengths
+    /// that do not divide into the chunk size, writing empty WAVs.
     #[test]
     fn resample_48k_to_16k_keeps_audio() {
         let input: Vec<f32> = (0..95_744).map(|i| (i as f32 / 50.0).sin()).collect();

@@ -3,14 +3,8 @@
 //! The model is given the tools the user has actually connected and decides
 //! which to call; Composio owns the OAuth and the API surface behind them.
 //!
-//! An earlier design shipped alongside this one — a universal action schema, a
-//! per-service `Connector` trait, an intent parser, and a dispatcher — on the
-//! assumption that each service would need hand-written support. Composio made
-//! all of it unreachable, so it was deleted rather than left to rot; `git log`
-//! has it if per-service connectors are ever wanted again.
-//!
-//! The design principle survives both: an action never fires without explicit
-//! approval, and every write requires confirmation.
+//! The invariant throughout: an action never fires without explicit approval,
+//! and every write requires confirmation.
 
 pub mod cache;
 pub mod composio;
@@ -20,11 +14,9 @@ pub use cache::ResponseCache;
 pub use composio::{toolkit_of_slug, ComposioClient, ToolDef, Toolkit, TOOLS_PER_TOOLKIT};
 pub use tool_loop::{run as run_tool_loop, LoopEvent};
 
-/// Whether a command is an agent request or plain dictation.
-///
-/// Task 3: agent mode is entered explicitly, not inferred from content — a
-/// dedicated hotkey, or the spoken trigger below as a convenience. Mirrors the
-/// ask-trigger design so "hey flow" and "hey agent" feel consistent.
+/// Whether a command is an agent request or plain dictation. Agent mode is
+/// entered explicitly, never inferred from content — a dedicated hotkey, or
+/// these spoken triggers as a convenience.
 pub fn command_from_trigger(transcript: &str) -> Option<String> {
     const TRIGGERS: &[&[&[&str]]] = &[&[&["hey"], &["agent", "agents"]], &[&["do"], &["this"]]];
     aloud_llm::trigger::after_trigger(transcript, TRIGGERS)

@@ -4,12 +4,8 @@ import type { ToolArgs } from "./tool-views";
 /**
  * One tool call in a run, with everything the panel shows about it.
  *
- * A run can make several calls — "send this and draft a reply" is two — and
- * they resolve one at a time. The panel used to keep a single call and a
- * single result for the whole run, which meant the second call inherited the
- * first one's result and its confirmation gate never rendered: the write sat
- * waiting on a button that was never drawn. Steps are a list for that reason,
- * not for looks.
+ * A list, not one call per run: with a single call and result, the second call
+ * inherited the first's result and its confirmation gate never rendered.
  */
 export type Step = {
   name: string;
@@ -25,13 +21,7 @@ export type Step = {
 export type Run = {
   heard: string;
   steps: Step[];
-  /**
-   * Tools this round intends to call that have not started yet.
-   *
-   * The model returns a batch and the loop runs it one at a time, so this is
-   * what is coming rather than what has happened. Entries leave as their call
-   * starts — see `withoutPlanned`.
-   */
+  /** Calls this round has not started yet; each leaves as its call starts. */
   planned?: PlannedCall[];
   finished?: string;
   error?: string;
@@ -47,11 +37,9 @@ function asArgs(value: unknown): ToolArgs {
 }
 
 /**
- * Folds a tool-call event into the step list.
- *
- * Rust emits two events per call: the start, then — for a write — the same
- * call again with `requiresConfirmation`. Both name the same tool, so the
- * second updates the open step rather than appending a duplicate.
+ * Folds a tool-call event into the step list. Rust emits two events per write —
+ * the start, then the same call with `requiresConfirmation` — so the second
+ * updates the open step rather than appending a duplicate.
  */
 export function withCall(steps: Step[], call: ToolCall): Step[] {
   const open = steps.length > 0 ? steps[steps.length - 1] : undefined;
@@ -77,10 +65,8 @@ export function withCall(steps: Step[], call: ToolCall): Step[] {
 }
 
 /**
- * Drops the first queued entry for `name`, because that call has now started.
- *
- * By name and only the first, so a round that calls the same tool twice — two
- * emails to two people — ticks off one of them per start rather than both.
+ * Drops the first queued entry for `name`, and only the first, so a round that
+ * calls the same tool twice ticks off one per start rather than both.
  */
 export function withoutPlanned(
   planned: PlannedCall[] | undefined,

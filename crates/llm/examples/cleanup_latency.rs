@@ -1,12 +1,9 @@
 //! Measures what a dictation actually waits for on the cleanup stage.
 //!
-//! Two things are being proven here, both of which unit tests cannot show:
-//!
-//! 1. **Connection reuse.** `LlmClient` is constructed per request, so before
-//!    the pool was made process-wide every dictation paid a fresh TCP+TLS
-//!    handshake. Run 1 pays it; runs 2+ must not.
-//! 2. **Reasoning tokens.** The default cleanup model reasons unless told not
-//!    to, and cleanup is a deterministic rewrite with nothing to reason about.
+//! Two things unit tests cannot show: connection reuse (a per-request
+//! `LlmClient` paid a fresh TCP+TLS handshake every dictation before the pool
+//! was process-wide — run 1 pays it, runs 2+ must not), and reasoning tokens
+//! (the default cleanup model reasons unless told not to).
 //!
 //!   GROQ_API_KEY=... cargo run -p aloud-llm --example cleanup_latency
 //!
@@ -56,10 +53,9 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Reported as a spread, not a single number: server-side variance is large
-    // enough that any one run proves nothing. Compare the *mean across runs*
-    // between two builds — trying to read the handshake off run 1 alone does
-    // not work, because a slow completion swamps the ~80ms it costs.
+    // A spread, not one number: server variance means any single run proves
+    // nothing. Compare the mean between builds — run 1 alone cannot show the
+    // handshake, because a slow completion swamps the ~80ms it costs.
     let mut ms: Vec<u128> = timings.iter().map(|d| d.as_millis()).collect();
     let mean = ms.iter().sum::<u128>() / ms.len() as u128;
     ms.sort_unstable();

@@ -1,12 +1,8 @@
-//! Microphone capture, ported from `AudioRecorder.swift`.
+//! Microphone capture via cpal (CoreAudio / WASAPI).
 //!
-//! cpal replaces `AVCaptureSession`, so it works on CoreAudio (macOS) and
-//! WASAPI (Windows) alike. Capture runs at the device's native rate and is
-//! converted on stop:
-//!
-//! - a 16 kHz mono PCM16 WAV file for upload-based transcription
-//! - 24 kHz mono PCM16 chunks for the realtime tap, matching the rate the
-//!   Swift app streamed to OpenAI Realtime
+//! Capture runs at the device's native rate and is converted on stop: a 16 kHz
+//! mono PCM16 WAV for upload-based transcription, 24 kHz mono PCM16 chunks for
+//! the realtime tap.
 
 pub mod resample;
 
@@ -32,8 +28,8 @@ pub struct AudioDevice {
     pub name: String,
 }
 
-/// Every input device, sorted by name. Deduplicated by id — the Swift version
-/// had to do the same, as macOS can list one physical mic more than once.
+/// Every input device, sorted by name. Deduplicated by id: macOS can list one
+/// physical mic more than once.
 pub fn input_devices() -> Result<Vec<AudioDevice>> {
     let host = cpal::default_host();
     let mut devices: Vec<AudioDevice> = host
@@ -53,7 +49,7 @@ pub fn input_devices() -> Result<Vec<AudioDevice>> {
     Ok(devices)
 }
 
-/// The requested device, falling back to the system default when it's absent
+/// The requested device, falling back to the system default when it is absent
 /// (unplugged since the user picked it) or when `id` is None.
 fn resolve_device(id: Option<&str>) -> Result<cpal::Device> {
     let host = cpal::default_host();
@@ -80,9 +76,8 @@ pub struct Recorder {
 impl Recorder {
     /// Opens `device_id` (or the default mic) and starts capturing.
     ///
-    /// `on_pcm16` receives 24 kHz mono PCM16 chunks as they arrive, for the
-    /// realtime transcription path. It runs on the audio callback thread, so
-    /// it must not block.
+    /// `on_pcm16` receives 24 kHz mono PCM16 chunks for the realtime path. It
+    /// runs on the audio callback thread, so it must not block.
     pub fn start(
         device_id: Option<&str>,
         on_pcm16: Option<Box<dyn FnMut(Vec<u8>) + Send>>,
@@ -169,15 +164,14 @@ impl Recorder {
         })
     }
 
-    /// Stops capture and writes a 16 kHz mono PCM16 WAV to `path`.
-    /// The current input level, 0.0–1.0, for the recording overlay's waveform.
-    ///
-    /// Shared with the audio callback: the returned handle stays live only as
-    /// long as this `Recorder`, which is how the meter task knows to stop.
+    /// Current input level, 0.0–1.0, for the overlay's waveform. The handle
+    /// stays live only as long as this `Recorder` — how the meter task knows
+    /// to stop.
     pub fn level_handle(&self) -> Arc<AtomicU32> {
         self.level.clone()
     }
 
+    /// Stops capture and writes a 16 kHz mono PCM16 WAV to `path`.
     pub fn stop_to_wav(self, path: &Path) -> Result<()> {
         let samples = self.take_samples()?;
         if samples.is_empty() {
@@ -208,17 +202,9 @@ impl Recorder {
     }
 }
 
-/// Perceived loudness of a block, 0.0–1.0.
-///
-/// RMS rather than peak: peak jumps on a single click and reads as a spike,
-/// where RMS tracks how loud speech actually sounds.
-///
-/// The square root matters more than the gain. Loudness is perceived roughly
-/// logarithmically, so a linear scale spends most of its range on volumes
-/// nobody produces: ordinary speech sits near RMS 0.05, which `rms * 4` maps
-/// to 0.2 — a meter that looks broken until you shout at it. The curve lifts
-/// that to 0.45 and still leaves headroom, so the pill responds to a normal
-/// speaking voice.
+/// Perceived loudness of a block, 0.0–1.0. RMS not peak (a click reads as a
+/// spike), and the sqrt curve is the tuning that matters: speech sits near RMS
+/// 0.05, which `rms * 4` alone maps to a dead-looking 0.2, the curve to 0.45.
 pub fn loudness(samples: &[f32]) -> f32 {
     if samples.is_empty() {
         return 0.0;
@@ -245,11 +231,9 @@ pub fn write_wav(path: &Path, samples: &[f32], rate: u32) -> Result<()> {
     Ok(())
 }
 
-/// Writes raw realtime-tap bytes (24 kHz mono PCM16) as a 16 kHz WAV.
-///
-/// The rate change is the point, not a detail: the transcriber contract is
-/// 16 kHz mono, and local whisper hard-rejects anything else. Handing it the
-/// tap's native 24 kHz silently dropped every chunk it was given.
+/// Writes raw realtime-tap bytes (24 kHz mono PCM16) as a 16 kHz WAV. The rate
+/// change is the point: local whisper hard-rejects anything but 16 kHz mono and
+/// silently dropped every chunk handed to it at the tap's native 24 kHz.
 pub fn write_pcm16_wav(path: &Path, pcm16: &[u8]) -> Result<()> {
     let samples: Vec<f32> = pcm16
         .chunks_exact(2)
@@ -261,11 +245,8 @@ pub fn write_pcm16_wav(path: &Path, pcm16: &[u8]) -> Result<()> {
 
 /// Cuts a continuous byte stream into fixed-size chunks, numbered in order.
 ///
-/// The realtime tap delivers whatever the OS hands it — buffer sizes vary by
-/// device and are never a whole chunk — so the leftover has to be carried
-/// across calls. Each chunk carries its index because chunks are transcribed
-/// concurrently and finish out of order; the index is the only thing that puts
-/// a meeting's timeline back together.
+/// Tap buffers are never a whole chunk, so the leftover is carried across
+/// calls. The index is what reorders chunks transcribed concurrently.
 #[derive(Debug)]
 pub struct Chunker {
     pending: Vec<u8>,
@@ -282,12 +263,9 @@ impl Chunker {
         }
     }
 
-    /// Adds bytes and returns every whole chunk they completed.
-    ///
-    /// Returns a Vec rather than an Option: one oversized buffer can complete
-    /// more than one chunk, and returning only the first would strand the rest
-    /// in `pending` until the next call — which, at the end of a meeting,
-    /// means losing them.
+    /// Adds bytes and returns every whole chunk they completed. A Vec, not an
+    /// Option: one buffer can complete several chunks and stranding the rest in
+    /// `pending` loses them at the end of a meeting.
     pub fn push(&mut self, bytes: &[u8]) -> Vec<(usize, Vec<u8>)> {
         self.pending.extend_from_slice(bytes);
         let mut chunks = Vec::new();
@@ -310,8 +288,7 @@ impl Chunker {
 mod tests {
     use super::*;
 
-    /// The tap hands over arbitrary buffer sizes, so the leftover must survive
-    /// between calls. Dropping it loses audio; double-counting it repeats it.
+    /// Dropping the leftover loses audio; double-counting it repeats it.
     #[test]
     fn chunker_carries_the_remainder_across_pushes() {
         let mut chunker = Chunker::new(10);
@@ -327,9 +304,7 @@ mod tests {
         assert_eq!(chunker.take_tail(), (1, vec![0; 2]));
     }
 
-    /// One oversized buffer can complete several chunks. Emitting only the
-    /// first would strand the rest until the next push — at the end of a
-    /// meeting, that means losing them.
+    /// Emitting only the first chunk strands the rest — lost at meeting end.
     #[test]
     fn chunker_emits_every_chunk_a_single_push_completes() {
         let mut chunker = Chunker::new(4);
@@ -343,8 +318,7 @@ mod tests {
         assert_eq!(chunker.take_tail(), (3, vec![7; 2]));
     }
 
-    /// An exact multiple must not leave a phantom empty tail behind, and must
-    /// not consume the boundary byte twice.
+    /// An exact multiple must not double-consume the boundary byte.
     #[test]
     fn chunker_handles_an_exact_multiple() {
         let mut chunker = Chunker::new(8);
@@ -360,8 +334,8 @@ mod tests {
         assert_eq!(chunks[1].1, vec![5, 6, 7, 8]);
     }
 
-    /// The staged chunk WAV must be 16 kHz mono — local whisper hard-rejects
-    /// the tap's native 24 kHz, which silently dropped every meeting chunk.
+    /// Regression: local whisper silently dropped every chunk staged at the
+    /// tap's native 24 kHz. Staged WAVs must be 16 kHz mono.
     #[test]
     fn pcm16_wav_is_16k_mono_and_not_silent() {
         let rate = REALTIME_RATE as usize;
@@ -385,18 +359,14 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// The overlay's waveform is only honest if this tracks real input:
-    /// silence must read near zero and speech must not peg the meter.
+    /// Guards the gain curve: silence reads zero, speech lands mid-range.
     #[test]
     fn loudness_separates_silence_from_speech() {
         assert_eq!(loudness(&[]), 0.0);
         assert_eq!(loudness(&[0.0; 512]), 0.0);
 
-        // Ordinary speech must land in the visibly-moving middle of the
-        // range, not down near the floor where the meter looks dead.
         let speech = loudness(&[0.05; 512]);
         assert!(speech > 0.35 && speech < 0.75, "got {speech}");
-        // Louder speech is still distinguishable, not already pegged.
         assert!(loudness(&[0.1; 512]) > speech);
         assert_eq!(loudness(&[1.0; 512]), 1.0);
         assert!(loudness(&[-0.5; 512]) > 0.0, "sign must not matter");
@@ -416,7 +386,7 @@ mod tests {
         assert_eq!(reader.len() as usize, samples.len());
     }
 
-    /// Device enumeration must not error even on a machine with no mic (CI).
+    /// Must not error on a machine with no mic (CI).
     #[test]
     fn input_devices_does_not_error() {
         assert!(input_devices().is_ok());

@@ -13,18 +13,12 @@ import { Caption, PaneTitle, Surface } from "@/components/ui/rows";
 import { cn } from "@/lib/utils";
 
 /**
- * Connectors: the services the agent can act through, as one list of services
- * rather than a catalogue of tool names.
+ * The services the agent can act through, listed from Composio at runtime so a
+ * newly connected service needs no release.
  *
- * Everything here comes from Composio at runtime rather than a hardcoded list,
- * so connecting a new service in the browser makes its tools available to the
- * agent without a release.
- *
- * Deliberately says nothing about individual tools. Selection is per command —
- * every tool in a connected toolkit is a candidate on every request — so any
- * list shown here would be a sample masquerading as a promise. Listing services
- * is the honest granularity, and it costs one request instead of one per
- * connected service.
+ * Deliberately says nothing about individual tools: every tool in a connected
+ * toolkit is a candidate on every request, so any list here would be a sample
+ * masquerading as a promise — and it costs one request, not one per service.
  */
 
 type Filter = "all" | "connected" | "available";
@@ -47,13 +41,9 @@ export function ConnectorEditor() {
   const [filter, setFilter] = useState<Filter>("all");
   /** The connector awaiting a disconnect confirmation, if any. */
   const [confirming, setConfirming] = useState<Connector | null>(null);
-  /**
-   * Slugs the user has disconnected, held until Composio agrees.
-   *
-   * A DELETE followed straight away by a GET can still report the account as
-   * ACTIVE, which would flip the row back to connected a second after the user
-   * disconnected it — the same confusion the optimistic update exists to avoid.
-   */
+  /** Slugs the user has disconnected, held until Composio agrees: a DELETE
+      followed straight away by a GET can still report the account ACTIVE, and
+      the row would flip back to connected a second later. */
   const [disconnected, setDisconnected] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(async () => {
@@ -81,8 +71,7 @@ export function ConnectorEditor() {
     // come back to this window.
     window.addEventListener("focus", refresh);
     // `refresh` answers from cache and revalidates behind it, so the fresh
-    // list arrives here rather than as the return value. Without this listener
-    // a service connected in the browser would never appear.
+    // list arrives on this event rather than as the return value.
     const unlisten = events.connectorsUpdated.listen(({ payload }) => {
       setError(null);
       setConnected(payload);
@@ -120,17 +109,14 @@ export function ConnectorEditor() {
       return;
     }
 
-    // Flip the row here rather than waiting for the refetch below. Disconnect
-    // clears the backend cache, so that refetch is the cold path — a full
-    // Composio round-trip during which the row would otherwise keep its tick
-    // and read as "nothing happened".
+    // Disconnect clears the backend cache, so the refetch below is a full cold
+    // round-trip; without this the row keeps its tick throughout.
     setDisconnected((prev) => new Set(prev).add(connector.slug));
     refresh();
   }
 
-  // One list: connected services first, then whatever the search offers. The
-  // connected copy wins on slug, since only it carries the connectionId needed
-  // to disconnect.
+  // Connected first, then search results. The connected copy wins on slug —
+  // only it carries the connectionId needed to disconnect.
   const rows = useMemo(() => {
     const mine = (connected ?? []).map((c) =>
       disconnected.has(c.slug)
@@ -144,12 +130,9 @@ export function ConnectorEditor() {
     return merged;
   }, [connected, results, filter, disconnected]);
 
-  // Only while browsing: once the user types, they want the table, not a
-  // shortlist chosen for them. Hidden under "Connected" for the same reason.
-  //
-  // Drawn from the catalogue, never from the user's own list: promoting a
-  // just-disconnected service into a "Popular" card would yank the row the
-  // user was looking at out of the table and into a promo strip.
+  // Only while browsing, and drawn from the catalogue rather than the user's
+  // own list: promoting a just-disconnected service into a Popular card would
+  // yank the row the user was looking at out of the table.
   const mineSlugs = new Set((connected ?? []).map((c) => c.slug));
   const browsing = !query.trim() && filter !== "connected";
   const popular = browsing
@@ -206,8 +189,8 @@ export function ConnectorEditor() {
                 className="flex items-center gap-2 p-2.5"
               >
                 <Logo connector={c} small />
-                {/* Three-up in a 686px pane, so a long name ellipsizes —
-                    the title keeps it recoverable. */}
+                {/* Three-up in a 686px pane: long names ellipsize, so the
+                    title attribute keeps them recoverable. */}
                 <span
                   title={c.name}
                   className="min-w-0 flex-1 truncate text-ui font-medium"
@@ -294,8 +277,8 @@ export function ConnectorEditor() {
         this window when you are done and the connector appears here.
       </p>
 
-      {/* Disconnecting revokes the account and cannot be undone from here —
-          reconnecting means going through OAuth again. */}
+      {/* Confirmed because disconnecting revokes the account: reconnecting
+          means going through OAuth again. */}
       <Dialog
         open={confirming !== null}
         onOpenChange={(open) => !open && setConfirming(null)}
@@ -358,7 +341,6 @@ function Logo({
   small,
 }: {
   connector: Connector;
-  /** Three cards share one row in a 686px pane; every pixel goes to the name. */
   small?: boolean;
 }) {
   const [failed, setFailed] = useState(false);

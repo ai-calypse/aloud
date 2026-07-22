@@ -38,11 +38,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-/**
- * The wings overlay is macOS-only (no menu bar to weld to on Windows), and the
- * backend forces the pill there regardless — so the row is hidden rather than
- * offering a choice that does nothing.
- */
+/** The wings overlay is macOS-only, and the backend forces the pill on Windows
+ * regardless — the row is hidden rather than offering a dead choice. */
 const IS_MAC = navigator.userAgent.includes("Mac");
 
 /** The `named:` prefix keeps a monitor called "primary" from colliding. */
@@ -68,49 +65,37 @@ export type SettingsSection =
   /** Behind `developer_tools`; the sidebar hides the row when it is off. */
   | "debug";
 
-/**
- * Settings forms bound to the Rust `Settings` struct, laid out as macOS System
- * Settings grouped lists: an uppercase caption over a solid card of
- * hairline-separated rows, label left and control right.
- *
- * The Swift app had seven tabs over ~70 UserDefaults keys. This is the subset
- * that exists so far; the rest arrive with the features they configure. Which
- * pane shows is driven by the app-level sidebar via the `section` prop.
- */
+/** Settings forms bound to the Rust `Settings` struct, as macOS System
+ * Settings grouped lists. Which pane shows comes from the `section` prop. */
 export function SettingsView({
   section,
   onSettings,
 }: {
   section: SettingsSection;
-  // The app shell keeps its own copy of settings for the sidebar (developer
-  // tools rows, the engine footer). Without this, a toggle here persists to
-  // disk but the shell stays on stale settings until the next launch.
+  // The app shell keeps its own copy for the sidebar; without this a toggle
+  // here persists to disk but the shell stays stale until the next launch.
   onSettings?: (s: Settings) => void;
 }) {
   const [settings, setSettings] = useState<Settings | null>(null);
-  // Long-lived closures call `update` from an older render: a hotkey capture
-  // waits up to ten seconds, and everything on this pane stays clickable
-  // throughout. Spreading that render's `settings` silently reverted anything
-  // changed by mouse in the meantime.
+  // A ref, not state: long-lived closures call `update` from an older render
+  // (a hotkey capture waits up to ten seconds while the pane stays clickable),
+  // and spreading that render's `settings` reverted anything changed since.
   const live = useRef(settings);
   live.current = settings;
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [displays, setDisplays] = useState<string[]>([]);
   const [build, setBuild] = useState<BuildInfo | null>(null);
   const [copied, setCopied] = useState(false);
-  // The shipped prompt and its version, for the Prompts pane's banner and its
-  // View Default button. Null until it loads; both surfaces hide until then.
+  // Null until it loads; the Prompts banner and View Default hide until then.
   const [builtIn, setBuiltIn] = useState<DefaultPrompt | null>(null);
   const [sample, setSample] = useState("");
   const [running, setRunning] = useState(false);
-  // One panel for both the run's output and the built-in prompt, since only
-  // one is ever worth reading at a time.
+  // One panel for both the run's output and the built-in prompt.
   const [panel, setPanel] = useState<{ title: string; body: string } | null>(
     null,
   );
   const [saved, setSaved] = useState(false);
-  // Owned by the OS (a login item / registry key), not settings.json, so it is
-  // read from the autostart plugin rather than from `settings`.
+  // Owned by the OS (a login item / registry key), not settings.json.
   const [atLogin, setAtLogin] = useState(false);
 
   useEffect(() => {
@@ -128,13 +113,10 @@ export function SettingsView({
   if (!settings) return <p className="text-ink-2">Loading…</p>;
 
   // Every field is optional in TS because the Rust struct is #[serde(default)]
-  // — a partial settings file is valid. Read through these rather than
-  // scattering `??` through the markup.
+  // — a partial settings file is valid. Defaulted once here rather than
+  // scattering `??` through the markup, where one row drifts from the rest.
   const engine = settings.engine ?? "local";
   const vocabulary = settings.vocabulary ?? [];
-  // A partial settings file may omit these; fall back to empty so the editors
-  // render. hotkeys is never null in practice (Config::defaults), but TS types
-  // it optional because the struct is #[serde(default)].
   const hotkeys = settings.hotkeys ?? {
     hold: null,
     toggle: null,
@@ -147,11 +129,7 @@ export function SettingsView({
   const macros = settings.macros ?? [];
   const appRules = settings.appRules ?? [];
   const tidy = settings.postProcessingEnabled ?? true;
-  // Read once: specta types every field optional (the Rust struct is
-  // #[serde(default)]), and repeating the fallback per row is how one of them
-  // ends up with a different default from the rest.
   const commandMode = settings.commandModeEnabled ?? true;
-  // The display name the user picked, if they picked one by name at all.
   const overlayDisplay = settings.overlayDisplay;
   const chosenDisplay =
     overlayDisplay && typeof overlayDisplay === "object" && "named" in overlayDisplay
@@ -200,9 +178,8 @@ export function SettingsView({
         body: result.status === "error" ? result.error : result.data,
       });
     } catch (e) {
-      // A rejected invoke — serialization, a panic, the window going away —
-      // never reaches the Result type, and without this the button stays
-      // disabled until the pane remounts.
+      // A rejected invoke (serialization, a panic) never reaches the Result
+      // type; without this the button stays disabled until the pane remounts.
       setPanel({ title: "Failed", body: String(e) });
     } finally {
       setRunning(false);
@@ -303,9 +280,8 @@ export function SettingsView({
             >
               <Value>
                 <Select
-                  // Lowercased to match: the field this replaced was free
-                  // text, so a stored "EN" would otherwise select nothing and
-                  // render an empty trigger.
+                  // Lowercased: this field used to be free text, and a stored
+                  // "EN" matches no item, rendering an empty trigger.
                   value={settings.language?.toLowerCase() || AUTO_DETECT}
                   onValueChange={(v) =>
                     update({ language: v === AUTO_DETECT ? "" : v })
@@ -360,9 +336,8 @@ export function SettingsView({
                     />
                   </Value>
                 </Row>
-                {/* Deliberately in Cleanup, not Transcription: whisper's
-                    translate task only ever targets English, so this is an
-                    instruction to the cleanup model and lives beside it. */}
+                {/* In Cleanup, not Transcription: whisper's translate task
+                    only targets English, so this instructs the cleanup model. */}
                 <Row
                   label="Output language"
                   hint="Translate the finished text before pasting. “Same as spoken” leaves it alone."
@@ -405,9 +380,8 @@ export function SettingsView({
                     onChange={(c) => update({ instructionGuardEnabled: c })}
                   />
                 </Row>
-                {/* Off by default, and it has to stay that way: this sends the
-                    title of whatever window has focus — a document name, a
-                    chat participant, a URL — alongside every dictation. */}
+                {/* Must stay off by default: this sends the focused window's
+                    title — a document name, a chat participant, a URL. */}
                 <Row
                   label="Use screen context"
                   hint="Tell cleanup which app and window you are in, so it spells names the way they are already spelled on screen. Sends the window title with your dictation."
@@ -682,11 +656,8 @@ export function SettingsView({
                   <SelectContent>
                     <SelectItem value="active">Active window</SelectItem>
                     <SelectItem value="primary">Primary display</SelectItem>
-                    {/* The configured display first, even when it is not
-                        currently plugged in. Without a matching item Radix
-                        renders the trigger *blank*, so the user could not see
-                        what was set or that Rust had fallen back to primary —
-                        which is exactly the state the row is meant to explain. */}
+                    {/* Radix renders the trigger blank when the value matches
+                        no item, so an unplugged display needs one of its own. */}
                     {chosenDisplay && !displays.includes(chosenDisplay) && (
                       <SelectItem value={NAMED + chosenDisplay}>
                         {chosenDisplay} (not connected)
@@ -751,10 +722,9 @@ export function SettingsView({
                   <Button
                     variant="plain"
                     size="text"
-                    // Deliberately does NOT acknowledge: dismissing here takes
-                    // "Switch to it" with it, and view-then-decide is the whole
-                    // point of the button. Swift's View Default only toggles a
-                    // disclosure too.
+                    // Deliberately does NOT acknowledge: dismissing here would
+                    // take "Switch to it" with it, and the point is to view
+                    // then decide.
                     onClick={() =>
                       setPanel({
                         title: "Built-in prompt",
@@ -791,11 +761,9 @@ export function SettingsView({
                 className="w-full resize-none border-0 bg-transparent p-0 font-mono text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
                 placeholder="Leave empty to use the built-in cleanup prompt."
                 value={settings.customSystemPrompt ?? ""}
-                // The version is stamped on every edit, mirroring Swift's
-                // `customSystemPromptLastModified`. Without it a fresh install
-                // that types one character into an empty box is immediately
-                // told its prompt "was written against an older default",
-                // which is false — it was written against this one.
+                // The version is stamped on every edit: without it, typing one
+                // character into an empty box is immediately told the prompt
+                // "was written against an older default", which is false.
                 onChange={(e) =>
                   update({
                     customSystemPrompt: e.target.value,
@@ -845,8 +813,8 @@ export function SettingsView({
           {panel && (
             <Group title={panel.title}>
               <Row className="block py-3">
-                {/* Read-only, and errors land here as text: a toast for a
-                    rate limit vanishes before it can be acted on. */}
+                {/* Errors land here as text: a toast for a rate limit vanishes
+                    before it can be acted on. */}
                 <p className="whitespace-pre-wrap font-mono text-xs text-foreground">
                   {panel.body}
                 </p>
@@ -858,8 +826,8 @@ export function SettingsView({
 
       {section === "connectors" && (
         <>
-          {/* Owns the pane title: the design puts the search box on the same
-              row as it. Remounts when the key changes so the list reloads. */}
+          {/* Owns its own pane title. Keyed on the API key so it remounts and
+              reloads the list when that changes. */}
           <ConnectorEditor key={settings.composioApiKey ?? ""} />
         </>
       )}
@@ -875,10 +843,6 @@ export function SettingsView({
             onChange={(hotkeys) => update({ hotkeys })}
           />
 
-          {/* A selection is the whole trigger. The extra-modifier gesture Swift
-              offered came out: it collided with the dictate key in most of the
-              modifier choices, and the Rewrite hotkey above already covers
-              rewriting on demand. */}
           <Group title="Command mode">
             <Row
               label="Rewrite the selection"
@@ -915,11 +879,9 @@ export function SettingsView({
         />
       )}
 
-      {/* Owns its own data and its own title: it reads history and timings,
-          not `settings`, so nothing above is of any use to it. */}
+      {/* These three own their data and their titles: they read history and
+          timings, not `settings`. */}
       {section === "runlog" && <RunLogView />}
-
-      {/* Both own their data and their own titles, like the Run Log. */}
       {section === "meetings" && <MeetingsView />}
       {section === "debug" && <DebugView />}
 

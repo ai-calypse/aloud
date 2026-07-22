@@ -22,9 +22,8 @@ fn main() -> anyhow::Result<()> {
     println!("Releasing the key starts a fake 10s 'transcribing' window —");
     println!("press Escape inside it to prove Escape survives the key release.\n");
 
-    // Stands in for the pipeline's busy flag: set while a session is still
-    // running after its key was released, which is the window the real bug
-    // left uncancellable.
+    // Stands in for the pipeline's busy flag: the window after a key release
+    // that was once uncancellable.
     let busy = Arc::new(AtomicBool::new(false));
     let flag = busy.clone();
 

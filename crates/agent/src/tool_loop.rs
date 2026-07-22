@@ -1,11 +1,9 @@
 //! The Composio tool loop: model ↔ tools until the model produces a final
-//! answer. A direct port of voice-dict's `AskService.answerUsingTools`.
+//! answer.
 //!
-//! The model is told which tools its connected apps offer; it either answers or asks
-//! to call tools; each call executes through Composio and the result is fed
-//! back. Bounded rounds — the last round forbids tools so the model must answer
-//! rather than loop forever. Write tools (send email, create issue) pause for an
-//! explicit confirmation before they run; that is the one non-negotiable gate.
+//! Bounded rounds — the last forbids tools, so the model must answer rather than
+//! loop forever. Write tools pause for an explicit confirmation before they run;
+//! that is the one non-negotiable gate.
 
 use crate::composio::{ComposioClient, ToolDef};
 use aloud_llm::{LlmClient, LlmError, Message};
@@ -20,23 +18,14 @@ const MAX_ROUNDS: usize = 5;
 /// maps these onto its own UI events.
 #[derive(Debug, Clone)]
 pub enum LoopEvent {
-    /// Every tool this round intends to run, before the first of them starts.
-    ///
-    /// The model hands back a whole batch of calls at once and the loop then
-    /// executes them one at a time, so the run already knows what is coming and
-    /// used to throw that away — the panel learned about the third call when
-    /// the third call began. For an agent holding write access to somebody's
-    /// mail that is the wrong moment: "it is about to do three things, one of
-    /// which sends" is worth reading *before* the first one fires.
-    ///
-    /// Names only. The arguments arrive with `ToolCallStart`, which is also the
-    /// point they stop being a plan and start being an action.
+    /// Every tool this round intends to run, before the first starts — for an
+    /// agent with write access to somebody's mail, "it is about to do three
+    /// things, one of which sends" is worth reading first. Names only; the
+    /// arguments arrive with `ToolCallStart`, where a plan becomes an action.
     Planned { names: Vec<String> },
-    /// The model asked to run a tool, with the arguments it chose.
-    ///
-    /// The whole JSON object, not a flattened list: the panel renders a draft's
-    /// body as text and ignores `user_id`, which it can only do if it still has
-    /// the fields to choose between.
+    /// The model asked to run a tool, with the arguments it chose. The whole
+    /// JSON object, not a flattened list: the panel renders a draft's body as
+    /// text and ignores `user_id`, which needs the fields kept apart.
     ToolCallStart {
         name: String,
         args: serde_json::Value,
@@ -64,15 +53,10 @@ repeat it in full rather than leaving the second one blank. Omit optional \
 arguments you have no real value for — use the schema's default rather than \
 inventing identifiers.";
 
-/// The model has no clock, so "tomorrow at 4pm" resolves against its training
-/// data: a "4 to 6pm" event landed on 2023-07-20T09:00-07:00 — right time of
-/// day, wrong year, and stamped UTC instead of the user's zone. Every relative
-/// date and every timezone argument depends on this line.
-///
-/// Naming the zone is not enough on its own. Told only "(Asia/Calcutta)", the
-/// model still searched `2026-07-18T17:00:00Z` for a 5pm event — 10:30pm local
-/// — found an empty window, and burned four lookups widening it. Spelling the
-/// offset out, in the exact format the arguments want, is what stops that.
+/// The model has no clock: without this, "tomorrow at 4pm" landed on
+/// 2023-07-20T09:00-07:00 — right time of day, wrong year, stamped UTC. Naming
+/// the zone alone is not enough either; told only "(Asia/Calcutta)" it still
+/// searched `T17:00:00Z` for a 5pm event. The literal offset is what stops it.
 fn now_line() -> String {
     let now = chrono::Local::now();
     let zone = iana_time_zone::get_timezone().unwrap_or_else(|_| now.offset().to_string());
@@ -110,13 +94,10 @@ where
         Message::user(command),
     ];
 
-    // Whether any tool call in the run failed — the empty-answer fallback must
-    // not say "Done." over a failure.
+    // The empty-answer fallback must not say "Done." over a failure.
     let mut any_failed = false;
 
     for round in 0..MAX_ROUNDS {
-        // The last round forbids tools, forcing the model to answer with what it
-        // has rather than calling forever.
         let is_last = round == MAX_ROUNDS - 1;
         let chat = || {
             llm.chat_with_tools(
@@ -125,10 +106,8 @@ where
                 (!is_last).then_some(schemas.as_slice()),
                 Some(0.3),
             )
-            // Per round, not per run: a command that takes three rounds to
-            // settle spends three model calls, and "the model was slow" and
-            // "the model went round twice" are different problems with
-            // different fixes.
+            // Per round, not per run: "the model was slow" and "the model went
+            // round twice" are different problems with different fixes.
             .instrument(tracing::info_span!(
                 "tool_select",
                 model,
@@ -137,11 +116,10 @@ where
             ))
         };
 
-        // Ported from `AskService.requestChatMessage`: a 429 mid-loop is
-        // retried once after honoring `retry-after` (capped), because the loop
+        // A 429 mid-loop is retried once after a capped `retry-after`: the loop
         // makes several calls in a row and a per-minute budget can trip between
-        // rounds. The retry lives here, not in the llm crate, so the panel can
-        // see the wait instead of looking hung.
+        // rounds. Here rather than in the llm crate so the panel can show the
+        // wait instead of looking hung.
         let turn = match chat().await {
             Err(e) => match e.downcast_ref::<LlmError>() {
                 Some(LlmError::RateLimited { retry_after, .. }) => {
@@ -178,8 +156,8 @@ where
                 }));
         }
 
-        // Record the assistant's tool-call message so the model sees its own
-        // request alongside the results we're about to append.
+        // The model must see its own request alongside the results appended
+        // below, or it cannot match them up.
         messages.push(Message {
             role: aloud_llm::Role::Assistant,
             content: turn.content.clone(),
@@ -187,8 +165,7 @@ where
             tool_call_id: None,
         });
 
-        // Only when there is more than one: announcing a queue of one is a
-        // second surface saying what the step list is about to say anyway.
+        // A queue of one is a second surface saying what the step list says.
         if turn.tool_calls.len() > 1 {
             on_event(LoopEvent::Planned {
                 names: turn
@@ -209,21 +186,19 @@ where
                 args: args.clone(),
             });
 
-            // A write waits for an explicit yes. A rejected write is reported to
-            // the model as a normal result so it can respond ("Okay, cancelled")
-            // rather than erroring the whole command.
             // The toolkit drives the latency profile — a Gmail send and a
-            // Calendar create behave nothing alike — so it is a field on the
-            // exec span rather than something to infer from the tool name.
+            // Calendar create behave nothing alike — so it is a span field
+            // rather than something to infer from the tool name.
             let toolkit = tools
                 .iter()
                 .find(|t| t.name == name)
                 .map(|t| t.toolkit.as_str())
                 .unwrap_or("unknown");
 
-            // Confirmation is the user thinking, not the app working. Its own
-            // span so it can be subtracted: left inside the run it would put a
-            // 40s "latency" spike on a pipeline that was never running.
+            // Confirmation is the user thinking, not the app working: its own
+            // span so a 40s wait is not charged to pipeline latency. A declined
+            // write returns as a normal result so the model can say "cancelled"
+            // rather than erroring the whole command.
             let declined = is_write(&name, tools)
                 && !confirm(name.clone(), args.clone())
                     .instrument(tracing::info_span!("confirm", tool = %name, toolkit))
@@ -263,13 +238,9 @@ where
     anyhow::bail!("reached the tool-round limit without an answer")
 }
 
-/// Whether a tool needs confirmation before it runs.
-///
-/// Fail-safe by construction: only a tool Composio explicitly marks
-/// `readOnlyHint` skips the gate. A create, an update, a delete, an
-/// unannotated tool, or a name that is not in the offered set at all is
-/// treated as a write. This replaced a hardcoded list of two slugs, which
-/// silently let every tool of a newly connected toolkit run unconfirmed.
+/// Whether a tool needs confirmation. Fail-safe: only an explicit
+/// `readOnlyHint` skips the gate, so an unannotated tool — or a name never
+/// offered at all — counts as a write.
 fn is_write(name: &str, tools: &[ToolDef]) -> bool {
     !tools
         .iter()
@@ -278,17 +249,14 @@ fn is_write(name: &str, tools: &[ToolDef]) -> bool {
         .unwrap_or(false)
 }
 
-/// Whether a compacted tool result reports success. The execute path returns
-/// `{"successful": bool, …}` on a real call and `{"error": …}` (no `successful`)
-/// on a transport failure — so trust `successful` when present, else treat the
-/// presence of a non-null `error` as failure.
+/// Whether a compacted tool result reports success: trust `successful` when
+/// present, else treat a non-null `error` (a transport failure) as failure.
 fn tool_succeeded(result: &str) -> bool {
     let Ok(json) = serde_json::from_str::<serde_json::Value>(result) else {
         return false;
     };
-    // Composio relays the upstream API's status inside `data` (observed live:
-    // a 404 repo carries data.status_code=404) — an error status is a failure
-    // even if the wrapper's `successful` flag disagrees.
+    // Composio relays the upstream status inside `data`, and an error there is
+    // a failure even when the wrapper's `successful` flag disagrees.
     if let Some(code) = json
         .pointer("/data/status_code")
         .and_then(serde_json::Value::as_u64)
@@ -317,8 +285,6 @@ mod tests {
         }
     }
 
-    /// The confirmation gate is the one non-negotiable safety property, so it
-    /// must fail closed: anything not proven read-only asks first.
     #[test]
     fn the_prompt_carries_a_current_year_not_the_models_training_year() {
         let line = now_line();
@@ -326,8 +292,7 @@ mod tests {
         assert!(line.contains(&year), "got: {line}");
     }
 
-    /// Naming the zone alone left the model sending `...T17:00:00Z` for 5pm
-    /// local. The literal offset is the part that stops it.
+    /// Naming the zone alone left the model sending `...T17:00:00Z` for 5pm local.
     #[test]
     fn the_prompt_spells_out_the_utc_offset() {
         let line = now_line();
@@ -339,6 +304,8 @@ mod tests {
         assert!(line.contains("never a \"Z\" suffix"), "got: {line}");
     }
 
+    /// The confirmation gate is the one non-negotiable safety property, so it
+    /// must fail closed: anything not proven read-only asks first.
     #[test]
     fn only_explicitly_read_only_tools_skip_confirmation() {
         let tools = [
@@ -348,8 +315,7 @@ mod tests {
 
         assert!(!is_write("GMAIL_FETCH_EMAILS", &tools));
         assert!(is_write("GMAIL_SEND_EMAIL", &tools));
-        // A hallucinated or newly added name we were never offered must not
-        // slip through as a read.
+        // A hallucinated name we never offered must not pass as a read.
         assert!(is_write("SLACK_DELETE_EVERYTHING", &tools));
         assert!(is_write("anything", &[]));
     }
@@ -367,8 +333,8 @@ mod tests {
 
     #[test]
     fn upstream_http_error_in_data_is_a_failure_even_if_successful_says_true() {
-        // Observed live: a nonexistent repo comes back with the GitHub 404
-        // relayed in data.status_code. Trust that over the wrapper's flag.
+        // Observed live: a nonexistent repo relays GitHub's 404 in
+        // data.status_code. Trust that over the wrapper's flag.
         assert!(!tool_succeeded(
             r#"{"successful":true,"data":{"status_code":404,"message":"Not Found"}}"#
         ));

@@ -7,10 +7,8 @@ import { cn } from "@/lib/utils";
 const FETCH = 500;
 const WATERFALLS = 10;
 
-/** One bar per stage, keyed to the stage name so a run is readable at a glance.
- *  Tokens, not hexes: these bars sit on a card that flips with the OS, and a
- *  frozen light-mode palette on a dark card is exactly the wash-out the
- *  two-tier token system exists to prevent. */
+/** Tokens, not hexes: these bars sit on a card that flips with the OS, and a
+ *  frozen light-mode palette washes out on the dark one. */
 const STAGE_TINT: Record<string, string> = {
   finalize_audio: "var(--sys-orange)",
   transcribe: "var(--sys-blue)",
@@ -26,8 +24,6 @@ const STAGE_TINT: Record<string, string> = {
   tool_select_retry: "var(--sys-pink)",
   composio_exec: "var(--sys-purple)",
   // Human time, not machine time — greyed so it never reads as a hot stage.
-  // --text3 is the app's "tertiary, deliberately recessive" grey; it already
-  // has the light/dark pair this needs.
   confirm: "var(--text3)",
 };
 
@@ -56,8 +52,7 @@ function group(rows: Span[]): Utterance[] {
       if (!root) return null;
       return {
         id,
-        // Runs recorded before modes were tagged have none; they are still
-        // real runs, so they get a bucket rather than being dropped.
+        // Runs predating mode tagging are still real runs — bucketed, not lost.
         mode: String(fields(root).mode ?? "untagged"),
         root,
         stages: spans.filter((s) => s !== root),
@@ -105,9 +100,8 @@ export function TimingsView() {
   useEffect(() => {
     refresh();
     // Every terminal phase, not just "done": agent and ask runs finish on
-    // Idle, so watching done/error alone missed exactly the runs worth
-    // inspecting. The row is written when the span closes, which is just
-    // after the phase is emitted — hence the delay.
+    // Idle. The row is written when the span closes, just after the phase is
+    // emitted — hence the delay.
     const unlisten = events.dictationPhase.listen((event) => {
       if (["done", "error", "idle"].includes(event.payload)) {
         setTimeout(refresh, 150);
@@ -144,8 +138,6 @@ export function TimingsView() {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Mode filter. Every root span carries `mode`, so this is a real
-          partition rather than a guess from which stages happen to appear. */}
       <div className="flex flex-wrap gap-1.5">
         {["all", ...modes].map((m) => {
           const n =
@@ -186,8 +178,6 @@ export function TimingsView() {
           ))}
         </div>
 
-        {/* Run-over-run, oldest left. A drift upward is the thing worth
-            catching; a single spike usually is not. */}
         <div className="mt-5 flex h-16 items-end gap-px">
           {overTime.map((u) => (
             <div
@@ -208,8 +198,7 @@ export function TimingsView() {
         </div>
       </section>
 
-      {/* Per-stage, within the selected mode. p95 rather than avg is the
-          number to act on — a stage that is usually fast and occasionally
+      {/* Sorted on p95, not avg: a stage that is usually fast and occasionally
           terrible averages out to fine. */}
       <section className="rounded-card border-[0.5px] border-surface-border bg-surface p-5 shadow-card">
         <h2 className="mb-3 text-[13px] font-semibold">Stages · {mode}</h2>
@@ -254,9 +243,8 @@ export function TimingsView() {
       {runs.slice(0, WATERFALLS).map((u) => {
         const total = Math.max(u.root.durationMs, 1);
         const f = fields(u.root);
-        // Time spent at a confirmation prompt is the user deciding. Counting
-        // it as pipeline latency would make every approved write look like a
-        // catastrophic regression.
+        // Confirmation time is the user deciding; counted as pipeline latency
+        // it makes every approved write look like a catastrophic regression.
         const waiting = u.stages
           .filter((s) => s.stage === "confirm")
           .reduce((n, s) => n + s.durationMs, 0);
@@ -285,8 +273,8 @@ export function TimingsView() {
 
             <div className="flex flex-col gap-1">
               {u.stages.map((s, i) => {
-                // Offset within the utterance, so a bar's position shows when
-                // the stage ran, not just how long it took.
+                // Offset within the utterance: the bar's position is when the
+                // stage ran, its width how long it took.
                 const offset = Math.max(s.startedAt - u.root.startedAt, 0);
                 return (
                   <div
@@ -315,7 +303,7 @@ export function TimingsView() {
                 );
               })}
               {/* Stages never sum to the total; the gap is the app's own
-                  overhead, and naming it is the point of the panel. */}
+                  overhead. */}
               <div className="mt-1 grid grid-cols-[130px_1fr_58px] gap-2 text-[11px] text-ink-2">
                 <span>unaccounted</span>
                 <span />

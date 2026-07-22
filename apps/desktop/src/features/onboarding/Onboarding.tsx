@@ -8,13 +8,9 @@ function Lead({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * First-run wizard. Shown once, when `settings.onboarded` is false, in place of
- * the main window's tabs. Walks the things a new user must decide: permission
- * and engine. Keys are never asked for — the app supplies its own.
- *
- * It reuses the same commands the Settings panel does — this is a guided view
- * over existing settings, not a parallel config path. On finish it flips
- * `onboarded` and hands control back to the app.
+ * First-run wizard, shown while `settings.onboarded` is false. A guided view
+ * over the same commands Settings uses, not a parallel config path; on finish
+ * it flips `onboarded` and hands control back.
  */
 export function Onboarding({
   settings,
@@ -27,8 +23,8 @@ export function Onboarding({
   const [engine, setEngine] = useState<Settings["engine"]>(settings.engine);
   const [permitted, setPermitted] = useState(true);
 
-  // Re-check the permission each time the permission step is shown, so granting
-  // it in System Settings and tabbing back reflects immediately.
+  // Re-checked on every visit to the step, so granting in System Settings and
+  // tabbing back reflects immediately.
   useEffect(() => {
     if (step === 1) commands.hotkeysPermitted().then(setPermitted);
   }, [step]);

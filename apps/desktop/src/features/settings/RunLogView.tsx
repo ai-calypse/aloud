@@ -13,36 +13,27 @@ const FETCH = 200;
 const COLUMNS = "150px 96px 52px 1fr auto";
 
 /**
- * Every dictation that survived retention, newest first — the primary surface
- * for "what did it actually hear?". The tray's History submenu stays for quick
- * copy; this is where a run is inspected, retried and thrown away.
- *
- * Expanding joins the row to its `timings` spans on `utteranceId` and shows the
- * pipeline that produced it: each stage's duration, whether it succeeded, and
- * the fields it recorded — including the vocabulary the cleanup prompt was
- * given, which is usually the answer to a mangled proper noun.
+ * Every dictation that survived retention, newest first. Expanding joins the
+ * row to its `timings` spans on `utteranceId` to show the pipeline that
+ * produced it.
  */
 export function RunLogView() {
   const [entries, setEntries] = useState<Entry[]>([]);
-  // Every span of the recent utterances, indexed by run. Fetched whole rather
-  // than per row: `recent_timings` has no by-id form, and one call covers
-  // every row the pane can expand.
+  // Fetched whole rather than per row: `recent_timings` has no by-id form.
   const [spans, setSpans] = useState<Map<number, Span[]>>(new Map());
-  /** The oldest utterance the spans fetch reached. Rows older than this were
-      not loaded, which is a different thing from having been pruned — and the
-      two need different words, because one of them is not the user's data
-      going missing. */
+  /** Oldest utterance the spans fetch reached. Rows older than this were not
+      loaded, which the UI must word differently from having been pruned. */
   const [spansFrom, setSpansFrom] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
   const [retrying, setRetrying] = useState<number | null>(null);
-  /** Per-row message from a retry — an error, or what changed. Never a toast:
-      a rate-limit that vanishes before it is read is the one to keep. */
+  /** Per-row retry message. Never a toast: a rate-limit that vanishes before
+      it is read is the one that had to be kept. */
   const [note, setNote] = useState<{ id: number; text: string } | null>(null);
 
   const refresh = useCallback(() => {
-    // An empty log is the normal first-run state, so a read failure logs and
-    // shows the empty state rather than taking the pane down.
+    // An empty log is the normal first-run state, so a read failure shows the
+    // empty state rather than taking the pane down.
     or(commands.historyRecent(FETCH), [], "reading the run log").then(
       setEntries,
     );
@@ -63,7 +54,7 @@ export function RunLogView() {
   useEffect(() => {
     refresh();
     // The row is written as the utterance span closes, just after the phase is
-    // emitted — hence the delay. Same reasoning as the Timings pane.
+    // emitted — hence the delay.
     const unlisten = events.dictationPhase.listen((event) => {
       if (["done", "error", "idle"].includes(event.payload)) {
         setTimeout(refresh, 150);
@@ -100,16 +91,14 @@ export function RunLogView() {
   }
 
   /**
-   * Re-runs cleanup on the stored raw transcript. Deliberately `testPrompt`
-   * rather than a second cleanup command: "test this prompt against this text"
-   * and "clean this text again" are the same call, and a parallel path would
-   * be the one that quietly stops matching the real pipeline.
+   * Re-runs cleanup on the stored raw transcript. `testPrompt` rather than a
+   * second cleanup command — a parallel path is the one that quietly stops
+   * matching the real pipeline.
    */
   async function retry(entry: Entry) {
     setRetrying(entry.id);
     setNote(null);
-    // The live prompt, read now rather than at mount: the point of a retry is
-    // usually that the prompt was just edited.
+    // Read now, not at mount: a retry usually follows editing the prompt.
     const settings = await commands.getSettings();
     const run = await commands.testPrompt(
       settings.customSystemPrompt ?? "",
@@ -119,15 +108,13 @@ export function RunLogView() {
 
     if (run.status === "error") {
       // Covers the MIN_WORDS trap: cleanup short-circuits on a short
-      // transcript, so a retry there returns the same words and reads as a
-      // button that does nothing. The command says so in words.
+      // transcript, so the retry reads as a button that does nothing.
       setNote({ id: entry.id, text: run.error });
       return;
     }
 
-    // An empty result means the prompt asked for a blank paste — the EMPTY
-    // sentinel doing its job. Writing that back would replace the user's
-    // transcript with nothing, and there is no undo.
+    // An empty result is the EMPTY sentinel asking for a blank paste. Writing
+    // it back would erase the user's transcript, and there is no undo.
     if (run.data.trim() === "") {
       setNote({
         id: entry.id,
@@ -156,14 +143,10 @@ export function RunLogView() {
   }
 
   /**
-   * Re-transcribes the stored recording, then cleans it up — the whole
-   * pipeline from the WAV down, unlike `retry` above which starts from the
-   * words already in the row.
-   *
-   * A null engine means "whatever Settings says". Switching engines here makes
-   * the pipeline load the other model, which on a machine that has never run
-   * on-device is a 150MB download: the button stays busy for a while and that
-   * is not a hang, hence the wording below.
+   * The whole pipeline from the WAV down, unlike `retry` which starts from the
+   * words already in the row. A null engine means "whatever Settings says";
+   * switching engines can trigger a 150MB model download, so the long busy
+   * state is not a hang — hence the wording below.
    */
   async function retryTranscription(entry: Entry, engine: "local" | "cloud" | null) {
     setRetrying(entry.id);
@@ -178,9 +161,8 @@ export function RunLogView() {
       setNote({ id: entry.id, text: run.error });
       return;
     }
-    // The command rewrote both transcripts, so the row is refetched rather
-    // than patched: `rawTranscript` changed too, and a half-updated row would
-    // show the old "Heard" beside the new "Pasted".
+    // Refetched, not patched: `rawTranscript` changed too, and a half-updated
+    // row would show the old "Heard" beside the new "Pasted".
     refresh();
     setNote({ id: entry.id, text: "Re-transcribed." });
   }
@@ -313,9 +295,8 @@ function RunDetail({
   onRetryTranscription: (engine: "local" | "cloud" | null) => void;
 }) {
   const cleanup = stages?.find((s) => s.stage === "cleanup");
-  // Recorded by the cleanup span as a joined string, because that is what the
-  // prompt was actually handed. Empty means the vocabulary was empty, which is
-  // different from "not recorded" — a pre-4.4 run has no field at all.
+  // Recorded by the cleanup span as a joined string. Empty means the
+  // vocabulary was empty; a pre-4.4 run has no field at all, hence the null.
   const vocabulary = useMemo(() => {
     const raw = cleanup && spanFields(cleanup).vocabulary;
     if (typeof raw !== "string") return null;
@@ -332,12 +313,10 @@ function RunDetail({
       {entry.audioPath && (
         <div>
           <Label>Recording</Label>
-          {/* Served over Tauri's asset protocol, which is scoped in
-              tauri.conf.json to the media directory and nothing else. Note the
-              failure mode: an out-of-scope path is refused by the protocol
-              handler with a 403 the element reports as a generic media error,
-              so a widened path that stops matching the scope looks like a
-              corrupt file rather than a permission problem. */}
+          {/* Tauri's asset protocol, scoped in tauri.conf.json to the media
+              directory. A path outside that scope 403s, which the <audio>
+              element reports as a generic media error — it looks like a
+              corrupt file, not a permission problem. */}
           <audio
             controls
             preload="none"
@@ -416,9 +395,8 @@ function RunDetail({
             >
               Re-transcribe
             </Button>
-            {/* A native select rather than the app's Select: two options in a
-                details row do not justify a popover, and this one is keyboard
-                and screen-reader correct for free. */}
+            {/* A native select: two options do not justify a popover, and this
+                is keyboard and screen-reader correct for free. */}
             <select
               aria-label="Re-transcribe using a different engine"
               className="rounded-[7px] bg-field px-2 py-[3px] text-hint"

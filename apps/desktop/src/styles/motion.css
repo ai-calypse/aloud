@@ -1,24 +1,14 @@
-/* Motion tokens.
+/* Motion tokens. Every duration and curve in the app comes from here.
  *
- * Durations and curves live here so the app moves with one voice. A component
- * that invents its own `240ms cubic-bezier(...)` is a component that will drift
- * out of step with everything around it.
- *
- * The curves are the ones Apple's interfaces use, and they are not
- * interchangeable:
- *   --ease-out    entrances. Fast start, long settle. Content arriving should
- *                 decelerate into place, never coast at constant speed.
- *   --ease-glide  travel between two known points (a pill sliding to the row
- *                 you clicked). Almost no overshoot, but a very long tail, so
- *                 it reads as weight rather than as a linear slide.
- *   --ease-in     exits. Slow start, fast finish — the mirror of an entrance.
- *   --ease-spring Slight overshoot, for things that should feel physical when
- *                 they pop into existence.
+ * The curves are not interchangeable:
+ *   --ease-out    entrances — decelerate into place
+ *   --ease-glide  travel between two known points; long tail reads as weight
+ *   --ease-in     exits — the mirror of an entrance
+ *   --ease-spring slight overshoot, for things that pop into existence
  */
 
 :root {
-  /* Snappy enough to feel instant, slow enough to be seen. Under ~120ms an
-     animation reads as a jump-cut; over ~450ms it reads as waiting. */
+  /* Under ~120ms reads as a jump-cut; over ~450ms reads as waiting. */
   --dur-instant: 90ms;
   --dur-fast: 160ms;
   --dur-base: 240ms;
@@ -33,30 +23,15 @@
 
 /* --- Springs -------------------------------------------------------------
  *
- * A bezier is a shape someone drew; a spring is a shape physics produced. The
- * difference is visible: a bezier decelerates on a schedule, a spring settles,
- * and settling is what "Apple-feeling" motion actually is.
+ * Real mass-spring solutions sampled into `linear()`, parameterised the way
+ * Apple does: damping ratio (1.0 = no overshoot) and response in seconds.
  *
- * These are real mass-spring solutions sampled into `linear()`, in Apple's two
- * parameters rather than mass/stiffness/damping (which nobody can reason
- * about):
+ * The `-dur` values are the FULL settle, so they look long; the motion is
+ * perceptually over much sooner. Shortening them clips the settle and the
+ * spring stops being one.
  *
- *   damping ratio  1.0 = no overshoot, ~0.6 = a visible settle past the target
- *   response       how fast it reaches the target, in seconds. NOT a duration
- *
- * A critically damped spring's shape is scale-invariant in time, so `--spring`
- * is one curve and the two durations below pick how fast it runs. Only the
- * overshooting one needs a second curve.
- *
- * The `-dur` values are the FULL settle, which is why they look long. The
- * motion is perceptually over much sooner — --spring-snappy is 90% done at
- * 186ms of its 441ms, and that gap is the whole point: it reads as fast and
- * still lands softly. Do not "fix" these by shortening them; that just clips
- * the settle and the spring stops being one.
- *
- * The bezier line before each `linear()` is a real fallback, not decoration:
- * a webview too old to parse `linear()` drops that declaration and keeps the
- * bezier above it. Never collapse the pairs into one line.
+ * The bezier before each `linear()` is a real fallback for webviews that
+ * cannot parse `linear()`. Never collapse the pairs into one line.
  */
 :root {
   /* Critically damped: the default for anything a user did not throw. */
@@ -67,10 +42,8 @@
     0.9863, 0.9897, 0.9923, 0.9942, 0.9957, 0.9968, 0.9976, 0.9982, 0.9987, 1
   );
 
-  /* damping 0.62 — overshoots 8.4%, for things that should feel like an object
-     arriving rather than a value changing. Reserved for entrances and for
-     motion the user's own gesture threw; overshoot on a menu that merely faded
-     in reads as noise. */
+  /* damping 0.62 — overshoots 8.4%. Entrances and gesture-thrown motion only;
+     overshoot on something that merely faded in reads as noise. */
   --spring-pop: cubic-bezier(0.34, 1.42, 0.64, 1);
   --spring-pop: linear(
     0, 0.0575, 0.1949, 0.3681, 0.5456, 0.7068, 0.8405, 0.9423, 1.0131, 1.0566,
@@ -78,48 +51,29 @@
     0.9985, 0.995, 0.9934, 0.993, 0.9936, 0.9946, 0.9958, 0.997, 0.9981, 1
   );
 
-  /* response 0.31 / 0.35 / 0.37 respectively — chosen in tune.html, and
-     regenerated from those three numbers by lib/spring-curve.ts. Do not
-     hand-edit the samples above; change the response and re-run the tuner. */
+  /* response 0.31 / 0.35 / 0.37, chosen in tune.html. Do not hand-edit the
+     samples above — change the response and re-run the tuner. */
   --spring-dur: 456ms;
   --spring-dur-slow: 515ms;
   --spring-pop-dur: 605ms;
 
-  /* --- The drop-down panel's spring -------------------------------------
+  /* The drop-down panel's spring. Not baked into a `linear()` because its
+   * target changes mid-flight; `lib/spring.ts` integrates it live so a
+   * redirect carries its velocity instead of restarting from zero.
    *
-   * Not baked into a `linear()` like the three above, because its target
-   * changes while it is still moving — a phase lands mid-flight three times a
-   * dictation, and an answer retargets it once a frame while it streams. A
-   * baked curve redirected halfway restarts from zero velocity; `lib/spring.ts`
-   * integrates these live so the motion carries through. Same two parameters,
-   * read from here so that every motion value in the app is in one file.
-   *
-   * One damping ratio and two responses: the close is deliberately slower than
-   * the open — half again as slow here. That asymmetry is not a detail; an
-   * equal open and close reads as a box toggling, where a lingering close reads
-   * as something with mass settling back.
-   *
-   * 0.45 overshoots a full 20% of its travel, which on an answer panel is ~60pt
-   * past the target before it settles. That is the point — it is what makes the
-   * panel read as thrown out of the notch rather than resized — but it is also
-   * why `draw` floors the drawn size at the cutout. Ring that far on a *close*
-   * and the panel passes clean through the notch it is welded to, showing the
-   * hardware either side of it. At the old 0.77 that undershoot was 6pt and the
-   * missing floor never showed. */
+   * Close is deliberately slower than open — equal timings read as a box
+   * toggling. Damping 0.45 overshoots ~20% of travel (~60pt on an answer
+   * panel), which is why `draw` floors the drawn size at the cutout: ring that
+   * far on a close and the panel passes through the notch it is welded to. */
   --panel-damping: 0.45;
   --panel-open: 0.44;
   --panel-close: 0.66;
 }
 
-/* One global switch. Every animation in the app is expected to be covered by
- * this — if a new one is not, it is a bug, not a style choice. Vestibular
- * disorders make large motion genuinely unpleasant, and the OS setting is the
- * user telling us so.
+/* One global switch; every animation in the app must be covered by it.
  *
- * Not `animation: none`: killing an animation outright can leave an element
- * stuck at its `from` state (invisible, offset, mid-blur). Collapsing the
- * duration instead runs it to completion in a single frame, so the end state
- * is always correct.
+ * Collapsed to 1ms rather than `animation: none`, which can strand an element
+ * on its `from` frame (invisible, offset, mid-blur). 1ms runs to completion.
  */
 @media (prefers-reduced-motion: reduce) {
   :root {
@@ -129,10 +83,8 @@
     --dur-slow: 1ms;
     --dur-slower: 1ms;
 
-    /* The springs are on the same switch. A spring left running here would
-       survive the sweep below, because that only reaches `animation-duration`
-       and `transition-duration` — a JS-driven spring (lib/spring.ts) reads
-       these vars instead and needs to be told directly. */
+    /* The sweep below only reaches animation/transition-duration; a JS-driven
+       spring (lib/spring.ts) reads these vars and must be told directly. */
     --spring-dur: 1ms;
     --spring-dur-slow: 1ms;
     --spring-pop-dur: 1ms;
@@ -148,23 +100,12 @@
   }
 }
 
-/* --- Named motions ------------------------------------------------------
- *
- * Kept in CSS rather than inline styles so the compositor owns every frame:
- * JS only sets a transform target or restarts the animation, and stays off
- * the per-frame path entirely.
- */
+/* --- Named motions ------------------------------------------------------ */
 
-/* The travelling selection chip.
- *
- * Its transform is driven per-frame by a spring (lib/spring.ts), NOT by a
- * transition, so that clicking a second row while it is still moving bends the
- * travel rather than stalling it. A `transition: transform` here would fight
- * those writes and smear them a frame behind the spring — the property is
- * deliberately absent.
- *
- * Height is still a transition because it is written straight through and, with
- * uniform rows, never actually changes. */
+/* The travelling selection chip. `transition: transform` is deliberately
+ * absent: a spring (lib/spring.ts) writes the transform per frame so a click
+ * mid-travel bends it, and a transition would smear those writes a frame
+ * behind. Height transitions because it is written straight through. */
 .motion-pill {
   border-radius: var(--radius-row);
   background: var(--accent);
@@ -173,9 +114,8 @@
   transition: height var(--dur-fast) var(--ease-out);
 }
 
-/* Content arriving in a pane: out of focus and slightly displaced, coming
-   into focus and settling. The displacement is signed by the direction the
-   user moved through the list, set from JS as --materialize-from. */
+/* Content arriving in a pane. --materialize-from is set from JS and signed by
+   the direction the user moved through the list. */
 @keyframes materialize {
   from {
     opacity: 0.4;
@@ -193,14 +133,8 @@
   animation: materialize var(--spring-dur) var(--spring) both;
 }
 
-/* A highlight sweeping across text while the agent is thinking.
- *
- * The gradient is a moving window over the text's own background, clipped to
- * the glyphs. CSS rather than a JS animation loop: the compositor owns every
- * frame, and — the reason it changed — the reduced-motion switch above
- * reaches it. Driven from JS it ran regardless of the user's setting, which
- * is exactly the case that setting exists for.
- */
+/* A highlight sweeping across text while the agent is thinking. CSS, not a JS
+ * loop, so the reduced-motion switch above actually reaches it. */
 @keyframes shimmer {
   from {
     background-position: 100% center;

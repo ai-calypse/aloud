@@ -1,11 +1,8 @@
 //! Matching a spoken trigger phrase at the start of a transcript.
 //!
-//! Ask ("hey flow") and Agent ("hey agent") both offer a spoken way in
-//! alongside their hotkey, and both need the same three rules: match only at
-//! the start, compare with punctuation stripped, and require something after
-//! the phrase. Lives here rather than in either caller because it was written
-//! twice — identically, down to the `normalize` helper — and a fix to one copy
-//! would not have reached the other.
+//! Shared by Ask ("hey flow") and Agent ("hey agent"): match only at the start,
+//! compare with punctuation stripped, require something after the phrase. Here
+//! rather than in either caller because it was written twice, identically.
 
 /// The remainder of `transcript` after any of `phrases` matches at the start.
 ///

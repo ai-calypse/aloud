@@ -1,18 +1,9 @@
 import type { ReactNode } from "react";
 
 /**
- * What the agent panel draws for each tool.
- *
- * The panel does not hide fields — it chooses what to draw. `user_id: "me"`
- * and `is_html: false` never appear because nothing here references them.
- * Presentation belongs to the app, not to Composio, which only supplies
- * schemas and executes calls.
- *
- * A registry rather than a switch: aloud can now connect any of Composio's
- * 800+ toolkits, so adding a service's custom UI should be registering one
- * entry, not extending a growing conditional. Everything unregistered falls
- * back to a humanised label and no body, which is the honest default for a
- * tool we know nothing about.
+ * What the agent panel draws for each tool. A registry rather than a switch:
+ * any of Composio's 800+ toolkits can be connected, so a service's custom UI
+ * is one entry. Anything unregistered falls back to a humanised label, no body.
  */
 
 /** A tool call's arguments. Unknown shape — every read must be defensive. */
@@ -32,9 +23,8 @@ function text(args: ToolArgs, key: string): string {
 }
 
 /**
- * The panel-window card every tool body sits in. Local to this file rather
- * than a components/ui primitive: the white/10 hairline is the floating
- * panel's material, not the settings window's.
+ * The card every tool body sits in. Local rather than a components/ui
+ * primitive: the white/10 hairline is the floating panel's material.
  */
 function ToolCard({ children }: { children: ReactNode }) {
   return (
@@ -154,10 +144,8 @@ const VIEWS: Record<string, ToolView> = {
   },
   GOOGLECALENDAR_FIND_EVENT: { label: () => "Looking through your calendar" },
   GOOGLECALENDAR_FIND_FREE_SLOTS: { label: () => "Finding a free slot" },
-  // The only destructive tool in the default set, and it was the one with no
-  // view: its confirmation read "Googlecalendar: delete event" over an empty
-  // body. Delete carries no title or time — only ids — so the gate shows the
-  // id rather than pretending to more.
+  // Delete carries no title or time, only ids, so the gate shows the id rather
+  // than pretending to more.
   GOOGLECALENDAR_DELETE_EVENT: {
     label: () => "Deleting a calendar event",
     body: (args) => {
@@ -176,12 +164,7 @@ const VIEWS: Record<string, ToolView> = {
   },
 };
 
-/**
- * "SLACK_SEND_MESSAGE" → "Slack: send message".
- *
- * The fallback for the toolkits nobody has written a view for, which after
- * the Connectors work is most of them.
- */
+/** "SLACK_SEND_MESSAGE" → "Slack: send message"; the unregistered fallback. */
 export function humanise(slug: string): string {
   const [toolkit, ...rest] = slug.split("_");
   if (rest.length === 0) return slug;

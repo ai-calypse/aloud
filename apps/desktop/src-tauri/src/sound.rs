@@ -1,27 +1,14 @@
 //! Alert chimes for recording start / stop / error.
 //!
-//! voice-dict played named macOS system sounds through `NSSound` (Tink on
-//! start, Pop on stop, Basso on error). There is no cross-platform `NSSound`,
-//! and bundling audio + a mixer (rodio) is overkill for three UI chimes — so
-//! this uses each OS's own sound facility, behind `#[cfg]`, per the CLAUDE.md
-//! "platform differences live behind cfg, use the better Rust tool" guidance:
-//!
-//! - macOS: `afplay /System/Library/Sounds/<Name>.aiff` — the exact sound set
-//!   voice-dict used, no dependency, no bundled files.
-//! - Windows: PowerShell `[System.Media.SystemSounds]` — the native equivalents.
-//! - Otherwise: silent (no assumption about a Linux sound daemon).
-//!
-//! Fire-and-forget: a chime must never block or fail the dictation pipeline, so
-//! errors are logged and swallowed.
+//! Shells out to each OS's own sound facility rather than bundling audio and a
+//! mixer (rodio) for three UI chimes; Linux gets silence. Fire-and-forget — a
+//! chime must never block or fail the dictation pipeline, so errors are logged
+//! and swallowed.
 
-/// The three moments that get a sound, mapped to each OS's nearest equivalent.
 #[derive(Debug, Clone, Copy)]
 pub enum Chime {
-    /// Recording started.
     Start,
-    /// Recording stopped / transcription begins.
     Stop,
-    /// Something failed.
     Error,
 }
 
@@ -38,7 +25,7 @@ pub fn play(chime: Chime, enabled: bool, volume: f32) {
 
 #[cfg(target_os = "macos")]
 fn play_impl(chime: Chime, volume: f32) -> std::io::Result<()> {
-    // The names voice-dict used; these files ship with every macOS.
+    // These files ship with every macOS.
     let name = match chime {
         Chime::Start => "Tink",
         Chime::Stop => "Pop",
@@ -54,9 +41,8 @@ fn play_impl(chime: Chime, volume: f32) -> std::io::Result<()> {
 
 #[cfg(target_os = "windows")]
 fn play_impl(chime: Chime, _volume: f32) -> std::io::Result<()> {
-    // SystemSounds has no distinct "start" tone; Asterisk/Hand are the nearest
-    // informational/error pair, with Beep standing in for the stop tick. There
-    // is no per-sound volume here, so the setting does not apply.
+    // SystemSounds has no distinct "start" tone and no per-sound volume, so the
+    // volume setting does not apply here.
     let sound = match chime {
         Chime::Start => "Asterisk",
         Chime::Stop => "Beep",

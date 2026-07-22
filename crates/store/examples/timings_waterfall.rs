@@ -1,9 +1,7 @@
-//! Drives an utterance-shaped span tree through the *same* subscriber stack
-//! the app builds in `lib.rs::run`, then prints the waterfall back.
-//!
-//! The unit test proves the layer. This proves the wiring: an `EnvFilter`
-//! attached globally rather than per-layer would silently drop every span
-//! before the timing layer saw it, and nothing else would notice.
+//! Drives an utterance-shaped span tree through the *same* subscriber stack the
+//! app builds, then prints the waterfall back. The unit test proves the layer;
+//! this proves the wiring — a globally attached `EnvFilter` would silently drop
+//! every span before the timing layer saw it.
 //!
 //! `cargo run -p aloud-store --example timings_waterfall`
 
@@ -49,7 +47,6 @@ fn main() -> anyhow::Result<()> {
             let cleanup = tracing::info_span!("cleanup", model = "llama-3.1-8b");
             let _c = cleanup.enter();
             std::thread::sleep(Duration::from_millis(60));
-            // Nested: the retry that doubles perceived latency.
             work!("llm_fallback", 120);
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -57,7 +54,7 @@ fn main() -> anyhow::Result<()> {
         std::thread::sleep(Duration::from_millis(50)); // app overhead
     }
 
-    // Agent mode: a second root, with the stages the dictation path never has.
+    // Agent mode: a second root, with stages the dictation path never has.
     {
         let root = tracing::info_span!("utterance", utterance_id = 2i64, mode = "agent");
         let _r = root.enter();
@@ -69,7 +66,7 @@ fn main() -> anyhow::Result<()> {
             let _a = agent.enter();
             work!("tool_discovery", 260);
             work!("tool_select", 410);
-            // Human time. Must land on its own bar, not inside composio_exec.
+            // Human time: must land on its own bar, not inside composio_exec.
             work!("confirm", 900);
             {
                 let exec = tracing::info_span!("composio_exec", toolkit = "gmail", ok = true);
@@ -80,7 +77,6 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Ask and command modes: the other two roots, so every mode is groupable.
     {
         let root = tracing::info_span!("utterance", utterance_id = 3i64, mode = "ask");
         let _r = root.enter();
@@ -125,8 +121,8 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
     assert!(dictation.duration_ms >= 700, "root must span its children");
 
-    // Confirmation is its own bar, not swallowed by the tool it gates —
-    // otherwise an approved write reads as a 1.5s Composio call.
+    // Confirmation must not be swallowed by the tool it gates, or an approved
+    // write reads as a 1.5s Composio call.
     let confirm = rows.iter().find(|r| r.stage == "confirm").unwrap();
     let exec = rows.iter().find(|r| r.stage == "composio_exec").unwrap();
     assert!(confirm.duration_ms >= 900);
@@ -140,10 +136,9 @@ fn main() -> anyhow::Result<()> {
         exec.fields
     );
 
-    // Two tool_select rounds: the reselect that doubles latency is visible.
     assert_eq!(rows.iter().filter(|r| r.stage == "tool_select").count(), 2);
 
-    // Every root must be taggable, or per-mode averages silently merge modes.
+    // Every root must be taggable, or per-mode averages merge modes.
     let modes: Vec<&str> = rows
         .iter()
         .filter(|r| r.stage == "utterance")

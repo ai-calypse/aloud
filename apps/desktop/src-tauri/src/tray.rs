@@ -1,12 +1,8 @@
-//! The menu-bar menu — the app's only always-visible surface.
+//! The menu-bar menu — the app's only always-visible surface, since there is no
+//! dock icon.
 //!
-//! Aloud has no dock icon, so for a user who has closed the window this menu
-//! *is* the app: what it is doing, what it has done, and the handful of
-//! actions that do not deserve a hotkey.
-//!
-//! A tray menu is a static snapshot — Tauri offers no way to mutate one item
-//! in place — so anything that changes means rebuilding the whole menu.
-//! [`refresh`] does that, and the pipeline calls it on every phase change.
+//! Tauri offers no way to mutate one menu item in place, so any change means
+//! rebuilding the whole menu: [`refresh`], called on every phase change.
 
 use crate::AppState;
 use tauri::{
@@ -16,7 +12,6 @@ use tauri::{
 };
 
 const TRAY_ID: &str = "aloud";
-/// Past transcripts listed in the History submenu, as in voice-dict.
 const HISTORY_ITEMS: usize = 10;
 /// Menu rows are one line: long transcripts are cut to this before the ellipsis.
 const SNIPPET_CHARS: usize = 48;
@@ -46,14 +41,12 @@ fn create(app: &AppHandle) -> tauri::Result<()> {
 
 /// Shows or hides the menu-bar icon without a restart.
 ///
-/// Hiding is a one-way door — no dock icon, no menu bar, no way back to the
-/// settings that would turn it on again — except for the `RunEvent::Reopen`
-/// arm in `lib.rs`, which is what makes this safe and is **not yet verified
-/// against a real build**. See the TODO there before trusting this toggle.
+/// Hiding is a one-way door but for the `RunEvent::Reopen` arm in `lib.rs`,
+/// which is **not yet verified against a real build** — see the TODO there.
 pub fn set_visible(app: &AppHandle, visible: bool) {
     let handle = app.clone();
-    // Creating and destroying a status item is main-thread-only on macOS, and
-    // this arrives on whichever thread saved the settings.
+    // Creating and destroying a status item is main-thread-only on macOS; this
+    // arrives on whichever thread saved the settings.
     let _ = app.run_on_main_thread(move || {
         let exists = handle.tray_by_id(TRAY_ID).is_some();
         match (visible, exists) {
@@ -74,8 +67,8 @@ pub fn set_visible(app: &AppHandle, visible: bool) {
 /// phase change; a no-op before the tray exists.
 pub fn refresh(app: &AppHandle) {
     let handle = app.clone();
-    // Menu mutation has to happen on the main thread on macOS, and phases
-    // arrive on tokio workers and the hotkey thread.
+    // Menu mutation is main-thread-only on macOS; phases arrive on tokio
+    // workers and the hotkey thread.
     let _ = app.run_on_main_thread(move || {
         let Some(tray) = handle.tray_by_id(TRAY_ID) else {
             return;
@@ -100,7 +93,6 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 
     let menu = Menu::new(app)?;
 
-    // Status and lifetime totals: disabled rows, read rather than clicked.
     menu.append(&disabled(app, "status", status_line(app))?)?;
     let stats = state.pipeline.stats();
     if stats.total_sessions > 0 {
@@ -131,8 +123,7 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         None::<&str>,
     )?)?;
 
-    // Paste Again is meaningless before the first dictation, so it greys out
-    // rather than silently doing nothing.
+    // Greyed out before the first dictation rather than silently doing nothing.
     menu.append(&MenuItem::with_id(
         app,
         "paste_again",
@@ -273,14 +264,11 @@ fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         "show" => show_main(app),
         "settings" => {
             show_main(app);
-            // The window owns its own navigation; this only asks it to land on
-            // the settings pane.
             if let Err(e) = app.emit("open-settings", ()) {
                 tracing::warn!(%e, "could not ask the window to open settings");
             }
         }
-        // Clearing `onboarded` is all it takes: the window shows the wizard
-        // whenever that flag is false.
+        // The window shows the wizard whenever `onboarded` is false.
         "setup" => {
             let state = app.state::<AppState>();
             let mut settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
@@ -302,8 +290,8 @@ fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     }
 }
 
-/// Start or stop a dictation from the menu — the same flow the hold hotkey
-/// drives, so dictation still works before Accessibility is granted.
+/// The same flow the hold hotkey drives, so dictation still works before
+/// Accessibility is granted.
 fn toggle_dictation(app: &AppHandle) {
     let pipeline = app.state::<AppState>().pipeline.clone();
     if pipeline.is_recording() {
@@ -336,10 +324,8 @@ fn copy_history_entry(app: &AppHandle, raw_id: &str) {
 ///
 /// ponytail: no checkmark flash, unlike the Swift menu. Every phase change
 /// rebuilds the menu wholesale (see [`refresh`]), so transient state does not
-/// survive long enough to be seen, and making it survive means threading a
-/// timestamp through `build`. The clipboard word is already in Settings →
-/// Vocabulary if the user wants confirmation. Revisit if Tauri ever allows
-/// mutating one item in place.
+/// survive long enough to be seen; revisit if Tauri ever allows mutating one
+/// item in place.
 fn add_clipboard_to_vocabulary(app: &AppHandle) {
     let Ok(text) = aloud_paste::clipboard_text() else {
         tracing::warn!("clipboard holds no text");
@@ -348,9 +334,8 @@ fn add_clipboard_to_vocabulary(app: &AppHandle) {
 
     let state = app.state::<AppState>();
     let mut settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
-    // Split, not stored whole: the source is the clipboard, so whatever the
-    // user last copied arrives here. A paragraph stored as one "term" would be
-    // prefixed to the user message of every subsequent cleanup request.
+    // Split, not stored whole: a pasted paragraph kept as one "term" would be
+    // prefixed to every subsequent cleanup request.
     let added = settings.add_vocabulary_terms(&text);
     if added == 0 {
         tracing::info!("clipboard holds nothing new to add to the vocabulary");
@@ -360,8 +345,6 @@ fn add_clipboard_to_vocabulary(app: &AppHandle) {
         tracing::warn!(%e, "could not save vocabulary");
         return;
     }
-    // Nothing to refresh afterwards: the menu shows no vocabulary, and the
-    // Settings pane reloads its own copy when it opens.
     let Ok(mut current) = state.settings.lock() else {
         return;
     };
@@ -431,8 +414,7 @@ fn disabled(
     MenuItem::with_id(app, id, text.as_ref(), false, None::<&str>)
 }
 
-/// Raises the main window. The single way back to it, shared by the tray's
-/// Open/Settings/Re-run Setup rows and by the reopen handler in `lib.rs`.
+/// Raises the main window — the single way back to it.
 pub(crate) fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
