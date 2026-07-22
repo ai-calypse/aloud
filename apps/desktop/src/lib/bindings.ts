@@ -445,7 +445,7 @@ export type OverlayStyleChanged = {
 /**  A capability the app needs the OS to allow. */
 export type Permission = 
 /**  Global hotkeys, synthetic paste, and reading the focused selection. */
-"accessibility" | "microphone" | "screenRecording";
+"accessibility" | "microphone";
 
 export type PermissionStatus = {
 	permission: Permission,
@@ -538,19 +538,6 @@ export type Settings = {
 	 *  [`vocabulary`]: Settings::vocabulary
 	 */
 	preservePhrases?: string[],
-	/**
-	 *  Tell cleanup what app and window are in front, so it can spell names the
-	 *  way the screen does. Off by default: a window title is a document name,
-	 *  a chat participant or a URL, sent to a third party on every dictation.
-	 */
-	contextEnabled?: boolean,
-	/**
-	 *  Also capture a screenshot with the context. Separate from
-	 *  [`context_enabled`] because it needs the Screen Recording grant.
-	 * 
-	 *  [`context_enabled`]: Settings::context_enabled
-	 */
-	contextScreenshotEnabled?: boolean,
 	/**  Spoken shorthand that expands to canned text after cleanup. */
 	macros?: Macro[],
 	/**  Per-app behaviour overrides, applied by the focused app's name. */

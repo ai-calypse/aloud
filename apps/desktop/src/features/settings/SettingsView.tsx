@@ -386,19 +386,6 @@ export function SettingsView({
                     onChange={(c) => update({ instructionGuardEnabled: c })}
                   />
                 </Row>
-                {/* Must stay off by default: this sends the focused window's
-                    title — a document name, a chat participant, a URL. */}
-                <Row
-                  label="Use screen context"
-                  hint="Tell cleanup which app and window you are in, so it spells names the way they are already spelled on screen. Sends the window title with your dictation."
-                  className="py-[11px]"
-                >
-                  <Toggle
-                    checked={settings.contextEnabled ?? false}
-                    label="Use screen context"
-                    onChange={(c) => update({ contextEnabled: c })}
-                  />
-                </Row>
               </>
             )}
           </Group>

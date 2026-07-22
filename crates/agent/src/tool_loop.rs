@@ -46,6 +46,12 @@ the intent. After acting, confirm what you did in one short plain sentence. \
 If a tool result was not successful or contains an error, say the action \
 failed and why — never claim it worked. But if it failed because an argument \
 was invalid, fix that argument and retry once before reporting failure. \
+The user speaks names, not addresses. When an argument needs an email address, \
+a Slack user or a GitHub username and the command gives only a name, look it up \
+first with the directory tool in the list and use what it returns — never \
+invent an address, and never ask the user to spell one out. If the lookup \
+returns several people, take the closest match and name it in your \
+confirmation; if it returns none, say so rather than guessing. \
 Fill every argument you send with real content. If the user asks you to write \
 or draft something, compose the actual text — never send an empty body, an \
 empty subject, or a placeholder. If the same content is needed by two calls, \

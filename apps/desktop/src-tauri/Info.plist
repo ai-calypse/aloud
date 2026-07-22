@@ -12,7 +12,5 @@
   <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Aloud records your voice so it can transcribe what you say and paste the text into the app you are using.</string>
-    <key>NSScreenCaptureUsageDescription</key>
-    <string>Aloud can look at your screen so dictation matches what you are working on — for example, spelling a recipient's name the way the open email already spells it. Off unless you turn it on.</string>
   </dict>
 </plist>
