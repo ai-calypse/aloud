@@ -111,6 +111,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "aloud-bridge"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "aloud-hook-cli"
+version = "0.1.0"
+dependencies = [
+ "aloud-bridge",
+ "serde_json",
+]
+
+[[package]]
 name = "aloud-hotkey"
 version = "0.1.0"
 dependencies = [

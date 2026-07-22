@@ -17,6 +17,7 @@
 //! ```
 
 pub mod discovery;
+pub mod install;
 pub mod scan;
 
 use std::collections::HashMap;
