@@ -17,8 +17,7 @@ async fn main() -> anyhow::Result<()> {
     let dir = local::model_dir()?;
     println!("Model dir: {}", dir.display());
 
-    // Log every 10% rather than every chunk: \r progress is unreadable when
-    // stdout is not a terminal.
+    // Every 10%, not every chunk: \r progress is unreadable off a terminal.
     let mut last_decile = 0;
     let model = download::ensure_model(&dir, local::DEFAULT_MODEL, |p| {
         let decile = (p * 10.0) as u32;

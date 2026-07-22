@@ -9,20 +9,12 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * Preformatted JSON, in place of the registry's `CodeBlock`.
+ * Preformatted JSON, in place of the registry's shiki-highlighted `CodeBlock`.
+ * Shiki took the bundle from 972KB/7 files to 11MB/308, including a 608KB wasm
+ * blob, to highlight one already-indented object of tool arguments.
  *
- * The upstream component highlights with shiki, which is the right call in a
- * chat app rendering arbitrary code. Here it renders one flat object of tool
- * arguments, and it costs every language grammar shiki ships: pulling it in
- * took this app's bundle from 972KB across 7 files to 11MB across 308,
- * including a 608KB wasm blob and a 762KB emacs-lisp grammar, for a window
- * that hangs off the notch. Highlighting JSON that is already indented buys
- * approximately nothing against that.
- *
- * Customising a vendored component rather than avoiding it: `Tool` and its
- * parts are otherwise exactly right, and AI Elements ships the source into the
- * project precisely so a call like this can be made locally. Re-pulling `tool`
- * from the registry will restore the import — keep this edit.
+ * Re-pulling `tool` from the AI Elements registry restores the import — keep
+ * this edit.
  */
 const Json = ({ value }: { value: unknown }) => (
   <pre className="overflow-x-auto p-3 text-xs">
@@ -168,8 +160,7 @@ export const ToolOutput = ({
   if (typeof output === "object" && !isValidElement(output)) {
     Output = <Json value={output} />;
   } else if (typeof output === "string") {
-    // A result here is a sentence ("Sent"), not a document — it reads as prose,
-    // not as a code block.
+    // A string result here is a sentence ("Sent"), so prose, not a code block.
     Output = <div className="p-3 text-xs">{output}</div>;
   }
 

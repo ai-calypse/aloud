@@ -1,9 +1,6 @@
-/* Rendered view. Meeting notes are headings, bullets, and task lists, so the
-   defaults need spacing rules rather than a full prose stylesheet.
-
-   These are the only rules left here: Streamdown builds this markup at runtime,
-   so there is no JSX element to hang a Tailwind class on. Everything the Reader
-   renders itself lives as utilities in NotesView.tsx. */
+/* Streamdown builds this markup at runtime, so there is no JSX element to hang
+   a Tailwind class on. Everything the Reader renders itself is utilities in
+   NotesView.tsx. */
 .reader__rendered h1,
 .reader__rendered h2,
 .reader__rendered h3 {
@@ -21,8 +18,7 @@
   margin: 0 0 0.6rem;
 }
 
-/* The global reset strips list markers, so bullets have to be asked for
-   again — without them "Key Points" reads as loose indented lines. */
+/* The global reset strips list markers; ask for them back. */
 .reader__rendered ul {
   margin: 0 0 0.6rem;
   padding-left: 1.2rem;

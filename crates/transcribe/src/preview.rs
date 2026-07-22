@@ -1,17 +1,12 @@
 //! Showing the user what they are saying, while they are saying it.
 //!
-//! **Display only.** Nothing here reaches the clipboard: the pasted text comes
-//! from one pass over the whole recording once the key is up, cleaned up by the
-//! LLM as it always was. That is what makes this cheap to be wrong — a preview
-//! that mangles a word is a preview that fixes it two hundred milliseconds
-//! later, so it can be fast and loose in a way the real transcript cannot.
+//! **Display only** — nothing here reaches the clipboard, so it can be fast and
+//! loose in a way the real transcript cannot.
 //!
-//! The trick is re-transcribing rather than chunking. An open window of audio
-//! is transcribed again from the top every pass, so a word half-spoken at one
-//! pass is whole at the next and the text corrects itself as the sentence
-//! lands. Only when the window grows past [`COMMIT_SECONDS`] is its text frozen
-//! and its audio dropped, which bounds the cost of a pass no matter how long
-//! the user talks for.
+//! Re-transcribing, not chunking: an open window is transcribed again from the
+//! top every pass, so a half-spoken word is whole at the next one. Past
+//! [`COMMIT_SECONDS`] the window's text is frozen and its audio dropped, which
+//! bounds what a pass costs however long the user talks.
 //!
 //! ponytail: a fixed tick and a fixed window. Cutting the window on a pause
 //! (the energy floor `aloud_audio::loudness` already computes) would put the
@@ -24,15 +19,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// Distinguishes concurrent stagings. A meeting and a dictation stage WAVs at
-/// the same time, so a name keyed on anything shared is one process writing a
-/// file while another reads it.
+/// Distinguishes concurrent stagings: a meeting and a dictation stage WAVs at
+/// the same time, and a shared name is one writing what another reads.
 static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
 
 /// Transcribes one buffer of 24 kHz mono PCM16 — the rate the realtime tap
-/// emits — by staging it as the 16 kHz WAV both engines want.
-///
-/// The file is removed whether or not transcription succeeded.
+/// emits — by staging it as the 16 kHz WAV both engines want. The file is
+/// removed whether or not transcription succeeded.
 pub async fn transcribe_pcm16(transcriber: &dyn Transcriber, pcm16: &[u8]) -> Result<String> {
     let path = std::env::temp_dir().join(format!(
         "aloud-chunk-{}-{}.wav",
@@ -47,9 +40,8 @@ pub async fn transcribe_pcm16(transcriber: &dyn Transcriber, pcm16: &[u8]) -> Re
 
 const BYTES_PER_SECOND: usize = aloud_audio::REALTIME_RATE as usize * 2; // i16
 
-/// How long the open window may grow before its text is frozen and its audio
-/// dropped. Every pass re-transcribes the whole window, so this is what a pass
-/// costs at worst — raise it and the preview falls behind the speaker.
+/// How long the open window may grow before its text is frozen. Every pass
+/// re-transcribes it, so raising this puts the preview behind the speaker.
 pub const COMMIT_SECONDS: usize = 8;
 const COMMIT_BYTES: usize = BYTES_PER_SECOND * COMMIT_SECONDS;
 
@@ -57,16 +49,13 @@ const COMMIT_BYTES: usize = BYTES_PER_SECOND * COMMIT_SECONDS;
 /// nothing at all; waiting a tick costs the user nothing.
 const MIN_BYTES: usize = BYTES_PER_SECOND / 2;
 
-/// Gap between passes. The real cadence is this plus the pass itself
-/// (~200-400ms for `base.en` on 8s of audio with Metal), which lands the
-/// preview about half a second behind the voice — close enough to read as live.
+/// Gap between passes. Plus the pass itself (~200-400ms for `base.en` on 8s
+/// with Metal) that lands the preview about half a second behind the voice.
 const TICK: Duration = Duration::from_millis(250);
 
 /// A running live preview. Feed it with [`Preview::tap`]; drop it to stop.
-///
-/// There is no `finish`: the preview has no output the caller wants. Dropping
-/// aborts the worker mid-pass, which is the point — the user has let go of the
-/// key, and the real transcription is now the only one worth spending CPU on.
+/// There is no `finish` — dropping aborts the worker mid-pass, which is the
+/// point once the real transcription is the only one worth CPU.
 pub struct Preview {
     /// Audio captured but not yet frozen into `committed` by the worker.
     audio: Arc<Mutex<Vec<u8>>>,
@@ -77,14 +66,12 @@ impl Preview {
     /// Starts the background previewer.
     ///
     /// `transcriber` is a future because building one loads a model, which must
-    /// not happen on the thread that opens the microphone. It is awaited on the
-    /// first pass, so a capture with no audio in it never pays for the model.
+    /// not block the thread that opens the microphone; it is awaited on the
+    /// first pass, so a silent capture never pays for it.
     ///
-    /// `runtime` is passed in rather than found with a bare `tokio::spawn`,
-    /// which **panics when there is no runtime on the calling thread**. A
-    /// dictation starts on the OS key-event thread — a CGEventTap callback,
-    /// which is not a tokio worker — so the bare form would take the whole app
-    /// down on the first press with this turned on.
+    /// `runtime` is passed in because a bare `tokio::spawn` **panics with no
+    /// runtime on the calling thread**, and a dictation starts on the CGEventTap
+    /// callback thread.
     pub fn spawn(
         runtime: &tokio::runtime::Handle,
         transcriber: impl std::future::Future<Output = Result<Arc<dyn Transcriber>>> + Send + 'static,
@@ -97,10 +84,8 @@ impl Preview {
         }
     }
 
-    /// The callback to hand `aloud_audio::Recorder::start`.
-    ///
-    /// Runs on the audio callback thread, so it only appends: transcribing here
-    /// would stall capture itself.
+    /// The callback to hand `aloud_audio::Recorder::start`. Runs on the audio
+    /// callback thread, so it only appends — work here stalls capture.
     pub fn tap(&self) -> Box<dyn FnMut(Vec<u8>) + Send> {
         let audio = self.audio.clone();
         Box::new(move |bytes: Vec<u8>| {
@@ -146,8 +131,7 @@ async fn run(
         if built.is_none() {
             match build.take().expect("build is taken only on success").await {
                 Ok(t) => built = Some(t),
-                // No model, no preview. The dictation itself is unaffected, so
-                // this is a warning and not the user's problem.
+                // No model, no preview; the dictation itself is unaffected.
                 Err(e) => {
                     tracing::warn!(%e, "no transcriber for the live preview");
                     return;
@@ -157,19 +141,17 @@ async fn run(
 
         let text = match transcribe_pcm16(built.as_deref().expect("built above"), &window).await {
             Ok(text) => text,
-            // One failure means the next pass fails the same way — a missing
-            // model file, a poisoned context. Stop rather than log four times a
-            // second for the rest of the dictation.
+            // One failure means every pass fails the same way; stop rather than
+            // log four times a second for the rest of the dictation.
             Err(e) => {
                 tracing::warn!(%e, "live preview stopped");
                 return;
             }
         };
 
-        // An empty pass is kept, not shown: whisper answers a window it is
-        // unsure about with nothing at all, and the hallucination filter blanks
-        // others outright. Replacing the tail with that would make words the
-        // user has already read flicker out and back a quarter-second later.
+        // Whisper answers an uncertain window with nothing, and the
+        // hallucination filter blanks others; replacing the tail with that makes
+        // already-read words flicker out and back a tick later.
         let text = text.trim();
         if !text.is_empty() {
             tail = text.to_string();
@@ -184,9 +166,8 @@ async fn run(
         }
         on_partial(&shown);
 
-        // The window is full: freeze what it said and drop the audio it said it
-        // about. Exactly the bytes that were transcribed are drained — anything
-        // the tap appended while the pass ran stays for the next one.
+        // Window full: freeze its text and drain exactly the bytes transcribed,
+        // so whatever the tap appended mid-pass stays for the next one.
         if window.len() >= COMMIT_BYTES {
             committed = shown;
             tail.clear();
@@ -232,9 +213,8 @@ mod tests {
         aloud_audio::resample::to_pcm16_bytes(&samples)
     }
 
-    /// The failure this guards: a dictation longer than the window shows only
-    /// its last few seconds, so the text a user is reading vanishes upwards
-    /// mid-sentence. Everything before the commit has to stay on screen.
+    /// Guards: a dictation longer than the window showed only its last seconds,
+    /// so text vanished upwards mid-sentence.
     #[tokio::test]
     async fn text_from_before_the_window_slid_stays_on_screen() {
         let partials: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -260,9 +240,8 @@ mod tests {
         );
     }
 
-    /// Whisper returns nothing for a window it is unsure about, and the
-    /// hallucination filter blanks others outright. Both used to wipe the tail
-    /// mid-sentence, so a word appeared and vanished a tick later.
+    /// Guards: an empty pass used to wipe the tail, so a word appeared and
+    /// vanished a tick later.
     #[tokio::test]
     async fn a_pass_that_comes_back_empty_leaves_the_words_up() {
         let partials: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));

@@ -1,16 +1,10 @@
-//! Drives the meeting chunker from the real microphone tap.
+//! Drives the meeting chunker from the real microphone tap — the part a unit
+//! test cannot assert: the carried remainder surviving thousands of real
+//! callbacks at device-chosen buffer sizes.
 //!
 //! `cargo run -p aloud-audio --example meeting_chunks`
 //!
-//! The unit tests feed `Chunker` synthetic buffers sized to make the boundary
-//! cases obvious. Real hardware hands over whatever buffer size the device
-//! negotiated, which is never a whole chunk, so the boundary lands mid-buffer
-//! over and over. This is the part a test cannot assert: that the carried
-//! remainder survives thousands of real callbacks without losing or repeating
-//! a single byte.
-//!
-//! Uses a 2-second chunk rather than the real 60 so it finishes in a coffee
-//! break; the boundary arithmetic is identical either way.
+//! 2-second chunks rather than the real 60; the boundary arithmetic is the same.
 
 use std::{
     sync::{Arc, Mutex},
@@ -26,10 +20,7 @@ fn main() -> anyhow::Result<()> {
 
     let chunker = Arc::new(Mutex::new(aloud_audio::Chunker::new(chunk_bytes)));
     let chunks = Arc::new(Mutex::new(Vec::<(usize, Vec<u8>)>::new()));
-    // Every buffer size the OS actually handed us. Printed rather than
-    // assumed: this machine negotiated a uniform 512 bytes, but the size is
-    // the device's to choose and 512 into a 96000-byte chunk still lands the
-    // boundary mid-buffer, which is the case worth exercising.
+    // Printed rather than assumed — the buffer size is the device's to choose.
     let buffers = Arc::new(Mutex::new(Vec::<usize>::new()));
 
     let (tap_chunker, tap_chunks, tap_buffers) = (chunker.clone(), chunks.clone(), buffers.clone());
@@ -84,8 +75,8 @@ fn main() -> anyhow::Result<()> {
         tail.len()
     );
 
-    // The whole point: every byte the tap produced is either in a chunk or in
-    // the tail, exactly once. A remainder bug shows up here and nowhere else.
+    // Every tap byte is in a chunk or the tail, exactly once. A remainder bug
+    // shows up here and nowhere else.
     let total_in: usize = buffers.iter().sum();
     let total_out: usize = chunks.iter().map(|(_, c)| c.len()).sum::<usize>() + tail.len();
     println!("\ncaptured {total_in} bytes, accounted {total_out}");

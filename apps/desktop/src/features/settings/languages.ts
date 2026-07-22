@@ -1,10 +1,7 @@
 /**
- * The languages whisper can transcribe, as BCP-47 code → English name.
- *
- * This is whisper's own supported set, not a curated subset: a language
- * missing from here is one the user cannot pick at all, and the field it
- * replaced accepted any code. Sorted by name so the list reads alphabetically;
- * the Select's typeahead matches on the name, so "eng" jumps to English.
+ * Whisper's full supported set, not a curated subset — a language missing from
+ * here is one the user cannot pick at all. Sorted by name, which is also what
+ * the Select's typeahead matches on.
  */
 export const LANGUAGES: ReadonlyArray<{ code: string; name: string }> = [
   { code: "af", name: "Afrikaans" },
@@ -115,12 +112,6 @@ export const LANGUAGES: ReadonlyArray<{ code: string; name: string }> = [
  */
 export const AUTO_DETECT = "auto";
 
-/**
- * The "no translation" option for the output language.
- *
- * A separate sentinel from {@link AUTO_DETECT} because the two settings mean
- * different things — one is the language spoken into the mic, the other the
- * language pasted out — and sharing a constant is how they end up sharing a
- * bug. Both store `""` in `Settings`; only the Select needs a value.
- */
+/** The "no translation" option. A separate sentinel from {@link AUTO_DETECT}
+ * because the two settings mean different things; both store `""`. */
 export const SAME_AS_SPOKEN = "same";

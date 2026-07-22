@@ -1,17 +1,9 @@
-//! Turning a physical key gesture into a [`Binding`].
+//! Turning a physical key gesture into a [`Binding`]. Pure and
+//! platform-neutral, like [`crate::matcher`].
 //!
-//! The settings UI can only offer a fixed list of modifier-only holds, so
-//! `Binding::Key` — a real key with modifiers, e.g. Cmd+Shift+D — was
-//! expressible in Rust and unreachable from the app. This is the missing half.
-//!
-//! Capture cannot commit on the first key-down. Recording Cmd+Shift+D means
-//! watching Command go down, then Shift, then D: committing eagerly would
-//! record "Command". So the gesture is accumulated while anything is held and
-//! committed when the last key comes back up, keeping the most specific
-//! candidate seen along the way.
-//!
-//! Pure and platform-neutral, like [`crate::matcher`] — the OS backends only
-//! feed it `Key`s.
+//! Committing on the first key-down would record "Command" for every chord
+//! starting with it, so the gesture accumulates while anything is held and
+//! commits on the last release, keeping the most specific candidate seen.
 
 use crate::model::{Binding, Key, Modifiers};
 use std::collections::BTreeSet;
@@ -26,15 +18,12 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    /// Records a key going down, returning nothing — a gesture only commits on
-    /// release.
     pub fn key_down(&mut self, key: Key) {
         self.pressed.insert(key);
 
-        // The side-specific modifier keys held alongside the primary. Recording
-        // pins to exactly these, so Left-Option+Z and Right-Option+Z are kept
-        // apart — the whole reason capture stores this rather than only the
-        // logical `modifiers` derived from it.
+        // Side-specific keys held alongside the primary. Recording pins to
+        // exactly these, keeping Left-Option+Z and Right-Option+Z apart — the
+        // reason this is stored and not just the logical `modifiers`.
         let exact_modifiers: BTreeSet<Key> = self
             .pressed
             .iter()
@@ -87,12 +76,8 @@ impl Recorder {
     }
 }
 
-/// Whether `candidate` is a better record of the user's intent than `current`.
-///
-/// A real key always wins: someone pressing Cmd+Shift+D means D, and the
-/// modifier-only candidates recorded on the way there are scaffolding. Between
-/// two of the same kind, more modifiers wins — holding Cmd then Cmd+Option
-/// means Cmd+Option.
+/// A real key always wins — Cmd+Shift+D means D, and the modifier-only
+/// candidates seen on the way are scaffolding. Otherwise, more modifiers wins.
 fn outranks(candidate: &Binding, current: &Binding) -> bool {
     let plain = |b: &Binding| matches!(b, Binding::Key { .. });
     match (plain(candidate), plain(current)) {
@@ -125,8 +110,8 @@ mod tests {
         );
     }
 
-    /// The bug the eager implementation would have shipped: committing on the
-    /// first key-down records "Command" for every chord starting with Command.
+    /// Committing on the first key-down records "Command" for every chord
+    /// starting with Command.
     #[test]
     fn chord_records_the_real_key_not_the_first_modifier() {
         let mut r = Recorder::default();
@@ -145,8 +130,7 @@ mod tests {
         );
     }
 
-    /// Release order is the user's business, not ours — lifting the letter
-    /// first is the common case and must give the same answer.
+    /// Lifting the letter first is the common case and must give the same answer.
     #[test]
     fn release_order_does_not_change_the_binding() {
         let mut a = Recorder::default();
@@ -220,9 +204,8 @@ mod tests {
         r.key_down(Key::RightOption);
         r.key_up(Key::RightOption);
 
-        // Any key that stays recordable — Escape is intercepted as the capture
-        // bail-out before it ever reaches the recorder. The subject here is
-        // reuse across gestures, not which keys are legal.
+        // F5, not Escape: Escape is intercepted as the capture bail-out before
+        // it ever reaches the recorder.
         r.key_down(Key::F(5));
         assert_eq!(
             r.key_up(Key::F(5)),

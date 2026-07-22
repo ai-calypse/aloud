@@ -1,7 +1,5 @@
-//! macOS backend: CGEventTap, the same mechanism the Swift app used.
-//!
-//! A tap is the only way to see modifier-only holds and to swallow events
-//! before the focused app gets them. It requires Accessibility permission.
+//! macOS backend: CGEventTap — the only way to see modifier-only holds and to
+//! swallow events before the focused app gets them. Needs Accessibility.
 
 use crate::model::Key;
 use anyhow::{anyhow, Result};
@@ -57,11 +55,9 @@ pub fn key_from_keycode(code: i64) -> Option<Key> {
         109 => Key::F(10),
         103 => Key::F(11),
         111 => Key::F(12),
-        // These are physical positions, not legends: keycode 12 is the key at
-        // US-QWERTY's Q, which AZERTY labels A. Bindings still fire on the key
-        // the user actually pressed — only the settings keycap prints the US
-        // letter. Windows differs: its VK codes are layout-mapped, so `Char`
-        // there follows the legend.
+        // Physical positions, not legends: keycode 12 is US-QWERTY's Q, which
+        // AZERTY labels A. Bindings fire on the key pressed; only the settings
+        // keycap prints the US letter. Windows VK codes follow the legend.
         // ponytail: fixed US table — the upgrade is UCKeyTranslate against the
         // current TIS layout, which must run on the main thread and be cached
         // (TIS/TSM aborts the process off the main queue) and re-read on layout
@@ -96,19 +92,14 @@ pub fn key_from_keycode(code: i64) -> Option<Key> {
     })
 }
 
-/// Whether a modifier key is down, read from the event flags — flagsChanged
-/// reports the key that moved but not its direction.
+/// Whether a modifier key is down — flagsChanged reports the key that moved but
+/// not its direction.
 ///
-/// **Side-specific masks, as the Swift original used.** The public
-/// `CGEventFlagShift` is set while *either* Shift is down, so releasing Left
-/// Shift with Right Shift still held reads as "Left Shift is down". The
-/// matcher tolerated that because it recomputes from scratch on every event,
-/// but the capture recorder cannot: it commits only when every key has been
-/// released, so one phantom key-down leaves it armed — swallowing the whole
+/// Side-specific `NX_DEVICE*` masks from IOKit's `ev_keymap.h`, which occupy the
+/// low bits of the same flags word and have no `CGEventFlags` constants. The
+/// public `CGEventFlagShift` is set while *either* Shift is down, and one
+/// phantom key-down leaves the capture recorder armed — swallowing the whole
 /// keyboard — until its ten-second timeout.
-///
-/// These are the `NX_DEVICE*` masks from IOKit's `ev_keymap.h`. They occupy
-/// the low bits of the same flags word and have no `CGEventFlags` constants.
 fn modifier_is_down(key: Key, flags: CGEventFlags) -> bool {
     const L_CONTROL: u64 = 0x0000_0001;
     const L_SHIFT: u64 = 0x0000_0002;
@@ -174,11 +165,9 @@ where
     // must be `FnMut`. The run loop calls it on one thread, serially.
     let on_event = RefCell::new(on_event);
 
-    // Filled in after the tap exists. macOS disables a tap that takes too long
-    // to answer (or that the user interrupts) and tells us by sending
-    // TapDisabledBy*; without re-arming it here, every hotkey in the app stays
-    // dead until relaunch. The tap outlives this closure, so the raw port
-    // pointer stays valid for the life of the process.
+    // Filled in after the tap exists. macOS disables a slow or interrupted tap
+    // via TapDisabledBy*, and without re-arming it every hotkey stays dead until
+    // relaunch. The tap outlives this closure, so the raw port stays valid.
     let port: Rc<Cell<*const std::ffi::c_void>> = Rc::new(Cell::new(std::ptr::null()));
     let port_cb = port.clone();
 
@@ -204,32 +193,20 @@ where
                 return Some(event.to_owned());
             }
 
-            // Never let our own synthetic keystrokes drive our own hotkeys.
-            //
-            // `aloud_paste` types Cmd+C to read a selection and Cmd+V to paste,
-            // and a Session-level tap sees those exactly as it sees the user's
-            // keyboard. That fed back: holding Left Option to rewrite
-            // fired Activated, which read the selection, which typed Cmd+C,
-            // which the matcher read as Cmd+Option — not the bound Option — so
-            // it fired Deactivated. Releasing the synthetic Cmd re-fired
-            // Activated, which read the selection again. The pair repeated for
-            // as long as the key was held, and all the user heard was the start
-            // chime stuttering.
-            //
-            // Comparing the source pid is the reliable discriminator: real
-            // hardware reports 0, and a posted event carries its poster's pid.
-            // Hardware reports 0 here; a posted event carries its poster's pid.
+            // Never let our own synthetic keystrokes drive our own hotkeys: a
+            // Session tap sees `aloud_paste`'s Cmd+C/Cmd+V as the user's own,
+            // which loops Activated/Deactivated for as long as a rewrite key is
+            // held. The pid is the reliable discriminator — real hardware
+            // reports 0, a posted event carries its poster's pid.
             if event.get_integer_value_field(EventField::EVENT_SOURCE_UNIX_PROCESS_ID)
                 == i64::from(std::process::id())
             {
                 return Some(event.to_owned());
             }
 
-            // `None` for a key this crate has no `Key` for — a digit, Return,
-            // an arrow. The handler still gets a say, because while a binding
-            // is being recorded *every* key must be swallowed: forwarding the
-            // Return of a Cmd+Return the user was trying to record submits
-            // whatever is focused underneath, having swallowed only the Cmd.
+            // `None` for an unmapped key, but the handler still gets a say:
+            // while recording a binding *every* key must be swallowed, or the
+            // Return of a Cmd+Return submits whatever is focused underneath.
             let swallow = (on_event.borrow_mut())(decode(event_type, event));
             // Returning None swallows the event.
             if swallow {

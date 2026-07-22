@@ -5,14 +5,10 @@ import { Slot } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  // `transition-all` was shadcn's default and it animates every property that
-  // ever changes, including width and content shifts. Naming the four that
-  // should move keeps a button from easing its own layout.
-  //
-  // The press scale is on the base, not per-variant: a control that does not
-  // acknowledge the pointer on the way *down* feels dead no matter how good
-  // the rest of the motion is. Variants that want a different amount still
-  // override it — theirs are merged after these.
+  // Named transition properties, not shadcn's `transition-all`, which eases a
+  // button's own layout on any width or content change. The press scale is on
+  // the base so every variant acknowledges the pointer; variants merge after
+  // these and can still override it.
   "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap outline-none transition-[color,background-color,border-color,box-shadow,transform] duration-[var(--dur-fast)] ease-[var(--ease-out)] active:scale-[0.97] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
@@ -28,12 +24,7 @@ const buttonVariants = cva(
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-primary underline-offset-4 hover:underline",
 
-        /* --- Aloud's macOS variants ---------------------------------------
-         * The app's own buttons, previously hand-rolled as raw <button> class
-         * strings duplicated across MacroEditor, AppRuleEditor, SettingsView,
-         * ConnectorEditor and App.tsx. Kept here so there is one button in the
-         * app rather than shadcn's plus a parallel set.
-         */
+        /* --- Aloud's macOS variants --------------------------------------- */
         /** Filled action: "Add Rule", "Add Macro", "Connect". */
         accent:
           "bg-brand text-brand-fg shadow-accent hover:bg-brand/90 active:scale-[0.97]",

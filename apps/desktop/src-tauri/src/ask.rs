@@ -1,10 +1,8 @@
 //! Ask: streams a markdown answer into the overlay's drop-down panel.
 //!
-//! There is no Ask window any more. The panel the user has been watching say
-//! "Listening…" is the same surface the answer grows into, so the question and
-//! its answer read as one continuous thing rather than as a second window
-//! appearing over the first. `overlay::show_answer` owns the hand-off; this
-//! module only produces the text.
+//! There is no Ask window — the answer grows into the same panel that said
+//! "Listening…". `overlay::show_answer` owns the hand-off; this module only
+//! produces the text.
 
 use aloud_store::Settings;
 use anyhow::{bail, Result};
@@ -23,7 +21,6 @@ const LABEL: &str = "overlay";
 pub enum AskEvent {
     /// The question, echoed so the panel can show what it heard.
     Question(String),
-    /// One incremental chunk of the answer.
     Delta(String),
     Done,
     Failed(String),
@@ -73,12 +70,7 @@ async fn stream_answer(app: &AppHandle, question: &str, settings: &Settings) -> 
     Ok(())
 }
 
-
 /// Answers a question the user typed into the panel.
-///
-/// `answer` already took a plain `String`, so it is the seam: the typed and
-/// spoken paths differ only in where the string came from, and nothing about
-/// streaming, the panel or the credential check is duplicated to serve one.
 #[tauri::command]
 #[specta::specta]
 pub async fn ask_text(

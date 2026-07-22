@@ -1,14 +1,9 @@
 /**
- * Unwraps a fallible command's result.
+ * Unwraps a fallible command's result, logging and falling back.
  *
- * Rust commands that return `Result` cross the boundary as a
- * `{ status: "ok" | "error" }` union, so every call site has to handle the
- * error arm. Most of them have nothing useful to do with it — a failed note
- * search should log and show nothing, not crash the window — so this logs and
- * falls back.
- *
- * Use it where a fallback is genuinely correct. Where the user must be told,
- * handle the union directly.
+ * Use it where a fallback is genuinely correct — a failed note search should
+ * show nothing, not crash the window. Where the user must be told, handle the
+ * `{ status: "ok" | "error" }` union directly.
  */
 export async function or<T>(
   promise: Promise<{ status: "ok"; data: T } | { status: "error"; error: string }>,

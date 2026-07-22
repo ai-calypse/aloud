@@ -4,10 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { GridRow, Group, rowInput } from "@/components/ui/rows";
 
-/**
- * Edits the voice-macro list: a trigger phrase and the text it expands to.
- * Add/remove rows; each edit persists through the parent's `update`.
- */
+/** Voice macros: a trigger phrase and the text it expands to. Each edit
+ * persists through the parent's `update`. */
 export function MacroEditor({
   macros,
   onChange,

@@ -1,16 +1,13 @@
-//! Regression check for the off-main-thread SIGTRAP.
+//! Regression check for the off-main-thread SIGTRAP: enigo's `Key::Unicode`
+//! lookup calls TIS/TSM, which macOS aborts on (`dispatch_assert_queue`) off the
+//! main queue. Calls `copy_selection()` from a background thread the way the
+//! pipeline does — before the fix this killed the process.
 //!
-//! enigo's `Key::Unicode` lookup calls TIS/TSM, which modern macOS aborts on
-//! (`dispatch_assert_queue`) unless it runs on the main queue — this killed
-//! the whole app at paste time. This example calls `copy_selection()` from a
-//! background thread, exactly like the pipeline does: before the fix it
-//! crashes the process, after it the chord is dispatched to main and returns.
-//!
-//! Harmless to run: it synthesizes Cmd+C (a copy) and restores the clipboard.
+//! Harmless to run: it synthesizes Cmd+C and restores the clipboard.
 
 fn main() {
-    // Arm TSM on the main thread first, the way the app's NSApplication run
-    // loop does — the queue assert only fires once TSM has a home queue.
+    // Arm TSM on the main thread first: the assert only fires once TSM has a
+    // home queue.
     match aloud_paste::copy_selection() {
         Ok(text) => println!("main thread: OK, {} chars", text.len()),
         Err(e) => println!("main thread: ERR {e:#}"),

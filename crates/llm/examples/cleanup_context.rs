@@ -3,21 +3,15 @@
 //!
 //!   GROQ_API_KEY=... cargo run -p aloud-llm --example cleanup_context
 //!
-//! `prompts/cleanup.md` has carried the rule since it was ported — "correct a
-//! near-match like 'Aisha' to the visible recipient spelling 'Aysha' when it
-//! is clearly the same intended person" — but nothing ever supplied a context,
-//! so it was dead text. A unit test can only assert the string was built; only
-//! a real request shows the model obeying the rule.
-//!
-//! The sample deliberately mis-spells a name the way Whisper would. Without
-//! context the model has nothing to correct against and must leave it alone;
-//! with the mail window's title it must fix the spelling — and must NOT invent
-//! the surname, which the prompt forbids.
+//! A unit test can only assert the context string was built; only a real
+//! request shows the model obeying the rule. The sample mis-spells a name the
+//! way Whisper would: without context the model must leave it alone, with the
+//! mail window's title it must fix the spelling — and must NOT invent the
+//! surname, which the prompt forbids.
 
 use aloud_llm::cleanup;
 
-/// Phonetically what was said. The recipient's real spelling appears only in
-/// the window title, never in the transcript.
+/// The recipient's real spelling appears only in the window title.
 const SAMPLE: &str = "hi aisha just confirming that thursday afternoon still \
     works on my end for the q3 planning review";
 
@@ -52,9 +46,8 @@ async fn main() -> anyhow::Result<()> {
         with.contains("Aysha"),
         "the context named the recipient and the spelling was not adopted"
     );
-    // The prompt's other half: a visible name is a spelling reference, not
-    // content to add. Pasting a surname the user never said is worse than
-    // pasting the wrong spelling, because they cannot see it was invented.
+    // A visible name is a spelling reference, not content to add: an invented
+    // surname is worse than a wrong spelling, because it cannot be seen.
     assert!(
         !with.contains("Rahman"),
         "a surname that was never spoken was pulled out of the context"

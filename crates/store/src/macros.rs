@@ -1,41 +1,26 @@
 //! Voice macros: spoken shorthand that expands to canned text.
 //!
-//! "insert my address" → the full address; "my email" → the address; "standup
-//! template" → a multi-line block. A macro is a trigger phrase and its
-//! expansion; expansion runs on the cleaned transcript, so the model has
-//! already fixed spacing and casing before a trigger is matched.
-//!
-//! Matching is whole-phrase and case-insensitive, anchored on word boundaries
-//! so "my email" does not fire inside "customsummary email".
-//!
-//! The Swift app's macros are a *different* feature with the same name: there,
-//! a macro matched the whole raw utterance and bypassed the LLM entirely. Here
-//! a trigger expands inline, after cleanup, so one dictation can contain
-//! several. Kept as pure data + one function so it is trivially testable.
+//! Expansion runs on the *cleaned* transcript, so the model has already fixed
+//! spacing and casing before a trigger is matched, and one dictation can
+//! contain several. Matching is whole-phrase, case-insensitive and anchored on
+//! word boundaries, so "my email" does not fire inside "customsummary email".
 
 use serde::{Deserialize, Serialize};
 
-/// One shorthand → expansion pair.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct Macro {
     /// The spoken phrase that triggers expansion, e.g. "my address".
     pub trigger: String,
-    /// The text it expands to.
     pub expansion: String,
 }
 
-/// Expands every macro whose trigger appears in `text`.
-///
-/// Triggers are tried longest-first so "my work email" wins over "my email"
-/// when both match. Each is replaced everywhere it occurs. A trigger that is
-/// blank, or does not appear, is a no-op.
+/// Expands every macro whose trigger appears in `text`, longest trigger first so
+/// "my work email" wins over "my email".
 pub fn expand(text: &str, macros: &[Macro]) -> String {
     let mut ordered: Vec<&Macro> = macros
         .iter()
         .filter(|m| !m.trigger.trim().is_empty())
         .collect();
-    // Longest trigger first: a specific phrase should not be pre-empted by a
-    // shorter one it contains.
     ordered.sort_by_key(|m| std::cmp::Reverse(m.trigger.trim().len()));
 
     let mut result = text.to_string();
@@ -45,11 +30,9 @@ pub fn expand(text: &str, macros: &[Macro]) -> String {
     result
 }
 
-/// Case-insensitive, word-boundary replacement of `phrase` with `to`.
-///
-/// A hand-rolled scan rather than a regex: the dependency is not worth it for
-/// one pattern, and the boundary rule here is simply "not flanked by an
-/// alphanumeric", which a regex would spell `\b` but no more clearly.
+/// Case-insensitive, word-boundary replacement of `phrase` with `to`. Hand-rolled
+/// rather than a regex dependency for one pattern; the boundary rule is just
+/// "not flanked by an alphanumeric".
 fn replace_phrase(haystack: &str, phrase: &str, to: &str) -> String {
     let hay_lower = haystack.to_lowercase();
     let needle = phrase.to_lowercase();
@@ -61,8 +44,6 @@ fn replace_phrase(haystack: &str, phrase: &str, to: &str) -> String {
         let start = cursor + rel;
         let end = start + needle.len();
 
-        // A match only counts if neither side is an alphanumeric — otherwise
-        // it is inside a larger word and must be left alone.
         let before_ok = start == 0 || !is_alnum(bytes[start - 1]);
         let after_ok = end == bytes.len() || !is_alnum(bytes[end]);
 
@@ -71,7 +52,7 @@ fn replace_phrase(haystack: &str, phrase: &str, to: &str) -> String {
             out.push_str(to);
             cursor = end;
         } else {
-            // Keep the char and advance past this false match to avoid a loop.
+            // Advance past this false match to avoid a loop.
             out.push_str(&haystack[cursor..=start]);
             cursor = start + 1;
         }
@@ -112,7 +93,6 @@ mod tests {
 
     #[test]
     fn does_not_fire_inside_a_larger_word() {
-        // "sig" must not expand inside "signature".
         let macros = [m("sig", "— Jane")];
         assert_eq!(
             expand("my signature is sig", &macros),

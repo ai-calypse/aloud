@@ -1,7 +1,6 @@
 // Verifies installed_apps() against real bundles on this machine.
 fn main() {
-    // Cold vs warm: the scan is cached for the process lifetime, so the second
-    // call must not pay for the ~70 `sips` spawns again.
+    // Cold vs warm: the second call must not pay for the ~70 `sips` spawns.
     let cold_start = std::time::Instant::now();
     let apps = aloud_selection::installed_apps();
     let cold = cold_start.elapsed();
@@ -36,8 +35,8 @@ fn main() {
     println!("\n{}/{} have icons", with_icons, apps.len());
     println!("{}/{} have bundle ids", with_ids, apps.len());
     assert!(with_icons > 0, "expected at least one icon to extract");
-    // App rules key on this; a scan that reads none means every rule written
-    // from the picker falls back to name matching without saying so.
+    // App rules key on this: a scan that reads none silently drops every
+    // picker-written rule back to name matching.
     assert!(
         with_ids > apps.len() / 2,
         "most bundles declare an identifier"

@@ -1,14 +1,11 @@
-//! Platform-neutral binding model.
-//!
-//! The Swift app keyed everything off macOS virtual keycodes (55 = Command,
-//! 63 = Fn, ...). Those mean nothing on Windows, so bindings are expressed as
-//! a `Key` enum here and each backend maps its native codes into it.
+//! Platform-neutral binding model: bindings are a `Key` enum, and each backend
+//! maps its native keycodes into it.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-/// A physical key, side-specific where the distinction matters (the Swift app
-/// let you bind Right Option specifically, which is a popular dictation key).
+/// A physical key, side-specific where the distinction matters — Right Option
+/// alone is a popular dictation binding.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, specta::Type,
 )]
@@ -56,30 +53,26 @@ pub enum Modifier {
     Function,
 }
 
-/// Set of side-agnostic modifiers, mirroring Swift's `ShortcutModifiers`.
+/// Set of side-agnostic modifiers.
 pub type Modifiers = BTreeSet<Modifier>;
 
 /// What triggers a binding.
 ///
-/// `modifiers` is side-agnostic (`Option` matches either Alt key), which is
-/// what the presets want. `exact_modifiers` is the side-specific set a
-/// *recording* captures: when non-empty it pins the chord to exactly those
-/// keys, so Left-Option+Z is not Right-Option+Z. Empty means "either side",
-/// the case for every preset and hand-written binding — matching voice-dict,
-/// where only recorded bindings carry `exactModifierKeyCodes`.
+/// `modifiers` is side-agnostic (`Option` matches either Alt key). Only a
+/// *recording* fills `exact_modifiers`, which pins the chord to those exact
+/// keys so Left-Option+Z is not Right-Option+Z; empty means either side.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Binding {
     Disabled,
-    /// A regular key, optionally with modifiers held (e.g. Cmd+Shift+D).
     Key {
         key: Key,
         modifiers: Modifiers,
         #[serde(default)]
         exact_modifiers: BTreeSet<Key>,
     },
-    /// A modifier held on its own (e.g. hold Right Option) — the case Tauri's
-    /// global-shortcut plugin cannot express, and why this crate exists.
+    /// A modifier held on its own — the case Tauri's global-shortcut plugin
+    /// cannot express, and why this crate exists.
     ModifierKey {
         key: Key,
         modifiers: Modifiers,
@@ -89,9 +82,8 @@ pub enum Binding {
 }
 
 impl Binding {
-    /// A plain-key binding with side-agnostic modifiers (either side matches) —
-    /// how presets and hand-written bindings are built. A recording produces
-    /// the side-specific form via the struct literal instead.
+    /// A plain-key binding with side-agnostic modifiers. Recordings build the
+    /// side-specific form via the struct literal instead.
     pub fn key_chord(key: Key, modifiers: Modifiers) -> Self {
         Binding::Key {
             key,
@@ -100,9 +92,7 @@ impl Binding {
         }
     }
 
-    /// A modifier-held binding with side-agnostic modifiers. See [`key_chord`].
-    ///
-    /// [`key_chord`]: Binding::key_chord
+    /// A modifier-held binding with side-agnostic modifiers.
     pub fn modifier_chord(key: Key, modifiers: Modifiers) -> Self {
         Binding::ModifierKey {
             key,
@@ -152,7 +142,7 @@ impl Binding {
     }
 }
 
-/// What a binding does. Ported from Swift's `ShortcutRole`.
+/// What a binding does.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, specta::Type,
 )]
@@ -197,10 +187,9 @@ pub struct Config {
     pub toggle: Option<Binding>,
     pub copy_again: Option<Binding>,
     pub ask: Option<Binding>,
-    /// Rewrite the selected text by voice. Called `command` in settings files
-    /// written before the rename; `Settings::load` moves those across, rather
-    /// than a serde alias — an alias makes specta emit a union type, and
-    /// `keyof Config` on a union is `never`, which breaks the settings UI.
+    /// Called `command` in older settings files; `Settings::load` migrates them
+    /// rather than a serde alias, which makes specta emit a union whose
+    /// `keyof Config` is `never` and breaks the settings UI.
     pub rewrite: Option<Binding>,
     pub meeting_notes: Option<Binding>,
     pub agent: Option<Binding>,
@@ -228,8 +217,8 @@ impl Config {
     }
 }
 
-/// Default bindings. Hold-to-talk on Right Option: a modifier-only hold that
-/// exists on both platforms and rarely collides with app shortcuts.
+/// Hold-to-talk on Right Option: exists on both platforms and rarely collides
+/// with app shortcuts.
 impl Config {
     pub fn defaults() -> Self {
         Self {

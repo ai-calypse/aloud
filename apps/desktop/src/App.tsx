@@ -30,10 +30,8 @@ const PHASE_LABEL: Record<Phase, string> = {
 /** A sidebar row: either a top-level view or one settings pane. */
 type Nav = "notes" | "status" | "timings" | SettingsSection;
 
-// icon is an inline SVG path — no icon dependency. `tint` is the System
-// Settings-style rounded icon chip behind it; each pane keeps one hue so a row
-// is recognisable by colour before the label is read. Grouping mirrors the
-// Swift app: content views on top, settings panes below a divider.
+// icon is an inline SVG path — no icon dependency. Each pane keeps one hue, so
+// a row is recognisable by colour before the label is read.
 const NAV: {
   id: Nav;
   title: string;
@@ -43,9 +41,8 @@ const NAV: {
 }[] = [
   { id: "notes", title: "Notes", group: "app", tint: "var(--sys-orange)", icon: "M4 4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4ZM14 2v6h6M8 13h8M8 17h8" },
   { id: "status", title: "Status", group: "app", tint: "var(--sys-green)", icon: "M3 12h4l3 8 4-16 3 8h4" },
-  // Hidden unless "Developer tools" is on: the latency waterfall is a
-  // debugging tool, not a feature. It used to be gated on import.meta.env.DEV,
-  // which meant no release build could reach a finished, registered view.
+  // Hidden unless "Developer tools" is on. Not import.meta.env.DEV, which
+  // meant no release build could reach a finished, registered view.
   { id: "timings", title: "Timings", group: "app", tint: "var(--sys-pink)", icon: "M12 8v4l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z" },
   { id: "general", title: "General", group: "settings", tint: "var(--sys-grey)", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" },
   { id: "hotkeys", title: "Hotkeys", group: "settings", tint: "var(--sys-indigo)", icon: "M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" },
@@ -73,10 +70,8 @@ const SETTINGS_IDS: SettingsSection[] = [
 
 /**
  * Formatting only — the 40 wpm rule and the clamp live in
- * `Stats::time_saved_seconds`, and arrive as `timeSavedSeconds`. Reimplemented
- * here, changing the rule in Rust left this window disagreeing with the tray.
- *
- * The min/h switchover stays presentation, as in voice-dict's MenuBarView.
+ * `Stats::time_saved_seconds`. Reimplementing them here left this window
+ * disagreeing with the tray.
  */
 function timeSavedText(stats: StatsView): string {
   const minutes = (stats.timeSavedSeconds ?? 0) / 60;
@@ -102,10 +97,8 @@ export default function App() {
     commands.getStats().then(setStats);
     commands.hotkeysPermitted().then(setHotkeysReady);
 
-    // Dictation happens while this window is unfocused, and macOS suspends a
-    // hidden webview (App Nap) — "done" events can land on a frozen runtime
-    // and vanish, and the streak can roll at midnight with no event at all.
-    // Refetching on focus catches both.
+    // App Nap suspends this webview while it is unfocused, so a "done" event
+    // can land on a frozen runtime and vanish. Refetching on focus catches it.
     const refreshStats = () => commands.getStats().then(setStats);
     window.addEventListener("focus", refreshStats);
 
@@ -114,16 +107,14 @@ export default function App() {
       // Stats only change once the text has actually landed.
       if (event.payload === "done") refreshStats();
     });
-    // The tray's "Settings…" item opens the window on the settings pane; the
-    // menu cannot navigate the webview itself.
+    // The tray's "Settings…" item; the menu cannot navigate the webview itself.
     const unlistenSettings = listen("open-settings", () => setNav("general"));
     // "Re-run Setup…" clears `onboarded` in Rust; refetch so the wizard shows.
     const unlistenSetup = listen("rerun-setup", () =>
       commands.getSettings().then(setSettings),
     );
 
-    // Rust waits for the Accessibility grant and announces it, so the banner
-    // clears the moment permission lands — no app restart needed.
+    // Rust announces the Accessibility grant, so the banner clears without a restart.
     const unlistenPermission = events.hotkeysPermitted.listen((event) =>
       setHotkeysReady(event.payload),
     );
@@ -148,9 +139,8 @@ export default function App() {
     );
   }
 
-  // Timings and Debug are the conditional rows. Filtering here rather than at
-  // module scope keeps the pill's index and the sidebar's group divider
-  // agreeing with what is actually rendered.
+  // Filtered here rather than at module scope, so the pill's index and the
+  // group divider agree with what is actually rendered.
   const rows = NAV.filter(
     (n) =>
       (n.id !== "timings" && n.id !== "debug") || settings.developerTools,
@@ -168,7 +158,6 @@ export default function App() {
         className="relative flex flex-col gap-1 overflow-y-auto px-2.5 pb-3 pt-11"
         data-tauri-drag-region
       >
-        {/* Sits behind the rows, inset to match the nav's own padding. */}
         <SlidingPill
           target={activeRow}
           deps={[current]}

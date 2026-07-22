@@ -48,11 +48,8 @@ import { bodyFor, labelFor } from "./lib/tool-views";
 import { notchPath } from "./lib/notch-shape";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import { createSpring } from "./lib/spring";
-// Tailwind, which this window used to do without. It earns its place now that
-// the Ask answer streams into this panel: Streamdown styles every element it
-// emits with utilities (see the `@source` note in index.css), and hand-rolling
-// a second markdown stylesheet here would be the same answer looking different
-// in this window and in the agent panel.
+// Streamdown styles the streamed answer with Tailwind utilities — see the
+// `@source` note in index.css.
 import "./index.css";
 import "./styles/overlay.css";
 
@@ -62,8 +59,7 @@ const LABEL: Record<Phase, string> = {
   transcribing: "Transcribing…",
   done: "Pasted",
   noSpeech: "No speech detected",
-  // Replaced by the real reason as soon as Rust sends one; this is only what
-  // shows if an error somehow arrives without a message.
+  // Only shown if an error arrives without a message; Rust normally sends one.
   error: "Failed",
 };
 
@@ -71,39 +67,22 @@ const LABEL: Record<Phase, string> = {
 const ERROR_CHARS = 90;
 
 /**
- * Bars in the listening wave.
- *
- * Five, as the Swift app used. The count and the per-bar phase step together
- * set how much of a wave fits across the row (see the delay in overlay.css) —
- * change this and that has to move with it.
+ * Bars in the listening wave. With the per-bar delay in overlay.css this sets
+ * how much of a wave fits across the row — change one, move the other.
  */
 const BAR_COUNT = 5;
 
 /**
- * Per-bar height ceiling: a raised cosine, tallest in the middle.
- *
- * Without it every bar reaches the same height and the row reads as a ribbon
- * rather than a waveform. Computed rather than hand-tuned so the shape holds
- * if BAR_COUNT changes.
- *
- * The floor is 0.6, not 0, because this multiplies through the wave's trough
- * and the silent-level scale as well: a shallower envelope crushed the outer
- * bars to a 1px dash at rest, which read as a broken row of dots rather than
- * as short bars.
+ * Per-bar height ceiling: a raised cosine, tallest in the middle, so the row
+ * reads as a waveform and not a ribbon. The floor is 0.6, not 0, because it
+ * scales the trough too — lower crushed the outer bars to a 1px dash at rest.
  */
 const BAR_PEAKS = Array.from({ length: BAR_COUNT }, (_, i) => {
   const position = i / (BAR_COUNT - 1); // 0…1 across the row
   return 0.6 + 0.4 * Math.sin(Math.PI * position);
 });
 
-/**
- * The drop-down panel's motion, ported from the reference implementation's
- * `balanced` preset — now declared in motion.css, alongside every other motion
- * value in the app, and read from there.
- *
- * The fallbacks are only for a stylesheet that has not applied yet; the numbers
- * that matter, and the note explaining them, live in `motion.css`.
- */
+/** Only for a stylesheet that has not applied yet; motion.css owns the real values. */
 const PANEL_FALLBACK = { damping: 0.77, open: 0.45, close: 0.55 };
 
 function readPanelSpring(element: Element) {
@@ -120,15 +99,9 @@ function readPanelSpring(element: Element) {
 }
 
 /**
- * How the corner radii open up as the panel grows past the cutout.
- *
- * At rest the panel *is* the notch, so it wears the notch's own corners
- * (`baseRadius = height / 3`, and the top pair 4pt tighter — the reference's
- * collapsed values, ported directly). As it grows the corners open with it,
- * which is the same thing the reference does by handing its expanded states a
- * much larger fixed pair. Derived from the *current* height rather than the
- * target, so the radii interpolate along with the box instead of jumping to
- * their final value on the first frame.
+ * How the corner radii open up as the panel grows past the cutout. Derived from
+ * the *current* height, not the target, so they interpolate with the box rather
+ * than jumping to their final value on the first frame.
  */
 const RADIUS = { topGrowth: 0.12, topMax: 16, bottomGrowth: 0.14, bottomMax: 22 };
 
@@ -136,27 +109,18 @@ const RADIUS = { topGrowth: 0.12, topMax: 16, bottomGrowth: 0.14, bottomMax: 22 
 const NOTCH_FALLBACK = { width: 200, height: 32 };
 
 /**
- * How much wider than the cutout the panel settles, at minimum.
- *
- * The floor exists so the panel is never narrower than the hole it hangs from;
- * this is how far past it we deliberately go. Content wider than this still
- * wins, so a long error message grows the panel rather than being squeezed.
+ * Minimum panel width, as a multiple of the cutout, so it is never narrower
+ * than the hole it hangs from. Wider content still wins.
  */
 const PANEL_WIDTH_FACTOR = 1.5;
 
 /**
  * Grows the drop-down panel out of the notch and shrinks it back in.
  *
- * This is the one surface that does not use a CSS transition, for the reason
- * `lib/spring.ts` exists: its size is retargeted mid-flight (a phase change
- * lands while the previous one is still settling, three times a dictation), and
- * a transition restarts its curve from zero velocity every time it is
- * redirected. The reference gets this free from SwiftUI, whose springs are
- * interruptible by construction.
- *
- * Per frame it writes the panel's box and the shape's `d` straight onto the
- * nodes. No React state is involved — 60 renders a second is exactly what the
- * app's motion rule forbids, and the subtree would rebuild under the animation.
+ * The one surface that is not a CSS transition: its size is retargeted
+ * mid-flight three times a dictation, and a baked curve redirected halfway
+ * restarts from zero velocity — hence `lib/spring.ts`. Writes the box and the
+ * shape's `d` straight onto the nodes, so no React render sits between frames.
  */
 function useNotchPanel(
   style: OverlayStyle,
@@ -183,14 +147,12 @@ function useNotchPanel(
     const pathElement = path.current;
     const contentElement = content.current;
     if (!surfaceElement || !shapeElement || !pathElement || !contentElement) return;
-    // Nothing is on screen yet (the pill is `display: none` until the first
-    // run), so there is no layout to measure and no growth to start. Measuring
-    // here would set the target from a zero-width box.
+    // Nothing on screen yet (the pill is `display: none` until the first run);
+    // measuring here would set the target from a zero-width box.
     if (!contentElement.offsetWidth) return;
 
-    // Read once, here, rather than per retarget: this is a style recalc, and
-    // `remeasure` fires once a frame while an answer streams. Re-read on every
-    // rebuild, so a `run` bump is what applies a change from the tuning page.
+    // Read once per rebuild, not per retarget: it is a style recalc, and
+    // `remeasure` fires once a frame while an answer streams.
     const PANEL = readPanelSpring(surfaceElement);
 
     let base = { width: NOTCH_FALLBACK.width, height: NOTCH_FALLBACK.height };
@@ -202,11 +164,9 @@ function useNotchPanel(
     // changes and never from inside a frame.
     const measure = () => {
       const computed = getComputedStyle(surfaceElement);
-      // A screen with no notch reports a real zero, which is different from the
-      // variable being absent (the browser preview, where there is no Rust to
-      // measure anything). `||` conflates the two and would invent a cutout on
-      // an iMac — the panel then reserves space to clear a notch that is not
-      // there and carries a strip of dead black. Only a non-number falls back.
+      // A screen with no notch reports a real zero; `||` would conflate that
+      // with the variable being absent and invent a cutout on an iMac. Only a
+      // non-number falls back.
       const measured = (name: string, fallback: number) => {
         const value = parseFloat(computed.getPropertyValue(name));
         return Number.isFinite(value) ? value : fallback;
@@ -214,20 +174,15 @@ function useNotchPanel(
       const notchWidth = measured("--notch-w", NOTCH_FALLBACK.width);
       const notchHeight = measured("--notch-h", NOTCH_FALLBACK.height);
 
-      // The reference's `baseRadius`: the cutout's own rounding, which every
-      // other radius here is measured from.
+      // The cutout's own rounding; every other radius is measured from it.
       baseRadius = notchHeight / 3;
       base = { width: notchWidth, height: notchHeight };
       const settledHeight = notchHeight + contentElement.offsetHeight;
       target = {
-        // The body sits between the two concave shoulders, so the panel has to
-        // be wider than its content by exactly that much. Uses the *settled*
-        // top radius, since that is the width the panel comes to rest at.
-        //
-        // Never narrower than the cutout: a short status word ("Pasted") wants
-        // less width than the notch, and a panel narrower than the hole it
-        // hangs from leaves the physical camera bump sticking out either side.
-        // Every content size in the reference is likewise `baseWidth + n`.
+        // The body sits between the two concave shoulders, so the panel is
+        // wider than its content by exactly that much — measured at the
+        // *settled* top radius. Never narrower than the cutout, or the physical
+        // camera bump sticks out either side.
         width: Math.max(
           notchWidth * PANEL_WIDTH_FACTOR,
           contentElement.offsetWidth + topRadiusAt(settledHeight) * 2,
@@ -245,17 +200,10 @@ function useNotchPanel(
 
     const size = { width: 0, height: 0 };
     const draw = () => {
-      // Floored at the cutout, in both dimensions, because the spring rings
-      // past its target and a close targets the cutout itself.
-      //
-      // The overshoot is the point — it is what makes the panel read as thrown
-      // out of the notch rather than resized — but on the way back in it is an
-      // undershoot, and a panel *smaller* than the hole it hangs from shows the
-      // physical camera bump either side of it. At the damping this runs, the
-      // ring is a fifth of the travel: a 332pt answer collapsed clean through
-      // the 32pt cutout to nothing and sprang back out before settling. The
-      // spring keeps its real state and keeps integrating; only what is drawn
-      // is clamped, so nothing about the motion's timing changes.
+      // Floored at the cutout: the spring rings a fifth of its travel past the
+      // target, which on the way back in undershoots clean through the 32pt
+      // cutout and springs back out. Only what is drawn is clamped — the spring
+      // keeps its real state, so the motion's timing is unchanged.
       const width = Math.max(base.width, size.width);
       const height = Math.max(base.height, size.height);
 
@@ -343,10 +291,6 @@ function useNotchPanel(
 /**
  * A question and the answer streaming in under it, or null when the panel is
  * just a status pill.
- *
- * There is no separate Ask window any more: the panel that has been saying
- * "Listening…" grows into the answer, so the two read as one thing rather than
- * as a second surface arriving over the first.
  */
 type Ask = {
   question: string;
@@ -357,11 +301,7 @@ type Ask = {
   done: boolean;
 };
 
-/**
- * Dev/QA: `?ask` reaches the answer state without speaking into a mic, and
- * `?ask=<ms>` arrives that late — the only way to watch the panel grow from a
- * status word into an answer, which is the transition the whole change is for.
- */
+/** Dev/QA: `?ask` / `?ask=<ms>` reaches the answer state without a mic. */
 const ASK_PREVIEW: Ask = {
   question: "What is the difference between a spring and an easing curve?",
   answer:
@@ -374,19 +314,14 @@ const ASK_PREVIEW: Ask = {
 const STREAM_MS = 45;
 
 /**
- * A dictation preview, as whisper actually produces one.
- *
- * Each entry is the *whole* transcript at that moment, not a delta — that is
- * the shape of the real event, and it is why the text can go backwards. The
- * two shortenings here are deliberate: a rolling re-read revises what it
- * thought it heard, and a panel that springs to fit every revision is the one
- * way this can look nervous. A preview that only ever grew would hide that.
+ * A dictation preview, as whisper produces one: each entry is the *whole*
+ * transcript at that moment, so it can go backwards. The two shortenings are
+ * deliberate — a revision is what makes the panel shrink mid-flight.
  */
 const PARTIAL_PREVIEW = [
   "So the",
   "So the thing about",
   "So the thing about springs is",
-  // Revised: "springs is" became "spring is", and the tail was re-heard.
   "So the thing about a spring is that",
   "So the thing about a spring is that you can redirect it",
   "So the thing about a spring is that you can redirect it mid flight and it",
@@ -425,48 +360,39 @@ const AGENT_PREVIEW: Run = {
  * renders the current phase.
  */
 function Overlay() {
-  // Dev/QA: `?phase=recording` renders the pill statically in a browser so it
-  // can be seen and screenshotted without holding the dictate hotkey. In the
-  // real app there is no query string, so this is idle until Rust drives it.
+  // Dev/QA: `?phase=recording` renders the pill statically in a browser. No
+  // query string in the real app, so this is idle until Rust drives it.
   const preview = new URLSearchParams(location.search).get("phase") as Phase | null;
   const [phase, setPhase] = useState<Phase>(preview ?? "idle");
-  // Rust picks the style and pushes it on every show — including the swap back
-  // to the pill for an error, which no wing is wide enough to show.
-  // Only what is drawn before Rust's first style event lands, so it matches the
-  // default in `Settings` rather than being a second opinion about it.
+  // Only what is drawn before Rust's first style event lands, so it has to
+  // match the default in `Settings` rather than be a second opinion about it.
   const [style, setStyle] = useState<OverlayStyle>(
     (new URLSearchParams(location.search).get("style") as OverlayStyle) ??
       "dropPill",
   );
   const [error, setError] = useState<string | null>(null);
   const [download, setDownload] = useState<number | null>(null);
-  // The words so far, while the live preview is on. Feedback only — none of
-  // this is ever pasted; it is a rolling re-read of the last few seconds by
-  // the small local model, so it revises itself as a sentence lands.
+  // The words so far while the live preview is on. Feedback only — never
+  // pasted, and it revises itself as a sentence lands.
   const [partial, setPartial] = useState("");
   // Latched once a run has produced words; see `effectiveStyle`.
   const [droppedDown, setDroppedDown] = useState(false);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [agent, setAgent] = useState<Run | null>(null);
-  // Either of them owns the panel; almost everything below cares only that one
-  // of them does, not which.
+  // Either of them owns the panel; almost everything below only cares that one does.
   const panelOpen = ask !== null || agent !== null;
-  // The phase listener subscribes once and has to know whether a panel is on
-  // screen. A ref rather than the state it mirrors: re-subscribing on every
-  // streamed token would tear down and rebuild the listener 50 times an answer.
+  // A ref, not the state it mirrors: the phase listener subscribes once, and
+  // depending on `panelOpen` would rebuild it on every streamed token.
   const openRef = useRef(panelOpen);
   openRef.current = panelOpen;
   // Rust tells us the window is about to go away, so the panel can collapse
   // back into the notch while there is still a surface to draw it on.
   const [dismissing, setDismissing] = useState(false);
-  // Bumped once per dictation. The panel keys its springs off this so each run
-  // starts from the cutout; the phase alone cannot say "a new run began",
-  // because a run no longer ends by returning to `idle`.
+  // Bumped once per dictation: the panel keys its springs off this, and the
+  // phase alone cannot say "a new run began".
   const [run, setRun] = useState(0);
-  // Dev/QA, alongside `?phase=`: `?dismiss=800` plays the exit 800ms in. The
-  // exit cannot be reached any other way outside the app — it is driven by an
-  // event Rust emits — and it is the one path here that races (a dictation
-  // starting inside the exit window), so it needs to be reachable to look at.
+  // Dev/QA: `?dismiss=800` plays the exit 800ms in — otherwise only reachable
+  // from a Rust event, and it is the one path here that races.
   const dismissAfter = Number(new URLSearchParams(location.search).get("dismiss"));
   useEffect(() => {
     if (!dismissAfter) return;
@@ -480,37 +406,30 @@ function Overlay() {
     const timer = setTimeout(() => setAsk(ASK_PREVIEW), Number(askAfter) || 0);
     return () => clearTimeout(timer);
   }, [askAfter]);
-  // Rust decides when this window may take clicks by testing the pointer
-  // against the panel's box (see `track_cursor` in overlay.rs), so it needs the
-  // box. Reported from the one place that already computes it, and only when
-  // it changes: the target moves on every remeasure, which while an answer is
-  // streaming is roughly once a frame.
+  // Only during `recording`: a partial left over from the capture must not sit
+  // under "Transcribing…", which is about the whole utterance being re-read.
   const transcript = !panelOpen && phase === "recording" && partial.trim().length > 0;
 
   /**
-   * The style actually drawn, which is not always the one that was chosen.
-   *
-   * A wing is a 40pt tab inside the menu bar and has nowhere to put a sentence,
-   * so the moment there are words it hands over to the drop-down panel. Both
-   * are welded to the same cutout, so what the user sees is the notch itself
-   * pulling down — not one overlay being swapped for another.
-   *
-   * `droppedDown` latches for the rest of the run rather than tracking the
-   * words: the transcript is gone by `transcribing`, and springing back up to a
-   * menu-bar tab at that moment would undo the drop they just watched, one beat
-   * before the panel has anything to say about the result.
+   * The style actually drawn: a wing has nowhere to put a sentence, so the
+   * moment there are words it hands over to the drop-down panel. `droppedDown`
+   * latches for the rest of the run rather than tracking the words — the
+   * transcript is gone by `transcribing`, and springing back up to a menu-bar
+   * tab there would undo the drop just watched.
    */
   const effectiveStyle: OverlayStyle =
     style === "wings" && (droppedDown || panelOpen) ? "dropPill" : style;
 
+  // Rust tests the pointer against this box to decide when the window takes
+  // clicks (`track_cursor` in overlay.rs). Reported only when it changes: the
+  // target moves roughly once a frame while an answer streams.
   const reported = useRef("");
   const reportBox = useCallback((width: number, height: number) => {
     const box = `${Math.round(width)}x${Math.round(height)}`;
     if (box === reported.current) return;
     reported.current = box;
-    // Absent in the browser preview, where `invoke` throws synchronously. This
-    // is measured from inside the panel's own layout pass, so letting that
-    // escape would take the whole overlay down rather than just the reporting.
+    // `invoke` throws synchronously in the browser preview, and this runs
+    // inside the panel's own layout pass — letting it escape kills the overlay.
     try {
       void commands.setPanelBox(width, height);
     } catch {
@@ -524,10 +443,8 @@ function Overlay() {
   const answerRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLParagraphElement>(null);
 
-  // Levels land every 50ms. Writing --level straight onto the node keeps them
-  // out of React entirely: at 20 renders a second the pill would rebuild its
-  // subtree while the compositor is mid-wave, which is exactly the stutter the
-  // CSS-owned animation exists to avoid. Null (no signal yet) reads as silence.
+  // Levels land every 50ms; writing --level onto the node keeps 20 renders a
+  // second out of React, which would rebuild the pill mid-wave. Null = silence.
   useEffect(() => {
     const unlisten = events.audioLevel.listen((e) => {
       const level = Math.min(1, Math.max(0, e.payload ?? 0));
@@ -541,40 +458,27 @@ function Overlay() {
   useEffect(() => {
     const unlistenPhase = events.dictationPhase.listen((e) => {
       // `idle` means the run is over, not that the pill should vanish: the
-      // window stays up for the length of the exit, and something has to be on
-      // it to animate. Hold the last real phase and start collapsing instead.
-      //
-      // This is what made a no-speech run cut off dead while a pasted one
-      // animated. Pasting ends on `done`, which lingers and then dismisses with
-      // the phase unchanged; silence, a spoken ask and a cancel all end on
-      // `idle`, which used to blank the surface in the same frame the collapse
-      // was asked to start.
+      // window stays up for the exit and needs something on it to animate. Hold
+      // the last real phase and start collapsing instead — blanking here is
+      // what made a no-speech run cut off dead while a pasted one animated.
       if (e.payload === "idle") {
-        // …unless an answer is on screen. Both Ask paths end the run on
-        // `idle`, and the run ending is exactly when the answer is finished
-        // and wants reading. Rust suppresses the matching window hide for the
-        // same reason (ANSWERING in overlay.rs); this is its other half.
+        // …unless an answer is on screen: both Ask paths end the run on
+        // `idle`, which is exactly when the answer wants reading. Rust
+        // suppresses the matching hide for the same reason (ANSWERING).
         if (!openRef.current) setDismissing(true);
         return;
       }
 
       setPhase(e.payload);
-      // A phase arriving means the window is staying up, which cancels an exit
-      // in flight — Rust has already bumped its own generation to match.
+      // A phase arriving means the window is staying up, cancelling an exit.
       setDismissing(false);
-      // A new run clears the last run’s message.
       if (e.payload === "recording") {
         setError(null);
-        // A dictation started over the top of an answer takes the panel back;
-        // `overlay::show` has already cleared its side of the same state.
+        // A dictation started over the top of an answer takes the panel back.
         setAsk(null);
         setAgent(null);
-        // Rust no longer sends an empty partial to clear the last run: there is
-        // no separate window to show, so there is no show to hang it off.
         setPartial("");
         setDroppedDown(false);
-        // Rebuilds the panel so it grows out of the notch again rather than
-        // resuming from wherever the last run's springs were left.
         setRun((previous) => previous + 1);
       }
     });
@@ -582,9 +486,8 @@ function Overlay() {
     const unlistenError = events.overlayError.listen((e) => setError(e.payload));
     const unlistenStyle = events.overlayStyle.listen((e) => {
       setStyle(e.payload.style);
-      // The exact notch cutout, measured natively, so the wings weld to it
-      // rather than straddle a fixed guess. Written as vars the CSS reads;
-      // zero for a pill, where the wave falls back to its own gap/height.
+      // The measured cutout, as vars the CSS reads, so the wings weld to it
+      // rather than straddle a guess. Zero for a pill.
       root.current?.style.setProperty("--notch-w", `${e.payload.notchWidth ?? 0}px`);
       root.current?.style.setProperty(
         "--notch-h",
@@ -596,8 +499,7 @@ function Overlay() {
     const unlistenDownload = events.modelDownload.listen((e) =>
       setDownload(e.payload === null || e.payload >= 1 ? null : e.payload),
     );
-    // The live transcript, which used to have a window of its own below the
-    // pill. Rust sends an empty string to say the preview is over.
+    // Rust sends an empty string to say the live preview is over.
     const unlistenPartial = events.dictationPartial.listen((e) => {
       setPartial(e.payload);
       // One-way for the rest of the run: see `effectiveStyle`.
@@ -638,8 +540,7 @@ function Overlay() {
     };
   }, []);
 
-  // The tuning page's hatch; see PreviewCommand. Inert in the real app, which
-  // never dispatches it.
+  // The tuning page's hatch; see PreviewCommand. Inert in the real app.
   useEffect(() => {
     let typing = 0;
     const stream = () => {
@@ -675,9 +576,8 @@ function Overlay() {
     const onPreview = (event: Event) => {
       const command = (event as CustomEvent<PreviewCommand>).detail;
       if (command.style) setStyle(command.style);
-      // Phase first, because `recording` resets everything below it — including
-      // the one timer both streams share. Starting a stream before that reset
-      // has it cancelled by the same command that asked for it.
+      // Phase first: `recording` resets everything below, including the timer
+      // both streams share, so a stream started before it would be cancelled.
       if (command.phase) {
         setPhase(command.phase);
         setDismissing(false);
@@ -740,8 +640,7 @@ function Overlay() {
     };
   }, []);
 
-  // An agent run. Its own listener beside the ask one, because they are
-  // separate event streams that happen to share a surface.
+  // An agent run. Its own listener: a separate event stream, a shared surface.
   useEffect(() => {
     const unlisten = events.agent.listen(({ payload }) => {
       switch (payload.kind) {
@@ -758,7 +657,6 @@ function Overlay() {
               r && {
                 ...r,
                 steps: withCall(r.steps, payload.value),
-                // This call has stopped being a plan and become an action.
                 planned: withoutPlanned(r.planned, payload.value.name),
                 status: undefined,
               },
@@ -796,36 +694,27 @@ function Overlay() {
     if (el && agent && !agent.finished) el.scrollTop = el.scrollHeight;
   }, [agent]);
 
-  // Escape dismisses the panel. Only while one is up: the window is
-  // click-through and unfocused otherwise, so this cannot fire, but the guard
-  // keeps a stray keystroke from asking Rust to hide a pill mid-dictation.
+  // Escape dismisses the panel. Guarded on `panelOpen` so a stray keystroke
+  // cannot ask Rust to hide a pill mid-dictation.
   useEffect(() => {
     if (!panelOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      // `closeAgent` is not `closeAsk`: it also abandons any pending
-      // confirmation, which is what makes Escape read as "no" rather than
-      // leaving a write waiting on a channel nobody will answer.
+      // `closeAgent` also abandons a pending confirmation, so Escape reads as
+      // "no" rather than leaving a write waiting on a channel nobody answers.
       if (e.key === "Escape") void (agent ? commands.closeAgent() : commands.closeAsk());
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [panelOpen, agent]);
 
-  // Follow the stream to the bottom, and stop once it finishes — the same
-  // simpler-than-tracking-manual-scroll choice the old Ask window made.
+  // Follow the stream to the bottom; simpler than tracking manual scroll.
   useEffect(() => {
     const el = answerRef.current;
     if (el && ask && !ask.done) el.scrollTop = el.scrollHeight;
   }, [ask]);
 
-  // The live transcript replaces the status word while it is running: once
-  // there are words, "Listening…" is saying less than they are. Only during
-  // `recording` — a partial left over from the capture must not sit under
-  // "Transcribing…", which is about the *whole* utterance being re-read.
-
-  // Follow the words down as they arrive. The panel grows to fit until the cap
-  // in overlay.css, and after that this is the only thing keeping the newest
-  // words on screen.
+  // Follow the words down as they arrive: past the height cap in overlay.css
+  // this is the only thing keeping the newest ones on screen.
   useEffect(() => {
     const el = transcriptRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -839,33 +728,23 @@ function Overlay() {
         : LABEL[phase];
 
   return (
-    // The exit is a state of the whole surface, not of one style: both have
-    // the window held open for them, so both have to use it.
+    // The exit is a state of the whole surface, not of one style.
     <div className="overlay-root" ref={root} data-exiting={dismissing || undefined}>
-    {/* Rendered whenever wings are the chosen style, and deliberately left
-        rendered *underneath* the panel once it has taken over. Both are pure
-        black welded to the same cutout, so the panel covers the tabs as it
-        grows past them and uncovers them as it collapses — nothing has to
-        animate out, and more importantly nothing pinches: hiding the wings on
-        hand-over would snap the bar from their width down to the bare cutout
-        for the frame before the panel starts growing.
-        This relies on the panel always settling wider than the tabs, which
-        holds while its floor (notch x 1.5) exceeds their span (notch + 88) —
-        true for any cutout wider than 176pt, and a real one is ~180-220. */}
+    {/* Left rendered *underneath* the panel once it takes over: hiding the
+        wings on hand-over snaps the bar down to the bare cutout for a frame.
+        Relies on the panel settling wider than the tabs — its floor
+        (notch x 1.5) beats their span (notch + 88) for any cutout over 176pt. */}
     {style === "wings" && (
-      // voice-dict's minimalist overlay: one continuous black bar welded to the
-      // notch — the waveform on the left, a recording light on the right, the
-      // measured cutout between them. Only ever shown on a screen that has a
-      // notch; Rust falls back to the drop pill otherwise (see overlay.rs).
+      // One continuous black bar welded to the notch. Only shown on a screen
+      // that has one; Rust falls back to the drop pill otherwise (overlay.rs).
       <div className={`wings wings--${phase}`}>
         <span className="wing wing--left">
           <PhaseSwap phase={phase}>
             <Indicator phase={phase} />
           </PhaseSwap>
         </span>
-        {/* The notch itself: solid black, exactly the cutout's width, so the
-            bar is continuous across it and the camera notch disappears into
-            the strip — the whole point of the blend. */}
+        {/* The cutout itself: solid black at exactly its width, so the bar
+            reads as continuous across it. */}
         <span className="wing-notch" aria-hidden />
         <span className="wing wing--right">
           {phase === "recording" && (
@@ -875,11 +754,9 @@ function Overlay() {
       </div>
     )}
     {effectiveStyle === "dropPill" && (
-      // voice-dict's drop-down pill: a solid-black panel welded to the top,
-      // rounded only along the bottom, with the wave and status sitting just
-      // below the notch (the __notch spacer is the measured cutout height).
-      // Not `--idle` while an answer is up, whatever the phase says: `--idle`
-      // is `display: none`, and the run that produced the answer has ended.
+      // A solid-black panel welded to the top; the __notch spacer is the
+      // measured cutout height. Never `--idle` while an answer is up, whatever
+      // the phase says — `--idle` is `display: none`.
       <div
         className={`drop-pill drop-pill--${panelOpen ? "answering" : phase}`}
         ref={panel.surface}
@@ -906,18 +783,15 @@ function Overlay() {
           ref={panel.content}
         >
           {ask ? (
-            // Keyed on the question so a new one resets the copied state and
-            // the follow-up field.
+            // Keyed on the question so a new one resets copy state and input.
             <Answer key={ask.question} ask={ask} answerRef={answerRef} />
           ) : agent ? (
             <AgentRun key={agent.heard} run={agent} bodyRef={answerRef} />
           ) : (
             <PhaseSwap phase={phase}>
               <Indicator phase={phase} />
-              {/* Deliberately inside PhaseSwap and beside the wave, rather than
-                  a layout of its own: the wave stays exactly where it is and
-                  only the text beside it changes, so "Listening…" becoming the
-                  words is one surface growing rather than a re-layout. */}
+              {/* Inside PhaseSwap and beside the wave, not a layout of its
+                  own, so only the text changes and the wave stays put. */}
               {transcript ? (
                 <p className="transcript" ref={transcriptRef}>
                   {partial}
@@ -937,14 +811,9 @@ function Overlay() {
 }
 
 /**
- * The question and its streaming answer, inside the drop-down panel.
- *
- * Nothing here sizes anything: this is the panel's measured content node's only
- * child, so the springs in `useNotchPanel` see it grow through the same
- * ResizeObserver that already tracked the status word, and the panel settles
- * around it. That is the whole reason the answer moved into this window —
- * asking a question *grows* the thing already on screen instead of putting a
- * second one over it.
+ * The question and its streaming answer, inside the drop-down panel. Nothing
+ * here sizes anything: it is the measured content node's only child, so the
+ * springs in `useNotchPanel` settle around it through the ResizeObserver.
  */
 function Answer({
   ask,
@@ -956,9 +825,8 @@ function Answer({
   const [typed, setTyped] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // DOM focus only, never a window focus request: `show_panel` already made the
-  // overlay key when the answer opened, and it is the only thing that takes
-  // focus from the app being dictated into.
+  // DOM focus only, never a window focus request — `show_panel` already made
+  // the overlay key, and it is the only thing that takes focus from the app.
   useEffect(() => {
     inputRef.current?.focus();
   }, [ask.question]);
@@ -974,9 +842,7 @@ function Answer({
           ref={inputRef}
           className="ask__input"
           // Not "Ask a follow-up": `stream_answer` builds a fresh
-          // [system, user] pair with no prior turn, so there is no conversation
-          // to follow up on. Promising one and then answering "and what about
-          // Friday?" with no context is worse than not offering it.
+          // [system, user] pair, so there is no conversation to follow up on.
           placeholder="Ask a question…"
           value={typed}
           // Disabled mid-answer: two streams write Delta into the same panel,
@@ -986,9 +852,8 @@ function Answer({
           onChange={(e) => setTyped(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== "Enter" || !typed.trim() || !ask.done) return;
-            // Cleared here rather than waiting for the backend's `question`
-            // event to echo back: until that lands the text sits in the field
-            // and is trivially re-submittable.
+            // Cleared here, not on the backend's echo: until that lands the
+            // text sits in the field and is trivially re-submittable.
             const question = typed;
             setTyped("");
             // The same backend entry point the spoken trigger uses, so the two
@@ -1009,16 +874,9 @@ function Answer({
   );
 }
 
-
 /**
  * An agent run, in the notch panel: what was heard, the tools it resolved to,
  * the approval a write has to pass, and the closing answer.
- *
- * Ported from the Agent window rather than rewritten — the flow and its
- * comments were right, only the surface changed. The one part that did get
- * rewritten is the confirmation, which used to be a shadcn Alert inside a
- * card: a bordered box within a black panel reads as a card someone dropped
- * in, where this surface wants the approval to be part of it.
  */
 function AgentRun({
   run,
@@ -1060,28 +918,21 @@ function AgentRun({
         </p>
       )}
 
-      {/* One Tool per call. The state mapping is exact — AI Elements happens
-          to name the same five outcomes an Aloud run has, including the denied
-          one a cancelled confirmation produces. */}
       {run.steps.map((step, i) => (
         <Tool
           key={`${step.name}-${i}`}
-          // Open on the step that is waiting for a decision, and on a failure.
-          // Everything else stays folded: a finished run is a list of things
-          // that worked, and expanding all of them buries the answer.
+          // Open only on the step awaiting a decision, and on failures —
+          // expanding everything that worked buries the answer.
           defaultOpen={step === pending || step.result?.success === false}
         >
           <ToolHeader
             type={`tool-${step.name}`}
             state={stateFor(step, step === pending)}
-            // The curated label, not the raw tool name. `tool-views` turns
-            // GMAIL_SEND_EMAIL and its arguments into "Sending an email to
-            // priya", and that is the whole reason it exists.
+            // The curated label, not the raw tool name — see `tool-views`.
             title={labelFor(step.name, step.args)}
           />
           <ToolContent>
-            {/* The registered view first, because it is the readable one; the
-                raw parameters sit under it for when they matter. */}
+            {/* The readable view first; the raw parameters under it. */}
             {bodyFor(step.name, step.args)}
             <ToolInput input={step.args} />
             {step.result && (
@@ -1094,8 +945,7 @@ function AgentRun({
         </Tool>
       ))}
 
-      {/* What has not happened yet. Below the steps because it reads in run
-          order — done, doing, next — and it disappears as the last one starts. */}
+      {/* What has not happened yet — below the steps, so it reads in run order. */}
       {run.planned && run.planned.length > 0 && (
         <Queue>
           <QueueSection>
@@ -1106,14 +956,11 @@ function AgentRun({
               <QueueList>
                 {run.planned.map((next, i) => (
                   <QueueItem key={`${next.name}-${i}`}>
-                    {/* QueueItem is a column — indicator and title share a row
-                        inside it, which is the shape its description slot
-                        expects underneath. */}
+                    {/* QueueItem is a column; indicator and title share a row
+                        inside it. */}
                     <span className="flex items-start gap-2">
                       <QueueItemIndicator />
-                      {/* No arguments yet: they arrive with the call. The label
-                          falls back to the humanised tool name, which is the
-                          honest amount to promise before it starts. */}
+                      {/* No arguments yet — they arrive with the call. */}
                       <QueueItemContent>{labelFor(next.name, {})}</QueueItemContent>
                     </span>
                   </QueueItem>
@@ -1130,8 +977,7 @@ function AgentRun({
             {labelFor(pending.name, pending.args)} — this writes to {pending.app}.
           </ConfirmationTitle>
           <ConfirmationRequest>
-            {/* Approving a write without seeing what it will do is not a gate,
-                so the body shows here even though the step list is quiet. */}
+            {/* A gate you cannot see through is not a gate. */}
             <div className="mb-3">{bodyFor(pending.name, pending.args)}</div>
             <ConfirmationActions>
               <ConfirmationAction variant="outline" onClick={() => confirm(false)}>
@@ -1152,7 +998,6 @@ function AgentRun({
         </p>
       )}
 
-      {/* The run's closing answer — the whole point of the run. */}
       {run.finished && <MessageResponse>{run.finished}</MessageResponse>}
       {run.error && <p className="ask__error">{run.error}</p>}
     </Panel>
@@ -1160,11 +1005,8 @@ function AgentRun({
 }
 
 /**
- * An Aloud step in the vocabulary `ToolHeader` speaks.
- *
- * The five states line up one-for-one, which is the reason this is a lookup
- * and not an adapter: a call is running, waiting on the user, done, denied by
- * that user, or failed.
+ * An Aloud step in the vocabulary `ToolHeader` speaks. A lookup and not an
+ * adapter because the five states line up one-for-one.
  */
 function stateFor(step: Step, pending: boolean): ToolUIPart["state"] {
   if (step.result) return step.result.success ? "output-available" : "output-error";
@@ -1175,11 +1017,6 @@ function stateFor(step: Step, pending: boolean): ToolUIPart["state"] {
 /**
  * The chrome both Ask and Agent draw inside the notch panel: what was heard,
  * a rule, the scrolling body, and a footer.
- *
- * This is what `components/ui/panel-shell` was for the two windows that no
- * longer exist. It is not that component moved here — that one is a shadcn
- * Card sized to a window, and none of that survives the move to a surface
- * welded to the notch. What is shared is the shape, so only the shape is.
  */
 function Panel({
   title,
@@ -1228,13 +1065,9 @@ function Panel({
 }
 
 /**
- * Cross-fades its contents whenever the phase changes.
- *
- * The `key` is the whole mechanism: React remounts on a new phase, so the CSS
- * entrance in overlay.css runs again without the usual reflow-to-restart-a-
- * keyframe dance. Cheap here because the subtree is a dot (or five bars) and a
- * word — and the bars only exist in one phase, so nothing mid-wave is thrown
- * away by the remount.
+ * Cross-fades its contents whenever the phase changes. The `key` is the whole
+ * mechanism: React remounts, so the CSS entrance in overlay.css restarts
+ * without the usual reflow dance. Cheap — the subtree is a dot and a word.
  */
 function PhaseSwap({ phase, children }: { phase: Phase; children: ReactNode }) {
   return (
@@ -1249,9 +1082,8 @@ function Indicator({ phase }: { phase: Phase }) {
   if (phase !== "recording") {
     return <span className={`dot dot--${phase}`} aria-hidden />;
   }
-  // A continuous wave the voice scales rather than drives. CSS owns the
-  // motion; these two custom properties only give each bar its place in the
-  // row and its height ceiling.
+  // CSS owns the motion; these two properties only give each bar its place in
+  // the row and its height ceiling.
   return (
     <span className="bars" aria-hidden>
       {BAR_PEAKS.map((peak, i) => (

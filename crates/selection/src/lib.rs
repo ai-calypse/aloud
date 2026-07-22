@@ -1,26 +1,19 @@
 //! Reads the selected text in whatever app has focus, so an utterance can
 //! rewrite it instead of being typed.
 //!
-//! macOS has a proper answer — the Accessibility API's `AXSelectedText`,
-//! ported from `AppContextService.swift`. Windows UI Automation is unreliable
-//! across apps, so both platforms fall back to synthesizing the copy chord and
-//! reading the clipboard (via `aloud-paste`), which works anywhere text can be
-//! selected.
+//! macOS uses the Accessibility API's `AXSelectedText`. Windows UI Automation is
+//! unreliable across apps, so both fall back to synthesizing the copy chord and
+//! reading the clipboard (`aloud-paste`).
 
 use anyhow::Result;
 
 /// The current selection without touching the clipboard, or None when the OS
 /// cannot say.
 ///
-/// The Accessibility read only — no Cmd+C fallback. Dictation calls this on
-/// every utterance to decide whether to rewrite the selection or type fresh
-/// text, and paying a clipboard round-trip for that would mean synthesising a
-/// copy into the user's app every time they dictate: slow, and destructive in
-/// any app where Cmd+C does something of its own.
-///
-/// None means "no selection, as far as we can tell". That is the safe way to
-/// be wrong — the caller falls back to plain dictation, which is what would
-/// have happened anyway.
+/// Accessibility read only — no Cmd+C fallback. This runs on every utterance,
+/// and synthesising a copy that often is slow and destructive in any app where
+/// Cmd+C does something of its own. None is the safe way to be wrong: the
+/// caller falls back to plain dictation.
 pub fn selected_text_quietly() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
@@ -36,10 +29,8 @@ pub fn selected_text_quietly() -> Option<String> {
 
 /// The current selection, or an empty string when nothing is selected.
 ///
-/// Tries the native path first where there is one, then the clipboard trick.
 /// Costs a synthesised Cmd+C wherever Accessibility cannot answer, so this is
-/// for the explicit rewrite hotkey; see [`selected_text_quietly`] for the read
-/// dictation does on every utterance.
+/// for the explicit rewrite hotkey; see [`selected_text_quietly`] otherwise.
 pub fn selected_text() -> Result<String> {
     #[cfg(target_os = "macos")]
     if let Some(text) = macos::selected_text() {
@@ -60,15 +51,8 @@ pub struct FocusedApp {
     pub bundle_id: Option<String>,
 }
 
-/// The app that currently has focus, e.g. "Slack", "Code".
-///
-/// Used by app rules to vary behaviour per app. Returns None when it can't be
-/// determined (no focus, permission denied, or the Windows path, which is not
-/// yet implemented). A None means "no app matched", so rules simply don't fire.
-///
-/// The bundle id costs one extra `Info.plist` read on a path already resolved
-/// for the name, so it is read unconditionally rather than on demand — the
-/// expensive half is the Accessibility call, and that happens either way.
+/// The app that currently has focus. None means "no app matched", so app rules
+/// simply don't fire.
 pub fn frontmost_app() -> Option<FocusedApp> {
     #[cfg(target_os = "macos")]
     {
@@ -82,12 +66,9 @@ pub fn frontmost_app() -> Option<FocusedApp> {
     }
 }
 
-/// The title of the focused window, e.g. "Re: Q3 planning — Mail".
-///
-/// The cheapest real signal about *what* the user is looking at, which is what
-/// the cleanup prompt's context clause asks for: a mail window's title carries
-/// the subject and often the correspondent. None when there is no titled
-/// window, which many apps' menus and sheets are.
+/// The title of the focused window, e.g. "Re: Q3 planning — Mail" — the cheapest
+/// signal about what the user is looking at, for the cleanup prompt's context
+/// clause. None for the many windows, menus and sheets with no title.
 pub fn frontmost_window_title() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
@@ -101,10 +82,9 @@ pub fn frontmost_window_title() -> Option<String> {
     }
 }
 
-/// Staged accessors behind the frontmost-app read, for the `frontmost`
-/// example. Not part of the API the app uses — `frontmost_app` is — but the
-/// read failed silently and identically for a permission denial and for a bad
-/// attribute, which is how it stayed broken.
+/// Staged accessors behind the frontmost-app read, for the `frontmost` example:
+/// the read fails identically for a permission denial and a bad attribute,
+/// which is how it stayed broken.
 #[cfg(target_os = "macos")]
 pub mod debug {
     pub fn is_trusted() -> bool {
@@ -160,10 +140,8 @@ pub struct InstalledApp {
     pub icon: Option<String>,
 }
 
-/// Every installed app, sorted by name. Fills the App Rules picker's search.
-///
-/// The names are the same display names `frontmost_app()` reports, so a name
-/// picked here matches at dictation time. Empty if the list can't be read.
+/// Every installed app, sorted by name. The names are the same ones
+/// `frontmost_app()` reports, so a name picked here matches at dictation time.
 pub fn installed_apps() -> Vec<InstalledApp> {
     #[cfg(target_os = "macos")]
     {
@@ -180,8 +158,7 @@ pub fn installed_apps() -> Vec<InstalledApp> {
 #[cfg(target_os = "macos")]
 mod macos {
     //! `AXUIElementCopyAttributeValue(kAXSelectedTextAttribute)` on the focused
-    //! element. Needs Accessibility permission, which the app already requires
-    //! for hotkeys.
+    //! element. Needs the Accessibility permission hotkeys already require.
 
     use core_foundation::base::{CFTypeRef, TCFType};
     use core_foundation::string::{CFString, CFStringRef};
@@ -205,8 +182,7 @@ mod macos {
     }
 
     extern "C" {
-        /// libproc, linked into every process on macOS. Gives the executable
-        /// path, from which the `.app` bundle name falls out.
+        /// libproc, linked into every process on macOS.
         fn proc_pidpath(pid: i32, buf: *mut std::ffi::c_void, size: u32) -> i32;
     }
 
@@ -233,7 +209,6 @@ mod macos {
             return None;
         }
 
-        // The focused element, then its selection.
         let focused = copy_element(system, "AXFocusedUIElement");
         unsafe { CFRelease(system as CFTypeRef) };
         let focused = focused?;
@@ -245,7 +220,6 @@ mod macos {
         text.filter(|t| !t.is_empty())
     }
 
-    /// Reads an element-valued attribute (the focused element).
     fn copy_element(element: AXUIElementRef, attribute: &str) -> Option<AXUIElementRef> {
         let attr = CFString::new(attribute);
         let mut value: CFTypeRef = std::ptr::null();
@@ -258,16 +232,10 @@ mod macos {
         Some(value as AXUIElementRef)
     }
 
-    /// The focused application's display name.
-    ///
-    /// Resolved from the process's bundle path rather than `AXTitle`. AXTitle
-    /// on an *application* element is empty for most apps — every Electron one
-    /// among them — so the previous read returned None for everything and app
-    /// rules never fired at all. The recorded timings said so: every `paste`
-    /// span logged `target_app: "unknown"`.
-    ///
-    /// The `.app` stem is also exactly the string `installed_apps` puts in the
-    /// picker, so a rule created by picking an app still matches.
+    /// The focused application's display name, from the process's bundle path
+    /// and never `AXTitle` — AXTitle on an *application* element is empty for
+    /// most apps, so it returned None for everything and no app rule ever fired.
+    /// The `.app` stem is also what `installed_apps` puts in the picker.
     pub fn frontmost_app() -> Option<super::FocusedApp> {
         let pid = frontmost_pid()?;
         let path = executable_path(pid)?;
@@ -277,12 +245,9 @@ mod macos {
         })
     }
 
-    /// The focused window's `AXTitle`.
-    ///
-    /// Read off `AXFocusedWindow` of the focused *application* element, not
-    /// off the system-wide element: the system-wide `AXFocusedWindow` is not
-    /// an attribute anything implements, and asking for it returns None for
-    /// every app — the same trap `frontmost_app` fell into with `AXTitle`.
+    /// The focused window's `AXTitle`, read off `AXFocusedWindow` of the focused
+    /// *application* element: nothing implements the system-wide
+    /// `AXFocusedWindow`, so asking for it returns None for every app.
     pub(super) fn frontmost_window_title() -> Option<String> {
         let pid = frontmost_pid()?;
         // SAFETY: an application element for a live pid; released below.
@@ -299,13 +264,8 @@ mod macos {
         title
     }
 
-    /// The focused application's process id.
-    ///
-    /// Either attribute answers — both hang off the system-wide element and
-    /// both resolve to a process — so it tries the direct one and falls back to
-    /// the element the selection read already relies on. Which of the two is
-    /// available varies with what has focus; a text field gives both, a native
-    /// menu or a window with no text focus often gives only the first.
+    /// The focused application's process id. Which attribute answers varies with
+    /// what has focus — a text field gives both, a menu often only the first.
     pub(super) fn frontmost_pid() -> Option<i32> {
         let system = unsafe { AXUIElementCreateSystemWide() };
         if system.is_null() {
@@ -322,9 +282,8 @@ mod macos {
         (err == AX_SUCCESS && pid > 0).then_some(pid)
     }
 
-    /// The raw AX error for the focused-application read, so the `frontmost`
-    /// example can tell a permission problem from a locked screen
-    /// (`kAXErrorCannotComplete`, -25204) from a genuinely absent attribute.
+    /// The raw AX error, so the `frontmost` example can tell a permission
+    /// problem from a locked screen (`kAXErrorCannotComplete`, -25204).
     pub(super) fn frontmost_error() -> i32 {
         let system = unsafe { AXUIElementCreateSystemWide() };
         if system.is_null() {
@@ -342,7 +301,6 @@ mod macos {
         err
     }
 
-    /// The executable path for a pid, via libproc.
     pub(super) fn executable_path(pid: i32) -> Option<String> {
         let mut buf = [0u8; 4096];
         let written = unsafe { proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
@@ -352,14 +310,10 @@ mod macos {
         Some(String::from_utf8_lossy(&buf[..written as usize]).into_owned())
     }
 
-    /// The `.app` bundle name from an executable path, e.g.
-    /// `/Applications/Slack.app/Contents/MacOS/Slack` → `Slack`. Falls back to
-    /// the executable's own file name for a plain binary with no bundle.
-    ///
-    /// The *outermost* `.app`, not the nearest one. Electron nests helper
-    /// bundles — `Cursor.app/Contents/Frameworks/Cursor Helper.app/…` — and a
-    /// rule the user wrote by picking "Cursor" from the list has to match when
-    /// focus is in a helper, which is most of the time.
+    /// The `.app` bundle name from an executable path, falling back to the file
+    /// name for a plain binary. The *outermost* `.app`: Electron nests helper
+    /// bundles, and a rule written against "Cursor" has to match when focus is
+    /// in `Cursor Helper.app`, which is most of the time.
     pub(super) fn bundle_name(exec_path: &str) -> Option<String> {
         let path = Path::new(exec_path);
         bundle_path(exec_path)
@@ -373,8 +327,7 @@ mod macos {
     /// The outermost `.app` directory containing `exec_path`, or None for a
     /// plain binary. See [`bundle_name`] for why outermost.
     pub(super) fn bundle_path(exec_path: &str) -> Option<PathBuf> {
-        // `ancestors()` walks deepest-first and is not double-ended, so the
-        // outermost match is simply the last one it yields.
+        // `ancestors()` walks deepest-first, so the outermost match is last.
         Path::new(exec_path)
             .ancestors()
             .filter(|a| a.extension().is_some_and(|e| e == "app"))
@@ -382,11 +335,8 @@ mod macos {
             .map(Path::to_path_buf)
     }
 
-    /// A bundle's `CFBundleIdentifier`, e.g. `com.tinyspeck.slackmacgap`.
-    ///
-    /// Same string-slice read as [`find_icns`] rather than a plist parser, and
-    /// a failure is survivable: the caller falls back to name matching, which
-    /// is what every rule did before this field existed.
+    /// A bundle's `CFBundleIdentifier`. A string-slice read, not a plist parser;
+    /// a failure is survivable, since the caller falls back to name matching.
     ///
     /// ponytail: binary plists read as None. Measured on this machine, that is
     /// 1 app in 71 — Xcode. `plutil -convert xml1 -o -` (or the `plist` crate)
@@ -412,22 +362,12 @@ mod macos {
     use std::path::{Path, PathBuf};
 
     /// Every `.app` under the standard application folders, sorted by name.
+    /// Scanning the folders is the AppKit-free way to enumerate them; icons are
+    /// best-effort so a missing one never drops an app.
     ///
-    /// Scanning the folders is the AppKit-free way to enumerate installed apps:
-    /// each `.app` bundle's folder name (minus the extension) is its display
-    /// name. Icons are extracted best-effort so a slow or missing icon never
-    /// drops an app from the list.
-    ///
-    /// Cached for [`CACHE_TTL`]: the walk costs ~0.3s for 70 apps and scales
-    /// with `/Applications`, almost all of it `sips` process spawns.
-    ///
-    /// The TTL is what makes this safe to cache at all. Aloud is a menu-bar app
-    /// that is never quit — it hides on close and lives in the tray for weeks —
-    /// so a process-lifetime cache would mean an app installed today never
-    /// appears in App Rules, and a scan that ran while permissions were still
-    /// being granted would be wrong until the next reboot. Five minutes is long
-    /// enough that opening the picker repeatedly is free, short enough that a
-    /// newly installed app shows up without the user understanding why.
+    /// Cached for [`CACHE_TTL`] — the walk costs ~0.3s for 70 apps, nearly all
+    /// `sips` spawns. A *process-lifetime* cache would be wrong: this app lives
+    /// in the tray for weeks, so a newly installed app would never appear.
     pub fn installed_apps() -> Vec<InstalledApp> {
         static CACHE: std::sync::Mutex<Option<(std::time::Instant, Vec<InstalledApp>)>> =
             std::sync::Mutex::new(None);
@@ -440,9 +380,8 @@ mod macos {
             }
         }
 
-        // Deliberately not holding the lock across the scan: two pickers opening
-        // at once would rather duplicate a 0.3s scan than block each other, and
-        // the results are identical anyway.
+        // Not holding the lock across the scan: two pickers opening at once
+        // would rather duplicate 0.3s of work than block each other.
         let apps = scan();
         if let Ok(mut cache) = CACHE.lock() {
             *cache = Some((std::time::Instant::now(), apps.clone()));
@@ -485,8 +424,7 @@ mod macos {
             }
         }
 
-        // Icon extraction shells out to `sips` once per app; doing ~100 of them
-        // in parallel keeps the picker snappy instead of a slow serial crawl.
+        // `sips` is one process per app; ~100 in parallel beats a serial crawl.
         let mut apps: Vec<InstalledApp> = std::thread::scope(|s| {
             let handles: Vec<_> = bundles
                 .iter()
@@ -504,11 +442,8 @@ mod macos {
         apps
     }
 
-    /// Extracts a small PNG icon for an `.app` as a data URI, or None.
-    ///
-    /// `sips` is the system image tool — it reads the multi-resolution `.icns`
-    /// and writes a fixed-size PNG, so we avoid parsing ICNS ourselves. Cheap
-    /// enough run once when the picker opens; a failure just yields no icon.
+    /// A small PNG icon for an `.app` as a data URI, or None. `sips` reads the
+    /// multi-resolution `.icns` so we do not have to parse ICNS ourselves.
     fn icon_data_uri(app: &Path) -> Option<String> {
         use base64::Engine;
         use std::io::Read;
@@ -540,12 +475,10 @@ mod macos {
         Some(format!("data:image/png;base64,{b64}"))
     }
 
-    /// The bundle's icon file: `CFBundleIconFile` from Info.plist if set,
-    /// otherwise the first `.icns` in Resources. Falls back gracefully because
-    /// plist parsing is not worth a dependency here.
+    /// The bundle's icon file: `CFBundleIconFile` if the plist names one (it may
+    /// lack the extension), otherwise the first `.icns` in Resources.
     fn find_icns(app: &Path) -> Option<PathBuf> {
         let resources = app.join("Contents/Resources");
-        // The declared icon, if the plist names one (may lack the extension).
         if let Ok(plist) = std::fs::read_to_string(app.join("Contents/Info.plist")) {
             if let Some(name) = plist_string(&plist, "CFBundleIconFile") {
                 let named = resources.join(&name);
@@ -558,7 +491,6 @@ mod macos {
                 }
             }
         }
-        // Otherwise the first .icns we find.
         std::fs::read_dir(&resources).ok()?.flatten().find_map(|e| {
             let p = e.path();
             (p.extension().and_then(|x| x.to_str()) == Some("icns")).then_some(p)
@@ -570,17 +502,15 @@ mod macos {
 mod tests {
     #[test]
     fn selected_text_does_not_panic_with_no_selection() {
-        // Both paths must return, not crash, when nothing is selected. In CI
-        // there is no focused UI, so this exercises the None/empty branches.
+        // In CI there is no focused UI, so this exercises the None/empty branch.
         let _ = super::selected_text();
     }
 }
 
 #[cfg(all(test, target_os = "macos"))]
 mod cache_tests {
-    /// The regression this guards: a process-lifetime cache in a menu-bar app
-    /// that is never quit means an app installed today never shows up in App
-    /// Rules. The TTL is the only thing making the cache safe.
+    /// Guards: a process-lifetime cache in an app that is never quit means an
+    /// app installed today never shows up in App Rules.
     #[test]
     fn cache_ttl_is_short_enough_for_a_long_running_app() {
         assert!(
@@ -589,7 +519,6 @@ mod cache_tests {
         );
     }
 
-    /// Two calls inside the TTL must not rescan.
     #[test]
     fn second_call_is_served_from_cache() {
         let cold = std::time::Instant::now();
@@ -609,9 +538,8 @@ mod cache_tests {
         }
     }
 
-    /// The failure this guards: `frontmost_app` read `AXTitle` off the
-    /// application element, which is empty for most apps, so it returned None
-    /// for everything and no app rule ever fired.
+    /// Guards: `AXTitle` off the application element is empty for most apps, so
+    /// `frontmost_app` returned None for everything and no rule ever fired.
     #[test]
     #[cfg(target_os = "macos")]
     fn a_bundle_path_yields_the_name_a_rule_would_be_written_against() {
@@ -621,21 +549,18 @@ mod cache_tests {
             bundle_name("/Applications/Slack.app/Contents/MacOS/Slack").as_deref(),
             Some("Slack")
         );
-        // Nested helper bundles resolve to the outermost .app, which is the one
-        // the user sees and the one `installed_apps` lists.
+        // Nested helpers resolve to the outermost .app, which is what is listed.
         assert_eq!(
             bundle_name("/Applications/Cursor.app/Contents/Frameworks/Cursor Helper.app/Contents/MacOS/Helper")
                 .as_deref(),
             Some("Cursor")
         );
-        // A plain binary with no bundle still gets a usable name.
         assert_eq!(bundle_name("/usr/bin/vim").as_deref(), Some("vim"));
         assert_eq!(bundle_name(""), None);
     }
 
-    /// App rules key on the bundle id, so reading the wrong `<string>` out of
-    /// Info.plist silently mis-keys every rule the picker writes. The keys
-    /// nearby are the ones that would be grabbed by a looser slice.
+    /// Reading the wrong `<string>` silently mis-keys every rule the picker
+    /// writes; the neighbouring keys are what a looser slice would grab.
     #[test]
     fn the_bundle_id_key_is_read_and_not_a_neighbouring_one() {
         use super::macos::plist_string;
@@ -655,17 +580,15 @@ mod cache_tests {
         );
         // An absent key must be None, not the first string in the file.
         assert_eq!(plist_string(plist, "CFBundleVersion"), None);
-        // A binary plist reads as garbage rather than XML; None is the answer
-        // that lets the caller fall back to name matching.
+        // A binary plist must read as None, so the caller falls back to names.
         assert_eq!(
             plist_string("bplist00\u{0}\u{1}", "CFBundleIdentifier"),
             None
         );
     }
 
-    /// The bundle id is read from the *outermost* bundle, for the same reason
-    /// the name is: focus usually sits in an Electron helper, whose own
-    /// Info.plist declares a different id from the app the user picked.
+    /// Outermost, for the same reason the name is: an Electron helper declares a
+    /// different id from the app the user picked.
     #[test]
     fn the_bundle_path_is_the_outermost_app_not_the_helper() {
         use super::macos::bundle_path;

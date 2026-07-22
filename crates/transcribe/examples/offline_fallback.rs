@@ -3,10 +3,8 @@
 //! `cargo run -p aloud-transcribe --example offline_fallback -- <file.wav>`
 //!
 //! Runs the same two steps `Pipeline::transcribe_with_local_fallback` does —
-//! classify what the cloud call returned, then retry on-device — against a
-//! base URL nothing is listening on. A unit test cannot show that the local
-//! engine still produces text once the cloud one is unreachable, which is the
-//! whole claim.
+//! classify what the cloud call returned, then retry on-device — against a base
+//! URL nothing is listening on.
 
 use aloud_transcribe::{cloud::CloudTranscriber, download, is_recoverable_locally, local};
 use std::path::PathBuf;
@@ -18,8 +16,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| "/tmp/aloud-test.wav".into())
         .into();
 
-    // Port 1 refuses connections, so the failure is a genuine transport error
-    // and not a mock of one.
+    // Port 1 refuses connections: a genuine transport error, not a mock.
     let cloud = CloudTranscriber::new("k", Some("http://127.0.0.1:1"), None, None)?;
     let error = aloud_transcribe::Transcriber::transcribe(&cloud, &wav)
         .await

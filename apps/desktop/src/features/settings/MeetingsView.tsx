@@ -7,14 +7,9 @@ import { NoteReader } from "../notes/NotesView";
 import { formatDate, formatElapsed } from "@/lib/format";
 
 /**
- * Meeting capture in the main window: what the running session has heard so
- * far, and the notes past ones left behind.
- *
- * Until now this lived only in the tray, which could say "Stop Meeting" and
- * nothing else — no elapsed time, no sign of whether transcription was working.
- *
- * Every note in the notes directory is a meeting note (`write_note` has exactly
- * one caller), so past meetings are `recentNotes` with no new plumbing.
+ * Meeting capture: the running session, and the notes past ones left behind.
+ * Every note in the notes directory is a meeting note (`write_note` has one
+ * caller), so past meetings are just `recentNotes`.
  */
 export function MeetingsView() {
   // `at` is when the payload arrived, so the timer can advance between events.
@@ -31,12 +26,9 @@ export function MeetingsView() {
     const arrive = (phase: MeetingPhase | null) =>
       setLive(phase && phase.phase !== "idle" ? { phase, at: Date.now() } : null);
 
-    // A poll must never *clear* a saving state. `toggle_meeting` takes the
-    // session out of the slot before `stop` runs, so `meeting_status` answers
-    // null for the whole summarisation — and focusing this window then would
-    // replace "Saving…" with an enabled Start button, which opens a second
-    // recorder. The event stream is the authority while saving; polling only
-    // fills the gap for a window opened mid-meeting.
+    // A poll must never *clear* a saving state: `meeting_status` answers null
+    // for the whole summarisation, so focusing the window then would replace
+    // "Saving…" with an enabled Start button and open a second recorder.
     const poll = (phase: MeetingPhase | null) =>
       setLive((current) =>
         current?.phase.phase === "saving" && !phase

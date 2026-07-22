@@ -3,11 +3,9 @@
 //!
 //! `cargo run -p aloud-hotkey --example capture`
 //!
-//! This is the half unit tests cannot reach. `capture::Recorder` is pure and
-//! tested, but whether the OS backend reports *Right* Option rather than a
-//! side-agnostic Option, whether Fn arrives at all, and whether the keys are
-//! swallowed instead of reaching the terminal are all facts about the tap.
-//! Type into this and the answers are visible.
+//! The half unit tests cannot reach: whether the backend reports *Right* Option
+//! rather than a side-agnostic one, whether Fn arrives at all, and whether keys
+//! are swallowed instead of reaching the terminal are all facts about the tap.
 
 use aloud_hotkey::model::Config;
 use std::sync::{atomic::AtomicBool, mpsc, Arc, Mutex};

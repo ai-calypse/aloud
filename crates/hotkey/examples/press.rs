@@ -20,15 +20,13 @@ fn main() {
         .nth(2)
         .and_then(|a| a.parse().ok())
         .unwrap_or(61);
-    // Optional third arg: a second modifier keycode held *around* the binding,
-    // for testing that a chord does or does not fire. 55 is Left Command.
+    // Optional third arg: a second modifier held *around* the binding, to test
+    // that a chord does or does not fire. 55 is Left Command.
     let extra: Option<u16> = std::env::args().nth(3).and_then(|a| a.parse().ok());
 
-    // Real hardware sets both the generic mask (CGEventFlagAlternate) and the
-    // side-specific NX_DEVICE* bit. The backend reads the side-specific one —
-    // the generic bit cannot tell Left Shift from Right Shift — so an event
-    // carrying only the generic bit reads as "released" and drives nothing.
-    // Emulating just the generic mask made this example silently useless.
+    // Hardware sets both the generic mask and the side-specific NX_DEVICE* bit.
+    // The backend reads the side-specific one, so an event carrying only the
+    // generic bit reads as "released" and drives nothing.
     let device_bit = |code: u16| -> u64 {
         match code {
             59 => 0x0000_0001, // Left Control
@@ -47,16 +45,14 @@ fn main() {
     let post = |code: u16, down: bool, bits: u64| {
         let e = CGEvent::new_keyboard_event(src.clone(), code, down).unwrap();
         e.set_type(CGEventType::FlagsChanged);
-        // retain, not truncate: the NX_DEVICE* bits are not declared in
-        // CGEventFlags, and truncating silently drops exactly the bits the
-        // backend reads — which is why this example fired nothing at all.
+        // retain, not truncate: NX_DEVICE* bits are undeclared in CGEventFlags,
+        // and truncating drops exactly the bits the backend reads.
         e.set_flags(CGEventFlags::from_bits_retain(bits));
         e.post(CGEventTapLocation::Session);
     };
 
-    // Flags are cumulative and describe the whole keyboard, not the key that
-    // moved: every event must carry the bits of everything still held, or the
-    // tap reads the others as released.
+    // Flags describe the whole keyboard, not the key that moved: every event
+    // must carry the bits of everything still held.
     let mut held: u64 = 0;
 
     if let Some(code) = extra {

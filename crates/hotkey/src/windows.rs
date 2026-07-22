@@ -1,9 +1,7 @@
-//! Windows backend: a WH_KEYBOARD_LL low-level hook.
-//!
-//! The equivalent of the macOS event tap, and needed for the same reasons:
-//! `RegisterHotKey` cannot see modifier-only holds and cannot swallow events.
-//! The hook callback is a C function pointer with no user data, so the handler
-//! lives in a thread-local set up by `run_hook`.
+//! Windows backend: a WH_KEYBOARD_LL low-level hook, needed for the same reason
+//! as the macOS tap — `RegisterHotKey` sees no modifier-only holds and cannot
+//! swallow events. The callback is a bare C function pointer, so the handler
+//! lives in a thread-local.
 
 use crate::model::Key;
 use anyhow::{anyhow, Result};
@@ -26,10 +24,7 @@ thread_local! {
     static HANDLER: RefCell<Option<Handler>> = const { RefCell::new(None) };
 }
 
-/// Maps a virtual-key code plus the extended-key flag to a `Key`.
-///
-/// Windows reports left/right modifiers as distinct VKs (VK_LMENU/VK_RMENU),
-/// so the side-specific bindings the Swift app supported carry over. `Fn` is
+/// Maps a virtual-key code plus the extended-key flag to a `Key`. `Fn` is
 /// absent: it is handled in keyboard firmware and never reaches the hook.
 pub fn key_from_vk(vk: u16, extended: bool) -> Option<Key> {
     let vk = VIRTUAL_KEY(vk);
@@ -89,9 +84,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
     let swallow = if is_key_event {
         const LLKHF_EXTENDED: u32 = 0x01;
         let extended = info.flags.0 & LLKHF_EXTENDED != 0;
-        // `None` for a key with no `Key` variant. The handler still decides:
-        // while a binding is being recorded every key must be swallowed, even
-        // one that can never be recorded.
+        // `None` for an unmapped key, but the handler still decides: while a
+        // binding is being recorded every key must be swallowed.
         let raw = key_from_vk(info.vkCode as u16, extended).map(|key| RawEvent { key, down });
         HANDLER.with(|h| h.borrow_mut().as_mut().is_some_and(|handler| handler(raw)))
     } else {
@@ -106,10 +100,9 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
     }
 }
 
-/// Installs the hook and pumps messages on the current thread. Blocks forever.
-///
-/// A low-level hook requires a message loop on the installing thread — without
-/// one Windows silently stops delivering events.
+/// Installs the hook and pumps messages on the current thread. Blocks forever —
+/// a low-level hook needs a message loop on the installing thread, or Windows
+/// silently stops delivering events.
 pub fn run_hook<F>(on_event: F) -> Result<()>
 where
     F: FnMut(Option<RawEvent>) -> bool + 'static,

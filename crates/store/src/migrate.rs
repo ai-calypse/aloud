@@ -1,12 +1,7 @@
 //! One-shot import of the Swift app's data, macOS only.
 //!
-//! The Swift app writes to `~/Library/Application Support/{Aloud Dev,FreeFlow}`.
-//! This copies its notes and settings into the new app's home on first launch.
-//!
-//! Ported from `LegacyDataMigration.swift`, keeping its two safety rules:
-//! only migrate into an untouched destination, and never delete the user's
-//! originals. The Swift version *moved* its data; this **copies**, because the
-//! old app is still installed and must keep working.
+//! Two safety rules: only migrate into an untouched destination, and **copy,
+//! never move** — the old app is still installed and must keep working.
 
 use crate::Settings;
 use anyhow::{Context, Result};
@@ -16,8 +11,8 @@ use std::{fs, path::PathBuf};
 /// Old data homes, newest naming first.
 const LEGACY_DIRS: &[&str] = &["Aloud", "Aloud Dev", "FreeFlow"];
 
-/// The Swift `.settings` JSON. Only the fields worth carrying over: models
-/// and hotkeys changed shape in the port, but keys and URLs did not.
+/// The Swift `.settings` JSON. Only keys and URLs carry over; models and
+/// hotkeys changed shape.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct LegacySettings {
@@ -36,10 +31,8 @@ pub struct Report {
     pub source: Option<PathBuf>,
 }
 
-/// Imports legacy data if the new app has none yet.
-///
-/// Returns an empty report when there is nothing to do, which is the common
-/// case on every launch after the first.
+/// Imports legacy data if the new app has none yet. An empty report means there
+/// was nothing to do, the case on every launch after the first.
 pub fn run() -> Result<Report> {
     if !cfg!(target_os = "macos") {
         return Ok(Report::default()); // the Swift app was macOS-only
@@ -67,8 +60,8 @@ pub fn run() -> Result<Report> {
 
 /// The first legacy directory that exists and has notes worth importing.
 fn find_legacy_dir() -> Option<PathBuf> {
-    // The Swift app's home sits beside ours, so derive the base from the path
-    // the notes crate already computes rather than recomputing it here.
+    // The Swift app's home sits beside ours, so derive the base rather than
+    // recomputing it.
     let new_dir = aloud_notes::data_dir().ok()?;
     let base = new_dir.parent()?.to_path_buf();
 
@@ -83,11 +76,8 @@ fn copy_notes(source: &std::path::Path) -> Result<usize> {
     copy_notes_into(&source.join("Notes"), &aloud_notes::directory()?)
 }
 
-/// Copies markdown notes across. The format is unchanged, so this is a plain
-/// file copy — the payoff of keeping notes as markdown on disk.
-///
-/// Skips names that already exist rather than overwriting: a same-named note
-/// in the new home is the user's, not ours to clobber.
+/// Copies markdown notes across; the format is unchanged. Skips names that
+/// already exist — a same-named note in the new home is the user's.
 fn copy_notes_into(from: &std::path::Path, to: &std::path::Path) -> Result<usize> {
     if !from.is_dir() {
         return Ok(0);
@@ -140,9 +130,8 @@ fn import_settings(source: &std::path::Path) -> Result<bool> {
         ..Default::default()
     };
 
-    // The Swift app had separate transcription and chat endpoints; this app
-    // has one. Prefer the transcription URL, since that is the one users
-    // actually repointed.
+    // Two legacy endpoints collapse into one. Prefer the transcription URL,
+    // which is the one users actually repointed.
     if let Some(url) = [legacy.transcription_api_url, legacy.api_base_url]
         .into_iter()
         .find(|u| !u.trim().is_empty())
@@ -154,8 +143,8 @@ fn import_settings(source: &std::path::Path) -> Result<bool> {
         settings.groq_api_key = legacy.transcription_api_key;
     }
 
-    // A key means cloud transcription was set up and working; keep using it
-    // rather than silently switching them to a model they have not downloaded.
+    // A key means cloud transcription worked; switching them to a model they
+    // have not downloaded would break it.
     if !settings.groq_api_key.trim().is_empty() {
         settings.engine = aloud_transcribe::Engine::Cloud;
     }
@@ -182,7 +171,6 @@ mod tests {
         let legacy: LegacySettings = serde_json::from_str(json).unwrap();
         assert_eq!(legacy.groq_api_key, "gsk_x");
         assert_eq!(legacy.composio_api_key, "comp_x");
-        // Unknown keys (keychain_migration_done) must not break parsing.
     }
 
     #[test]
@@ -224,8 +212,7 @@ mod tests {
         assert_eq!(copy_notes_into(missing, to.path()).unwrap(), 0);
     }
 
-    /// The imported notes must be readable by the notes crate that will serve
-    /// them — the whole reason the file format was kept identical.
+    /// Imported notes must be readable by the crate that serves them.
     #[test]
     fn imported_notes_are_readable_by_the_notes_crate() {
         let source = tempfile::tempdir().unwrap();

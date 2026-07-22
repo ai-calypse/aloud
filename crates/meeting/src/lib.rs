@@ -1,24 +1,15 @@
-//! Turning transcribed meeting chunks into a saved note.
-//!
-//! The half of meeting capture that has nothing to do with Tauri: where a
-//! chunk sits on the timeline, what a gap means, and what gets written when
-//! the summary fails. Recording and the OS wiring stay in the app; this is
-//! what can be tested without a microphone.
-//!
-//! Ported from `MeetingNotesService.swift`.
+//! Turning transcribed meeting chunks into a saved note: where a chunk sits on
+//! the timeline, what a gap means, and what gets written when the summary
+//! fails. Recording and OS wiring stay in the app.
 
 use anyhow::Result;
 
-/// Seconds of audio per chunk. Sets the timestamp granularity: a segment is
-/// stamped with the start of the chunk it came from, so this is also how far
-/// a quoted line can be from its real position.
+/// Seconds of audio per chunk, and so the timestamp granularity: a segment is
+/// stamped with its chunk's start, not its own.
 pub const CHUNK_SECONDS: usize = 60;
 
-/// Which model writes the summary, and what to fall back to.
-///
-/// A borrowed struct rather than the app's `Settings` so this crate does not
-/// depend on the settings store — and so a test can summarise without
-/// constructing a whole config.
+/// Which model writes the summary, and what to fall back to. Borrowed rather
+/// than the app's `Settings` so this crate does not depend on the store.
 pub struct Model<'a> {
     pub api_key: &'a str,
     pub base_url: &'a str,
@@ -27,12 +18,9 @@ pub struct Model<'a> {
     pub fallback: Option<&'a str>,
 }
 
-/// Places finished segments on the timeline by chunk index.
-///
-/// Chunks transcribe concurrently and finish out of order, so completion
-/// order is not timeline order. A missing index stays `None` and keeps its
-/// slot: closing the gap would slide every later segment earlier, and a
-/// meeting's timestamps would silently drift by a minute per lost chunk.
+/// Places finished segments on the timeline by chunk index — chunks transcribe
+/// concurrently, so completion order is not timeline order. A missing index
+/// keeps its slot; closing the gap drifts every later stamp by a minute.
 pub fn in_order(mut done: Vec<(usize, String)>) -> Vec<Option<String>> {
     done.sort_by_key(|(index, _)| *index);
     let mut segments = vec![None; done.last().map_or(0, |(i, _)| i + 1)];
@@ -61,11 +49,8 @@ pub fn assemble(segments: &[Option<String>]) -> String {
         .join("\n\n")
 }
 
-/// Words captured so far, for the in-progress meeting readout.
-///
-/// Counted from the segment text, never from [`assemble`]'s output: the
-/// `[hh:mm]` stamp it prepends is whitespace-separated, so counting the
-/// assembled transcript inflates the total by one word per minute of meeting.
+/// Words captured so far. Counted from the segment text, never [`assemble`]'s
+/// output — its `[hh:mm]` stamps would add a word per minute of meeting.
 pub fn word_count(segments: &[Option<String>]) -> usize {
     segments
         .iter()
@@ -74,12 +59,9 @@ pub fn word_count(segments: &[Option<String>]) -> usize {
         .sum()
 }
 
-/// The note's markdown and title.
-///
-/// One LLM call turns the transcript into notes; **any** failure still
-/// returns the raw transcript verbatim. Losing an hour of a meeting because a
-/// summary request 429'd is the worst outcome this code can produce, so there
-/// is no error path out of here — the caller always gets something to save.
+/// The note's markdown and title. **Any** failure still returns the raw
+/// transcript verbatim: there is no error path out of here, because losing an
+/// hour of meeting to a 429 is the worst outcome this code could produce.
 pub async fn notes(model: Model<'_>, transcript: &str) -> (String, String) {
     if transcript.trim().is_empty() {
         return (
@@ -150,9 +132,7 @@ mod tests {
         assert!(assemble(&segments).starts_with("[01:00]"));
     }
 
-    /// Chunks finish out of order because they transcribe concurrently, so
-    /// reassembly must key on the index. Sorting by completion order would
-    /// silently shuffle a meeting's timeline.
+    /// Sorting by completion order would silently shuffle the timeline.
     #[test]
     fn out_of_order_chunks_reassemble_by_position() {
         let segments = in_order(vec![
@@ -160,8 +140,7 @@ mod tests {
             (0, "first minute".to_string()),
         ]);
 
-        // Index 1 never arrived, so it must stay an empty slot rather than
-        // letting "third minute" slide up to the 1-minute mark.
+        // Index 1 never arrived, so it must stay an empty slot.
         assert_eq!(segments.len(), 3);
         assert_eq!(segments[1], None);
         assert_eq!(
@@ -170,10 +149,8 @@ mod tests {
         );
     }
 
-    /// The regression this guards: counting `assemble()`'s output instead of
-    /// the segments adds the `[hh:mm]` stamp to the total, so the live word
-    /// count drifts up by one per minute — a 90-minute meeting reads 90 words
-    /// longer than it is.
+    /// Guards: counting `assemble()`'s output added the `[hh:mm]` stamps, so a
+    /// 90-minute meeting read 90 words longer than it was.
     #[test]
     fn the_word_count_does_not_include_the_timestamp_stamps() {
         let segments = vec![
@@ -211,9 +188,8 @@ mod tests {
         assert_eq!(title, "Meeting Notes");
     }
 
-    /// The guarantee worth pinning: a failed summary must never cost the
-    /// transcript. The base URL below refuses connections, so this exercises
-    /// the real error path rather than a stub of it.
+    /// A failed summary must never cost the transcript. The base URL refuses
+    /// connections, so this is the real error path, not a stub.
     #[tokio::test]
     async fn a_failed_summary_still_preserves_the_transcript_verbatim() {
         let model = Model {

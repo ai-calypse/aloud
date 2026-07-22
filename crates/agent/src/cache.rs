@@ -1,13 +1,9 @@
-//! An in-memory cache for responses that cost a network round-trip.
+//! An in-memory cache for responses that cost a network round-trip: credential
+//! scoping, single-flight revalidation, compare-and-set.
 //!
-//! Generic over the cached type so the Tauri DTO can stay in `src-tauri` while
-//! the policy — credential scoping, single-flight revalidation, compare-and-set
-//! — lives here where it is testable without launching the app.
-//!
-//! Every method takes the lock itself and returns owned data. That is the point
-//! of the type: a caller holding the lock across a compare and a later write
-//! can let a slow response overwrite a newer one, which is exactly the bug this
-//! replaces.
+//! Every method takes the lock itself and returns owned data — a caller holding
+//! the lock across a compare and a later write lets a slow response overwrite a
+//! newer one.
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -25,17 +21,13 @@ pub struct ResponseCache<T> {
 }
 
 struct Inner<T> {
-    /// Hash of the credential these entries were fetched with. Entries fetched
-    /// under a different key belong to a different account, so the whole cache
-    /// is dropped rather than served across a key change.
-    ///
-    /// Hashed rather than stored: the key is already held in `Settings`, and a
-    /// cache has no business keeping a second copy of a secret.
+    /// Which credential these entries were fetched with; a change drops the
+    /// whole cache rather than serving one account's data to another. Hashed
+    /// because a cache has no business keeping a second copy of a secret.
     credential: u64,
     primary: Option<Vec<T>>,
     searches: HashMap<String, Vec<T>>,
-    /// Whether a background revalidation is already running. Without this every
-    /// window focus starts another fan-out, and they multiply with no bound.
+    /// Without this, every window focus starts another unbounded fan-out.
     revalidating: bool,
 }
 
@@ -60,9 +52,6 @@ fn hash(credential: &str) -> u64 {
 
 impl<T: Clone + PartialEq> ResponseCache<T> {
     /// The cached primary list, or None when cold or fetched under another key.
-    ///
-    /// A credential change empties the cache on the way past, so the caller
-    /// cannot accidentally serve one account's data to another.
     pub fn primary(&self, credential: &str) -> Option<Vec<T>> {
         let mut inner = self.inner.lock().ok()?;
         inner.scope_to(hash(credential));
@@ -105,13 +94,10 @@ impl<T: Clone + PartialEq> ResponseCache<T> {
         }
     }
 
-    /// Releases the revalidation claim and stores `fresh` if it differs from
-    /// what is cached. Returns whether the caller should push the new value.
-    ///
-    /// Compare and store happen under one lock so a slower revalidation cannot
-    /// land on top of a newer one. `None` means the fetch failed: the claim is
-    /// released and the existing entry is left alone, because showing the last
-    /// known list beats blanking the pane over a dropped request.
+    /// Releases the claim and stores `fresh` if it differs, returning whether to
+    /// push. Compare and store under one lock, so a slower revalidation cannot
+    /// land on a newer one. `None` (fetch failed) leaves the entry alone —
+    /// showing the last known list beats blanking the pane.
     pub fn finish_revalidation(&self, credential: &str, fresh: Option<Vec<T>>) -> bool {
         let Ok(mut inner) = self.inner.lock() else {
             return false;
@@ -129,9 +115,8 @@ impl<T: Clone + PartialEq> ResponseCache<T> {
         true
     }
 
-    /// Drops everything. For the paths where we know the cache is wrong —
-    /// disconnecting a service invalidates the connected list *and* any search
-    /// result that mentioned it.
+    /// Drops everything: disconnecting a service invalidates the connected list
+    /// *and* any search result that mentioned it.
     pub fn clear(&self) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.primary = None;
@@ -167,8 +152,8 @@ mod tests {
         assert_eq!(c.primary("key-a"), Some(vec!["gmail".into()]));
     }
 
-    /// The account-swap bug: entries fetched with one Composio key must never
-    /// be served to a session authenticated as someone else.
+    /// Entries fetched with one Composio key must never reach a session
+    /// authenticated as someone else.
     #[test]
     fn a_different_credential_sees_nothing() {
         let c = cache();
@@ -181,8 +166,7 @@ mod tests {
         assert_eq!(c.primary("key-a"), None);
     }
 
-    /// Only one revalidation may run: every window focus asks for one, and
-    /// unguarded they multiply into overlapping fan-outs.
+    /// Every window focus asks for one; unguarded they overlap.
     #[test]
     fn only_one_revalidation_runs_at_a_time() {
         let c = cache();
@@ -215,8 +199,6 @@ mod tests {
         assert_eq!(c.primary("key-a"), Some(vec!["gmail".into()]));
     }
 
-    /// Disconnecting invalidates the connected list *and* any search result
-    /// that still claims a live connection to that service.
     #[test]
     fn clear_drops_searches_too() {
         let c = cache();

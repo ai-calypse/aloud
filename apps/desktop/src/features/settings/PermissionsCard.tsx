@@ -26,27 +26,20 @@ const COPY: Record<Permission, { label: string; hint: string }> = {
 };
 
 /**
- * Live status for every OS permission, with a button to the right System
- * Settings pane.
+ * Live status for every OS permission. Renders nothing on an empty list, which
+ * is what Windows returns — no TCC, no pane to open.
  *
- * Renders nothing when the backend returns an empty list, which is what
- * Windows does: there is no TCC there and no pane to open.
- *
- * **Refreshed on window focus, not on a timer.** Granting a permission means
- * leaving for System Settings and coming back, so the return trip is the
- * signal — and it is one macOS already sends. A poll would burn a TCC lookup a
- * second forever to catch a change that only happens while the app is in the
- * background. The accessibility row additionally listens to the existing
- * `hotkeysPermitted` push, which fires without a focus change because the
- * hotkey thread is already waiting on that grant.
+ * Refreshed on window focus rather than a timer: granting means leaving for
+ * System Settings and coming back, so the return trip is the signal. The
+ * `hotkeysPermitted` push covers the accessibility grant, which the waiting
+ * hotkey thread sees without a focus change.
  */
 export function PermissionsCard() {
   const [statuses, setStatuses] = useState<PermissionStatus[]>([]);
 
   const refresh = useCallback(() => {
-    // These commands return a bare value rather than a Result, so `or` does
-    // not apply — but a transport-layer rejection still has to land somewhere
-    // other than an unhandled promise.
+    // Returns a bare value, not a Result, so `or` does not apply — but a
+    // transport rejection still needs somewhere to land.
     commands
       .permissions()
       .then(setStatuses)

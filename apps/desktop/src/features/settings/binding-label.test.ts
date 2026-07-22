@@ -3,8 +3,7 @@ import { describeBinding } from "./binding-label";
 
 describe("describeBinding", () => {
   it("shows which side a modifier is on", () => {
-    // The whole reason the Swift app bound Right Option specifically: a label
-    // of plain "⌥" would make the two indistinguishable in the list.
+    // A label of plain "⌥" makes the two sides indistinguishable in the list.
     expect(
       describeBinding({ kind: "modifierKey", key: "rightOption", modifiers: [] }),
     ).toBe("Right Option ⌥");
@@ -24,10 +23,8 @@ describe("describeBinding", () => {
   });
 
   it("prefers the recorded side over the logical modifier", () => {
-    // `exact_modifiers` is what a recorded chord pins to, and it has to win:
-    // rendering `modifiers` as well would print the Command twice, once
-    // side-agnostic and once not. Untested until now, which is how the format
-    // change below went unnoticed.
+    // `exact_modifiers` has to win: rendering `modifiers` too prints the
+    // Command twice, once side-agnostic and once not.
     expect(
       describeBinding({
         kind: "key",

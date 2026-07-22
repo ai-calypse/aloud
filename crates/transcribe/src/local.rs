@@ -1,7 +1,5 @@
-//! On-device transcription via whisper.cpp.
-//!
-//! Replaces the Swift app's `SFSpeechRecognizer` offline fallback, which is
-//! macOS-only. This works identically on Windows and needs no network.
+//! On-device transcription via whisper.cpp. Works on both platforms and needs
+//! no network.
 
 use crate::{hallucination, Transcriber};
 use anyhow::{bail, Context, Result};
@@ -15,7 +13,7 @@ pub const DEFAULT_MODEL: &str = "ggml-base.en.bin";
 
 pub struct LocalTranscriber {
     /// Shared so inference can move onto a blocking thread without borrowing
-    /// `self` across the await. `WhisperContext` is `Send + Sync`.
+    /// `self` across the await.
     context: Arc<WhisperContext>,
     language: Option<String>,
 }
@@ -23,8 +21,8 @@ pub struct LocalTranscriber {
 impl LocalTranscriber {
     /// Loads a ggml model. Expensive — do this once and reuse.
     pub fn new(model_path: &Path, language: Option<&str>) -> Result<Self> {
-        // whisper.cpp writes progress straight to stdout/stderr from C; route
-        // it into tracing so it is filterable and does not corrupt app output.
+        // whisper.cpp writes to stdout/stderr from C. Without the hooks, model
+        // load takes 19s instead of 200ms and the log fills with junk.
         whisper_rs::install_logging_hooks();
 
         if !model_path.exists() {
@@ -44,16 +42,14 @@ impl LocalTranscriber {
     }
 }
 
-/// Threads for the CPU-side decode. Leaves one core for the audio callback and
-/// the event tap, both of which are latency-critical and must not be starved
-/// by a transcription that is already saturating the machine.
+/// Threads for the CPU-side decode, leaving one core for the audio callback and
+/// the event tap, which must not be starved.
 fn threads() -> i32 {
     let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
     cores.saturating_sub(1).clamp(1, 8) as i32
 }
 
-/// The blocking inference itself, free-standing so it can run on the blocking
-/// pool without borrowing the transcriber.
+/// Free-standing so it can run on the blocking pool without borrowing `self`.
 fn run_whisper(
     context: &WhisperContext,
     language: Option<&str>,
@@ -67,17 +63,13 @@ fn run_whisper(
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
 
-    // whisper.cpp defaults to `min(4, hardware_concurrency)`. **Measured as a
-    // no-op on macOS** — Metal owns the encoder (see Cargo.toml), so the
-    // CPU-side work left over is small: 6s of speech transcribed in 157-215ms
-    // at 9 threads against 154-236ms at 4. Kept because it is free here and the
-    // Windows path has no Metal at all, where a 4-thread cap on a 16-core box
-    // is the whole decode. Do not expect it to show up on a Mac.
+    // whisper.cpp defaults to `min(4, hardware_concurrency)`. Measured as a
+    // no-op on macOS (Metal owns the encoder), kept for Windows, where a
+    // 4-thread cap on a 16-core box is the whole decode.
     params.set_n_threads(threads());
 
-    // A dictation is one utterance, not a continuation of the last one, so
-    // priming the decoder with the previous window's text only invites it to
-    // invent a run-on. Correctness, not speed.
+    // A dictation is one utterance: priming the decoder with the previous
+    // window's text only invites a run-on.
     params.set_no_context(true);
 
     let mut state = context.create_state().context("creating state")?;
@@ -109,11 +101,9 @@ impl Transcriber for LocalTranscriber {
     async fn transcribe(&self, wav_path: &Path) -> Result<String> {
         let samples = read_wav_16k_mono(wav_path)?;
 
-        // whisper inference is seconds of blocking CPU. Running it directly on
-        // an async worker parks that thread for the whole call and starves the
-        // runtime — the dictation then hangs at "Transcribing" because the task
-        // that would publish the result never gets scheduled. Hand it to the
-        // blocking pool, which exists for exactly this.
+        // Seconds of blocking CPU: on an async worker this starves the runtime
+        // and the dictation hangs at "Transcribing", because the task that would
+        // publish the result never gets scheduled.
         let context = self.context.clone();
         let language = self.language.clone();
         tokio::task::spawn_blocking(move || run_whisper(&context, language.as_deref(), &samples))
@@ -122,15 +112,9 @@ impl Transcriber for LocalTranscriber {
     }
 }
 
-/// Strips whisper.cpp's square-bracketed non-speech annotations:
-/// `[BLANK_AUDIO]`, `[MUSIC]`, `[SOUND]` and friends.
-///
-/// These are not transcription — pasting "[BLANK_AUDIO]" into a document is
-/// never right, and an all-marker result must come back as silence. The cloud
-/// API does not emit them, so this is local-only.
-///
-/// Only square brackets: whisper uses those for annotations, while parentheses
-/// appear in ordinary dictated speech.
+/// Strips whisper.cpp's square-bracketed non-speech annotations (`[BLANK_AUDIO]`,
+/// `[MUSIC]`, …), which must never reach the user's document. Square brackets
+/// only: parentheses appear in ordinary dictated speech.
 fn strip_non_speech_markers(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -151,8 +135,7 @@ fn strip_non_speech_markers(text: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Reads a PCM16 WAV as f32 samples. whisper.cpp requires 16 kHz mono, which
-/// is exactly what the audio crate writes.
+/// Reads a PCM16 WAV as f32 samples. whisper.cpp requires 16 kHz mono.
 fn read_wav_16k_mono(path: &Path) -> Result<Vec<f32>> {
     let mut reader =
         hound::WavReader::open(path).with_context(|| format!("opening {}", path.display()))?;
@@ -173,13 +156,10 @@ fn read_wav_16k_mono(path: &Path) -> Result<Vec<f32>> {
         .context("reading samples")
 }
 
-/// Whether the default model is already on disk.
-///
-/// The offline fallback needs this: `ensure_model` *downloads* a missing
-/// model, and a user on the cloud engine has never had one, so falling back
-/// blind would put a 150MB download inside the dictation the user is waiting
-/// on — and on the transport-error case the download fails too, because the
-/// network is exactly what just broke.
+/// Whether the default model is already on disk. The offline fallback checks
+/// this because `ensure_model` *downloads* a missing one, which would put 150MB
+/// inside the dictation the user is waiting on — over the network that just
+/// broke.
 pub fn model_is_present() -> bool {
     model_dir().is_ok_and(|dir| dir.join(DEFAULT_MODEL).exists())
 }
@@ -235,8 +215,8 @@ mod tests {
         assert!((samples[0] - 1.0).abs() < 0.001);
     }
 
-    /// whisper.cpp reports silence as a literal "[BLANK_AUDIO]" string, which
-    /// is not empty and would otherwise be pasted into the user's document.
+    /// whisper.cpp reports silence as a literal "[BLANK_AUDIO]", which is not
+    /// empty and would otherwise be pasted into the user's document.
     #[test]
     fn strips_blank_audio_marker() {
         assert_eq!(strip_non_speech_markers("[BLANK_AUDIO]"), "");
@@ -253,7 +233,6 @@ mod tests {
         );
     }
 
-    /// Parentheses are ordinary speech; only square brackets are annotations.
     #[test]
     fn leaves_parentheses_and_unclosed_brackets_alone() {
         assert_eq!(

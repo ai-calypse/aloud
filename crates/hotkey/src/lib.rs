@@ -1,15 +1,9 @@
 //! Global hotkeys with hold, toggle, and modifier-only bindings.
 //!
-//! Ported from the Swift app's `ShortcutCore` + `GlobalShortcutBackend`.
-//!
-//! Tauri's `global-shortcut` plugin is deliberately not used: it cannot
-//! express a modifier-only binding ("hold Right Option"), cannot distinguish
-//! hold from tap, and cannot swallow the event before the focused app sees it.
-//! All three are core to how this app dictates, so each OS gets a raw hook:
-//! CGEventTap on macOS, WH_KEYBOARD_LL on Windows.
-//!
-//! The interesting logic lives in [`matcher`], which is pure and runs its
-//! tests on any platform.
+//! Tauri's `global-shortcut` plugin cannot express a modifier-only binding,
+//! distinguish hold from tap, or swallow the event before the focused app sees
+//! it — all three are core here, so each OS gets a raw hook: CGEventTap on
+//! macOS, WH_KEYBOARD_LL on Windows. The logic lives in the pure [`matcher`].
 
 pub mod capture;
 pub mod matcher;
@@ -32,26 +26,22 @@ use std::sync::{Arc, Mutex};
 
 /// One armed recording: where to send the gesture, and which request it is.
 ///
-/// The id exists so a request that gives up can tell whether the slot is still
-/// its own. Retargeting to a second row drops the first sender, which wakes
-/// its task as if it had timed out — and clearing then would disarm the
-/// recording that just replaced it.
+/// The id lets a request that gives up tell whether the slot is still its own —
+/// retargeting drops the first sender, which wakes its task as if it had timed
+/// out, and clearing then would disarm the recording that replaced it.
 pub struct Capture {
     pub id: u64,
     pub tx: std::sync::mpsc::Sender<Binding>,
 }
 
-/// Shared slot that arms binding capture from another thread.
-///
-/// `Some(..)` puts the listener into capture mode: the next complete key
-/// gesture is sent back and every event is swallowed until it commits. The
-/// listener clears the slot itself, so capture is always one-shot — a UI that
-/// crashes mid-recording cannot leave the keyboard permanently swallowed.
+/// Shared slot that arms binding capture from another thread. `Some(..)` sends
+/// back the next complete gesture and swallows everything until it commits. The
+/// listener clears the slot itself, so a UI that crashes mid-recording cannot
+/// leave the keyboard permanently swallowed.
 pub type CaptureSlot = Arc<Mutex<Option<Capture>>>;
 
-/// Whether the OS will let us listen for keys.
-///
-/// macOS needs Accessibility permission; Windows has no equivalent gate.
+/// Whether the OS will let us listen for keys. macOS needs Accessibility;
+/// Windows has no equivalent gate.
 pub fn is_permitted() -> bool {
     backend::is_trusted()
 }
@@ -61,13 +51,10 @@ pub fn is_permitted() -> bool {
 /// (a run loop on macOS, a message pump on Windows), so run this on its own.
 ///
 /// `config` is shared so settings changes apply without restarting the hook.
-///
-/// `busy` is set by the app while a session is still running after its key was
-/// released. Escape only cancels — and is only swallowed — while a role is held
-/// or `busy` is set, so Escape keeps working everywhere else.
-///
-/// `on_event` also receives the modifiers held when the event fired — the only
-/// point at which that key state still exists.
+/// `busy` marks a session still running after its key was released; Escape only
+/// cancels while a role is held or `busy` is set, so it keeps working
+/// elsewhere. `on_event` gets the modifiers held when the event fired — the
+/// only point at which that key state still exists.
 pub fn listen<F>(
     config: Arc<Mutex<Config>>,
     busy: Arc<std::sync::atomic::AtomicBool>,
@@ -79,19 +66,15 @@ where
 {
     let mut state = State::default();
     let mut recorder = capture::Recorder::default();
-    // Capture swallows every key while armed, key-ups included, so anything the
-    // user was holding when they clicked Record stays `pressed` in the matcher
-    // forever. One phantom modifier fails the exact-match rule on every
-    // modifier-only binding, and the dictate key is dead until relaunch.
+    // Capture swallows key-ups too, so a key held when Record was clicked stays
+    // `pressed` in the matcher forever — one phantom modifier fails the
+    // exact-match rule and the dictate key is dead until relaunch.
     let mut was_armed = false;
 
     let handler = move |raw: Option<backend::RawEvent>| -> bool {
-        // Capture runs ahead of the matcher and swallows everything: recording
-        // a new hotkey must not also fire the hotkey being replaced, and the
-        // keys pressed to record it must not reach the app underneath.
-        //
-        // A key with no `Key` variant — a digit, Return, an arrow — still has
-        // to be swallowed while armed, even though it can never be recorded.
+        // Capture runs ahead of the matcher and swallows everything, unmapped
+        // keys included: recording a hotkey must not fire the one it replaces,
+        // nor let the keys pressed reach the app underneath.
         let Some(raw) = raw else {
             was_armed |= capture_poison_if_armed(&capture, &mut recorder);
             return was_armed;
@@ -131,10 +114,9 @@ where
         let outcome = state.reduce(input, &config);
         drop(config);
 
-        // Only when something fired: this allocates a set, and it runs on the
-        // event tap for every keystroke on the machine, almost none of which
-        // produce an event. Read once, after the reduce, so every event from
-        // this input sees the same key state.
+        // Only when something fired: this allocates, and runs on the event tap
+        // for every keystroke on the machine. Read once, after the reduce, so
+        // every event from this input sees the same key state.
         if !outcome.events.is_empty() {
             let held = state.modifiers();
             for event in outcome.events {
@@ -155,14 +137,10 @@ where
     }
 }
 
-/// Discards the in-flight gesture when a key that cannot be recorded arrives,
-/// and reports whether it was swallowed.
-///
-/// The failure this prevents: `key_from_keycode` has no mapping for digits,
-/// Return, Tab or punctuation, so recording Cmd+Return dropped the Return and
-/// still committed on the Command key-up — binding a bare "hold Command",
-/// which then fires a dictation on every plain Cmd press. Poisoning the
-/// gesture means nothing commits and the row keeps asking.
+/// Discards the in-flight gesture when an unmappable key arrives (digits,
+/// Return, punctuation), and reports whether it was swallowed. Without this,
+/// recording Cmd+Return dropped the Return and committed a bare "hold Command"
+/// that then dictates on every plain Cmd press.
 fn capture_poison_if_armed(capture: &CaptureSlot, recorder: &mut capture::Recorder) -> bool {
     let Ok(slot) = capture.lock() else {
         tracing::error!("hotkey capture lock poisoned");
@@ -175,11 +153,9 @@ fn capture_poison_if_armed(capture: &CaptureSlot, recorder: &mut capture::Record
     true
 }
 
-/// Feeds one raw event to the capture recorder while capture is armed.
-///
-/// Returns whether the event was consumed by capture. Disarms itself the moment
-/// a gesture commits, so the caller never has to — a settings window that dies
-/// mid-recording cannot leave the keyboard swallowed.
+/// Feeds one raw event to the capture recorder, returning whether capture
+/// consumed it. Disarms itself the moment a gesture commits, so a settings
+/// window that dies mid-recording cannot leave the keyboard swallowed.
 fn capture_event(
     capture: &CaptureSlot,
     recorder: &mut capture::Recorder,
@@ -198,13 +174,11 @@ fn capture_event(
         return false;
     }
 
-    // Escape is the bail-out, not a recordable key. Two problems, one guard:
-    // capture swallows the whole keyboard while armed — Cmd+Tab and Cmd+Q
-    // included — so without this the only ways out are the mouse and a
-    // ten-second timeout; and the matcher handles Escape ahead of all binding
-    // matching, so a binding containing it cancels its own session on the first
-    // auto-repeat and can never fire. Keyed on the key-down alone, which also
-    // blocks Cmd+Escape — equally broken, since that branch ignores modifiers.
+    // Escape is the bail-out, not a recordable key: capture swallows Cmd+Tab and
+    // Cmd+Q too, so it is the only keyboard way out, and the matcher handles
+    // Escape ahead of binding matching so an Escape binding could never fire.
+    // Keyed on the key-down alone, which also blocks the equally broken
+    // Cmd+Escape.
     if down && key == model::Key::Escape {
         recorder.reset();
         // Dropping the sender is what wakes `capture_hotkey` with None.
@@ -217,8 +191,8 @@ fn capture_event(
         return true;
     }
     if let Some(binding) = recorder.key_up(key) {
-        // Take the sender before sending: capture is one-shot, and a UI that
-        // has gone away just drops the value.
+        // Take the sender: capture is one-shot, and a UI that has gone away
+        // just drops the value.
         if let Some(capture) = slot.take() {
             let _ = capture.tx.send(binding);
         }
@@ -236,11 +210,8 @@ mod tests {
         (Arc::new(Mutex::new(Some(Capture { id: 0, tx }))), rx)
     }
 
-    /// The failure: while capture is armed every key is swallowed, so Escape
-    /// recorded *as a binding* instead of cancelling — and there was no
-    /// keyboard way out at all, since Cmd+Tab and Cmd+Q are swallowed too.
-    /// An Escape binding could never fire anyway: the matcher handles Escape
-    /// ahead of all binding matching, so it cancels its own session.
+    /// Regression: Escape recorded *as a binding* instead of cancelling, leaving
+    /// no keyboard way out — Cmd+Tab and Cmd+Q are swallowed too.
     #[test]
     fn escape_cancels_capture_instead_of_recording() {
         let (capture, rx) = armed();
@@ -260,10 +231,8 @@ mod tests {
         );
     }
 
-    /// The failure: `key_from_keycode` has no variant for Return, so recording
-    /// Cmd+Return dropped the Return and still committed on the Command
-    /// key-up — silently binding "hold Command", which then fires a dictation
-    /// on every plain Cmd press.
+    /// Regression: recording Cmd+Return dropped the unmappable Return and
+    /// committed "hold Command", dictating on every plain Cmd press.
     #[test]
     fn an_unrecordable_key_commits_nothing() {
         let (capture, rx) = armed();

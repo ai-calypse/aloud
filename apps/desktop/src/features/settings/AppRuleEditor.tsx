@@ -21,15 +21,13 @@ import {
 import { GridRow, Group, Row, Surface, Toggle } from "@/components/ui/rows";
 
 /**
- * Per-app rules, modelled on the Swift app. A rule pins how dictation behaves
- * in one app: paste verbatim (no LLM cleanup) or steer the cleanup with a style
- * hint. Rules are added/edited in a shadcn Dialog; the app is chosen from a
- * searchable Command list of installed apps, and the search box doubles as a
- * free-text field so a rule can match any app-name substring, running or not.
+ * Per-app dictation rules: paste verbatim, or steer cleanup with a style hint.
+ * The picker's search box doubles as a free-text field, so a rule can match any
+ * app-name substring whether or not the app is installed.
  *
- * The two `AppRule` fields are edited independently rather than collapsed into
- * a mode: a rule that cleans up *without* a style hint is a real combination
- * the model allows, and a single Verbatim/Style radio made it unreachable.
+ * The two `AppRule` fields are edited independently rather than as one mode:
+ * "clean up without a style hint" is valid, and a Verbatim/Style radio made it
+ * unreachable.
  */
 
 const isVerbatim = (r: AppRule) => r.post_processing_enabled === false;
@@ -39,10 +37,8 @@ function summary(r: AppRule): string {
   return r.custom_prompt ? `Style: ${r.custom_prompt}` : "Cleanup, no style hint";
 }
 
-// Starting points, never auto-applied. Mirrors AppRule.suggestions in Swift.
-// No bundle ids here: a suggestion is a name the user may not even have
-// installed, and guessing an id that turns out to be wrong would key the rule
-// on something that can never match.
+// Starting points, never auto-applied. No bundle ids: a suggestion may name an
+// app the user does not have, and a wrong id keys the rule on nothing.
 const SUGGESTIONS: AppRule[] = [
   { app_matches: "Terminal", post_processing_enabled: false, custom_prompt: "" },
   {
@@ -69,9 +65,8 @@ export function AppRuleEditor({
   const [editing, setEditing] = useState<number | null>(null);
 
   useEffect(() => {
-    // An empty list is a valid answer (Windows has no scan yet), so a failure
-    // logs rather than silently looking like "no apps installed". The picker
-    // still works: its search box doubles as a free-text app-name field.
+    // An empty list is valid (Windows has no scan yet) and the picker still
+    // works as a free-text field, so a failure logs rather than blocking.
     or(commands.installedApps(), [], "listing installed apps").then(setApps);
   }, []);
 
@@ -209,27 +204,18 @@ function RuleDialog({
   }, [open, rule]);
 
   const picked = apps.find((a) => a.name === match);
-  // Only the app matcher is required. A hint is optional now that cleanup is
-  // its own switch — "clean up, no style hint" is a valid rule.
+  // Only the matcher is required — "clean up, no style hint" is a valid rule.
   const canSave = match.trim() !== "";
 
   function submit() {
     if (!canSave) return;
     onSave({
       app_matches: match.trim(),
-      // Only when the name came from the picker: a bundle id is the exact
-      // identity of *that* app, so attaching one to hand-typed free text would
-      // key the rule on an app the user never chose. Typed rules keep matching
-      // on the name, which is what they have always done.
-      //
-      // Falls back to the id the rule already had, and that fallback is the
-      // whole point of the feature. `picked` is an exact name match against
-      // the *currently installed* apps, recomputed on save — so editing a rule
-      // for an app that has since been renamed (the exact case a bundle id
-      // exists to survive) would find nothing and write null, destroying the
-      // rename-survival property and dropping the rule back to matching a name
-      // that no longer exists. Only an explicit change of the matcher text
-      // clears it.
+      // An id only when the name came from the picker; hand-typed rules match
+      // on the name. The fallback to the rule's existing id is load-bearing:
+      // `picked` is recomputed against currently-installed apps, so re-saving
+      // a rule for a since-renamed app would write null and destroy exactly
+      // the rename-survival the bundle id exists for.
       bundle_id: picked?.bundle_id ?? rule?.bundle_id ?? null,
       post_processing_enabled: !verbatim,
       custom_prompt: verbatim ? "" : hint.trim(),
@@ -249,8 +235,8 @@ function RuleDialog({
           <div className="flex flex-col gap-1.5">
             <Label>App</Label>
             <Command
-              // Let free text match too: the typed value is a valid substring
-              // rule even when it isn't one of the listed apps.
+              // Free text is kept: a typed value is a valid substring rule
+              // even when it matches none of the listed apps.
               className="rounded-lg border border-input"
               shouldFilter
             >

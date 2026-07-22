@@ -2,12 +2,9 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * macOS System Settings building blocks: an uppercase caption over a solid
- * rounded card whose children are hairline-separated rows.
- *
- * The separator is drawn by the row (border-bottom, dropped on the last child)
- * rather than by a divider element, so a conditionally-rendered row can appear
- * and disappear without leaving a stray line behind.
+ * macOS System Settings building blocks: a caption over a card of
+ * hairline-separated rows. The separator is a border-bottom on the row, not a
+ * divider element, so a conditional row leaves no stray line behind.
  */
 export function Group({
   title,
@@ -26,12 +23,8 @@ export function Group({
   );
 }
 
-/**
- * The app's card: a solid panel with a hairline border.
- *
- * Solid on purpose — letting the window vibrancy through a grouped list washes
- * out the separators the design is made of.
- */
+/** The app's card. Solid on purpose: window vibrancy through a grouped list
+ * washes out the separators the design is made of. */
 export function Surface({
   children,
   className,
@@ -71,13 +64,7 @@ export function Caption({
   );
 }
 
-/**
- * A row whose columns are fixed rather than label-left/control-right.
- *
- * Five places grew their own copy of this grid — hotkeys, macros, app rules,
- * app-rule suggestions, connectors — each repeating the same hairline and
- * last-child rule with a different column template.
- */
+/** A row whose columns are fixed rather than label-left/control-right. */
 export function GridRow({
   columns,
   children,
@@ -149,10 +136,9 @@ export function Value({
 }
 
 /**
- * Chrome-less variants of the shadcn controls, so a Select/Input sitting in a
- * row reads as the right-hand value of that row rather than as a boxed field.
- * The `data-[size=default]` override is needed because SelectTrigger pins its
- * own height by data attribute, which a plain `h-auto` cannot outrank.
+ * Chrome-less shadcn controls, so a Select/Input in a row reads as that row's
+ * value rather than a boxed field. `data-[size=default]` is needed because
+ * SelectTrigger pins its height by data attribute, which `h-auto` cannot beat.
  */
 export const rowSelect =
   "h-auto w-fit max-w-full gap-1 border-0 bg-transparent p-0 text-row text-ink-2 shadow-none data-[size=default]:h-auto focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent [&_svg]:text-chevron";
@@ -160,7 +146,7 @@ export const rowSelect =
 export const rowInput =
   "h-auto rounded-none border-0 bg-transparent p-0 text-right text-row text-ink-2 shadow-none focus-visible:ring-0 md:text-row dark:bg-transparent";
 
-/** Pane heading, matching the mock's 24px/700 title and optional subtitle. */
+/** Pane heading with an optional subtitle. */
 export function PaneTitle({
   title,
   subtitle,
@@ -180,11 +166,7 @@ export function PaneTitle({
   );
 }
 
-/**
- * iOS-style switch. Radix has no Switch in this project's `components/ui`, and
- * a checkbox reads wrong for the immediate on/off rows in the design — a
- * button with `role="switch"` is the whole component.
- */
+/** iOS-style switch: a button with `role="switch"` is the whole component. */
 export function Toggle({
   checked,
   onChange,
@@ -210,10 +192,8 @@ export function Toggle({
       <span
         className={cn(
           "absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow-knob",
-          // The knob is a physical object being thrown to the other end of the
-          // track, so it gets the spring that overshoots rather than a curve
-          // that decelerates: ~1px past the stop and back, which is the whole
-          // difference between an iOS switch and a checkbox that slides.
+          // The overshooting spring, not a decelerating curve: ~1px past the
+          // stop and back is what separates an iOS switch from a slider.
           "transition-transform duration-[var(--spring-pop-dur)] ease-[var(--spring-pop)]",
           checked ? "translate-x-4" : "translate-x-0",
         )}
