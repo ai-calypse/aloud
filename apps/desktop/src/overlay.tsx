@@ -6,37 +6,20 @@ import React, {
   type ReactNode,
 } from "react";
 import ReactDOM from "react-dom/client";
-import { CheckIcon, CopyIcon, LoaderCircleIcon, XIcon } from "lucide-react";
-import type { ToolUIPart } from "ai";
+import {
+  CheckIcon,
+  CircleDashedIcon,
+  CopyIcon,
+  LoaderCircleIcon,
+  PlusIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from "lucide-react";
 import { commands, events, type OverlayStyle, type Phase } from "./lib/bindings";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool";
-import {
-  Queue,
-  QueueItem,
-  QueueItemContent,
-  QueueItemIndicator,
-  QueueList,
-  QueueSection,
-  QueueSectionContent,
-  QueueSectionLabel,
-  QueueSectionTrigger,
-} from "@/components/ai-elements/queue";
-import {
-  Confirmation,
-  ConfirmationAction,
-  ConfirmationActions,
-  ConfirmationRequest,
-  ConfirmationTitle,
-} from "@/components/ai-elements/confirmation";
-import {
+  groupSteps,
   pendingStep,
   withCall,
   withResult,
@@ -44,7 +27,13 @@ import {
   type Run,
   type Step,
 } from "./lib/agent-steps";
-import { bodyFor, labelFor } from "./lib/tool-views";
+import {
+  askFor,
+  bodyFor,
+  editsFor,
+  labelFor,
+  type ToolArgs,
+} from "./lib/tool-views";
 import { notchPath } from "./lib/notch-shape";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import { createSpring } from "./lib/spring";
@@ -356,6 +345,24 @@ const AGENT_PREVIEW: Run = {
 };
 
 /**
+ * One tab in the notch's strip. Tab 0 is the live ask/agent panel; the rest are
+ * blank until we decide what they hold. `closing` is set instead of removing
+ * the tab, so its exit has something to play on — see `closeTab`.
+ */
+type Tab = { id: number; blank: boolean; closing?: boolean };
+
+/** The strip a run starts with: just the panel the dictation opened. */
+const FIRST_TABS: Tab[] = [{ id: 0, blank: false }];
+
+/**
+ * Where `+` stops. The strip has the answer body's 480pt and no more, and past
+ * this every label is ellipsed to two characters — a notch panel is not a
+ * browser. ponytail: a hard cap, not overflow scrolling; if tabs ever carry
+ * enough to want more, the strip needs its own overflow affordance anyway.
+ */
+const MAX_TABS = 5;
+
+/**
  * The recording pill. Rust drives the window's visibility, so this only ever
  * renders the current phase.
  */
@@ -391,6 +398,41 @@ function Overlay() {
   // Bumped once per dictation: the panel keys its springs off this, and the
   // phase alone cannot say "a new run began".
   const [run, setRun] = useState(0);
+  const [tabs, setTabs] = useState<Tab[]>(FIRST_TABS);
+  const [activeTab, setActiveTab] = useState(0);
+  const nextTabId = useRef(1);
+  // A new dictation is a new session, so its extra tabs go with it. Keyed on
+  // `run` rather than the phase because both the real and the preview paths
+  // bump it, which makes this the single place the reset has to live.
+  useEffect(() => {
+    setTabs(FIRST_TABS);
+    setActiveTab(0);
+  }, [run]);
+
+  // The cap is enforced here rather than in each button, so no caller can get
+  // past it — the buttons only hide themselves so the strip stops offering.
+  // The cap is enforced here rather than in each button, so no caller can get
+  // past it — the buttons only hide themselves so the strip stops offering.
+  const addTab = useCallback(() => {
+    if (tabs.length >= MAX_TABS) return;
+    const id = nextTabId.current++;
+    setTabs((current) => [...current, { id, blank: true }]);
+    setActiveTab(id);
+  }, [tabs.length]);
+
+  // Marked, not removed: unmounting here would cut the exit off mid-frame. The
+  // removal is `dropTab`, downstream of the animation finishing.
+  const closeTab = useCallback((id: number) => {
+    setTabs((current) =>
+      current.map((tab) => (tab.id === id ? { ...tab, closing: true } : tab)),
+    );
+    setActiveTab((active) => (active === id ? 0 : active));
+  }, []);
+
+  const dropTab = useCallback(
+    (id: number) => setTabs((current) => current.filter((tab) => tab.id !== id)),
+    [],
+  );
   // Dev/QA: `?dismiss=800` plays the exit 800ms in — otherwise only reachable
   // from a Rust event, and it is the one path here that races.
   const dismissAfter = Number(new URLSearchParams(location.search).get("dismiss"));
@@ -623,6 +665,107 @@ function Overlay() {
           ],
         });
       }
+      // The editable gate, as it arrives after both lookups came back empty:
+      // a name and no address, which is exactly the state the inputs exist for.
+      if (command.agent === "contact") {
+        setAsk(null);
+        setAgent({
+          heard: "Email Genghis Khan the release notes",
+          steps: [
+            // The reported sequence: one lookup that cost three calls. The two
+            // adjacent inbox reads collapse; the contacts search stays its own
+            // row because it reads differently.
+            {
+              name: "GOOGLECONTACTS_SEARCH_CONTACTS",
+              app: "Google Contacts",
+              args: { query: "Genghis Khan" },
+              requiresConfirmation: false,
+              result: { success: true, message: "no results" },
+            },
+            {
+              name: "GMAIL_FETCH_EMAILS",
+              app: "Gmail",
+              args: { query: "Genghis Khan" },
+              requiresConfirmation: false,
+              result: { success: true, message: "no results" },
+            },
+            {
+              name: "GMAIL_FETCH_EMAILS",
+              app: "Gmail",
+              args: { query: "from:Genghis" },
+              requiresConfirmation: false,
+              result: { success: true, message: "no results" },
+            },
+            {
+              name: "GOOGLECONTACTS_CREATE_CONTACT",
+              app: "Google Contacts",
+              // Stringified, because that is how `display_args` delivers a
+              // nested argument to the panel.
+              args: {
+                names: JSON.stringify([
+                  { givenName: "Genghis Khan", displayName: "Genghis Khan" },
+                ]),
+                emailAddresses: JSON.stringify([]),
+                personFields: "names,emailAddresses",
+              },
+              requiresConfirmation: true,
+            },
+          ],
+        });
+      }
+      // The model waiting on the user; the run is suspended in Rust for as
+      // long as this is up.
+      if (command.agent === "asked") {
+        setAsk(null);
+        setAgent({
+          heard: "Send hi to Charlie Yang",
+          steps: [
+            {
+              name: "GOOGLECONTACTS_SEARCH_CONTACTS",
+              app: "Google Contacts",
+              args: { query: "Charlie Yang" },
+              requiresConfirmation: false,
+              result: { success: true, message: "no results" },
+            },
+            {
+              name: "GMAIL_FETCH_EMAILS",
+              app: "Gmail",
+              args: { query: "Charlie Yang" },
+              requiresConfirmation: false,
+              result: { success: true, message: "no results" },
+            },
+          ],
+          question: {
+            question: "What is Charlie Yang's email address?",
+            options: [],
+          },
+        });
+      }
+      // The same channel, asking a question whose answers are known — which is
+      // what a lookup with several matches should do instead of picking.
+      if (command.agent === "choose") {
+        setAsk(null);
+        setAgent({
+          heard: "Send hi to Sam",
+          steps: [
+            {
+              name: "GOOGLECONTACTS_SEARCH_CONTACTS",
+              app: "Google Contacts",
+              args: { query: "Sam" },
+              requiresConfirmation: false,
+              result: { success: true, message: "3 results" },
+            },
+          ],
+          question: {
+            question: "Which Sam did you mean?",
+            options: [
+              "sam.patel@example.com",
+              "samantha.reeve@example.com",
+              "s.okafor@contractors.example.com",
+            ],
+          },
+        });
+      }
       if (command.agent === "close") setAgent(null);
       if (command.partial === "clear") {
         clearInterval(typing);
@@ -659,11 +802,15 @@ function Overlay() {
                 steps: withCall(r.steps, payload.value),
                 planned: withoutPlanned(r.planned, payload.value.name),
                 status: undefined,
+                question: undefined,
               },
           );
           break;
         case "toolResult":
           setAgent((r) => r && { ...r, steps: withResult(r.steps, payload.value), status: undefined });
+          break;
+        case "asked":
+          setAgent((r) => r && { ...r, question: payload.value, status: undefined });
           break;
         case "status":
           setAgent((r) => r && { ...r, status: payload.value });
@@ -673,12 +820,24 @@ function Overlay() {
           // Rust suppresses the hide the finishing run would otherwise trigger.
           setAgent(
             (r) =>
-              r && { ...r, finished: payload.value, status: undefined, planned: undefined },
+              r && {
+                ...r,
+                finished: payload.value,
+                status: undefined,
+                planned: undefined,
+                question: undefined,
+              },
           );
           break;
         case "runError":
           setAgent(
-            (r) => r && { ...r, error: payload.value, status: undefined, planned: undefined },
+            (r) => r && {
+              ...r,
+              error: payload.value,
+              status: undefined,
+              planned: undefined,
+              question: undefined,
+            },
           );
           break;
       }
@@ -782,11 +941,38 @@ function Overlay() {
           }`}
           ref={panel.content}
         >
-          {ask ? (
-            // Keyed on the question so a new one resets copy state and input.
-            <Answer key={ask.question} ask={ask} answerRef={answerRef} />
-          ) : agent ? (
-            <AgentRun key={agent.heard} run={agent} bodyRef={answerRef} />
+          {panelOpen ? (
+            <>
+              <TabStrip
+                tabs={tabs}
+                active={activeTab}
+                title={ask?.question ?? agent?.heard ?? "Aloud"}
+                onSelect={setActiveTab}
+                onClose={closeTab}
+                onClosed={dropTab}
+                onAdd={addTab}
+              />
+              {/* Keyed so switching back to a tab replays its entrance rather
+                  than having the content appear already settled. */}
+              {tabs.find((tab) => tab.id === activeTab)?.blank ? (
+                <div className="tab-blank" key={activeTab} />
+              ) : ask ? (
+                // Keyed on the question so a new one resets copy state and input.
+                <Answer
+                  key={ask.question}
+                  ask={ask}
+                  answerRef={answerRef}
+                  onAddTab={tabs.length < MAX_TABS ? addTab : undefined}
+                />
+              ) : agent ? (
+                <AgentRun
+                  key={agent.heard}
+                  run={agent}
+                  bodyRef={answerRef}
+                  onAddTab={tabs.length < MAX_TABS ? addTab : undefined}
+                />
+              ) : null}
+            </>
           ) : (
             <PhaseSwap phase={phase}>
               <Indicator phase={phase} />
@@ -811,6 +997,78 @@ function Overlay() {
 }
 
 /**
+ * The strip across the top of the notch panel. Terminal-style: the run that
+ * opened the panel is the first tab, `+` puts a blank one beside it.
+ *
+ * Sizes nothing — it lives inside the fixed-width answer body, so adding a tab
+ * moves the panel's shoulders not at all and only the swapped body retargets
+ * the height spring.
+ */
+function TabStrip({
+  tabs,
+  active,
+  /** What tab 0 is called: the question asked, or what the agent heard. */
+  title,
+  onSelect,
+  onClose,
+  onClosed,
+  onAdd,
+}: {
+  tabs: Tab[];
+  active: number;
+  title: string;
+  onSelect: (id: number) => void;
+  onClose: (id: number) => void;
+  onClosed: (id: number) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <div className="tabs">
+      {tabs.map((tab, i) => (
+        // The wrapper is what collapses; the chip inside it is what is clipped.
+        <div
+          key={tab.id}
+          className="tab"
+          data-motion={tab.closing ? "out" : "in"}
+          // Guarded on the target: animationend bubbles, and an animation added
+          // inside a chip later would otherwise delete the tab under it.
+          onAnimationEnd={(e) =>
+            tab.closing && e.target === e.currentTarget && onClosed(tab.id)
+          }
+        >
+          <div className="tab__chip" data-active={tab.id === active || undefined}>
+            <button className="tab__select" onClick={() => onSelect(tab.id)}>
+              {/* Numbered by position, not by id, so the strip always reads
+                  1..n after a close — the same thing a terminal does. Four
+                  tabs all called "New Tab" are unswitchable-between. */}
+              {tab.blank ? `Tab ${i + 1}` : title}
+            </button>
+            {/* Tab 0 is the run itself; closing it would leave the panel with
+                nothing to show but no way back. Escape still closes the lot. */}
+            {tab.id !== 0 && (
+              <button
+                className="tab__close"
+                aria-label="Close tab"
+                onClick={() => onClose(tab.id)}
+              >
+                <XIcon size={11} />
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+      {tabs.length < MAX_TABS && (
+        <button className="tab__add" aria-label="New tab" title="New tab" onClick={onAdd}>
+          {/* Heavier than the default 2 at this size — a hairline plus on black
+              disappears into the panel. */}
+          <PlusIcon size={15} strokeWidth={2.5} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
  * The question and its streaming answer, inside the drop-down panel. Nothing
  * here sizes anything: it is the measured content node's only child, so the
  * springs in `useNotchPanel` settle around it through the ResizeObserver.
@@ -818,9 +1076,11 @@ function Overlay() {
 function Answer({
   ask,
   answerRef,
+  onAddTab,
 }: {
   ask: Ask;
   answerRef: React.RefObject<HTMLDivElement | null>;
+  onAddTab?: () => void;
 }) {
   const [typed, setTyped] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -837,6 +1097,7 @@ function Answer({
       bodyRef={answerRef}
       copyText={ask.answer}
       onClose={() => void commands.closeAsk()}
+      onAddTab={onAddTab}
       footer={
         <input
           ref={inputRef}
@@ -881,13 +1142,13 @@ function Answer({
 function AgentRun({
   run,
   bodyRef,
+  onAddTab,
 }: {
   run: Run;
   bodyRef: React.RefObject<HTMLDivElement | null>;
+  onAddTab?: () => void;
 }) {
   const pending = pendingStep(run);
-
-  const confirm = (approved: boolean) => void commands.confirmAgent(approved);
 
   return (
     <Panel
@@ -896,6 +1157,7 @@ function AgentRun({
       // Nothing to copy until the run has said something.
       copyText={run.finished || undefined}
       onClose={() => void commands.closeAgent()}
+      onAddTab={onAddTab}
       footer={
         <span className="agent__trail">
           {run.steps.length > 0
@@ -918,77 +1180,55 @@ function AgentRun({
         </p>
       )}
 
-      {run.steps.map((step, i) => (
-        <Tool
-          key={`${step.name}-${i}`}
-          // Open only on the step awaiting a decision, and on failures —
-          // expanding everything that worked buries the answer.
-          defaultOpen={step === pending || step.result?.success === false}
-        >
-          <ToolHeader
-            type={`tool-${step.name}`}
-            state={stateFor(step, step === pending)}
-            // The curated label, not the raw tool name — see `tool-views`.
-            title={labelFor(step.name, step.args)}
-          />
-          <ToolContent>
-            {/* The readable view first; the raw parameters under it. */}
-            {bodyFor(step.name, step.args)}
-            <ToolInput input={step.args} />
-            {step.result && (
-              <ToolOutput
-                output={step.result.success ? step.result.message : undefined}
-                errorText={step.result.success ? undefined : step.result.message}
-              />
-            )}
-          </ToolContent>
-        </Tool>
-      ))}
-
-      {/* What has not happened yet — below the steps, so it reads in run order. */}
-      {run.planned && run.planned.length > 0 && (
-        <Queue>
-          <QueueSection>
-            <QueueSectionTrigger>
-              <QueueSectionLabel count={run.planned.length} label="still to do" />
-            </QueueSectionTrigger>
-            <QueueSectionContent>
-              <QueueList>
-                {run.planned.map((next, i) => (
-                  <QueueItem key={`${next.name}-${i}`}>
-                    {/* QueueItem is a column; indicator and title share a row
-                        inside it. */}
-                    <span className="flex items-start gap-2">
-                      <QueueItemIndicator />
-                      {/* No arguments yet — they arrive with the call. */}
-                      <QueueItemContent>{labelFor(next.name, {})}</QueueItemContent>
-                    </span>
-                  </QueueItem>
-                ))}
-              </QueueList>
-            </QueueSectionContent>
-          </QueueSection>
-        </Queue>
+      {/* One line per tool: what is running and how it went. The arguments are
+          deliberately not shown here — they are a wall of JSON, and the only
+          moment they matter is when approving a write, below. */}
+      {(run.steps.length > 0 || (run.planned?.length ?? 0) > 0) && (
+        <ul className="agent__steps">
+          {/* Keyed on the row's own text, so only steps the user could not have
+              told apart collapse — see `groupSteps`. */}
+          {groupSteps(run.steps, (s) => rowKey(s, s === pending)).map(
+            ({ step, count }, i) => (
+            <li key={`${step.name}-${i}`}>
+              <span className="agent__step">
+                <StepIcon step={step} pending={step === pending} />
+                <span className="agent__name">{labelFor(step.name, step.args)}</span>
+                {count > 1 && <span className="agent__count">×{count}</span>}
+                <span className="agent__state">
+                  {stepStatus(step, step === pending)}
+                </span>
+              </span>
+              {/* Only what this tool is worth showing, and never for the step
+                  awaiting a decision — the gate below shows that one, and
+                  rendering both put the same draft on screen twice. */}
+              {step !== pending && (
+                <span className="agent__body">{bodyFor(step.name, step.args)}</span>
+              )}
+            </li>
+            ),
+          )}
+          {/* What has not happened yet, in the same list so the run reads in
+              order rather than as two stacked sections. */}
+          {run.planned?.map((next, i) => (
+            <li key={`planned-${next.name}-${i}`} className="agent__step--planned">
+              <span className="agent__step">
+                <CircleDashedIcon className="agent__icon" size={14} />
+                {/* No arguments yet — they arrive with the call. */}
+                <span className="agent__name">{labelFor(next.name, {})}</span>
+                <span className="agent__state">queued</span>
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
 
-      {pending && (
-        <Confirmation approval={{ id: pending.name }} state="approval-requested">
-          <ConfirmationTitle>
-            {labelFor(pending.name, pending.args)} — this writes to {pending.app}.
-          </ConfirmationTitle>
-          <ConfirmationRequest>
-            {/* A gate you cannot see through is not a gate. */}
-            <div className="mb-3">{bodyFor(pending.name, pending.args)}</div>
-            <ConfirmationActions>
-              <ConfirmationAction variant="outline" onClick={() => confirm(false)}>
-                Cancel
-              </ConfirmationAction>
-              <ConfirmationAction autoFocus onClick={() => confirm(true)}>
-                Confirm
-              </ConfirmationAction>
-            </ConfirmationActions>
-          </ConfirmationRequest>
-        </Confirmation>
+      {/* Keyed on the step, so a second gate in one run starts from its own
+          arguments instead of inheriting the first one's draft. */}
+      {pending && <ConfirmGate key={`${pending.name}-${run.steps.length}`} step={pending} />}
+
+      {/* Keyed on the question so a second one clears the first one's answer. */}
+      {run.question && !pending && (
+        <AskGate key={run.question.question} asked={run.question} />
       )}
 
       {run.status && (
@@ -1005,13 +1245,193 @@ function AgentRun({
 }
 
 /**
- * An Aloud step in the vocabulary `ToolHeader` speaks. A lookup and not an
- * adapter because the five states line up one-for-one.
+ * The model asking the user for something no tool could give it.
+ *
+ * The run is suspended in Rust for as long as this is on screen, so it is the
+ * one place the panel takes input that is not a decision. Dismissing answers
+ * "nothing", which the loop reports as unanswered — the model then closes the
+ * run rather than retrying into the same wall.
  */
-function stateFor(step: Step, pending: boolean): ToolUIPart["state"] {
-  if (step.result) return step.result.success ? "output-available" : "output-error";
-  if (step.confirmed === false) return "output-denied";
-  return pending ? "approval-requested" : "input-available";
+function AskGate({ asked }: { asked: { question: string; options: string[] } }) {
+  const [typed, setTyped] = useState("");
+  const answer = (text: string | null) => void commands.answerAgent(text);
+
+  // A choice, not a blank. Offered whenever the model knows the candidates —
+  // which of three Sams, which calendar — because picking cannot be misspelled
+  // and a spoken app should never make someone type an address they can see.
+  if (asked.options.length > 0) {
+    return (
+      <div className="agent__confirm" role="group">
+        <p className="agent__confirm-title">{asked.question}</p>
+        <div className="agent__options">
+          {asked.options.map((option) => (
+            <button
+              className="agent__option"
+              key={option}
+              onClick={() => answer(option)}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+        <div className="agent__actions">
+          <button className="agent__action" onClick={() => answer(null)}>
+            None of these
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="agent__confirm" role="group">
+      <p className="agent__confirm-title">{asked.question}</p>
+      <form
+        className="agent__ask"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (typed.trim()) answer(typed.trim());
+        }}
+      >
+        <input
+          className="ask__input"
+          autoFocus
+          value={typed}
+          placeholder="Type your answer…"
+          onChange={(e) => setTyped(e.target.value)}
+        />
+        <button className="agent__action" type="button" onClick={() => answer(null)}>
+          Skip
+        </button>
+        <button
+          className="agent__action agent__action--go"
+          type="submit"
+          disabled={!typed.trim()}
+        >
+          Send
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/**
+ * The gate a write passes before it runs.
+ *
+ * Most tools show what they are about to do and take a yes. A few declare
+ * editable fields (`edits` in tool-views) and show inputs instead — the agent
+ * reaches the contact gate precisely because it could not find an address, so
+ * refusing is the only other answer it could give.
+ */
+function ConfirmGate({ step }: { step: Step }) {
+  const fields = editsFor(step.name);
+  const [draft, setDraft] = useState<ToolArgs>(step.args);
+  // A form is a demand, and the agent reaches this one on its own initiative.
+  // Ask first; the fields only appear for someone who said yes.
+  const [filling, setFilling] = useState(false);
+  const asking = fields.length > 0 && !filling;
+
+  // Only what the user could have changed. Rust folds it back into the real
+  // nested arguments; anything untouched keeps the value the model chose.
+  const confirm = (approved: boolean) =>
+    void commands.confirmAgent(
+      approved,
+      approved && fields.length > 0 ? asStrings(draft) : null,
+    );
+
+  return (
+    <div className="agent__confirm" role="group">
+      <p className="agent__confirm-title">
+        {asking && askFor(step.name, draft)
+          ? askFor(step.name, draft)
+          : `${labelFor(step.name, draft)} — this writes to ${step.app}.`}
+      </p>
+      {/* Approving a write without seeing what it will do is not a gate, so the
+          body shows here even though the step list is otherwise quiet. */}
+      {asking ? null : fields.length > 0 ? (
+        <div className="agent__fields">
+          {fields.map((field) => (
+            <label className="agent__field" key={field.key}>
+              <span className="agent__field-label">{field.label}</span>
+              <input
+                className="ask__input"
+                value={field.get(draft)}
+                placeholder={field.placeholder}
+                // The first empty field is the one the agent could not fill.
+                autoFocus={!field.get(draft)}
+                onChange={(e) =>
+                  setDraft((current) => field.set(current, e.target.value))
+                }
+              />
+            </label>
+          ))}
+        </div>
+      ) : (
+        <div className="agent__body">{bodyFor(step.name, draft)}</div>
+      )}
+      <div className="agent__actions">
+        <button className="agent__action" onClick={() => confirm(false)}>
+          {asking ? "No thanks" : "Cancel"}
+        </button>
+        {asking ? (
+          <button
+            className="agent__action agent__action--go"
+            autoFocus
+            onClick={() => setFilling(true)}
+          >
+            Save contact
+          </button>
+        ) : (
+          <button
+            className="agent__action agent__action--go"
+            autoFocus={fields.length === 0}
+            onClick={() => confirm(true)}
+          >
+            Confirm
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The flat string map the confirm command takes; see `display_args` in agent.rs. */
+function asStrings(args: ToolArgs): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(args).map(([key, value]) => [
+      key,
+      typeof value === "string" ? value : JSON.stringify(value),
+    ]),
+  );
+}
+
+function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
+  if (step.result) {
+    return step.result.success ? (
+      <CheckIcon className="agent__icon" size={14} />
+    ) : (
+      <XIcon className="agent__icon agent__icon--bad" size={14} />
+    );
+  }
+  if (step.confirmed === false) return <XIcon className="agent__icon" size={14} />;
+  if (pending)
+    return <TriangleAlertIcon className="agent__icon agent__icon--warn" size={14} />;
+  return <LoaderCircleIcon className="agent__icon animate-spin" size={14} />;
+}
+
+/**
+ * What a step's row says, as one string. Two adjacent steps sharing it render
+ * identically, which is exactly when collapsing them hides nothing.
+ */
+function rowKey(step: Step, pending: boolean): string {
+  return `${labelFor(step.name, step.args)}|${stepStatus(step, pending)}`;
+}
+
+function stepStatus(step: Step, pending: boolean): string {
+  if (step.result) return step.result.success ? "done" : "failed";
+  if (step.confirmed === false) return "cancelled";
+  if (pending) return "needs approval";
+  return "running…";
 }
 
 /**
@@ -1024,6 +1444,7 @@ function Panel({
   /** Omit to hide the copy button — there is nothing worth copying yet. */
   copyText,
   onClose,
+  onAddTab,
   footer,
   children,
 }: {
@@ -1031,7 +1452,9 @@ function Panel({
   bodyRef?: React.RefObject<HTMLDivElement | null>;
   copyText?: string;
   onClose: () => void;
-  /** Sits left of copy/close. */
+  /** Omitted at MAX_TABS — the button goes away rather than sitting dead. */
+  onAddTab?: () => void;
+  /** Sits left of new/copy/close. */
   footer?: ReactNode;
   children: ReactNode;
 }) {
@@ -1045,6 +1468,19 @@ function Panel({
       </div>
       <div className="ask__footer">
         {footer}
+        {/* The second way to open a tab. The strip's own `+` is the discoverable
+            one; this sits in the row the eye already goes to for copy/close.
+            Absent, not disabled, at the cap — matching the strip's. */}
+        {onAddTab && (
+          <button
+            className="ask__button"
+            aria-label="New tab"
+            title="New tab"
+            onClick={onAddTab}
+          >
+            <PlusIcon size={15} strokeWidth={2.5} />
+          </button>
+        )}
         {copyText !== undefined && (
           <button
             className="ask__button"

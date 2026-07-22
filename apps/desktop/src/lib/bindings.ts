@@ -146,8 +146,17 @@ export const commands = {
 	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
 	/**  Records the panel's settled box, so the click region can be exactly it. */
 	setPanelBox: (width: number | null, height: number | null) => __TAURI_INVOKE<void>("set_panel_box", { width, height }),
-	/**  Resolves the pending confirmation. Called by the panel's Yes/No buttons. */
-	confirmAgent: (approved: boolean) => __TAURI_INVOKE<void>("confirm_agent", { approved }),
+	/**
+	 *  Resolves the pending confirmation. Called by the panel's Cancel/Confirm
+	 *  buttons; `edits` carries any field the user filled in or corrected before
+	 *  approving, in the same flattened form the panel was given.
+	 */
+	confirmAgent: (approved: boolean, edits: { [key in string]: string } | null) => __TAURI_INVOKE<void>("confirm_agent", { approved, edits }),
+	/**
+	 *  Resolves the pending question. `None` is the user dismissing it, which the
+	 *  loop reports to the model as unanswered rather than as an error.
+	 */
+	answerAgent: (answer: string | null) => __TAURI_INVOKE<void>("answer_agent", { answer }),
 	/**  Lets the panel dismiss itself on Escape or after showing a result. */
 	closeAgent: () => __TAURI_INVOKE<void>("close_agent"),
 };
@@ -184,6 +193,11 @@ export type AgentEvent =
 { kind: "planned"; value: PlannedCall[] } | 
 /**  A parsed action awaiting dispatch. A write pauses here for confirmation. */
 { kind: "toolCall"; value: ToolCall } | { kind: "toolResult"; value: ToolResult } | 
+/**
+ *  The model needs something only the user can give. The run is suspended
+ *  until `answer_agent`; the panel shows an input rather than a gate.
+ */
+{ kind: "asked"; value: Question } | 
 /**
  *  A transient status line (e.g. "rate limited, retrying in 30s") shown
  *  while the run is otherwise silent; cleared by the next event.
@@ -466,6 +480,15 @@ export type Phase = "idle" | "recording" | "transcribing" | "done" |
 export type PlannedCall = {
 	name: string,
 	app: string,
+};
+
+/**
+ *  A question put to the user mid-run. `options` non-empty means the answer is
+ *  one of them, so the panel offers buttons instead of a text field.
+ */
+export type Question = {
+	question: string,
+	options: string[],
 };
 
 export type SearchResult = {

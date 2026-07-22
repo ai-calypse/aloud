@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { humanise, labelFor, viewFor } from "./tool-views";
+import { bodyFor, humanise, labelFor, viewFor } from "./tool-views";
 
 describe("tool views", () => {
   it("says what the tool is doing, not what it is called", () => {
@@ -43,5 +43,95 @@ describe("tool views", () => {
       "Sending an email",
     );
     expect(labelFor("MYSTERY", {})).toBe("MYSTERY");
+  });
+
+  /**
+   * The reported bug: asked to mail "Charlie yang", the agent took an
+   * unrelated person a search happened to return and wrote to them. The gate
+   * showed "Sending an email to nadege.guillaumat" — the local part only —
+   * and the body card showed subject and message but never the address, so
+   * there was nowhere on screen that said who it was really going to.
+   */
+  describe("the recipient of a send", () => {
+    it("shows the whole address, domain included", () => {
+      const body = bodyFor("GMAIL_SEND_EMAIL", {
+        recipient_email: "nadege.guillaumat@example.com",
+        subject: "hi",
+        body: "hi",
+      });
+      expect(JSON.stringify(body)).toContain("nadege.guillaumat@example.com");
+    });
+
+    it("says so loudly when a send has no recipient at all", () => {
+      const body = bodyFor("GMAIL_SEND_EMAIL", { subject: "hi", body: "hi" });
+      expect(JSON.stringify(body)).toContain("No recipient");
+    });
+  });
+
+  it("names who a directory lookup is looking for", () => {
+    expect(labelFor("GMAIL_SEARCH_PEOPLE", { query: "Charlie yang" })).toBe(
+      "Looking for Charlie yang",
+    );
+    expect(labelFor("GOOGLECONTACTS_SEARCH_CONTACTS", {})).toBe(
+      "Looking through your contacts",
+    );
+  });
+
+  /**
+   * The People API nests names and addresses in arrays of objects rather than
+   * the flat strings every other tool here uses, so this reader digs two levels
+   * and has two levels to get wrong. The gate that approves writing a contact
+   * shows what these return.
+   */
+  describe("saving a contact", () => {
+    const dad = {
+      names: [{ givenName: "Dad", displayName: "Dad" }],
+      emailAddresses: [{ value: "dipteshg54@gmail.com" }],
+      personFields: "names,emailAddresses",
+    };
+
+    it("reads the name out of the nested arrays", () => {
+      expect(labelFor("GOOGLECONTACTS_CREATE_CONTACT", dad)).toBe(
+        "Saving Dad to your contacts",
+      );
+    });
+
+    /**
+     * The shipped bug: `display_args` in agent.rs stringifies every argument
+     * that is not already a string, so the panel receives `names` as JSON text.
+     * Read as an array it was always empty, and the gate for a contact write
+     * said "Saving a contact" with no name and no address under it.
+     */
+    it("reads them when the panel receives them stringified, as it really does", () => {
+      const flattened = {
+        names: JSON.stringify(dad.names),
+        emailAddresses: JSON.stringify(dad.emailAddresses),
+        personFields: "names,emailAddresses",
+      };
+      expect(labelFor("GOOGLECONTACTS_CREATE_CONTACT", flattened)).toBe(
+        "Saving Dad to your contacts",
+      );
+    });
+
+    it("falls back to given and family names when there is no displayName", () => {
+      expect(
+        labelFor("GOOGLECONTACTS_CREATE_CONTACT", {
+          names: [{ givenName: "Ada", familyName: "Lovelace" }],
+        }),
+      ).toBe("Saving Ada Lovelace to your contacts");
+    });
+
+    it("does not blank on an empty, wrongly-typed or empty-object array", () => {
+      expect(labelFor("GOOGLECONTACTS_CREATE_CONTACT", {})).toBe("Saving a contact");
+      expect(labelFor("GOOGLECONTACTS_CREATE_CONTACT", { names: "Dad" })).toBe(
+        "Saving a contact",
+      );
+      expect(labelFor("GOOGLECONTACTS_CREATE_CONTACT", { names: [{}] })).toBe(
+        "Saving a contact",
+      );
+      expect(labelFor("GOOGLECONTACTS_CREATE_CONTACT", { names: [null] })).toBe(
+        "Saving a contact",
+      );
+    });
   });
 });

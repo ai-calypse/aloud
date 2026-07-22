@@ -66,14 +66,24 @@ async fn main() -> anyhow::Result<()> {
             LoopEvent::ToolCallResult { name, success } => {
                 println!("  [{}] {name}", if success { "ok" } else { "ERR" });
             }
+            LoopEvent::Asked { question, options } => {
+                println!("  [ask] {question} {options:?}");
+            }
             LoopEvent::RateLimited { seconds } => {
                 println!("  [rate-limited] retrying in {seconds}s");
             }
         },
-        // No panel here: auto-approve writes. Reads dominate the test commands.
-        |name, _args: serde_json::Value| async move {
+        // No panel here: auto-approve writes with the arguments as-is. Reads
+        // dominate the test commands.
+        |name, args: serde_json::Value| async move {
             println!("  [auto-confirm write] {name}");
-            true
+            Some(args)
+        },
+        // No panel to type into: every question goes unanswered, which the loop
+        // reports to the model so it closes the run rather than hanging.
+        |question: String| async move {
+            println!("  [asked, unanswered] {question}");
+            None
         },
     )
     .await?;

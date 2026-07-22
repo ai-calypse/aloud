@@ -27,6 +27,13 @@ export type Run = {
   error?: string;
   /** Transient line ("Rate limited — retrying…"); cleared by the next event. */
   status?: string;
+  /**
+   * The model is waiting on the user for something no tool could give it. The
+   * run is suspended in Rust until `answerAgent`, so this is the one state the
+   * panel must offer an input for rather than only reporting. `options`
+   * non-empty makes it a choice rather than free text.
+   */
+  question?: { question: string; options: string[] };
 };
 
 /** Tool arguments cross as free-form JSON; anything but an object is empty. */
@@ -99,3 +106,43 @@ export function pendingStep(run: Run): Step | undefined {
   );
 }
 
+
+/** A run of adjacent steps the panel draws as one row. */
+export type StepGroup = {
+  /** The last of them — its result is the one the row reports. */
+  step: Step;
+  /** How many collapsed here; 1 for the overwhelming majority. */
+  count: number;
+};
+
+/**
+ * Collapses adjacent steps that would render identically.
+ *
+ * A lookup for one person routinely costs three calls — the contacts directory,
+ * then the mailbox, then the mailbox again with a different query — and the
+ * panel listed each as its own row, so a single "find Charlie" read as four
+ * things happening. Adjacent rows with the same rendered text now stack.
+ *
+ * Keyed on what the row actually shows, not on the tool name: two calls only
+ * merge when the user could not have told them apart anyway. That is what stops
+ * a failure being absorbed into the success above it, or the step awaiting
+ * approval being folded away — their rows read differently, so they never
+ * merge. Non-adjacent repeats stay separate; they are a real "went back and
+ * looked again", which is worth seeing.
+ */
+export function groupSteps(steps: Step[], rowKey: (step: Step) => string): StepGroup[] {
+  const groups: StepGroup[] = [];
+  let previousKey: string | null = null;
+  for (const step of steps) {
+    const key = rowKey(step);
+    const last = groups[groups.length - 1];
+    if (last && key === previousKey) {
+      last.step = step;
+      last.count += 1;
+    } else {
+      groups.push({ step, count: 1 });
+    }
+    previousKey = key;
+  }
+  return groups;
+}
