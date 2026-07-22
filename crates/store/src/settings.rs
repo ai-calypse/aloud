@@ -94,15 +94,6 @@ pub struct Settings {
     ///
     /// [`vocabulary`]: Settings::vocabulary
     pub preserve_phrases: Vec<String>,
-    /// Tell cleanup what app and window are in front, so it can spell names the
-    /// way the screen does. Off by default: a window title is a document name,
-    /// a chat participant or a URL, sent to a third party on every dictation.
-    pub context_enabled: bool,
-    /// Also capture a screenshot with the context. Separate from
-    /// [`context_enabled`] because it needs the Screen Recording grant.
-    ///
-    /// [`context_enabled`]: Settings::context_enabled
-    pub context_screenshot_enabled: bool,
     /// Spoken shorthand that expands to canned text after cleanup.
     pub macros: Vec<crate::macros::Macro>,
     /// Per-app behaviour overrides, applied by the focused app's name.
@@ -178,8 +169,6 @@ impl Default for Settings {
             instruction_guard_enabled: true,
             vocabulary: Vec::new(),
             preserve_phrases: Vec::new(),
-            context_enabled: false,
-            context_screenshot_enabled: false,
             macros: Vec::new(),
             app_rules: Vec::new(),
             command_mode_enabled: true,

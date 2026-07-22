@@ -142,7 +142,6 @@ pub async fn test_prompt(
         preserve: &settings.preserve_phrases,
         // Neither caller is a live dictation, so the window in front now does
         // not describe the moment being tested.
-        context: "",
         output_language: &settings.output_language,
         instruction_guard: settings.instruction_guard_enabled,
     };

@@ -36,7 +36,6 @@ async fn main() -> anyhow::Result<()> {
             model: &model,
             fallback: None,
             custom_prompt: "",
-            context: "",
             vocabulary: &[],
             preserve: &[],
             output_language: "",

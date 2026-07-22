@@ -20,7 +20,6 @@ pub enum Permission {
     /// Global hotkeys, synthetic paste, and reading the focused selection.
     Accessibility,
     Microphone,
-    ScreenRecording,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -37,17 +36,13 @@ pub fn all() -> Vec<PermissionStatus> {
     return Vec::new();
 
     #[cfg(target_os = "macos")]
-    [
-        Permission::Accessibility,
-        Permission::Microphone,
-        Permission::ScreenRecording,
-    ]
-    .into_iter()
-    .map(|permission| PermissionStatus {
-        permission,
-        granted: is_granted(permission),
-    })
-    .collect()
+    [Permission::Accessibility, Permission::Microphone]
+        .into_iter()
+        .map(|permission| PermissionStatus {
+            permission,
+            granted: is_granted(permission),
+        })
+        .collect()
 }
 
 /// Whether `permission` is granted right now, without prompting. Public so a
@@ -78,7 +73,6 @@ pub fn open_settings(permission: Permission) -> anyhow::Result<()> {
         let anchor = match permission {
             Permission::Accessibility => "Privacy_Accessibility",
             Permission::Microphone => "Privacy_Microphone",
-            Permission::ScreenRecording => "Privacy_ScreenCapture",
         };
         // `spawn`, not `status`: this is a non-async Tauri command on the main
         // thread, and waiting for LaunchServices freezes the window.
@@ -96,7 +90,6 @@ fn granted(permission: Permission) -> bool {
     match permission {
         Permission::Accessibility => aloud_hotkey::is_permitted(),
         Permission::Microphone => macos::microphone_authorized(),
-        Permission::ScreenRecording => macos::screen_capture_authorized(),
     }
 }
 
@@ -110,12 +103,6 @@ mod macos {
 
     type Id = *mut c_void;
 
-    #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" {
-        /// Non-prompting; `CGRequestScreenCaptureAccess` is the prompting one.
-        fn CGPreflightScreenCaptureAccess() -> bool;
-    }
-
     #[link(name = "AVFoundation", kind = "framework")]
     extern "C" {
         static AVMediaTypeAudio: Id;
@@ -128,10 +115,6 @@ mod macos {
         fn objc_getClass(name: *const c_char) -> Id;
         fn sel_registerName(name: *const c_char) -> Id;
         fn objc_msgSend();
-    }
-
-    pub fn screen_capture_authorized() -> bool {
-        unsafe { CGPreflightScreenCaptureAccess() }
     }
 
     /// `+[AVCaptureDevice authorizationStatusForMediaType:]`, via raw runtime

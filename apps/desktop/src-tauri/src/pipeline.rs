@@ -620,21 +620,6 @@ impl Pipeline {
         // chord left in front.
         let app_name = tauri::async_runtime::spawn_blocking(aloud_selection::frontmost_app);
 
-        // Screen context, for the same reasons and with the same timing. Only
-        // when opted in — it leaves the machine with the transcript.
-        //
-        // ponytail: this repeats the frontmost-app read the task above just
-        // did, costing a second Accessibility round-trip on a path that is off
-        // by default. Threading the already-read name into `aloud_screen` is
-        // the upgrade if the context setting ever defaults on.
-        let context = {
-            let settings = self.settings();
-            settings.context_enabled.then(|| {
-                let screenshot = settings.context_screenshot_enabled;
-                tauri::async_runtime::spawn_blocking(move || aloud_screen::capture(screenshot))
-            })
-        };
-
         let (raw, settings, wav) = self.capture(captured, true).await?;
         let mut wav = KeptWav(wav);
 
@@ -662,15 +647,7 @@ impl Pipeline {
             focused.as_ref().and_then(|f| f.bundle_id.as_deref()),
         );
 
-        let context = match context {
-            Some(handle) => handle.await.ok().unwrap_or_default(),
-            None => aloud_screen::Context::default(),
-        };
-        if !context.summary.is_empty() {
-            tracing::info!(context = %context.summary, "screen context");
-        }
-
-        let final_text = self.post_process(&raw, &effective, &context.summary).await;
+        let final_text = self.post_process(&raw, &effective).await;
         if final_text.trim().is_empty() {
             return Ok(Outcome::NoSpeech);
         }
@@ -707,7 +684,7 @@ impl Pipeline {
     /// Cleans up the transcript, falling back to the raw text if the LLM is
     /// unavailable: pasting the unpolished words beats pasting nothing. Voice
     /// macros expand last, on whichever text we settled on.
-    async fn post_process(&self, raw: &str, settings: &Settings, context: &str) -> String {
+    async fn post_process(&self, raw: &str, settings: &Settings) -> String {
         let cleaned =
             if !settings.post_processing_enabled || settings.groq_api_key.trim().is_empty() {
                 raw.to_string()
@@ -720,7 +697,6 @@ impl Pipeline {
                     custom_prompt: &settings.custom_system_prompt,
                     vocabulary: &settings.vocabulary,
                     preserve: &settings.preserve_phrases,
-                    context,
                     output_language: &settings.output_language,
                     instruction_guard: settings.instruction_guard_enabled,
                 };
@@ -1181,8 +1157,7 @@ impl Pipeline {
             bail!("the recording transcribed to nothing — it may be silence");
         }
 
-        // No context: whatever is on screen now describes a different moment.
-        let final_text = self.post_process(&raw, &settings, "").await;
+        let final_text = self.post_process(&raw, &settings).await;
         // Both halves: leaving the old "Heard" beside the new "Pasted" would
         // describe two different runs.
         self.history_db()?

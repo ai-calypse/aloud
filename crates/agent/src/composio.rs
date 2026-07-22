@@ -25,6 +25,13 @@ const API_BASE: &str = "https://backend.composio.dev/api/v3.1";
 ///
 /// Composio's "important" tag cannot do this job — it covers 25 of
 /// googlecalendar's 49 tools, so it falls through to alphabetical order.
+///
+/// Each toolkit's directory lookup is pinned for the same reason: "email Ravi
+/// the notes" scores every people-search tool zero, and without one in the list
+/// the model asks for an address the user already expects it to know. All are
+/// `readOnlyHint`, so resolving a name never hits the write confirmation.
+/// Calendar has no directory of its own — attendee lookup rides on
+/// `GMAIL_SEARCH_PEOPLE`, so calendar-without-gmail still needs full addresses.
 const PINNED_TOOLS: &[(&str, &[&str])] = &[
     (
         "gmail",
@@ -32,6 +39,7 @@ const PINNED_TOOLS: &[(&str, &[&str])] = &[
             "GMAIL_FETCH_EMAILS",
             "GMAIL_SEND_EMAIL",
             "GMAIL_CREATE_EMAIL_DRAFT",
+            "GMAIL_SEARCH_PEOPLE",
         ],
     ),
     (
@@ -40,6 +48,7 @@ const PINNED_TOOLS: &[(&str, &[&str])] = &[
             "GITHUB_CREATE_AN_ISSUE",
             "GITHUB_LIST_REPOSITORY_ISSUES",
             "GITHUB_GET_THE_AUTHENTICATED_USER",
+            "GITHUB_SEARCH_USERS",
         ],
     ),
     (
@@ -51,6 +60,9 @@ const PINNED_TOOLS: &[(&str, &[&str])] = &[
             "GOOGLECALENDAR_DELETE_EVENT",
         ],
     ),
+    // Slack's send verbs rank fine from the command; only the directory needs
+    // the pin.
+    ("slack", &["SLACK_FIND_USERS"]),
 ];
 
 /// Words carrying no signal about which tool is wanted. Kept short on purpose:

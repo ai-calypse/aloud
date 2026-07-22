@@ -19,10 +19,6 @@ const COPY: Record<Permission, { label: string; hint: string }> = {
     label: "Microphone",
     hint: "Recording. Denied, every dictation transcribes silence.",
   },
-  screenRecording: {
-    label: "Screen Recording",
-    hint: "Screen context. Nothing uses it yet — grant it when that ships.",
-  },
 };
 
 /**
