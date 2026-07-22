@@ -34,6 +34,23 @@ pub struct AgentSession {
     pub cwd: Option<String>,
     /// The tool running right now, already flattened to one line.
     pub tool: Option<String>,
+    /// The model, vendor prefix stripped: `opus-4-8`, `gpt-5.6-sol`.
+    pub model: Option<String>,
+    /// ISO-8601 of last activity, for the row's `· now` / `· 10m` tag. The tag
+    /// is rendered in the webview so it updates without a new event.
+    pub last_activity: Option<String>,
+    /// Subagents spawned under this session.
+    pub subagents: Vec<AgentSubagent>,
+    pub busy: bool,
+}
+
+/// A subagent under a session, for the `▸ N subagents` disclosure.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSubagent {
+    pub label: String,
+    pub model: Option<String>,
+    pub tool: Option<String>,
     pub busy: bool,
 }
 
@@ -90,6 +107,18 @@ fn poll(app: AppHandle) {
                         title: s.label(),
                         cwd: s.cwd.clone(),
                         tool: s.running.as_ref().map(describe),
+                        model: s.model.clone(),
+                        last_activity: s.last_activity.clone(),
+                        subagents: s
+                            .subagents
+                            .iter()
+                            .map(|sub| AgentSubagent {
+                                label: sub.label.clone(),
+                                model: sub.model.clone(),
+                                tool: sub.running.as_ref().map(describe),
+                                busy: sub.busy,
+                            })
+                            .collect(),
                         busy: s.busy,
                     })
                     .collect();
@@ -124,6 +153,14 @@ fn emit(app: &AppHandle, rows: Vec<AgentSession>) {
     if let Err(e) = AgentSessions(rows).emit(app) {
         tracing::warn!(%e, "could not send agent sessions");
     }
+}
+
+/// Now, in the same ISO-8601 UTC shape the transcripts use, so the webview's
+/// relative-time formatter takes hook rows and discovery rows the same way.
+fn now_iso() -> String {
+    chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string()
 }
 
 /// One line describing a running tool, for a narrow row.
@@ -222,11 +259,25 @@ fn record(app: &AppHandle, event: &HookEvent) {
             title: String::new(),
             cwd: None,
             tool: None,
+            model: None,
+            last_activity: None,
+            // Subagents come from the transcript, not the hook payload, so the
+            // discovery poll fills these in — the hook only knows the parent.
+            subagents: Vec::new(),
             busy: false,
         });
         if event.cwd.is_some() {
             row.cwd = event.cwd.clone();
         }
+        if event.model.is_some() {
+            row.model = event
+                .model
+                .as_deref()
+                .map(|m| m.strip_prefix("claude-").unwrap_or(m).to_string());
+        }
+        // Every hook fires with a wall-clock now; ISO-stamp it so the row's
+        // relative tag ticks the same way discovery's does.
+        row.last_activity = Some(now_iso());
         if let Some(prompt) = &event.prompt {
             row.title = prompt.clone();
         }

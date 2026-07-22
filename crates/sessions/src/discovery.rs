@@ -217,6 +217,54 @@ pub fn claude_project_dir(home: &Path, cwd: &Path) -> PathBuf {
     home.join(".claude/projects").join(slug)
 }
 
+/// One subagent spawned under a session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Subagent {
+    /// What the parent asked it to do, from the `.meta.json` `description`.
+    pub label: String,
+    /// Its own transcript, so its liveness and model can be read like any other.
+    pub transcript: PathBuf,
+}
+
+/// The subagents of a Claude Code session.
+///
+/// They live in `<transcript-without-ext>/subagents/agent-*.jsonl`, each with a
+/// sibling `agent-*.meta.json` carrying `agentType` and `description` — the
+/// label the parent gave the task, which is better than anything the child's
+/// own transcript names itself.
+pub fn subagents(transcript: &Path) -> Vec<Subagent> {
+    let dir = transcript.with_extension("").join("subagents");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // Pair each transcript with its meta; the meta is the label source.
+        if path.extension().is_some_and(|x| x == "jsonl") {
+            let meta = path.with_extension("meta.json");
+            let label = read_meta_description(&meta).unwrap_or_else(|| "subagent".to_string());
+            out.push(Subagent {
+                label,
+                transcript: path,
+            });
+        }
+    }
+    // Stable order, or the disclosure reshuffles between polls.
+    out.sort_by(|a, b| a.transcript.cmp(&b.transcript));
+    out
+}
+
+/// The `description` from a subagent's `.meta.json`, if any.
+fn read_meta_description(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value
+        .get("description")
+        .and_then(|d| d.as_str())
+        .map(str::to_string)
+}
+
 /// The most recently modified transcript in a directory.
 ///
 /// ponytail: newest-by-mtime, which is one `readdir` and no file reads. It can
@@ -342,6 +390,33 @@ mod tests {
             dir,
             Path::new("/Users/yakshgandhi/.claude/projects/-Users-yakshgandhi-Documents-Development-apps-aloud-tauri")
         );
+    }
+
+    /// The subagent dir sits beside the transcript with its extension dropped,
+    /// and each child's label comes from its `.meta.json` `description`. Both
+    /// verified against a real `~/.claude/projects/.../subagents/` layout.
+    #[test]
+    fn subagents_are_read_with_their_meta_description() {
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("session.jsonl");
+        std::fs::write(&transcript, "{}").unwrap();
+        let subs = transcript.with_extension("").join("subagents");
+        std::fs::create_dir_all(&subs).unwrap();
+        std::fs::write(subs.join("agent-a.jsonl"), "{}").unwrap();
+        std::fs::write(
+            subs.join("agent-a.meta.json"),
+            r#"{"agentType":"Explore","description":"Map the settings"}"#,
+        )
+        .unwrap();
+        // A transcript with no meta falls back to a generic label, not a skip.
+        std::fs::write(subs.join("agent-b.jsonl"), "{}").unwrap();
+
+        let found = subagents(&transcript);
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].label, "Map the settings");
+        assert_eq!(found[1].label, "subagent");
+        // A session with no subagents dir is the common case, not an error.
+        assert!(subagents(Path::new("/tmp/nope.jsonl")).is_empty());
     }
 
     /// The newest `.jsonl` is the live session, and nothing else in the folder

@@ -41,6 +41,7 @@ import {
   type ToolArgs,
 } from "./lib/tool-views";
 import { notchPath } from "./lib/notch-shape";
+import { timeAgo } from "./lib/format";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import { createSpring } from "./lib/spring";
 // Streamdown styles the streamed answer with Tailwind utilities — see the
@@ -432,13 +433,26 @@ function Overlay() {
     const params = new URLSearchParams(location.search);
     const count = Number(params.get("agents"));
     if (count > 0) {
+      const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
       setSessions(
         Array.from({ length: count }, (_, i) => ({
           id: `preview:${i}`,
           agent: i % 2 ? "codex" : "claude",
-          title: i === 0 ? "Add tab system to agent notch" : `Session ${i + 1}`,
+          title:
+            i === 0
+              ? "yo no, the gif in the readme sucks. please fix"
+              : `hello world. write ${i + 4} haikus`,
           cwd: "/Users/y/dev/aloud-tauri",
           tool: i === 0 ? "Bash: cargo test --workspace" : null,
+          model: i % 2 ? "gpt-5.6-sol" : "fable-5",
+          lastActivity: ago(i === 0 ? 0 : i * 10),
+          subagents:
+            i === 0
+              ? [
+                  { label: "Map the readme assets", model: "sonnet-5", tool: null, busy: true },
+                  { label: "Regenerate the gif", model: "fable-5", tool: null, busy: false },
+                ]
+              : [],
           busy: i === 0,
         })),
       );
@@ -1103,6 +1117,70 @@ function NotchPeek({
   );
 }
 
+/** The agent's display name — what `agent-notch` puts in bold at the row head. */
+const AGENT_NAME: Record<string, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+};
+
+/**
+ * One session row: the agent in bold, a `model · time` tag coloured by state,
+ * the user's own last prompt, and — folded behind a disclosure — its subagents.
+ *
+ * This is the shape `agent-notch` draws (main.swift `row(for:)`), ported: name
+ * on the left, tag on the right, `You:` line under, `▸ N subagents` beneath.
+ */
+function AgentRow({ session }: { session: AgentSession }) {
+  const [open, setOpen] = useState(false);
+  const subagents = session.subagents;
+  // The tag colour is the state: blue while busy (the swift app's systemBlue),
+  // grey when merely alive, green when the turn is done.
+  const state = session.busy ? "busy" : session.tool ? "live" : "done";
+  const tag = [session.model ?? session.agent, session.lastActivity && timeAgo(session.lastActivity)]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <li className="agent-row">
+      <div className="agent-row__head">
+        <span className="agent-row__state" data-state={state} aria-hidden />
+        <span className="agent-row__name">{AGENT_NAME[session.agent] ?? session.agent}</span>
+        <span className="agent-row__tag" data-state={state}>
+          {tag}
+        </span>
+      </div>
+      {/* The user's own words, the way the swift app shows them. Falls back to
+          the title (an ai-title) when there is no prompt to quote. */}
+      <p className="agent-row__prompt">
+        {session.tool ?? (session.title ? `You: ${session.title}` : "")}
+      </p>
+      {subagents.length > 0 && (
+        <>
+          <button className="agent-row__disclose" onClick={() => setOpen((o) => !o)}>
+            {open ? "▾" : "▸"} {subagents.length} subagent
+            {subagents.length === 1 ? "" : "s"}
+          </button>
+          {open && (
+            <ul className="subagents">
+              {subagents.map((sub, i) => (
+                <li className="subagent-row" key={i}>
+                  <span
+                    className="agent-row__state"
+                    data-state={sub.busy ? "busy" : "done"}
+                    aria-hidden
+                  />
+                  <span className="subagent-row__label">{sub.label}</span>
+                  {sub.model && <span className="subagent-row__model">{sub.model}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </li>
+  );
+}
+
 /**
  * The agent sessions, once the notch has been clicked open.
  *
@@ -1120,22 +1198,7 @@ function AgentList({
     <Panel title="Agents" onClose={onClose}>
       <ul className="agents">
         {sessions.map((session) => (
-          <li className="agent-row" key={session.id}>
-            <span
-              className="agent-row__state"
-              data-busy={session.busy || undefined}
-              aria-hidden
-            />
-            <span className="agent-row__text">
-              <span className="agent-row__title">{session.title}</span>
-              {/* What it is doing right now, from the transcript's orphan
-                  tool_use. Absent between tools, which is normal. */}
-              {session.tool && (
-                <span className="agent-row__tool">{session.tool}</span>
-              )}
-            </span>
-            <span className="agent-row__agent">{session.agent}</span>
-          </li>
+          <AgentRow session={session} key={session.id} />
         ))}
       </ul>
     </Panel>

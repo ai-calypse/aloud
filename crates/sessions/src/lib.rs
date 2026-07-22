@@ -42,7 +42,24 @@ pub struct Session {
     pub title: Option<String>,
     /// The tool running right now, if the transcript ends mid-call.
     pub running: Option<Tool>,
+    /// The model in use, vendor prefix stripped: `opus-4-8`, `gpt-5.6-sol`.
+    pub model: Option<String>,
+    /// When the session was last active, as an ISO-8601 string — the row's
+    /// `· now` / `· 10m` tag is computed from this.
+    pub last_activity: Option<String>,
+    /// Subagents spawned under this session, each already scanned.
+    pub subagents: Vec<Subagent>,
     /// Mid-turn: the transcript moved within [`scan::BUSY_WINDOW`].
+    pub busy: bool,
+}
+
+/// A subagent, flattened the same way as its parent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Subagent {
+    /// What the parent asked it to do.
+    pub label: String,
+    pub model: Option<String>,
+    pub running: Option<Tool>,
     pub busy: bool,
 }
 
@@ -60,6 +77,14 @@ impl Session {
             })
             .unwrap_or_else(|| self.agent.label().to_string())
     }
+}
+
+/// One transcript read: the tail scan plus its subagents. Bundled so `merge`
+/// takes a single reader closure, which is what keeps its tests from having to
+/// stage a `subagents/` directory on disk.
+pub struct Read {
+    pub scan: Scan,
+    pub subagents: Vec<Subagent>,
 }
 
 /// How many consecutive polls a process must be missing before its session is
@@ -87,8 +112,24 @@ impl SessionStore {
     /// One discovery cycle: find the processes, read their transcripts, and
     /// merge into what is already known.
     pub fn poll(&mut self) {
-        self.merge(discovery::processes(), SystemTime::now(), |path| {
-            scan::scan(path).ok()
+        let now = SystemTime::now();
+        self.merge(discovery::processes(), now, |path| {
+            let scan = scan::scan(path).ok()?;
+            // Each subagent is scanned like any other transcript, so its model
+            // and running tool come from the same code path as its parent's.
+            let subagents = discovery::subagents(path)
+                .into_iter()
+                .filter_map(|sub| {
+                    let child = scan::scan(&sub.transcript).ok()?;
+                    Some(Subagent {
+                        label: sub.label,
+                        model: child.model.clone(),
+                        running: child.running.clone(),
+                        busy: child.busy(now),
+                    })
+                })
+                .collect();
+            Some(Read { scan, subagents })
         });
     }
 
@@ -98,7 +139,7 @@ impl SessionStore {
         &mut self,
         found: Vec<Process>,
         now: SystemTime,
-        mut read: impl FnMut(&Path) -> Option<Scan>,
+        mut read: impl FnMut(&Path) -> Option<Read>,
     ) {
         let pids: Vec<u32> = found.iter().map(|p| p.pid).collect();
         let open: HashMap<u32, Vec<PathBuf>> =
@@ -125,22 +166,27 @@ impl SessionStore {
                     discovery::newest_transcript(&discovery::claude_project_dir(home, cwd))
                 });
 
-            let scan = transcript.as_deref().and_then(&mut read);
+            let read = transcript.as_deref().and_then(&mut read);
+            let scan = read.as_ref().map(|r| &r.scan);
             let session = Session {
                 pid: process.pid,
                 agent: process.agent,
                 // The transcript's own cwd is the agent's view of where it is
                 // working; the process's is the fallback when there is no
                 // transcript to read, so a row still names its folder.
-                cwd: scan.as_ref().and_then(|s| s.cwd.clone()).or_else(|| {
+                cwd: scan.and_then(|s| s.cwd.clone()).or_else(|| {
                     cwds.get(&process.pid)
                         .map(|p| p.to_string_lossy().into_owned())
                 }),
-                title: scan
+                title: scan.and_then(|s| s.title.clone().or_else(|| s.prompt.clone())),
+                running: scan.and_then(|s| s.running.clone()),
+                model: scan.and_then(|s| s.model.clone()),
+                last_activity: scan.and_then(|s| s.last_activity.clone()),
+                subagents: read
                     .as_ref()
-                    .and_then(|s| s.title.clone().or_else(|| s.prompt.clone())),
-                running: scan.as_ref().and_then(|s| s.running.clone()),
-                busy: scan.as_ref().is_some_and(|s| s.busy(now)),
+                    .map(|r| r.subagents.clone())
+                    .unwrap_or_default(),
+                busy: scan.is_some_and(|s| s.busy(now)),
                 transcript,
             };
             self.live
@@ -229,6 +275,32 @@ mod tests {
         }
     }
 
+    /// A blank session with the given pid — the fields the tests do not care
+    /// about default, so a new `Session` field does not touch every test.
+    fn session(pid: u32) -> Session {
+        Session {
+            pid,
+            agent: Agent::Claude,
+            transcript: None,
+            cwd: None,
+            title: None,
+            running: None,
+            model: None,
+            last_activity: None,
+            subagents: Vec::new(),
+            busy: false,
+        }
+    }
+
+    /// Wraps a scan as a read with no subagents — most tests do not exercise
+    /// them, and threading `Read` through by hand would be noise.
+    fn read(scan: Scan) -> Read {
+        Read {
+            scan,
+            subagents: Vec::new(),
+        }
+    }
+
     /// `ps` occasionally misses a live process. Dropping a session on the first
     /// absence makes the indicator flicker; it must survive exactly one.
     #[test]
@@ -270,13 +342,8 @@ mod tests {
             1,
             Tracked {
                 session: Session {
-                    pid: 1,
-                    agent: Agent::Claude,
                     transcript: Some(path.clone()),
-                    cwd: None,
-                    title: None,
-                    running: None,
-                    busy: false,
+                    ..session(1)
                 },
                 missed: 0,
             },
@@ -285,25 +352,25 @@ mod tests {
         let mut asked = Vec::new();
         store.merge(vec![process(1)], now, |p| {
             asked.push(p.to_path_buf());
-            Some(Scan {
+            Some(read(Scan {
                 title: Some("still here".into()),
                 ..Scan::default()
-            })
+            }))
         });
         assert_eq!(asked, vec![path]);
         assert_eq!(store.sessions()[0].title.as_deref(), Some("still here"));
     }
 
-    /// A scan of a turn that is happening right now.
-    fn mid_turn() -> Scan {
-        Scan {
+    /// A read of a turn that is happening right now.
+    fn mid_turn() -> Read {
+        read(Scan {
             last_activity: Some(ACTIVE.into()),
             running: Some(Tool {
                 name: "Bash".into(),
                 detail: Some("cargo test".into()),
             }),
             ..Scan::default()
-        }
+        })
     }
 
     /// A stamp, and the instant it means. `busy` compares the two, so the tests
@@ -321,13 +388,8 @@ mod tests {
             pid,
             Tracked {
                 session: Session {
-                    pid,
-                    agent: Agent::Claude,
                     transcript: Some(PathBuf::from(format!("/proc/{pid}.jsonl"))),
-                    cwd: None,
-                    title: None,
-                    running: None,
-                    busy: false,
+                    ..session(pid)
                 },
                 missed: 0,
             },
@@ -380,14 +442,11 @@ mod tests {
                 pid,
                 Tracked {
                     session: Session {
-                        pid,
-                        agent: Agent::Claude,
                         transcript: Some(PathBuf::from("/proc/shared.jsonl")),
-                        cwd: None,
                         title: Some("Add tab system".into()),
-                        running: None,
                         // Only the sibling is mid-turn.
                         busy: pid == 29514,
+                        ..session(pid)
                     },
                     missed: 0,
                 },
@@ -397,6 +456,36 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].pid, 20825, "the lowest pid is the stable row");
         assert!(sessions[0].busy, "a busy sibling makes the row busy");
+    }
+
+    /// The model and subagents ride through the merge onto the session, so the
+    /// row can show a `model · time` tag and a subagent disclosure.
+    #[test]
+    fn a_session_carries_its_model_and_subagents() {
+        let mut store = SessionStore::default();
+        let now = active_at();
+        with_transcript(&mut store, 1);
+        store.merge(vec![process(1)], now, |_| {
+            Some(Read {
+                scan: Scan {
+                    model: Some("opus-4-8".into()),
+                    last_activity: Some(ACTIVE.into()),
+                    ..Scan::default()
+                },
+                subagents: vec![Subagent {
+                    label: "Map the settings".into(),
+                    model: Some("sonnet-5".into()),
+                    running: None,
+                    busy: true,
+                }],
+            })
+        });
+        let session = &store.sessions()[0];
+        assert_eq!(session.model.as_deref(), Some("opus-4-8"));
+        assert_eq!(session.last_activity.as_deref(), Some(ACTIVE));
+        assert_eq!(session.subagents.len(), 1);
+        assert_eq!(session.subagents[0].label, "Map the settings");
+        assert!(session.subagents[0].busy);
     }
 
     /// Two agents that resolved no transcript are still two agents — the fold
@@ -411,15 +500,7 @@ mod tests {
 
     #[test]
     fn a_row_falls_back_from_title_to_folder_to_agent() {
-        let base = Session {
-            pid: 1,
-            agent: Agent::Claude,
-            transcript: None,
-            cwd: None,
-            title: None,
-            running: None,
-            busy: false,
-        };
+        let base = session(1);
         assert_eq!(base.label(), "claude");
         let with_cwd = Session {
             cwd: Some("/Users/y/Documents/aloud-tauri".into()),

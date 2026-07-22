@@ -14,6 +14,21 @@ export function formatDuration(ms: number) {
 }
 
 /**
+ * How long ago an ISO-8601 timestamp was, the way a menu-bar tag wants it:
+ * `now` under a minute, then `10m`, then `2h`. Ported from agent-notch's
+ * `relative()` so an agent row here reads the same as it did there.
+ *
+ * `now` is a parameter so the maths is testable without mocking the clock.
+ */
+export function timeAgo(iso: string, now = Date.now()): string {
+  const seconds = Math.max(0, Math.floor((now - Date.parse(iso)) / 1000));
+  if (Number.isNaN(seconds)) return "";
+  if (seconds < 60) return "now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  return `${Math.floor(seconds / 3600)}h`;
+}
+
+/**
  * A meeting's running length: `mm:ss` under an hour, `h:mm:ss` over it.
  * Meetings routinely run past both, unlike a dictation.
  */

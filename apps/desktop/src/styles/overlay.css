@@ -933,23 +933,36 @@
 .agents {
   display: flex;
   flex-direction: column;
-  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
-  min-width: 320px;
+  min-width: 440px;
+  /* Monospace throughout, like agent-notch — the model tags and commands are
+     code, and the prompts read as a terminal echo. */
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace;
 }
 
+/* Each row is a small block: head line, prompt line, optional subagents. The
+   dithered separator agent-notch draws between them is a bottom hairline. */
 .agent-row {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 4px;
-  font-size: 13px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 4px;
 }
 
-/* A ring when idle, filled and pulsing when mid-turn — a shape change rather
-   than only a colour one, so it survives being read at a glance. */
+.agent-row + .agent-row {
+  border-top: 1px solid rgb(255 255 255 / 0.06);
+}
+
+.agent-row__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A ring when done, a filled pulsing dot mid-turn — a shape change, not only a
+   colour one, so it survives being read at a glance. */
 .agent-row__state {
   flex: none;
   width: 7px;
@@ -959,41 +972,104 @@
   opacity: 0.4;
 }
 
-.agent-row__state[data-busy] {
+.agent-row__state[data-state="busy"] {
   background: var(--sys-green, #32d74b);
   box-shadow: none;
   opacity: 1;
   animation: breathe 1.6s var(--ease-in-out) infinite;
 }
 
-.agent-row__text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  flex: 1;
+.agent-row__state[data-state="done"] {
+  /* Done reads green but still, not pulsing — the checkmark's colour without
+     its motion. */
+  box-shadow: inset 0 0 0 1.5px var(--sys-green, #32d74b);
+  opacity: 0.9;
 }
 
-.agent-row__title {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.agent-row__name {
+  font-weight: 600;
+  font-size: 13px;
   white-space: nowrap;
 }
 
-/* The command it is running right now. Monospace because it is one. */
-.agent-row__tool {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 11px;
-  opacity: 0.55;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-row__agent {
+/* Pushed to the right edge; coloured by state, the way the swift app tints its
+   `model · time` tag: blue busy, grey alive, green done. */
+.agent-row__tag {
+  margin-left: auto;
   flex: none;
   font-size: 11px;
-  opacity: 0.45;
+  opacity: 0.75;
+}
+
+.agent-row__tag[data-state="busy"] {
+  color: var(--sys-blue, #0a84ff);
+}
+
+.agent-row__tag[data-state="done"] {
+  color: var(--sys-green, #32d74b);
+}
+
+.agent-row__tag[data-state="live"] {
+  color: var(--pill-ink);
+  opacity: 0.55;
+}
+
+/* The user's own prompt, or the running command. Indented to sit under the
+   name, past the state dot. */
+.agent-row__prompt {
+  margin: 0 0 0 15px;
+  font-size: 12px;
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-row__prompt:empty {
+  display: none;
+}
+
+/* The blue disclosure, matching the screenshot. */
+.agent-row__disclose {
+  align-self: flex-start;
+  margin: 3px 0 1px 15px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--sys-blue, #0a84ff);
+  cursor: pointer;
+}
+
+.subagents {
+  margin: 2px 0 0 15px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.subagent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.subagent-row__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.subagent-row__model {
+  margin-left: auto;
+  flex: none;
+  font-size: 10px;
+  opacity: 0.4;
 }
 
 /* --- Exits ---------------------------------------------------------------

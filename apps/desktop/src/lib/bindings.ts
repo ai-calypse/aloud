@@ -235,11 +235,28 @@ export type AgentSession = {
 	cwd: string | null,
 	/**  The tool running right now, already flattened to one line. */
 	tool: string | null,
+	/**  The model, vendor prefix stripped: `opus-4-8`, `gpt-5.6-sol`. */
+	model: string | null,
+	/**
+	 *  ISO-8601 of last activity, for the row's `· now` / `· 10m` tag. The tag
+	 *  is rendered in the webview so it updates without a new event.
+	 */
+	lastActivity: string | null,
+	/**  Subagents spawned under this session. */
+	subagents: AgentSubagent[],
 	busy: boolean,
 };
 
 /**  The live session list, pushed whenever it actually changes. */
 export type AgentSessions = AgentSession[];
+
+/**  A subagent under a session, for the `▸ N subagents` disclosure. */
+export type AgentSubagent = {
+	label: string,
+	model: string | null,
+	tool: string | null,
+	busy: boolean,
+};
 
 /**  One per-app override. */
 export type AppRule = {

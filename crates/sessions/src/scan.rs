@@ -35,6 +35,10 @@ pub struct Scan {
     /// When the last conversational record was written, as an ISO-8601 string.
     /// Housekeeping records do not set it — see [`Scan::busy`].
     pub last_activity: Option<String>,
+    /// The model, from an assistant record's `message.model`, with the vendor
+    /// prefix stripped: `claude-opus-4-8` reads as `opus-4-8`. What the row's
+    /// tag shows.
+    pub model: Option<String>,
 }
 
 /// A tool call the agent has started.
@@ -83,6 +87,9 @@ struct Message {
     /// carries tool calls or results. Only the list form matters here.
     #[serde(default)]
     content: Content,
+    /// Only assistant records carry it; the id form, e.g. `claude-opus-4-8`.
+    #[serde(default)]
+    model: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -151,6 +158,11 @@ pub fn scan_lines(text: &str) -> Scan {
                 }
                 if turn.cwd.is_some() {
                     out.cwd = turn.cwd;
+                }
+                // The model can change mid-session (a /model switch); the last
+                // one wins, matching what the agent is answering with now.
+                if let Some(model) = turn.message.model {
+                    out.model = Some(model.strip_prefix("claude-").unwrap_or(&model).to_string());
                 }
                 if let Content::Blocks(blocks) = turn.message.content {
                     for block in blocks {

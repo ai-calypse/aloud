@@ -24,8 +24,9 @@ fn main() {
         }
         for session in &sessions {
             let state = if session.busy { "busy" } else { "idle" };
+            let model = session.model.as_deref().unwrap_or(session.agent.label());
             println!(
-                "{:<7} {:<5} {:>6}  {}",
+                "{:<7} {:<5} {:>6}  {}  [{model}]",
                 session.agent.label(),
                 state,
                 session.pid,
@@ -36,6 +37,11 @@ fn main() {
                     Some(detail) => println!("           └ {}: {detail}", tool.name),
                     None => println!("           └ {}", tool.name),
                 }
+            }
+            for sub in &session.subagents {
+                let s = if sub.busy { "●" } else { "○" };
+                let m = sub.model.as_deref().unwrap_or("");
+                println!("           ▸ {s} {} [{m}]", sub.label);
             }
             if session.transcript.is_none() {
                 println!("           └ (no transcript found)");
