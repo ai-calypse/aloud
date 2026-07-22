@@ -888,7 +888,7 @@ export function SettingsView({
           <TermListEditor
             title="Say it, keep it"
             terms={preservePhrases}
-            placeholder="I am um boss"
+            placeholder="user underscore id"
             addLabel="Add Phrase"
             empty={{
               title: "Nothing Here Yet",
@@ -898,9 +898,10 @@ export function SettingsView({
           >
             <p className="max-w-[520px] text-hint text-ink-2">
               Aloud tidies what you say — it drops "um", trims repeated words
-              and smooths sentences out. Anything listed here it types word for
-              word instead. Say "I am um boss" and you get "I am um boss". The
-              rest of the sentence is still tidied.
+              and turns spoken shortcuts into symbols. Anything listed here it
+              types word for word instead. Say "user underscore id" and you get
+              "user underscore id", not "user_id". The rest of the sentence is
+              still tidied.
             </p>
           </TermListEditor>
 
