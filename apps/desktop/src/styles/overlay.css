@@ -928,6 +928,135 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* --- The permission card -------------------------------------------------
+ *
+ * The notch opens itself on a request (Rust calls show_panel), and this takes
+ * the body over everything else while one is pending. The agent is blocked on
+ * the socket the whole time this is up.
+ */
+.perm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 400px;
+  max-width: 460px;
+  padding: 14px 16px 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace;
+  animation: peek-in var(--dur-fast) var(--ease-out) both;
+}
+
+.perm__head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.perm__agent {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.perm__wants {
+  opacity: 0.55;
+}
+
+.perm__queue {
+  margin-left: auto;
+  flex: none;
+  color: var(--sys-orange, #ff9f0a);
+  opacity: 0.85;
+}
+
+.perm__call {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.perm__tool {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sys-blue, #0a84ff);
+}
+
+/* The command or path. This is the thing being approved, so it gets the
+   contrast — everything else is context around it. */
+.perm__headline {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--pill-ink);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.perm__args {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.perm__arg {
+  display: flex;
+  gap: 8px;
+}
+
+.perm__arg dt {
+  flex: none;
+  min-width: 60px;
+  opacity: 0.7;
+}
+
+.perm__arg dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perm__cwd {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perm__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.perm__deny,
+.perm__approve {
+  flex: 1;
+  padding: 7px 0;
+  border: none;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.perm__deny {
+  background: rgb(255 255 255 / 0.1);
+  color: var(--pill-ink);
+}
+
+.perm__approve {
+  background: var(--sys-blue, #0a84ff);
+  color: #fff;
+}
+
 /* --- The agent list ------------------------------------------------------ */
 
 .agents {

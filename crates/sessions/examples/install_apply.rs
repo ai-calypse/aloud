@@ -3,6 +3,7 @@
 //! ```sh
 //! cargo run -p aloud-sessions --example install_apply -- install
 //! cargo run -p aloud-sessions --example install_apply -- uninstall
+//! cargo run -p aloud-sessions --example install_apply -- take-over OpenIsland
 //! ```
 //!
 //! The same pure functions the app's commands call, reachable without launching
@@ -20,12 +21,15 @@ fn main() {
     let command =
         format!("'{home}/Library/Application Support/Aloud/bin/aloud-hook' --source claude");
     let after = match mode.as_str() {
-        // Approvals off: another tool owns PermissionRequest here, and step 4
-        // is what would answer one anyway.
         "install" => install::install(&before, &command, false),
         "uninstall" => install::uninstall(&before),
+        // Evicts a named tool from every event and installs our blocking hook.
+        "take-over" => {
+            let evict = std::env::args().nth(2).expect("take-over <tool-name>");
+            install::take_over(&before, &command, &evict)
+        }
         _ => {
-            eprintln!("usage: install_apply <install|uninstall>");
+            eprintln!("usage: install_apply <install|uninstall|take-over <tool>>");
             return;
         }
     };

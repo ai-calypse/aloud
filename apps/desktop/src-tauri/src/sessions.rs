@@ -59,6 +59,29 @@ pub struct AgentSubagent {
 #[tauri_specta(event_name = "agent-sessions")]
 pub struct AgentSessions(pub Vec<AgentSession>);
 
+/// One tool call awaiting an Approve / Deny. The notch opens itself on this and
+/// draws a card; several can be in flight at once (a Codex swarm asks in
+/// parallel), so the panel renders them as a queue keyed by `id`.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
+#[tauri_specta(event_name = "agent-permission")]
+pub struct AgentPermission {
+    /// `tool_use_id` — how a decision is routed back to the waiting hook.
+    pub id: String,
+    pub agent: String,
+    pub tool: String,
+    /// The tool's arguments, flattened to strings the same way sessions are —
+    /// specta will not export `serde_json::Value`.
+    pub input: std::collections::BTreeMap<String, String>,
+    pub cwd: Option<String>,
+}
+
+/// A request has been answered or the agent gave up on it; the card comes down.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
+#[tauri_specta(event_name = "agent-permission-resolved")]
+pub struct AgentPermissionResolved {
+    pub id: String,
+}
+
 /// Everything the notch needs to know, held across the poll and the socket.
 #[derive(Default)]
 pub struct Agents {
@@ -69,6 +92,12 @@ pub struct Agents {
     /// Sessions hooks have told us about, keyed by the agent's own session id.
     /// Hook data wins over discovery, because it is the agent speaking.
     hooked: Mutex<HashMap<String, AgentSession>>,
+    /// Tool calls waiting on an Approve / Deny, keyed by `tool_use_id`. The
+    /// socket thread parks on the receiver; `resolve_permission` sends the
+    /// answer. A std channel, not tokio's: the socket handler is a blocking
+    /// thread, and blocking it is the whole mechanism — the agent is waiting on
+    /// this hook's stdout.
+    pending: Mutex<HashMap<String, std::sync::mpsc::Sender<aloud_bridge::Reply>>>,
 }
 
 /// How often un-hooked sessions are re-discovered. Matches what the example
@@ -155,6 +184,106 @@ fn emit(app: &AppHandle, rows: Vec<AgentSession>) {
     }
 }
 
+/// Parks the socket thread until the user answers, then hands back their reply.
+///
+/// The agent is blocked on this hook's stdout for the whole wait, which is what
+/// holds the tool call open. If anything goes wrong — no id to route on, the app
+/// shutting the channel — it falls through to no directive, and the agent
+/// proceeds on its own rules rather than hanging.
+#[cfg(unix)]
+fn await_decision(app: &AppHandle, event: &HookEvent) -> Reply {
+    let Some(id) = event.tool_use_id.clone() else {
+        return Reply::default();
+    };
+    let (tx, rx) = std::sync::mpsc::channel::<Reply>();
+
+    let state = app.state::<Arc<Agents>>();
+    {
+        let Ok(mut pending) = state.pending.lock() else {
+            return Reply::default();
+        };
+        pending.insert(id.clone(), tx);
+    }
+
+    // The card. `tool_input` is arbitrary JSON; flatten it to strings the way
+    // the sessions do, keeping the real Value out of the binding.
+    let card = AgentPermission {
+        id: id.clone(),
+        agent: match event.source {
+            Some(aloud_bridge::Source::Codex) => "codex",
+            _ => "claude",
+        }
+        .to_string(),
+        tool: event.tool_name.clone().unwrap_or_default(),
+        input: flatten_args(event.tool_input.as_ref()),
+        cwd: event.cwd.clone(),
+    };
+    if let Err(e) = card.emit(app) {
+        tracing::warn!(%e, "could not send permission card");
+    }
+
+    // Bring the notch forward so the card is not missed. `show_panel` drives
+    // NSWindow, which is main-thread-only — and this runs on the socket's OS
+    // thread, so it has to be marshalled across. (The trap CLAUDE.md names.)
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || crate::overlay::show_panel(&handle));
+
+    // No inner timeout: the hook's own 24h read timeout (aloud-bridge) is the
+    // ceiling, and it closing the socket is what unblocks a request the user
+    // never answered. `recv` returning `Err` (the sender dropped on shutdown)
+    // takes the same fall-through as everything else.
+    let reply = rx.recv().unwrap_or_default();
+
+    // Whether answered or abandoned, the card comes down and the slot clears.
+    if let Ok(mut pending) = state.pending.lock() {
+        pending.remove(&id);
+    }
+    let _ = (AgentPermissionResolved { id }).emit(app);
+    reply
+}
+
+/// Flattens `tool_input` to display strings — specta will not export a
+/// `serde_json::Value`, and the card only needs it readable, not round-tripped.
+fn flatten_args(input: Option<&serde_json::Value>) -> std::collections::BTreeMap<String, String> {
+    input
+        .and_then(|v| v.as_object())
+        .map(|map| {
+            map.iter()
+                .map(|(key, value)| {
+                    let text = match value {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    };
+                    (key.clone(), text)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Approve or deny a pending request. The socket thread parked on it wakes with
+/// this reply and writes the directive to the agent.
+#[tauri::command]
+#[specta::specta]
+pub fn resolve_permission(app: AppHandle, id: String, allow: bool) {
+    let state = app.state::<Arc<Agents>>();
+    let sender = state
+        .pending
+        .lock()
+        .ok()
+        .and_then(|mut pending| pending.remove(&id));
+    if let Some(sender) = sender {
+        let reply = if allow {
+            Reply::allow()
+        } else {
+            Reply::deny("Denied in Aloud")
+        };
+        // The receiver is gone only if the request already timed out; nothing
+        // to do then, the agent has moved on.
+        let _ = sender.send(reply);
+    }
+}
+
 /// Now, in the same ISO-8601 UTC shape the transcripts use, so the webview's
 /// relative-time formatter takes hook rows and discovery rows the same way.
 fn now_iso() -> String {
@@ -222,10 +351,14 @@ fn handle(app: &AppHandle, stream: std::os::unix::net::UnixStream) {
 
     record(app, &event);
 
-    // Approvals are not wired yet: every request is answered with "no
-    // directive", which is the same thing a missing app says, so the agent
-    // falls through to its own permission rules. Step 4 replaces this.
-    let reply = Reply::default();
+    // A blocking request parks here until the user answers; everything else is
+    // fire-and-forget and gets no directive.
+    let reply = if event.is_permission_request() {
+        await_decision(app, &event)
+    } else {
+        Reply::default()
+    };
+
     if let Ok(mut text) = serde_json::to_string(&reply) {
         text.push('\n');
         let mut writer = &stream;

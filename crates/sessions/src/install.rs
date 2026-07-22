@@ -126,6 +126,48 @@ pub fn install(settings: &Value, command: &str, approvals: bool) -> Value {
     out
 }
 
+/// Installs with approvals on, first evicting every hook whose command matches
+/// `evict` — a substring, so the caller passes the foreign tool's path or name.
+///
+/// This is the one path that removes another tool's entries, and it is never
+/// automatic: [`install`] coexists, and only an explicit user choice to take
+/// approvals over reaches here. Everything not matching `evict` is left in place,
+/// so a shared event keeps its other consumers.
+pub fn take_over(settings: &Value, command: &str, evict: &str) -> Value {
+    let mut out = settings.clone();
+    if let Some(hooks) = out.get_mut("hooks").and_then(Value::as_object_mut) {
+        for (_, list) in hooks.iter_mut() {
+            if let Some(list) = list.as_array_mut() {
+                remove_matching(list, evict);
+            }
+        }
+        hooks.retain(|_, list| list.as_array().is_none_or(|l| !l.is_empty()));
+    }
+    // Approvals on: with the foreign owner gone, our PermissionRequest entry is
+    // the only one, which is the point of taking over.
+    install(&out, command, true)
+}
+
+/// Strips every hook whose command contains `needle`, and any group it empties.
+fn remove_matching(list: &mut Vec<Value>, needle: &str) {
+    for matcher in list.iter_mut() {
+        if let Some(hooks) = matcher.get_mut("hooks").and_then(Value::as_array_mut) {
+            hooks.retain(|hook| {
+                !hook
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(|c| c.contains(needle))
+            });
+        }
+    }
+    list.retain(|matcher| {
+        matcher
+            .get("hooks")
+            .and_then(Value::as_array)
+            .is_none_or(|hooks| !hooks.is_empty())
+    });
+}
+
 /// Appends one hook entry, replacing only a previous entry of ours.
 fn add_entry(hooks: &mut Map<String, Value>, event: &str, command: &str, timeout: Option<u64>) {
     let mut hook = json!({ "type": "command", "command": command });
@@ -294,6 +336,33 @@ mod tests {
             .map(|h| h["command"].as_str().unwrap())
             .collect();
         assert!(owners.iter().any(|c| c.contains("OpenIslandHooks")));
+    }
+
+    /// Taking over evicts the named tool from every event and installs our
+    /// blocking entry — but leaves anything not matching the needle, so petdex
+    /// survives the same sweep that clears Open Island.
+    #[test]
+    fn taking_over_evicts_the_named_tool_but_spares_others() {
+        let after = take_over(&real_world_settings(), OURS, "OpenIsland");
+
+        // No Open Island anywhere.
+        let all: Vec<String> = after["hooks"]
+            .as_object()
+            .unwrap()
+            .values()
+            .flat_map(|list| list.as_array().unwrap())
+            .flat_map(|m| m["hooks"].as_array().unwrap())
+            .map(|h| h["command"].as_str().unwrap().to_string())
+            .collect();
+        assert!(!all.iter().any(|c| c.contains("OpenIsland")), "{all:?}");
+        // petdex, which shared PreToolUse, is untouched.
+        assert!(all.iter().any(|c| c.contains("petdex")));
+        // And we now own the blocking event, with its timeout.
+        assert_eq!(permission_conflict(&after), Conflict::None);
+        assert_eq!(
+            after["hooks"][PERMISSION_EVENT][0]["hooks"][0]["timeout"],
+            json!(86_400)
+        );
     }
 
     /// Our own entry is not a conflict with ourselves.

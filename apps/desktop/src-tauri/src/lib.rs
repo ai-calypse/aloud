@@ -126,6 +126,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sessions::agent_hook_status,
             sessions::install_agent_hooks,
             sessions::uninstall_agent_hooks,
+            sessions::resolve_permission,
             agent::confirm_agent,
             agent::answer_agent,
             agent::close_agent,
@@ -143,6 +144,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::OverlayDismiss,
             overlay::NotchHover,
             sessions::AgentSessions,
+            sessions::AgentPermission,
+            sessions::AgentPermissionResolved,
             HotkeysPermitted,
             ConnectorsUpdated,
         ])

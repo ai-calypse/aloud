@@ -156,6 +156,11 @@ export const commands = {
 	installAgentHooks: () => typedError<HookStatus, string>(__TAURI_INVOKE("install_agent_hooks")),
 	uninstallAgentHooks: () => typedError<HookStatus, string>(__TAURI_INVOKE("uninstall_agent_hooks")),
 	/**
+	 *  Approve or deny a pending request. The socket thread parked on it wakes with
+	 *  this reply and writes the directive to the agent.
+	 */
+	resolvePermission: (id: string, allow: boolean) => __TAURI_INVOKE<void>("resolve_permission", { id, allow }),
+	/**
 	 *  Resolves the pending confirmation. Called by the panel's Cancel/Confirm
 	 *  buttons; `edits` carries any field the user filled in or corrected before
 	 *  approving, in the same flattened form the panel was given.
@@ -173,6 +178,8 @@ export const commands = {
 /** Events */
 export const events = {
 	agent: makeEvent<AgentEvent>("agent"),
+	agentPermission: makeEvent<AgentPermission>("agent-permission"),
+	agentPermissionResolved: makeEvent<AgentPermissionResolved>("agent-permission-resolved"),
 	agentSessions: makeEvent<AgentSessions>("agent-sessions"),
 	ask: makeEvent<AskEvent>("ask"),
 	audioLevel: makeEvent<AudioLevel>("audio-level"),
@@ -214,6 +221,29 @@ export type AgentEvent =
  *  while the run is otherwise silent; cleared by the next event.
  */
 { kind: "status"; value: string } | { kind: "runFinished"; value: string } | { kind: "runError"; value: string };
+
+/**
+ *  One tool call awaiting an Approve / Deny. The notch opens itself on this and
+ *  draws a card; several can be in flight at once (a Codex swarm asks in
+ *  parallel), so the panel renders them as a queue keyed by `id`.
+ */
+export type AgentPermission = {
+	/**  `tool_use_id` — how a decision is routed back to the waiting hook. */
+	id: string,
+	agent: string,
+	tool: string,
+	/**
+	 *  The tool's arguments, flattened to strings the same way sessions are —
+	 *  specta will not export `serde_json::Value`.
+	 */
+	input: { [key in string]: string },
+	cwd: string | null,
+};
+
+/**  A request has been answered or the agent gave up on it; the card comes down. */
+export type AgentPermissionResolved = {
+	id: string,
+};
 
 /**
  *  One agent session, flattened for the webview.

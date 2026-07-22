@@ -18,6 +18,7 @@ import {
 import {
   commands,
   events,
+  type AgentPermission,
   type AgentSession,
   type OverlayStyle,
   type Phase,
@@ -396,8 +397,12 @@ function Overlay() {
   // The notch opened by clicking it rather than by speaking. Its own state
   // because it belongs to no dictation and must survive `run` changing.
   const [browsing, setBrowsing] = useState(false);
-  // Any of them owns the panel; almost everything below only cares that one does.
-  const panelOpen = ask !== null || agent !== null || browsing;
+  // Tool calls awaiting Approve / Deny, newest first — a swarm can ask several
+  // at once, so this is a queue, not a single card. Keyed by tool_use_id.
+  const [permissions, setPermissions] = useState<AgentPermission[]>([]);
+  // Any of them owns the panel; almost everything below only cares that one
+  // does. A pending permission counts: the card has to be on screen to answer.
+  const panelOpen = ask !== null || agent !== null || browsing || permissions.length > 0;
   // A ref, not the state it mirrors: the phase listener subscribes once, and
   // depending on `panelOpen` would rebuild it on every streamed token.
   const openRef = useRef(panelOpen);
@@ -458,16 +463,49 @@ function Overlay() {
       );
     }
     if (params.has("hover")) setHovering(true);
+    // `?perm` and `?perm=2` stage the card and a queue behind it.
+    const perms = params.has("perm") ? Math.max(1, Number(params.get("perm")) || 1) : 0;
+    if (perms > 0) {
+      setPermissions(
+        Array.from({ length: perms }, (_, i) => ({
+          id: `preview:${i}`,
+          agent: "claude",
+          tool: "Bash",
+          input: { command: "rm -rf build/ && cargo clean", timeout: "120000" },
+          cwd: "/Users/y/dev/aloud-tauri",
+        })),
+      );
+    }
   }, []);
 
-  // Agents and hover, both independent of any dictation.
+  // Agents, hover and permission requests, all independent of any dictation.
   useEffect(() => {
     const sessionsOff = events.agentSessions.listen((e) => setSessions(e.payload));
     const hoverOff = events.notchHover.listen((e) => setHovering(e.payload.over));
+    // Newest on top, and de-duplicated by id: a hook that fires twice for one
+    // call must not stack two cards for it.
+    const permOff = events.agentPermission.listen((e) =>
+      setPermissions((queue) => [e.payload, ...queue.filter((p) => p.id !== e.payload.id)]),
+    );
+    // Answered here, abandoned by the agent, or the app deciding for us: the
+    // card comes down the same way in every case.
+    const resolvedOff = events.agentPermissionResolved.listen((e) =>
+      setPermissions((queue) => queue.filter((p) => p.id !== e.payload.id)),
+    );
     return () => {
       void sessionsOff.then((off) => off());
       void hoverOff.then((off) => off());
+      void permOff.then((off) => off());
+      void resolvedOff.then((off) => off());
     };
+  }, []);
+
+  // Answer, then drop it locally — the resolved event will also drop it, and
+  // whichever lands first wins. Removing it here keeps the next card from
+  // waiting on the round-trip.
+  const resolvePermission = useCallback((id: string, allow: boolean) => {
+    void commands.resolvePermission(id, allow);
+    setPermissions((queue) => queue.filter((p) => p.id !== id));
   }, []);
 
   // The cap is enforced here rather than in each button, so no caller can get
@@ -1016,7 +1054,15 @@ function Overlay() {
           }`}
           ref={panel.content}
         >
-          {resting ? (
+          {permissions.length > 0 ? (
+            // A permission is a demand — it takes the panel over everything
+            // else while one is pending, and the queue shows newest first.
+            <PermissionCard
+              request={permissions[0]}
+              queued={permissions.length - 1}
+              onResolve={resolvePermission}
+            />
+          ) : resting ? (
             // At rest the panel is exactly the cutout and this is empty, so
             // there is nothing to see; hovering grows it by the height of this
             // row. The spring in `useNotchPanel` does the growing — this only
@@ -1122,6 +1168,89 @@ const AGENT_NAME: Record<string, string> = {
   claude: "Claude Code",
   codex: "Codex",
 };
+
+/** The input keys worth leading with, per tool — the headline before the rest. */
+const HEADLINE_ARG: Record<string, string> = {
+  Bash: "command",
+  Read: "file_path",
+  Write: "file_path",
+  Edit: "file_path",
+  Glob: "pattern",
+  Grep: "pattern",
+};
+
+/**
+ * The Approve / Deny card. The agent is blocked on this — the socket thread in
+ * `sessions.rs` is parked until `onResolve` sends the answer back.
+ *
+ * The whole tool call is shown, not a summary: the headline argument first
+ * (a command, a path), then the rest, then the cwd — the point of a gate is
+ * that the user can see exactly what would run.
+ */
+function PermissionCard({
+  request,
+  queued,
+  onResolve,
+}: {
+  request: AgentPermission;
+  queued: number;
+  onResolve: (id: string, allow: boolean) => void;
+}) {
+  const headlineKey = HEADLINE_ARG[request.tool];
+  const headline = headlineKey ? request.input[headlineKey] : undefined;
+  const rest = Object.entries(request.input).filter(([k]) => k !== headlineKey);
+
+  // Enter approves, Escape denies — the two things a hand on the keyboard
+  // reaches for. Scoped to the card so it does not fight the panel's own Escape.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter") onResolve(request.id, true);
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onResolve(request.id, false);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [request.id, onResolve]);
+
+  return (
+    <div className="perm">
+      <div className="perm__head">
+        <span className="perm__agent">{AGENT_NAME[request.agent] ?? request.agent}</span>
+        <span className="perm__wants">wants to run</span>
+        {queued > 0 && <span className="perm__queue">+{queued} more</span>}
+      </div>
+
+      <div className="perm__call">
+        <span className="perm__tool">{request.tool}</span>
+        {headline && <code className="perm__headline">{headline}</code>}
+      </div>
+
+      {rest.length > 0 && (
+        <dl className="perm__args">
+          {rest.map(([key, value]) => (
+            <div className="perm__arg" key={key}>
+              <dt>{key}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
+      {request.cwd && <p className="perm__cwd">{request.cwd}</p>}
+
+      <div className="perm__actions">
+        <button className="perm__deny" onClick={() => onResolve(request.id, false)}>
+          Deny
+        </button>
+        <button className="perm__approve" onClick={() => onResolve(request.id, true)}>
+          Approve
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /**
  * One session row: the agent in bold, a `model · time` tag coloured by state,
