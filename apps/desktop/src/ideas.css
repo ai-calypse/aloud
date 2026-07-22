@@ -1,0 +1,269 @@
+@import "./styles/tokens.css";
+@import "./styles/motion.css";
+
+/* The ideas page. Dev-only exploration — see ideas.tsx.
+ *
+ * Deliberately styled like the surface the ideas would ship on: every demo
+ * sits in a black panel hanging off a menu bar, because an idea that only
+ * works in a 900px column is not an idea for this app. */
+
+body {
+  margin: 0;
+  background: #0b0b0d;
+  color: #f5f5f7;
+  font: 15px/1.55 system-ui, -apple-system, sans-serif;
+}
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 56px 28px 120px;
+}
+
+.masthead {
+  max-width: 660px;
+  margin-bottom: 8px;
+}
+
+.masthead h1 {
+  margin: 0 0 12px;
+  font-size: 34px;
+  letter-spacing: -0.02em;
+}
+
+.masthead p {
+  margin: 0 0 10px;
+  color: #a1a1a6;
+}
+
+.rule {
+  height: 1px;
+  margin: 40px 0;
+  background: rgb(255 255 255 / 0.08);
+}
+
+.idea {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
+  gap: 48px;
+  align-items: start;
+  padding: 40px 0;
+  border-bottom: 1px solid rgb(255 255 255 / 0.07);
+}
+
+@media (max-width: 1000px) {
+  .idea {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+}
+
+.idea__no {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.3);
+}
+
+.idea h2 {
+  margin: 6px 0 10px;
+  font-size: 21px;
+  letter-spacing: -0.01em;
+}
+
+.idea__what {
+  margin: 0 0 12px;
+  color: #d8d8dc;
+}
+
+/* The half that matters most: an idea without a reason is a component demo. */
+.idea__why {
+  margin: 0 0 16px;
+  padding-left: 12px;
+  border-left: 2px solid rgb(255 255 255 / 0.14);
+  color: #a1a1a6;
+  font-size: 14px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 3px 9px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+  color: #a1a1a6;
+}
+
+.chip--new {
+  border-color: rgb(10 132 255 / 0.5);
+  color: #7ab8ff;
+}
+
+/* --- the demo stage ----------------------------------------------------- */
+
+.stage {
+  position: relative;
+  border-radius: 14px;
+  background:
+    radial-gradient(900px 300px at 50% -20%, #2b2f4a 0%, transparent 70%), #17171b;
+  overflow: hidden;
+}
+
+/* A menu bar with a cutout, so every demo is judged on the surface it would
+   actually ship on rather than in a comfortable card. */
+.stage__menubar {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  background: #000;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.45);
+}
+
+.stage__notch {
+  width: 130px;
+  height: 100%;
+  background: #000;
+}
+
+.stage__body {
+  display: flex;
+  justify-content: center;
+  min-height: 300px;
+  padding: 0 20px 22px;
+}
+
+/* The notch panel itself. Not the real one — no springs here, this page is
+   about what goes *in* the panel — but the same silhouette and the same
+   pure black, so nothing looks better here than it will in the app. */
+.panel {
+  width: 100%;
+  max-width: 460px;
+  padding: 14px 16px 12px;
+  border-radius: 0 0 18px 18px;
+  background: #000;
+  animation: panel-in var(--dur-base) var(--ease-out) both;
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+.panel__heard {
+  margin: 0 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.5);
+}
+
+.panel__stack > * + * {
+  margin-top: 10px;
+}
+
+.play {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.08);
+  color: #f5f5f7;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+
+.play:hover {
+  background: rgb(255 255 255 / 0.18);
+}
+
+/* Each frame of a demo fades up, so a scripted sequence reads as motion
+   rather than as a slideshow. */
+.frame {
+  animation: frame-in var(--dur-base) var(--ease-out) both;
+}
+
+@keyframes frame-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+    filter: blur(3px);
+  }
+}
+
+.muted {
+  color: rgb(255 255 255 / 0.55);
+  font-size: 13px;
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgb(255 255 255 / 0.6);
+}
+
+/* The pointer demo's crosshair. */
+.pointer {
+  position: relative;
+  height: 92px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 8px;
+  background:
+    linear-gradient(rgb(255 255 255 / 0.04), transparent),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 11px,
+      rgb(255 255 255 / 0.05) 11px 12px
+    );
+  overflow: hidden;
+}
+
+.pointer__crop {
+  position: absolute;
+  top: 26px;
+  left: 34px;
+  width: 148px;
+  height: 40px;
+  border: 1.5px solid var(--sys-blue);
+  border-radius: 5px;
+  background: rgb(10 132 255 / 0.12);
+  animation: crop-in var(--spring-pop-dur) var(--spring-pop) both;
+}
+
+@keyframes crop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+
+.pointer__label {
+  position: absolute;
+  top: 70px;
+  left: 34px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 10px;
+  color: #7ab8ff;
+}
+
+.footnote {
+  margin: 56px 0 0;
+  color: rgb(255 255 255 / 0.4);
+  font-size: 13px;
+}

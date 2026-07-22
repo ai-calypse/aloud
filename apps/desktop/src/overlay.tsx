@@ -1053,7 +1053,10 @@ function AgentRun({
       {run.steps.length === 0 && !run.error && !run.status && (
         <p className="agent__status">
           <LoaderCircleIcon className="size-4 animate-spin" />
-          <Shimmer>Understanding…</Shimmer>
+          {/* `as="span"`: Shimmer renders a <p> by default, and a <p> inside a
+              <p> is invalid — React closes the outer one early and the layout
+              silently breaks. */}
+          <Shimmer as="span">Understanding…</Shimmer>
         </p>
       )}
 
@@ -1145,7 +1148,7 @@ function AgentRun({
       {run.status && (
         <p className="agent__status">
           <LoaderCircleIcon className="size-4 animate-spin" />
-          <Shimmer>{run.status}</Shimmer>
+          <Shimmer as="span">{run.status}</Shimmer>
         </p>
       )}
 
