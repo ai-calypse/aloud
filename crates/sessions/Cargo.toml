@@ -1,0 +1,15 @@
+[package]
+name = "aloud-sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Finding running coding agents and reading what they are doing"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
