@@ -408,6 +408,33 @@
   }
 }
 
+/* --- An agent run -------------------------------------------------------
+ *
+ * The step list, its approval gate and the tool detail are all AI Elements
+ * (`Tool`, `Confirmation`) rendering their own design, so there is almost
+ * nothing here — deliberately. What is left is the two bits of the run that
+ * are Aloud's rather than the registry's. */
+
+.agent__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: rgb(255 255 255 / 0.6);
+}
+
+/* The last tool that ran, in the footer beside copy/close — a one-line "where
+   is it up to" that survives the step list being scrolled out of view. */
+.agent__trail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ask__error {
   margin: 0;
   color: var(--sys-orange);

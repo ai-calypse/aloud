@@ -20,6 +20,18 @@ const MAX_ROUNDS: usize = 5;
 /// maps these onto its own UI events.
 #[derive(Debug, Clone)]
 pub enum LoopEvent {
+    /// Every tool this round intends to run, before the first of them starts.
+    ///
+    /// The model hands back a whole batch of calls at once and the loop then
+    /// executes them one at a time, so the run already knows what is coming and
+    /// used to throw that away — the panel learned about the third call when
+    /// the third call began. For an agent holding write access to somebody's
+    /// mail that is the wrong moment: "it is about to do three things, one of
+    /// which sends" is worth reading *before* the first one fires.
+    ///
+    /// Names only. The arguments arrive with `ToolCallStart`, which is also the
+    /// point they stop being a plan and start being an action.
+    Planned { names: Vec<String> },
     /// The model asked to run a tool, with the arguments it chose.
     ///
     /// The whole JSON object, not a flattened list: the panel renders a draft's
@@ -174,6 +186,18 @@ where
             tool_calls: Some(turn.tool_calls.clone()),
             tool_call_id: None,
         });
+
+        // Only when there is more than one: announcing a queue of one is a
+        // second surface saying what the step list is about to say anyway.
+        if turn.tool_calls.len() > 1 {
+            on_event(LoopEvent::Planned {
+                names: turn
+                    .tool_calls
+                    .iter()
+                    .map(|c| c.function.name.clone())
+                    .collect(),
+            });
+        }
 
         for call in &turn.tool_calls {
             let name = call.function.name.clone();

@@ -28,6 +28,12 @@ export type PreviewCommand = {
    * make the panel jitter — a preview that only ever grew would not show it.
    */
   partial?: "stream" | "clear";
+  /**
+   * An agent run. `pending` stops on the approval gate — the one state that
+   * needs a click mid-run, and the reason the panel takes the mouse before it
+   * has finished rather than after.
+   */
+  agent?: "run" | "pending" | "planned" | "close";
   dismissing?: boolean;
   /** Rebuilds the panel's springs, which is how a changed --panel-* applies. */
   restart?: boolean;

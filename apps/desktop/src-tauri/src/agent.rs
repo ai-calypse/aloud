@@ -5,10 +5,13 @@
 //!
 //!   transcribe → parse intent → (confirm if it writes) → dispatch → report
 //!
-//! Reads run straight through; writes surface a confirmation panel and wait
-//! for a yes. The panel mirrors `ask.rs`: a focused, always-on-top window that
-//! Escape dismisses. The difference is it collects a decision, so it holds a
-//! one-shot channel that the approve/reject commands resolve.
+//! Reads run straight through; writes surface a confirmation and wait for a
+//! yes. There is no Agent window: like Ask, the run is drawn in the overlay's
+//! drop-down panel, which grows out of the notch and holds the step list, the
+//! confirmation and the closing answer. The difference from Ask is that this
+//! one collects a decision, so it holds a one-shot channel that the
+//! approve/reject commands resolve — and that the panel has to take a click
+//! part way through a run rather than only at the end.
 
 use aloud_store::Settings;
 use anyhow::{bail, Result};
@@ -19,7 +22,8 @@ use tauri_specta::Event;
 use tokio::sync::oneshot;
 use tracing::Instrument;
 
-const LABEL: &str = "agent";
+/// The window these events go to — the overlay's, not one of Agent's own.
+const LABEL: &str = "overlay";
 /// How long a write waits for a yes before giving up and declining.
 const CONFIRM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
@@ -44,6 +48,16 @@ pub struct PendingConfirmation(Mutex<Option<oneshot::Sender<bool>>>);
 pub enum AgentEvent {
     /// AG-UI RUN_STARTED — the transcript, echoed so the panel shows what it heard.
     RunStarted(String),
+    /// The tools this round intends to run, before the first one starts.
+    ///
+    /// Not an AG-UI event: AG-UI has no vocabulary for a batch the model has
+    /// returned but the loop has not begun. It is the same information the
+    /// panel would otherwise learn one call at a time, arriving at the only
+    /// moment it can still be acted on — a run that is about to send mail is
+    /// worth reading before the send, not after.
+    ///
+    /// Only sent when a round holds more than one call.
+    Planned(Vec<PlannedCall>),
     /// AG-UI TOOL_CALL_START + ARGS — a parsed action, with its args, awaiting
     /// dispatch. A write pauses here for confirmation (AG-UI human-in-the-loop).
     ToolCall(ToolCall),
@@ -56,6 +70,16 @@ pub enum AgentEvent {
     RunFinished(String),
     /// AG-UI RUN_ERROR — the run failed before producing a result.
     RunError(String),
+}
+
+/// A tool the run intends to call. No arguments: they arrive with the call
+/// itself, which is also the point it stops being a plan and starts being an
+/// action.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PlannedCall {
+    pub name: String,
+    pub app: String,
 }
 
 /// An AG-UI tool call: the action name, the app it targets, and the parsed
@@ -101,7 +125,7 @@ fn emit(app: &AppHandle, event: AgentEvent) {
 
 /// Runs the full agent flow for a transcript. Called by the pipeline.
 pub async fn run(app: &AppHandle, transcript: String, settings: &Settings) -> Result<()> {
-    show(app);
+    crate::overlay::show_panel(app);
     emit(app, AgentEvent::RunStarted(transcript.clone()));
 
     match execute(app, &transcript, settings).await {
@@ -222,6 +246,15 @@ fn display_args(args: &serde_json::Value) -> std::collections::BTreeMap<String, 
 /// Maps a loop event to the panel's AG-UI event vocabulary.
 fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
     match event {
+        aloud_agent::LoopEvent::Planned { names } => AgentEvent::Planned(
+            names
+                .into_iter()
+                .map(|name| PlannedCall {
+                    app: tool_app(&name),
+                    name,
+                })
+                .collect(),
+        ),
         aloud_agent::LoopEvent::ToolCallStart { name, args } => AgentEvent::ToolCall(ToolCall {
             app: tool_app(&name),
             name,
@@ -296,23 +329,8 @@ pub fn confirm_agent(app: AppHandle, approved: bool) {
     }
 }
 
-fn show(app: &AppHandle) {
-    let Some(window) = app.get_webview_window(LABEL) else {
-        tracing::warn!("agent window missing");
-        return;
-    };
-    // Same top-centre drop as the ask panel; the frontend grows it downward.
-    if let Err(e) = crate::overlay::position_top_center(&window, 12.0) {
-        tracing::warn!(%e, "could not position agent panel");
-    }
-    let _ = window.show();
-    let _ = window.set_focus();
-}
-
 pub fn hide(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(LABEL) {
-        let _ = window.hide();
-    }
+    crate::overlay::end_panel(app);
 }
 
 /// Lets the panel dismiss itself on Escape or after showing a result.

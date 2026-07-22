@@ -36,19 +36,6 @@
         "skipTaskbar": true,
         "focus": false,
         "acceptFirstMouse": false
-      },
-      {
-        "label": "agent",
-        "url": "agent.html",
-        "title": "Agent",
-        "width": 500,
-        "height": 120,
-        "visible": false,
-        "transparent": true,
-        "decorations": false,
-        "alwaysOnTop": true,
-        "resizable": false,
-        "skipTaskbar": true
       }
     ],
     "macOSPrivateApi": true,
