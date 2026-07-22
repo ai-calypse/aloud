@@ -72,7 +72,20 @@ pub fn run() {
         .with(aloud_store::TimingLayer::new(timings.clone()))
         .init();
 
-    let builder = Builder::<tauri::Wry>::new()
+    let builder = specta_builder();
+
+    // Regenerate the TypeScript bindings on every debug run so the frontend
+    // never drifts from the Rust command surface.
+    #[cfg(debug_assertions)]
+    export_bindings(&builder).expect("failed to export typescript bindings");
+
+    build_app(builder, timings);
+}
+
+/// The command and event surface, in one place so `run` and the bindings test
+/// at the bottom of this file cannot end up describing different apps.
+fn specta_builder() -> Builder<tauri::Wry> {
+    Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             commands::get_settings,
             commands::update_settings,
@@ -110,6 +123,7 @@ pub fn run() {
             ask::close_ask,
             overlay::set_panel_box,
             agent::confirm_agent,
+            agent::answer_agent,
             agent::close_agent,
         ])
         .events(collect_events![
@@ -125,18 +139,20 @@ pub fn run() {
             overlay::OverlayDismiss,
             HotkeysPermitted,
             ConnectorsUpdated,
-        ]);
+        ])
+}
 
-    // Regenerate the TypeScript bindings on every debug run so the frontend
-    // never drifts from the Rust command surface.
-    #[cfg(debug_assertions)]
-    builder
-        .export(
-            specta_typescript::Typescript::default(),
-            "../src/lib/bindings.ts",
-        )
-        .expect("failed to export typescript bindings");
+/// Writes `src/lib/bindings.ts`. The path is relative to this crate's
+/// directory, which is why `cargo run -p aloud` has to be invoked from
+/// `src-tauri` — `pnpm dev` does that for you.
+fn export_bindings(builder: &Builder<tauri::Wry>) -> Result<(), specta_typescript::Error> {
+    builder.export(
+        specta_typescript::Typescript::default(),
+        "../src/lib/bindings.ts",
+    )
+}
 
+fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timings>>) {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
@@ -193,6 +209,7 @@ pub fn run() {
                 notch: notch::notched_screens(),
             });
             app.manage(agent::PendingConfirmation::default());
+            app.manage(agent::PendingQuestion::default());
 
             // Main thread required. A floating-level window is clamped below
             // the menu bar, which the wings style has to sit in.
@@ -485,5 +502,25 @@ pub(crate) fn toggle_meeting(
                 Err(e) => tracing::error!(%e, "starting meeting failed"),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regenerates `src/lib/bindings.ts` from the command surface.
+    ///
+    /// `run` does this too, but only when the app actually launches — which
+    /// means changing a command's signature could not be typechecked without
+    /// starting the GUI, and a half-updated `bindings.ts` would be committed
+    /// against a Rust surface nobody had exported. `cargo test -p aloud` is
+    /// enough now.
+    ///
+    /// It writes rather than asserts: the file is generated, so a diff after
+    /// running the tests is the signal that the frontend has to catch up.
+    #[test]
+    fn bindings_match_the_command_surface() {
+        export_bindings(&specta_builder()).expect("exporting typescript bindings");
     }
 }

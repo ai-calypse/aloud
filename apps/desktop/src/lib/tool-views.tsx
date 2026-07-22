@@ -14,6 +14,30 @@ export type ToolView = {
   label: (args: ToolArgs) => string;
   /** The one thing worth showing. Omitted means the label says it all. */
   body?: (args: ToolArgs) => ReactNode;
+  /**
+   * Fields the approval gate lets the user fill in before confirming, replacing
+   * `body` there. Only worth declaring where the model routinely cannot know
+   * the value — an address it never found. Everywhere else an editable gate is
+   * a form standing between the user and the thing they asked for.
+   */
+  edits?: Editable[];
+  /**
+   * The question the gate asks before showing `edits`. Only meaningful with
+   * them: an editable gate is the agent proposing work of its own, so it asks
+   * before putting a form in front of someone who never wanted one.
+   */
+  ask?: (args: ToolArgs) => string;
+};
+
+/** One field in an editable approval gate. */
+export type Editable = {
+  /** Stable across renders; also the React key. */
+  key: string;
+  label: string;
+  placeholder?: string;
+  get: (args: ToolArgs) => string;
+  /** Returns the whole argument object with this field replaced. */
+  set: (args: ToolArgs, value: string) => ToolArgs;
 };
 
 /** A string field, or "" when absent or not a string. */
@@ -39,14 +63,35 @@ function who(address: string): string {
   return address.split("@")[0] || address;
 }
 
+/** A directory lookup, named for who it is looking for. */
+function lookingFor(query: string): string {
+  return query ? `Looking for ${query}` : "Looking through your contacts";
+}
+
 /** The email body, which is the whole point of a draft. */
 function emailBody(args: ToolArgs): ReactNode {
   const body = text(args, "body");
   const subject = text(args, "subject");
-  if (!body && !subject) return null;
+  const to = text(args, "recipient_email");
+  if (!body && !subject && !to) return null;
 
   return (
     <ToolCard>
+      {/* The whole address, above everything else and never abbreviated. The
+          label says "to charlie" whether the address is charlie@… or a stranger
+          the lookup happened to return; this is the only place the gate states
+          who is actually being written to, so it is the line that has to be
+          right. A missing one is worse still — the tool would send to nobody or
+          to whatever it defaults to. */}
+      {to ? (
+        <p className="m-0 break-all text-ui text-muted-foreground">
+          To: <span className="text-ink">{to}</span>
+        </p>
+      ) : (
+        <p className="m-0 text-ui italic text-warning">
+          No recipient — cancel and ask again.
+        </p>
+      )}
       {subject && <p className="m-0 text-ui font-medium">{subject}</p>}
       {body ? (
         <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
@@ -98,6 +143,12 @@ const VIEWS: Record<string, ToolView> = {
   },
   GMAIL_FETCH_EMAILS: { label: () => "Reading your inbox" },
   GMAIL_LIST_DRAFTS: { label: () => "Looking through your drafts" },
+  // The directory lookups. Registered so the step list says who is being
+  // looked for — unlabelled they fell through to "Gmail: search people", which
+  // reads as plumbing and hides the name the agent actually searched for.
+  GMAIL_SEARCH_PEOPLE: {
+    label: (a) => lookingFor(text(a, "query")),
+  },
 
   GITHUB_CREATE_AN_ISSUE: {
     label: (a) => {
@@ -162,7 +213,115 @@ const VIEWS: Record<string, ToolView> = {
       );
     },
   },
+
+  GOOGLECONTACTS_SEARCH_CONTACTS: {
+    label: (a) => lookingFor(text(a, "query")),
+  },
+  // The People API takes names and addresses as arrays of objects, not the flat
+  // strings every other tool here uses, so both readers dig rather than `text`.
+  GOOGLECONTACTS_CREATE_CONTACT: {
+    label: (a) => {
+      const name = contactName(a);
+      return name ? `Saving ${name} to your contacts` : "Saving a contact";
+    },
+    // A contact you cannot see before approving is a contact you did not agree
+    // to — the address is the part that is easy to get wrong.
+    body: (a) => {
+      const name = contactName(a);
+      const email = contactEmail(a);
+      if (!name && !email) return null;
+      return (
+        <ToolCard>
+          {name && <p className="m-0 text-ui font-medium">{name}</p>}
+          {email && <p className="m-0 text-ui text-muted-foreground">{email}</p>}
+        </ToolCard>
+      );
+    },
+    ask: (a) => {
+      const name = contactName(a);
+      return name
+        ? `I could not find ${name}. Save them as a contact?`
+        : "Save this person as a contact?";
+    },
+    // The one gate worth making editable: the agent reaches it precisely when
+    // it could not find an address, so the field it most needs is the one field
+    // it cannot fill. Both write back the People API's nested shape, stringified
+    // the way `display_args` delivers it, so Rust parses it straight back.
+    edits: [
+      {
+        key: "name",
+        label: "Name",
+        placeholder: "Their name",
+        get: contactName,
+        set: (args, value) => ({
+          ...args,
+          names: JSON.stringify([{ givenName: value, displayName: value }]),
+        }),
+      },
+      {
+        key: "email",
+        label: "Email",
+        placeholder: "name@example.com",
+        get: contactEmail,
+        set: (args, value) => ({
+          ...args,
+          emailAddresses: JSON.stringify([{ value }]),
+        }),
+      },
+    ],
+  },
 };
+
+/** The gate's editable fields for a tool; empty for the yes/no majority. */
+export function editsFor(name: string): Editable[] {
+  return viewFor(name).edits ?? [];
+}
+
+/**
+ * A nested argument, back as a value.
+ *
+ * `display_args` in agent.rs stringifies every argument that is not already a
+ * string, so an array of objects reaches the panel as JSON text. Every other
+ * view here reads flat string fields and never noticed; this one has to undo it.
+ */
+function nested(args: ToolArgs, field: string): unknown {
+  const value = args[field];
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    // Not JSON after all — a plain string field that happens to be nested-ish.
+    return null;
+  }
+}
+
+/** First string at `key` in an array of People API objects, or "". */
+function firstOf(args: ToolArgs, field: string, key: string): string {
+  const list = nested(args, field);
+  if (!Array.isArray(list)) return "";
+  for (const entry of list) {
+    if (entry && typeof entry === "object") {
+      const value = (entry as Record<string, unknown>)[key];
+      if (typeof value === "string" && value) return value;
+    }
+  }
+  return "";
+}
+
+function contactName(args: ToolArgs): string {
+  const display = firstOf(args, "names", "displayName");
+  if (display) return display;
+  return [
+    firstOf(args, "names", "givenName"),
+    firstOf(args, "names", "familyName"),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function contactEmail(args: ToolArgs): string {
+  return firstOf(args, "emailAddresses", "value");
+}
 
 /** "SLACK_SEND_MESSAGE" → "Slack: send message"; the unregistered fallback. */
 export function humanise(slug: string): string {
@@ -191,5 +350,14 @@ export function bodyFor(name: string, args: ToolArgs): ReactNode {
     return viewFor(name).body?.(args) ?? null;
   } catch {
     return null;
+  }
+}
+
+/** The question an editable gate opens with, or "" when it has none. */
+export function askFor(name: string, args: ToolArgs): string {
+  try {
+    return viewFor(name).ask?.(args) ?? "";
+  } catch {
+    return "";
   }
 }

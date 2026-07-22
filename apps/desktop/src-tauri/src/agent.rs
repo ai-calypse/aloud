@@ -23,8 +23,23 @@ const CONFIRM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120)
 
 /// The pending confirmation's reply channel, so approve/reject can wake the
 /// awaiting dispatch. Only one is ever in flight; a new command replaces it.
+///
+/// The original arguments ride along because the panel only ever sees the
+/// flattened strings `display_args` produced. Merging its edits back into the
+/// real nested shape needs the thing that was flattened.
 #[derive(Default)]
-pub struct PendingConfirmation(Mutex<Option<oneshot::Sender<bool>>>);
+pub struct PendingConfirmation(Mutex<Option<Pending>>);
+
+struct Pending {
+    reply: oneshot::Sender<Option<serde_json::Value>>,
+    args: serde_json::Value,
+}
+
+/// The pending question's reply channel. Separate from the confirmation above:
+/// a run can be waiting on either, never both, and conflating them would let a
+/// Confirm click answer a question.
+#[derive(Default)]
+pub struct PendingQuestion(Mutex<Option<oneshot::Sender<Option<String>>>>);
 
 /// Streamed to the agent panel. Names follow the AG-UI protocol's tool-call
 /// lifecycle (https://docs.ag-ui.com) so the shape maps onto AI Elements' tool
@@ -41,6 +56,9 @@ pub enum AgentEvent {
     /// A parsed action awaiting dispatch. A write pauses here for confirmation.
     ToolCall(ToolCall),
     ToolResult(ToolResult),
+    /// The model needs something only the user can give. The run is suspended
+    /// until `answer_agent`; the panel shows an input rather than a gate.
+    Asked(Question),
     /// A transient status line (e.g. "rate limited, retrying in 30s") shown
     /// while the run is otherwise silent; cleared by the next event.
     Status(String),
@@ -71,6 +89,15 @@ pub struct ToolCall {
     pub args: std::collections::BTreeMap<String, String>,
     /// Whether this call pauses for confirmation before it runs (every write).
     pub requires_confirmation: bool,
+}
+
+/// A question put to the user mid-run. `options` non-empty means the answer is
+/// one of them, so the panel offers buttons instead of a text field.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Question {
+    pub question: String,
+    pub options: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -154,8 +181,43 @@ async fn execute(app: &AppHandle, transcript: &str, settings: &Settings) -> Resu
                 .unwrap_or_else(|| tool_app(&name));
             confirm_write(app, name, toolkit, args)
         },
+        // The question itself already went out through `on_event`; this only
+        // opens the reply channel and waits on it.
+        |_question| await_answer(app),
     )
     .await
+}
+
+/// Waits for the panel's reply to the question `event_of` has already emitted.
+async fn await_answer(app: &AppHandle) -> Option<String> {
+    let (tx, rx) = oneshot::channel();
+    if let Some(state) = app.try_state::<PendingQuestion>() {
+        *state.0.lock().unwrap() = Some(tx);
+    } else {
+        tracing::error!("PendingQuestion state missing");
+        return None;
+    }
+    // The same ceiling as a confirmation, and for the same reason: a run that
+    // can wait forever is a run that wedges the agent.
+    match tokio::time::timeout(CONFIRM_TIMEOUT, rx).await {
+        Ok(answer) => answer.unwrap_or(None),
+        Err(_) => {
+            tracing::warn!("question timed out; treating as unanswered");
+            None
+        }
+    }
+}
+
+/// Resolves the pending question. `None` is the user dismissing it, which the
+/// loop reports to the model as unanswered rather than as an error.
+#[tauri::command]
+#[specta::specta]
+pub fn answer_agent(app: AppHandle, answer: Option<String>) {
+    if let Some(state) = app.try_state::<PendingQuestion>() {
+        if let Some(tx) = state.0.lock().unwrap().take() {
+            let _ = tx.send(answer.filter(|text| !text.trim().is_empty()));
+        }
+    }
 }
 
 /// Surfaces a write tool for confirmation and awaits the panel's decision. Takes
@@ -165,18 +227,17 @@ async fn confirm_write(
     name: String,
     toolkit: String,
     args: serde_json::Value,
-) -> bool {
-    let args = display_args(&args);
+) -> Option<serde_json::Value> {
     emit(
         app,
         AgentEvent::ToolCall(ToolCall {
             app: toolkit,
             name,
-            args,
+            args: display_args(&args),
             requires_confirmation: true,
         }),
     );
-    await_confirmation(app).await
+    await_confirmation(app, args).await
 }
 
 /// Flattens a tool's argument object into displayable string fields.
@@ -207,6 +268,12 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
                 })
                 .collect(),
         ),
+        // The ask tool is not a tool as far as the panel is concerned — the
+        // question is the UI, and a "Aloud: ask user" row beside it reads as
+        // plumbing leaking through.
+        aloud_agent::LoopEvent::Asked { question, options } => {
+            AgentEvent::Asked(Question { question, options })
+        }
         aloud_agent::LoopEvent::ToolCallStart { name, args } => AgentEvent::ToolCall(ToolCall {
             app: tool_app(&name),
             name,
@@ -238,36 +305,69 @@ fn tool_app(slug: &str) -> String {
 /// Blocks until the panel approves or rejects. A dropped sender (panel closed,
 /// new command started) or a timeout reads as a rejection — a gate that can
 /// hang wedges the whole agent, and declining fails in the safe direction.
-async fn await_confirmation(app: &AppHandle) -> bool {
+async fn await_confirmation(app: &AppHandle, args: serde_json::Value) -> Option<serde_json::Value> {
     let (tx, rx) = oneshot::channel();
     if let Some(state) = app.try_state::<PendingConfirmation>() {
-        *state.0.lock().unwrap() = Some(tx);
+        *state.0.lock().unwrap() = Some(Pending { reply: tx, args });
     } else {
         tracing::error!("PendingConfirmation state missing");
-        return false;
+        return None;
     }
     match tokio::time::timeout(CONFIRM_TIMEOUT, rx).await {
-        Ok(answer) => answer.unwrap_or(false),
+        Ok(answer) => answer.unwrap_or(None),
         Err(_) => {
             tracing::warn!("confirmation timed out; treating as declined");
-            false
+            None
         }
     }
 }
 
-/// Resolves the pending confirmation. Called by the panel's Yes/No buttons.
+/// Resolves the pending confirmation. Called by the panel's Cancel/Confirm
+/// buttons; `edits` carries any field the user filled in or corrected before
+/// approving, in the same flattened form the panel was given.
 #[tauri::command]
 #[specta::specta]
-pub fn confirm_agent(app: AppHandle, approved: bool) {
+pub fn confirm_agent(
+    app: AppHandle,
+    approved: bool,
+    edits: Option<std::collections::BTreeMap<String, String>>,
+) {
     if let Some(state) = app.try_state::<PendingConfirmation>() {
-        if let Some(tx) = state.0.lock().unwrap().take() {
+        if let Some(pending) = state.0.lock().unwrap().take() {
+            let answer = approved.then(|| match edits {
+                Some(edits) => apply_edits(&pending.args, &edits),
+                None => pending.args.clone(),
+            });
             // A gone receiver means the flow was already abandoned.
-            let _ = tx.send(approved);
+            let _ = pending.reply.send(answer);
         }
     }
     if !approved {
         hide(&app);
     }
+}
+
+/// Folds the panel's edited strings back into a tool's real arguments.
+///
+/// The inverse of [`display_args`]: a field that was a string stays one, and a
+/// field that was flattened to JSON text is parsed back to the shape the tool
+/// expects. A value that no longer parses is kept as a string rather than
+/// dropped — a tool rejecting a bad argument says so, where a silently missing
+/// one just does the wrong thing.
+fn apply_edits(
+    original: &serde_json::Value,
+    edits: &std::collections::BTreeMap<String, String>,
+) -> serde_json::Value {
+    let mut out = original.as_object().cloned().unwrap_or_default();
+    for (key, edited) in edits {
+        let value = match original.get(key) {
+            Some(serde_json::Value::String(_)) | None => serde_json::Value::String(edited.clone()),
+            Some(_) => serde_json::from_str(edited)
+                .unwrap_or_else(|_| serde_json::Value::String(edited.clone())),
+        };
+        out.insert(key.clone(), value);
+    }
+    serde_json::Value::Object(out)
 }
 
 pub fn hide(app: &AppHandle) {
@@ -283,5 +383,80 @@ pub fn close_agent(app: AppHandle) {
     if let Some(state) = app.try_state::<PendingConfirmation>() {
         state.0.lock().unwrap().take();
     }
+    // A dropped sender resolves the question as unanswered, so a closed panel
+    // never leaves the loop waiting out its full timeout.
+    if let Some(state) = app.try_state::<PendingQuestion>() {
+        state.0.lock().unwrap().take();
+    }
     hide(&app);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The panel only ever sees `display_args`' flat strings, so approving a
+    /// gate has to rebuild the nested shape the tool expects. Getting this
+    /// wrong writes a contact with the address as a quoted JSON string, or
+    /// drops it entirely — both of which look like a successful save.
+    #[test]
+    fn edits_fold_back_into_the_shape_the_tool_expects() {
+        let original = json!({
+            "names": [{ "givenName": "Dad" }],
+            "emailAddresses": [],
+            "personFields": "names,emailAddresses",
+        });
+        let edits = [
+            (
+                "emailAddresses".to_string(),
+                r#"[{"value":"dad@example.com"}]"#.to_string(),
+            ),
+            (
+                "personFields".to_string(),
+                "names,emailAddresses".to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let merged = apply_edits(&original, &edits);
+        assert_eq!(merged["emailAddresses"][0]["value"], "dad@example.com");
+        // A string field stays a string rather than being parsed into a number
+        // or a bool that happens to look like one.
+        assert_eq!(merged["personFields"], "names,emailAddresses");
+        // Untouched keys survive.
+        assert_eq!(merged["names"][0]["givenName"], "Dad");
+    }
+
+    #[test]
+    fn an_edit_that_stops_being_json_is_kept_not_dropped() {
+        let original = json!({ "emailAddresses": [{ "value": "a@b.c" }] });
+        let edits = [("emailAddresses".to_string(), "not json".to_string())]
+            .into_iter()
+            .collect();
+        assert_eq!(apply_edits(&original, &edits)["emailAddresses"], "not json");
+    }
+
+    /// An empty or whitespace answer is the user having dismissed the box, not
+    /// an answer of "". Sending it as one would have the model act on a blank.
+    #[test]
+    fn a_blank_reply_is_not_an_answer() {
+        assert_eq!(
+            Some("  ".to_string()).filter(|t| !t.trim().is_empty()),
+            None
+        );
+        assert_eq!(
+            Some(" a@b.c ".to_string()).filter(|t| !t.trim().is_empty()),
+            Some(" a@b.c ".to_string())
+        );
+    }
+
+    #[test]
+    fn a_field_the_tool_never_had_arrives_as_a_string() {
+        let edits = [("subject".to_string(), "Hello".to_string())]
+            .into_iter()
+            .collect();
+        assert_eq!(apply_edits(&json!({}), &edits)["subject"], "Hello");
+    }
 }

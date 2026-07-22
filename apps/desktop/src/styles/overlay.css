@@ -219,6 +219,207 @@
   padding: 0;
 }
 
+/* --- The tab strip ------------------------------------------------------
+ *
+ * The gap does not collapse with the wrapper below, so a new tab shoves its
+ * neighbours sideways by this much on its first frame. Kept small enough that
+ * the jump is imperceptible against the 80pt the panel travels underneath —
+ * three pixels buys every chip a visible edge, which is worth more.
+ */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 7px 8px 0;
+  /* The same entrance `.ask > *` gets, leading the stagger — the strip is the
+     panel's first row and was the only one popping in flat.
+     It also fixes the `+`: the row is composited for the animation and stays
+     that way (`both` retains the transform), so every child paints into that
+     one layer. Without it `.tabs` was un-composited while each `.tab` inside
+     promoted itself, and in WKWebView the `+` — the only child that never
+     animates — went unpainted until an unrelated repaint forced it. The footer
+     `+`, identical markup inside the already-composited `.ask__footer`, never
+     had the problem. */
+  animation:
+    ask-rise var(--spring-pop-dur) var(--spring-pop) both,
+    ask-fade var(--dur-fast) var(--ease-out) both;
+}
+
+/* The collapsing wrapper — the same 0fr→1fr technique as `.motion-row` in
+   motion.css, turned ninety degrees. A grid track interpolates; `width: auto`
+   does not, and measuring each chip to animate a real width buys nothing here.
+   The child needs `overflow: hidden` or it spills out of the 0fr track. */
+/* Shrinks rather than pushing the `+` off the end: past four tabs the strip is
+   over its 480pt budget, and a browser would rather ellipsis a label than lose
+   the control that made it. `min-width: 0` is what lets a flex item shrink
+   below its content at all. */
+.tab {
+  display: grid;
+  grid-template-columns: 1fr;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.tab > * {
+  overflow: hidden;
+}
+
+.tab[data-motion="in"] {
+  animation: tab-in var(--spring-dur) var(--spring) both;
+}
+
+/* Slower than the entrance, per the app's open/close asymmetry, and eased
+   rather than sprung: a tab on its way out must not overshoot back into the
+   strip and make the neighbours it is handing space to hesitate. */
+.tab[data-motion="out"] {
+  animation: tab-out var(--spring-dur-slow) var(--ease-in) both;
+}
+
+/* Both ends stated on both keyframes: an implicit end resolves to the
+   element's computed `1fr`, which reads as no animation in and a cut out. */
+@keyframes tab-in {
+  from {
+    grid-template-columns: 0fr;
+    opacity: 0;
+    filter: blur(3px);
+  }
+  to {
+    grid-template-columns: 1fr;
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@keyframes tab-out {
+  from {
+    grid-template-columns: 1fr;
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    grid-template-columns: 0fr;
+    opacity: 0;
+    filter: blur(3px);
+  }
+}
+
+.tab__chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 150px;
+  padding: 4px 5px 4px 10px;
+  border-radius: 8px;
+  /* Filled even when inactive. With only the active one filled, four tabs read
+     as four loose words with air between them rather than as a strip. */
+  background: rgb(255 255 255 / 0.045);
+  color: rgb(255 255 255 / 0.45);
+  /* No sliding indicator behind the chips: a new tab is active before it has
+     finished growing, so the indicator would sit over the `+` for the whole
+     entrance. The active state is the chip's own fill. */
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.tab__chip:hover {
+  background: rgb(255 255 255 / 0.09);
+  color: rgb(255 255 255 / 0.7);
+}
+
+.tab__chip[data-active] {
+  background: rgb(255 255 255 / 0.16);
+  color: rgb(255 255 255 / 0.92);
+}
+
+.tab__select {
+  flex: 1;
+  /* Without this the flex item refuses to shrink and the ellipsis never
+     engages — the label pushes the chip past its max-width instead. */
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab__close {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  /* Revealed on the tab being pointed at or read, so a strip at rest is
+     labels and not a row of crosses. */
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.tab__chip:hover .tab__close,
+.tab__chip[data-active] .tab__close {
+  opacity: 1;
+}
+
+.tab__close:hover {
+  background: rgb(255 255 255 / 0.18);
+}
+
+.tab__add {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: 4px;
+  padding: 0;
+  /* Outlined as well as filled. It is the only control in the strip with no
+     label, so it has to read as a button from its shape alone — a glyph at
+     the strip's own ink level was clickable and unfindable. */
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.08);
+  color: rgb(255 255 255 / 0.75);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.tab__add:hover {
+  background: rgb(255 255 255 / 0.18);
+  color: rgb(255 255 255 / 0.95);
+}
+
+.tab__add:active {
+  transform: scale(0.88);
+}
+
+/* What a new tab holds is undecided. The height is a floor, not a placeholder:
+   an empty body would collapse the panel back up through the cutout it grew
+   out of, which reads as the window closing rather than a tab opening. */
+.tab-blank {
+  height: 220px;
+  animation:
+    ask-rise var(--spring-pop-dur) var(--spring-pop) both,
+    ask-fade var(--dur-fast) var(--ease-out) both;
+}
+
 .ask {
   display: flex;
   flex-direction: column;
@@ -309,8 +510,70 @@
   }
 }
 
-/* --- An agent run. The step list, approval gate and tool detail are AI
- * Elements rendering their own design; only Aloud's own bits live here. */
+/* --- An agent run ------------------------------------------------------
+ *
+ * Plain markup, not AI Elements. Those draw bordered cards with their own
+ * chrome, which on a 480pt surface hanging off the notch reads as a chat
+ * transcript pasted into a menu-bar popover — and their Tool card also showed
+ * the pending call's body, putting the same draft on screen twice with the
+ * approval gate.
+ */
+
+.agent__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent__step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent__state {
+  flex: none;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.45);
+}
+
+/* Not yet run, so it reads back a step: the same row, dimmer. */
+.agent__step--planned {
+  color: rgb(255 255 255 / 0.45);
+}
+
+.agent__icon {
+  flex: none;
+  color: rgb(255 255 255 / 0.55);
+}
+
+.agent__icon--bad {
+  color: var(--sys-red);
+}
+
+.agent__icon--warn {
+  color: var(--warning);
+}
+
+/* Indented under its step's label rather than its icon, so the eye reads a
+   tool and then what that tool is about to do. */
+.agent__body {
+  display: block;
+  padding-left: 22px;
+  font-size: 13px;
+  color: rgb(255 255 255 / 0.7);
+}
 
 .agent__status {
   display: flex;
@@ -318,6 +581,84 @@
   gap: 8px;
   margin: 0;
   color: rgb(255 255 255 / 0.6);
+}
+
+/* The approval gate.
+ *
+ * Deliberately not a bordered card: a box inside a black panel reads as
+ * something dropped in from another surface. A hairline above it and a warmer
+ * ink are enough to say "this one is different and it is waiting on you",
+ * which is the whole job — the panel is already the thing in front of them. */
+.agent__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgb(255 255 255 / 0.1);
+}
+
+.agent__confirm .agent__body {
+  padding-left: 0;
+}
+
+/* An editable gate. Stacked rather than a two-column grid: at 480pt a label
+   column steals width from the address, which is the field that must not
+   ellipsis. */
+.agent__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent__field-label {
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.45);
+}
+
+.agent__confirm-title {
+  margin: 0;
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.agent__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.agent__action {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 0.06);
+  color: var(--pill-ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: default;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.agent__action:hover {
+  background: rgb(255 255 255 / 0.16);
+}
+
+/* The one that fires the write. Solid, because a confirm that looks the same
+   as its cancel is a coin toss. */
+.agent__action--go {
+  border-color: transparent;
+  background: var(--sys-blue);
+}
+
+.agent__action--go:hover {
+  background: color-mix(in srgb, var(--sys-blue) 85%, white);
 }
 
 /* The last tool that ran — a "where is it up to" that survives the step list
@@ -523,7 +864,7 @@
 /* The answer must be gone before the panel collapses over it — the collapse
    clips its contents, and a paragraph sliced off line by line reads as the
    window being killed. Faster than the collapse for that reason. */
-.overlay-root[data-exiting] .ask > * {
+.overlay-root[data-exiting] :is(.ask > *, .tabs, .tab-blank) {
   animation: ask-out var(--dur-fast) var(--ease-in) both;
   animation-delay: 0ms;
 }
@@ -576,3 +917,57 @@
 }
 
 /* No "Reduce transparency" block: both surfaces here are opaque black. */
+
+/* How many adjacent identical steps stacked into this row; see `groupSteps`. */
+.agent__count {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 0.1);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: rgb(255 255 255 / 0.6);
+}
+
+/* The reply to a question the model asked. One row: the field is the point, and
+   the two buttons are narrow enough to sit beside it at 480pt. */
+.agent__ask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent__ask .ask__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent__action:disabled {
+  opacity: 0.4;
+}
+
+/* The candidates for a choice question. A column, not a row: these are
+   addresses and names, which are long and must not be ellipsed — the whole
+   point is reading them before picking. */
+.agent__options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent__option {
+  padding: 8px 12px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: var(--radius-row, 10px);
+  background: rgb(255 255 255 / 0.06);
+  color: var(--pill-ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  word-break: break-all;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.agent__option:hover {
+  background: rgb(255 255 255 / 0.16);
+}

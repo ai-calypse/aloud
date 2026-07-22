@@ -21,8 +21,12 @@ export type PreviewCommand = {
    * is the case that can make the panel jitter.
    */
   partial?: "stream" | "clear";
-  /** An agent run. `pending` stops on the approval gate. */
-  agent?: "run" | "pending" | "planned" | "close";
+  /**
+   * An agent run. `pending` stops on the approval gate; `contact` stops on the
+   * editable one, which is otherwise only reachable by asking the agent for
+   * someone it cannot find.
+   */
+  agent?: "run" | "pending" | "planned" | "contact" | "asked" | "choose" | "close";
   dismissing?: boolean;
   /** Rebuilds the panel's springs, which is how a changed --panel-* applies. */
   restart?: boolean;

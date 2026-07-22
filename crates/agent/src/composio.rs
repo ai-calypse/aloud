@@ -32,6 +32,12 @@ const API_BASE: &str = "https://backend.composio.dev/api/v3.1";
 /// `readOnlyHint`, so resolving a name never hits the write confirmation.
 /// Calendar has no directory of its own — attendee lookup rides on
 /// `GMAIL_SEARCH_PEOPLE`, so calendar-without-gmail still needs full addresses.
+///
+/// `GMAIL_SEARCH_PEOPLE` reads Google Contacts, not the mailbox: someone you
+/// have a year of threads with but never saved is simply absent, even with
+/// `other_contacts` on. `GMAIL_FETCH_EMAILS` is the fallback the tool's own
+/// description names, and is pinned above anyway — the prompt in `tool_loop`
+/// is what sends the model there second.
 const PINNED_TOOLS: &[(&str, &[&str])] = &[
     (
         "gmail",
@@ -63,6 +69,17 @@ const PINNED_TOOLS: &[(&str, &[&str])] = &[
     // Slack's send verbs rank fine from the command; only the directory needs
     // the pin.
     ("slack", &["SLACK_FIND_USERS"]),
+    // Look someone up, and write one down. `CREATE_CONTACT` carries no
+    // `readOnlyHint`, so it takes the confirmation gate like any other write —
+    // which is the whole approval flow for "save Dad to my contacts", with no
+    // second channel to ask the user anything.
+    (
+        "googlecontacts",
+        &[
+            "GOOGLECONTACTS_SEARCH_CONTACTS",
+            "GOOGLECONTACTS_CREATE_CONTACT",
+        ],
+    ),
 ];
 
 /// Words carrying no signal about which tool is wanted. Kept short on purpose:
@@ -379,6 +396,19 @@ impl ComposioClient {
     pub async fn connect(&self, toolkit: &str) -> Result<String> {
         let auth_config = match self.auth_config_for(toolkit).await? {
             Some(id) => id,
+            // Composio brokers OAuth only for toolkits it holds its own app
+            // registration for; `googlecontacts` advertises OAUTH2 as a scheme
+            // and still has no managed credentials behind it. Asking anyway
+            // returns a 400 that reads as a bug in Aloud. The `auth_config_for`
+            // arm above is the escape hatch: an auth config created in the
+            // Composio dashboard against your own OAuth client is found there,
+            // and the rest of this function does not care where it came from.
+            None if !self.has_managed_auth(toolkit).await? => bail!(
+                "Composio has no credentials of its own for {toolkit}, so it \
+                 cannot be connected from here. Add an auth config for it in \
+                 the Composio dashboard using your own OAuth client, then try \
+                 again."
+            ),
             None => self.create_auth_config(toolkit).await?,
         };
 
@@ -435,6 +465,16 @@ impl ComposioClient {
             .and_then(|c| c.into_iter().find(|c| !c.user_id.is_empty()))
             .map(|c| c.user_id)
             .unwrap_or_else(|| "default".to_string())
+    }
+
+    /// Whether Composio can supply the OAuth credentials itself. `auth_schemes`
+    /// is not the same question — it lists what the *service* accepts, which is
+    /// why a toolkit can show an OAuth2 badge and still be unconnectable.
+    async fn has_managed_auth(&self, toolkit: &str) -> Result<bool> {
+        let json = self.get(&format!("/toolkits/{toolkit}")).await?;
+        Ok(json["composio_managed_auth_schemes"]
+            .as_array()
+            .is_some_and(|schemes| !schemes.is_empty()))
     }
 
     async fn auth_config_for(&self, toolkit: &str) -> Result<Option<String>> {
@@ -548,17 +588,28 @@ impl ComposioClient {
         let response = req.send().await.context("composio request failed")?;
         let status = response.status();
         if !status.is_success() {
-            let snippet: String = response
-                .text()
-                .await
-                .unwrap_or_default()
-                .chars()
-                .take(300)
-                .collect();
-            bail!("Composio HTTP {}: {snippet}", status.as_u16());
+            let body = response.text().await.unwrap_or_default();
+            bail!("{}", error_message(&body, status.as_u16()));
         }
         response.json().await.context("decoding composio response")
     }
+}
+
+/// What to show a user when Composio refuses a request.
+///
+/// Composio wraps failures as `{"error":{"message":…}}`, and that message is a
+/// written sentence — "Default auth config not found for toolkit X". Bubbling
+/// the envelope up instead put a raw JSON blob in the connectors pane. The
+/// status-code form is only for a body that is not that shape at all.
+fn error_message(body: &str, status: u16) -> String {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|json| json["error"]["message"].as_str().map(str::to_string))
+        .filter(|message| !message.is_empty())
+        .unwrap_or_else(|| {
+            let snippet: String = body.chars().take(300).collect();
+            format!("Composio HTTP {status}: {snippet}")
+        })
 }
 
 /// Composio schemas run ~5K tokens for six tools, enough alone to burst a small
@@ -883,5 +934,25 @@ mod tests {
         );
         assert!(compact["nested"][0].get("node_id").is_none());
         assert_eq!(compact["nested"][0]["keep"], "in");
+    }
+
+    /// The reported bug: the connectors pane showed
+    /// `Composio HTTP 400: {"error":{"message":"Default auth config not found …`
+    /// — the envelope, not the sentence inside it.
+    #[test]
+    fn composio_errors_surface_their_message_not_their_envelope() {
+        let body = r#"{"error":{"message":"Default auth config not found for toolkit \"googlecontacts\".","code":306,"status":400}}"#;
+        assert_eq!(
+            error_message(body, 400),
+            "Default auth config not found for toolkit \"googlecontacts\"."
+        );
+    }
+
+    #[test]
+    fn a_body_that_is_not_an_error_envelope_still_says_something() {
+        // A gateway's HTML, an empty body, or a shape Composio changes to.
+        assert!(error_message("<html>502</html>", 502).contains("502"));
+        assert!(error_message("", 500).contains("500"));
+        assert!(error_message(r#"{"error":{"message":""}}"#, 400).contains("400"));
     }
 }

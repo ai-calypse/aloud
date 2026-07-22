@@ -14,6 +14,61 @@ use tracing::Instrument;
 
 const MAX_ROUNDS: usize = 5;
 
+/// How many times one read tool may run in a single command. Rounds are already
+/// capped, but a round can hold any number of calls, and a model that varies an
+/// argument slips past the identical-call cache indefinitely.
+const MAX_CALLS_PER_TOOL: usize = 3;
+
+/// How many questions one command may put to the user. See the ask tool below.
+const MAX_QUESTIONS: usize = 2;
+
+/// The one tool this crate owns rather than Composio.
+///
+/// A model that needs something only the user has — an address no directory
+/// held — will otherwise say so in its final answer, which arrives after the
+/// run is over and lands in a panel with nothing to type into. Given a tool, it
+/// asks *during* the run and the loop suspends for the reply.
+///
+/// A synthetic tool rather than a new wire protocol because the model already
+/// knows how to call tools, and this works on any OpenAI-compatible provider.
+/// The prefix is ours: every Composio slug is `TOOLKIT_VERB` for a real
+/// toolkit, so nothing can collide with it.
+pub const ASK_USER: &str = "ALOUD_ASK_USER";
+
+fn ask_user_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": ASK_USER,
+            "description":
+                "Ask the user something and wait for their reply. The run pauses \
+                 until they answer, and their answer comes back as this tool's \
+                 result. Ask one thing at a time, in one short sentence.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The question, as one short sentence.",
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description":
+                            "The answers to offer, when the answer is one of a known \
+                             set — the people a search returned, the calendars an \
+                             event could go on. The user picks one rather than \
+                             typing. Give each as the full value you need back, not \
+                             a label: an email address, not \"the first one\". Omit \
+                             entirely when the answer is not from a known set.",
+                    },
+                },
+                "required": ["question"],
+            },
+        }
+    })
+}
+
 /// Progress events for the panel, in AG-UI tool-call vocabulary. The caller
 /// maps these onto its own UI events.
 #[derive(Debug, Clone)]
@@ -32,6 +87,13 @@ pub enum LoopEvent {
     },
     /// That tool finished (success carries no payload; the model gets the JSON).
     ToolCallResult { name: String, success: bool },
+    /// The model needs something only the user has; the loop is suspended until
+    /// the panel answers. `options` non-empty means the answer is one of them —
+    /// a choice, not free text. See [`ASK_USER`].
+    Asked {
+        question: String,
+        options: Vec<String>,
+    },
     /// The chat API throttled us; the loop is waiting this long to retry once.
     RateLimited { seconds: u64 },
 }
@@ -46,12 +108,43 @@ the intent. After acting, confirm what you did in one short plain sentence. \
 If a tool result was not successful or contains an error, say the action \
 failed and why — never claim it worked. But if it failed because an argument \
 was invalid, fix that argument and retry once before reporting failure. \
+You can ask the user a question mid-run with the ask tool, and the run waits \
+for their reply. Ask when a value is genuinely required, no tool can supply \
+it, and getting it wrong would be worse than the interruption — a recipient, a \
+date the command left ambiguous, which of several matches was meant. When the \
+answer is one of a known set, pass those as options so they pick rather than \
+type. \
+Do not ask for anything a tool could tell you, anything the command already \
+implies, or a detail with a sensible default — a subject line, a meeting \
+length, which calendar. Asking is expensive: this is a voice app, the panel is \
+small, and two questions for one command is worse than a reasonable \
+assumption stated plainly in your answer. Prefer acting and saying what you \
+assumed. Never ask twice for the same thing, and never ask in your final \
+answer instead of with the tool — that answer arrives after the run is over \
+and cannot be replied to. \
 The user speaks names, not addresses. When an argument needs an email address, \
 a Slack user or a GitHub username and the command gives only a name, look it up \
 first with the directory tool in the list and use what it returns — never \
-invent an address, and never ask the user to spell one out. If the lookup \
-returns several people, take the closest match and name it in your \
-confirmation; if it returns none, say so rather than guessing. \
+invent an address, and never ask the user to spell one out. \
+A result only counts as the person if their name actually matches the name you \
+were given: the same person, allowing for spelling, capitalisation, a middle \
+name or a missing surname. These tools return their best guesses, not matches, \
+so a query for one person routinely comes back with somebody unrelated. Never \
+take an unrelated person because they were the only result, the first result, \
+or the closest of several — a wrong recipient is worse than no recipient, and \
+the user cannot tell you picked one. If nothing matches the name, that lookup \
+found nobody; treat it exactly as an empty result. If several do match, do not \
+choose between them: ask, with their addresses as the options. \
+When a lookup finds nobody, the person may still have been corresponded with: \
+search the mail itself for the name next, and take the address off a message \
+header — again only if that header is the person you were asked about. \
+If you did resolve an address, save the person to the user's contacts \
+afterwards so the next command finds them straight away, using the name you \
+were given and the address you resolved. \
+If both lookups found nobody, do not send anything and do not guess: ask for \
+the address, then use it for what they originally asked for and save the \
+contact as well. Never put another person's name or address in a call to fill \
+the gap, and never fall back to sending to whoever a search did return. \
 Fill every argument you send with real content. If the user asks you to write \
 or draft something, compose the actual text — never send an empty body, an \
 empty subject, or a placeholder. If the same content is needed by two calls, \
@@ -80,9 +173,15 @@ fn now_line() -> String {
 /// Runs the loop for `command`. Returns the model's final answer.
 ///
 /// `on_event` fires for each tool call so the panel can show progress.
-/// `confirm` is awaited before any write tool runs; its future resolves to the
-/// user's yes/no.
-pub async fn run<F>(
+/// `confirm` is awaited before any write tool runs. It resolves to `None` when
+/// the user declines, or to the arguments to run with — which are not
+/// necessarily the ones passed in, because the gate lets a field be filled in
+/// or corrected before approving.
+// ponytail: eight arguments, five of them the run's inputs and three its
+// callbacks. A `Callbacks { on_event, confirm, ask }` struct is the fix if a
+// fourth ever appears; at three it would be ceremony around the same tuple.
+#[allow(clippy::too_many_arguments)]
+pub async fn run<F, A>(
     llm: &LlmClient,
     model: &str,
     composio: &ComposioClient,
@@ -90,11 +189,16 @@ pub async fn run<F>(
     tools: &[ToolDef],
     mut on_event: impl FnMut(LoopEvent),
     confirm: impl Fn(String, serde_json::Value) -> F,
+    ask: impl Fn(String) -> A,
 ) -> Result<String>
 where
-    F: Future<Output = bool>,
+    F: Future<Output = Option<serde_json::Value>>,
+    A: Future<Output = Option<String>>,
 {
-    let schemas: Vec<serde_json::Value> = tools.iter().map(ToolDef::to_openai).collect();
+    // The synthetic tool rides alongside Composio's; the model cannot tell them
+    // apart, and `execute` never sees it.
+    let mut schemas: Vec<serde_json::Value> = tools.iter().map(ToolDef::to_openai).collect();
+    schemas.push(ask_user_schema());
     let mut messages = vec![
         Message::system(format!("{TOOL_SYSTEM_PROMPT} {}", now_line())),
         Message::user(command),
@@ -102,6 +206,13 @@ where
 
     // The empty-answer fallback must not say "Done." over a failure.
     let mut any_failed = false;
+    // Reads already made this run, keyed by tool and exact arguments, and how
+    // many times each tool has run. Both are per-run: a fresh command asks
+    // fresh questions.
+    let mut seen: std::collections::HashMap<(String, String), String> =
+        std::collections::HashMap::new();
+    let mut budget: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut asked = 0usize;
 
     for round in 0..MAX_ROUNDS {
         let is_last = round == MAX_ROUNDS - 1;
@@ -187,6 +298,83 @@ where
             let args: serde_json::Value = serde_json::from_str(&call.function.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
 
+            // Answered by the user, not by Composio. Before the dedup below,
+            // which would hand back a previous answer to a new question.
+            if name == ASK_USER {
+                let question = args["question"].as_str().unwrap_or_default().to_string();
+                let options: Vec<String> = args["options"]
+                    .as_array()
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(|o| o.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // An agent that can ask can interrogate. Two is the most a
+                // spoken command should ever cost; past that the model is
+                // gathering requirements, and the honest move is to act on what
+                // it has and say what it assumed.
+                asked += 1;
+                if asked > MAX_QUESTIONS {
+                    tracing::warn!("question budget exhausted");
+                    messages.push(Message::tool_result(
+                        &call.id,
+                        r#"{"error":"no more questions can be asked this run. Act on what you have and state any assumption in your answer."}"#,
+                    ));
+                    continue;
+                }
+                on_event(LoopEvent::Asked {
+                    question: question.clone(),
+                    options,
+                });
+                let answer = ask(question)
+                    .instrument(tracing::info_span!("ask_user"))
+                    .await;
+                let result = match answer {
+                    Some(text) => serde_json::json!({ "answer": text }).to_string(),
+                    // Dismissed. Reported as a result rather than an error so the
+                    // model closes the run politely instead of retrying.
+                    None => r#"{"error":"the user did not answer"}"#.to_string(),
+                };
+                on_event(LoopEvent::ToolCallResult {
+                    name: name.clone(),
+                    success: true,
+                });
+                messages.push(Message::tool_result(&call.id, result));
+                continue;
+            }
+
+            // A read that has already run this turn is answered from the first
+            // result instead of being repeated. Looking one person up cost
+            // three round-trips — the same inbox query twice, then a third — and
+            // the model has no memory of having asked. Writes are excluded: two
+            // identical sends are two emails, and collapsing them would swallow
+            // the second silently.
+            if !is_write(&name, tools) {
+                if let Some(previous) = seen.get(&(name.clone(), args.to_string())) {
+                    tracing::debug!(tool = %name, "identical read already made; reusing");
+                    messages.push(Message::tool_result(&call.id, previous.clone()));
+                    continue;
+                }
+                // Independent of the dedup above: a model that varies one
+                // argument each time never hits the cache and would otherwise
+                // loop until MAX_ROUNDS.
+                let calls = budget.entry(name.clone()).or_insert(0);
+                *calls += 1;
+                if *calls > MAX_CALLS_PER_TOOL {
+                    tracing::warn!(tool = %name, "per-tool budget exhausted");
+                    messages.push(Message::tool_result(
+                        &call.id,
+                        format!(
+                            "{{\"error\":\"{name} has already been called \
+                             {MAX_CALLS_PER_TOOL} times this run and will not run \
+                             again. Answer from what you have.\"}}"
+                        ),
+                    ));
+                    continue;
+                }
+            }
+
             on_event(LoopEvent::ToolCallStart {
                 name: name.clone(),
                 args: args.clone(),
@@ -205,10 +393,24 @@ where
             // span so a 40s wait is not charged to pipeline latency. A declined
             // write returns as a normal result so the model can say "cancelled"
             // rather than erroring the whole command.
-            let declined = is_write(&name, tools)
-                && !confirm(name.clone(), args.clone())
+            // Rebound, not just checked: the gate returns the arguments to run
+            // with, so a field the user filled in at the gate is what executes.
+            // A read tool never reaches the gate and keeps the model's.
+            let mut args = args;
+            let declined = if is_write(&name, tools) {
+                match confirm(name.clone(), args.clone())
                     .instrument(tracing::info_span!("confirm", tool = %name, toolkit))
-                    .await;
+                    .await
+                {
+                    Some(approved) => {
+                        args = approved;
+                        false
+                    }
+                    None => true,
+                }
+            } else {
+                false
+            };
 
             let result = if declined {
                 on_event(LoopEvent::ToolCallResult {
@@ -237,6 +439,9 @@ where
                 result
             };
 
+            if !declined && !is_write(&name, tools) {
+                seen.insert((name.clone(), args.to_string()), result.clone());
+            }
             messages.push(Message::tool_result(&call.id, result));
         }
     }
