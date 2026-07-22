@@ -276,6 +276,7 @@ function Tuner() {
             >
               Transcript
             </Action>
+            <Action onClick={() => send({ agent: "planned" })}>Agent (queued)</Action>
             <Action onClick={() => send({ agent: "pending" })}>Agent (approve)</Action>
             <Action onClick={() => send({ agent: "run" })}>Agent (done)</Action>
             <Action onClick={() => send({ ask: "open" })}>Answer (whole)</Action>

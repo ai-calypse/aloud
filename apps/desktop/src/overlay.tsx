@@ -19,6 +19,17 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 import {
+  Queue,
+  QueueItem,
+  QueueItemContent,
+  QueueItemIndicator,
+  QueueList,
+  QueueSection,
+  QueueSectionContent,
+  QueueSectionLabel,
+  QueueSectionTrigger,
+} from "@/components/ai-elements/queue";
+import {
   Confirmation,
   ConfirmationAction,
   ConfirmationActions,
@@ -29,6 +40,7 @@ import {
   pendingStep,
   withCall,
   withResult,
+  withoutPlanned,
   type Run,
   type Step,
 } from "./lib/agent-steps";
@@ -700,6 +712,17 @@ function Overlay() {
         setAsk(null);
         setAgent(AGENT_PREVIEW);
       }
+      if (command.agent === "planned") {
+        setAsk(null);
+        setAgent({
+          ...AGENT_PREVIEW,
+          steps: [AGENT_PREVIEW.steps[0]],
+          planned: [
+            { name: "GMAIL_CREATE_EMAIL_DRAFT", app: "Gmail" },
+            { name: "GOOGLECALENDAR_FIND_EVENT", app: "Google Calendar" },
+          ],
+        });
+      }
       if (command.agent === "close") setAgent(null);
       if (command.partial === "clear") {
         clearInterval(typing);
@@ -726,8 +749,20 @@ function Overlay() {
           // A new run resets the panel; it is reused, not recreated.
           setAgent({ heard: payload.value, steps: [] });
           break;
+        case "planned":
+          setAgent((r) => r && { ...r, planned: payload.value });
+          break;
         case "toolCall":
-          setAgent((r) => r && { ...r, steps: withCall(r.steps, payload.value), status: undefined });
+          setAgent(
+            (r) =>
+              r && {
+                ...r,
+                steps: withCall(r.steps, payload.value),
+                // This call has stopped being a plan and become an action.
+                planned: withoutPlanned(r.planned, payload.value.name),
+                status: undefined,
+              },
+          );
           break;
         case "toolResult":
           setAgent((r) => r && { ...r, steps: withResult(r.steps, payload.value), status: undefined });
@@ -738,10 +773,15 @@ function Overlay() {
         case "runFinished":
           // The panel stays up: a run is something you check succeeded, and
           // Rust suppresses the hide the finishing run would otherwise trigger.
-          setAgent((r) => r && { ...r, finished: payload.value, status: undefined });
+          setAgent(
+            (r) =>
+              r && { ...r, finished: payload.value, status: undefined, planned: undefined },
+          );
           break;
         case "runError":
-          setAgent((r) => r && { ...r, error: payload.value, status: undefined });
+          setAgent(
+            (r) => r && { ...r, error: payload.value, status: undefined, planned: undefined },
+          );
           break;
       }
     });
@@ -1050,6 +1090,36 @@ function AgentRun({
           </ToolContent>
         </Tool>
       ))}
+
+      {/* What has not happened yet. Below the steps because it reads in run
+          order — done, doing, next — and it disappears as the last one starts. */}
+      {run.planned && run.planned.length > 0 && (
+        <Queue>
+          <QueueSection>
+            <QueueSectionTrigger>
+              <QueueSectionLabel count={run.planned.length} label="still to do" />
+            </QueueSectionTrigger>
+            <QueueSectionContent>
+              <QueueList>
+                {run.planned.map((next, i) => (
+                  <QueueItem key={`${next.name}-${i}`}>
+                    {/* QueueItem is a column — indicator and title share a row
+                        inside it, which is the shape its description slot
+                        expects underneath. */}
+                    <span className="flex items-start gap-2">
+                      <QueueItemIndicator />
+                      {/* No arguments yet: they arrive with the call. The label
+                          falls back to the humanised tool name, which is the
+                          honest amount to promise before it starts. */}
+                      <QueueItemContent>{labelFor(next.name, {})}</QueueItemContent>
+                    </span>
+                  </QueueItem>
+                ))}
+              </QueueList>
+            </QueueSectionContent>
+          </QueueSection>
+        </Queue>
+      )}
 
       {pending && (
         <Confirmation approval={{ id: pending.name }} state="approval-requested">

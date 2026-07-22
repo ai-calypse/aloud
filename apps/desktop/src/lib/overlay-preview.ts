@@ -33,7 +33,7 @@ export type PreviewCommand = {
    * needs a click mid-run, and the reason the panel takes the mouse before it
    * has finished rather than after.
    */
-  agent?: "run" | "pending" | "close";
+  agent?: "run" | "pending" | "planned" | "close";
   dismissing?: boolean;
   /** Rebuilds the panel's springs, which is how a changed --panel-* applies. */
   restart?: boolean;

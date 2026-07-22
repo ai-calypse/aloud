@@ -234,6 +234,18 @@ export type AgentEvent =
 /**  AG-UI RUN_STARTED — the transcript, echoed so the panel shows what it heard. */
 { kind: "runStarted"; value: string } | 
 /**
+ *  The tools this round intends to run, before the first one starts.
+ * 
+ *  Not an AG-UI event: AG-UI has no vocabulary for a batch the model has
+ *  returned but the loop has not begun. It is the same information the
+ *  panel would otherwise learn one call at a time, arriving at the only
+ *  moment it can still be acted on — a run that is about to send mail is
+ *  worth reading before the send, not after.
+ * 
+ *  Only sent when a round holds more than one call.
+ */
+{ kind: "planned"; value: PlannedCall[] } | 
+/**
  *  AG-UI TOOL_CALL_START + ARGS — a parsed action, with its args, awaiting
  *  dispatch. A write pauses here for confirmation (AG-UI human-in-the-loop).
  */
@@ -588,6 +600,16 @@ export type Phase = "idle" | "recording" | "transcribing" |
  *  while it dismisses, and "Pasted" would be a lie.
  */
 "noSpeech" | "error";
+
+/**
+ *  A tool the run intends to call. No arguments: they arrive with the call
+ *  itself, which is also the point it stops being a plan and starts being an
+ *  action.
+ */
+export type PlannedCall = {
+	name: string,
+	app: string,
+};
 
 export type SearchResult = {
 	note: Note,

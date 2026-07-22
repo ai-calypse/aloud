@@ -1,4 +1,4 @@
-import type { ToolCall, ToolResult } from "./bindings";
+import type { PlannedCall, ToolCall, ToolResult } from "./bindings";
 import type { ToolArgs } from "./tool-views";
 
 /**
@@ -25,6 +25,14 @@ export type Step = {
 export type Run = {
   heard: string;
   steps: Step[];
+  /**
+   * Tools this round intends to call that have not started yet.
+   *
+   * The model returns a batch and the loop runs it one at a time, so this is
+   * what is coming rather than what has happened. Entries leave as their call
+   * starts — see `withoutPlanned`.
+   */
+  planned?: PlannedCall[];
   finished?: string;
   error?: string;
   /** Transient line ("Rate limited — retrying…"); cleared by the next event. */
@@ -66,6 +74,23 @@ export function withCall(steps: Step[], call: ToolCall): Step[] {
       requiresConfirmation: call.requiresConfirmation,
     },
   ];
+}
+
+/**
+ * Drops the first queued entry for `name`, because that call has now started.
+ *
+ * By name and only the first, so a round that calls the same tool twice — two
+ * emails to two people — ticks off one of them per start rather than both.
+ */
+export function withoutPlanned(
+  planned: PlannedCall[] | undefined,
+  name: string,
+): PlannedCall[] | undefined {
+  if (!planned?.length) return planned;
+  const at = planned.findIndex((p) => p.name === name);
+  if (at === -1) return planned;
+  const left = [...planned.slice(0, at), ...planned.slice(at + 1)];
+  return left.length ? left : undefined;
 }
 
 /** Attaches a result to the last step still waiting for one. */

@@ -48,6 +48,16 @@ pub struct PendingConfirmation(Mutex<Option<oneshot::Sender<bool>>>);
 pub enum AgentEvent {
     /// AG-UI RUN_STARTED — the transcript, echoed so the panel shows what it heard.
     RunStarted(String),
+    /// The tools this round intends to run, before the first one starts.
+    ///
+    /// Not an AG-UI event: AG-UI has no vocabulary for a batch the model has
+    /// returned but the loop has not begun. It is the same information the
+    /// panel would otherwise learn one call at a time, arriving at the only
+    /// moment it can still be acted on — a run that is about to send mail is
+    /// worth reading before the send, not after.
+    ///
+    /// Only sent when a round holds more than one call.
+    Planned(Vec<PlannedCall>),
     /// AG-UI TOOL_CALL_START + ARGS — a parsed action, with its args, awaiting
     /// dispatch. A write pauses here for confirmation (AG-UI human-in-the-loop).
     ToolCall(ToolCall),
@@ -60,6 +70,16 @@ pub enum AgentEvent {
     RunFinished(String),
     /// AG-UI RUN_ERROR — the run failed before producing a result.
     RunError(String),
+}
+
+/// A tool the run intends to call. No arguments: they arrive with the call
+/// itself, which is also the point it stops being a plan and starts being an
+/// action.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PlannedCall {
+    pub name: String,
+    pub app: String,
 }
 
 /// An AG-UI tool call: the action name, the app it targets, and the parsed
@@ -226,6 +246,15 @@ fn display_args(args: &serde_json::Value) -> std::collections::BTreeMap<String, 
 /// Maps a loop event to the panel's AG-UI event vocabulary.
 fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
     match event {
+        aloud_agent::LoopEvent::Planned { names } => AgentEvent::Planned(
+            names
+                .into_iter()
+                .map(|name| PlannedCall {
+                    app: tool_app(&name),
+                    name,
+                })
+                .collect(),
+        ),
         aloud_agent::LoopEvent::ToolCallStart { name, args } => AgentEvent::ToolCall(ToolCall {
             app: tool_app(&name),
             name,

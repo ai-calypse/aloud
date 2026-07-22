@@ -57,6 +57,9 @@ async fn main() -> anyhow::Result<()> {
         &command,
         &tools,
         |event| match event {
+            LoopEvent::Planned { names } => {
+                println!("  [plan] {}", names.join(" → "));
+            }
             LoopEvent::ToolCallStart { name, args } => {
                 println!("  [tool] {name}({args})");
             }
