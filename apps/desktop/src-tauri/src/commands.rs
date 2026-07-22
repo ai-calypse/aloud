@@ -139,6 +139,7 @@ pub async fn test_prompt(
         fallback: Some(settings.fallback_model.as_str()),
         custom_prompt: &prompt,
         vocabulary: &settings.vocabulary,
+        preserve: &settings.preserve_phrases,
         // Neither caller is a live dictation, so the window in front now does
         // not describe the moment being tested.
         context: "",

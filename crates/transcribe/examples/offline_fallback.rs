@@ -18,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Port 1 refuses connections: a genuine transport error, not a mock.
     let cloud = CloudTranscriber::new("k", Some("http://127.0.0.1:1"), None, None)?;
-    let error = aloud_transcribe::Transcriber::transcribe(&cloud, &wav)
+    let error = aloud_transcribe::Transcriber::transcribe(&cloud, &wav, &[])
         .await
         .expect_err("nothing is listening on port 1");
     println!("Cloud failed: {error:#}");
@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     let model = download::ensure_model(&dir, local::DEFAULT_MODEL, |_| {}).await?;
     let started = std::time::Instant::now();
     let transcriber = local::LocalTranscriber::new(&model, None)?;
-    let text = aloud_transcribe::Transcriber::transcribe(&transcriber, &wav).await?;
+    let text = aloud_transcribe::Transcriber::transcribe(&transcriber, &wav, &[]).await?;
     println!("Local transcript in {:?}: {text:?}", started.elapsed());
     assert!(!text.trim().is_empty(), "the fallback produced no text");
     Ok(())

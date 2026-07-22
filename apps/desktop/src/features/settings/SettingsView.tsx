@@ -10,6 +10,7 @@ import {
 import { or } from "../../lib/result";
 import { HotkeyEditor } from "./HotkeyEditor";
 import { MacroEditor } from "./MacroEditor";
+import { TermListEditor } from "./TermListEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
 import { ConnectorEditor } from "./ConnectorEditor";
 import { RunLogView } from "./RunLogView";
@@ -56,7 +57,7 @@ function displayValue(display: OverlayDisplay | undefined): string {
 export type SettingsSection =
   | "general"
   | "hotkeys"
-  | "macros"
+  | "dictionary"
   | "rules"
   | "prompts"
   | "connectors"
@@ -102,7 +103,9 @@ export function SettingsView({
     commands.getSettings().then(setSettings);
     commands.defaultPrompt().then(setBuiltIn);
     or(commands.inputDevices(), [], "listing microphones").then(setDevices);
-    or(commands.launchAtLogin(), false, "reading launch-at-login").then(setAtLogin);
+    or(commands.launchAtLogin(), false, "reading launch-at-login").then(
+      setAtLogin,
+    );
     or(commands.overlayDisplays(), [], "listing displays").then(setDisplays);
     commands
       .buildInfo()
@@ -126,13 +129,16 @@ export function SettingsView({
     meeting_notes: null,
     agent: null,
   };
+  const preservePhrases = settings.preservePhrases ?? [];
   const macros = settings.macros ?? [];
   const appRules = settings.appRules ?? [];
   const tidy = settings.postProcessingEnabled ?? true;
   const commandMode = settings.commandModeEnabled ?? true;
   const overlayDisplay = settings.overlayDisplay;
   const chosenDisplay =
-    overlayDisplay && typeof overlayDisplay === "object" && "named" in overlayDisplay
+    overlayDisplay &&
+    typeof overlayDisplay === "object" &&
+    "named" in overlayDisplay
       ? overlayDisplay.named
       : null;
   const sounds = settings.playSounds ?? true;
@@ -393,26 +399,6 @@ export function SettingsView({
                     onChange={(c) => update({ contextEnabled: c })}
                   />
                 </Row>
-                <Row
-                  label="Vocabulary"
-                  hint="Names the model should spell correctly"
-                >
-                  <Value className="flex-1">
-                    <Input
-                      className={rowInput}
-                      value={vocabulary.join(", ")}
-                      placeholder="Kubernetes, Tauri, Aloud"
-                      onChange={(e) =>
-                        update({
-                          vocabulary: e.target.value
-                            .split(",")
-                            .map((v) => v.trim())
-                            .filter(Boolean),
-                        })
-                      }
-                    />
-                  </Value>
-                </Row>
               </>
             )}
           </Group>
@@ -435,7 +421,10 @@ export function SettingsView({
               />
             </Row>
 
-            <Row label="Say “press enter” at the end to submit" className="py-[11px]">
+            <Row
+              label="Say “press enter” at the end to submit"
+              className="py-[11px]"
+            >
               <Toggle
                 checked={settings.pressEnterCommand ?? true}
                 label="Say press enter at the end to submit"
@@ -567,7 +556,10 @@ export function SettingsView({
                   value={settings.audioRetentionMb ?? 0}
                   onChange={(e) =>
                     update({
-                      audioRetentionMb: Math.max(0, Number(e.target.value) || 0),
+                      audioRetentionMb: Math.max(
+                        0,
+                        Number(e.target.value) || 0,
+                      ),
                     })
                   }
                 />
@@ -746,7 +738,11 @@ export function SettingsView({
                   >
                     Switch to it
                   </Button>
-                  <Button variant="plain" size="text" onClick={acknowledgePrompt}>
+                  <Button
+                    variant="plain"
+                    size="text"
+                    onClick={acknowledgePrompt}
+                  >
                     Keep mine
                   </Button>
                 </div>
@@ -859,16 +855,66 @@ export function SettingsView({
         </>
       )}
 
-      {section === "macros" && (
+      {/* Three mechanisms, one pane, in the order a dictation passes through
+          them: the transcriber is biased, then cleanup is fenced off from
+          certain phrases, then the finished text is substituted into. Together
+          because what separates them — better odds, left alone, always exactly
+          this — is only legible side by side. */}
+      {section === "dictionary" && (
         <>
           <PaneTitle
-            title="Voice Macros"
-            subtitle="Say a phrase mid-dictation and it expands to the text you set."
+            title="Dictionary"
+            subtitle="Teach Aloud the words you use, the phrases it should not touch, and the shortcuts that save you typing."
           />
+
+          <TermListEditor
+            title="Words to get right"
+            terms={vocabulary}
+            placeholder="Kubernetes"
+            addLabel="Add Word"
+            empty={{
+              title: "No Words Yet",
+              body: "Add a name or word Aloud keeps hearing wrong.",
+            }}
+            onChange={(vocabulary) => update({ vocabulary })}
+          >
+            <p className="max-w-[520px] text-hint text-ink-2">
+              Names, brands and jargon Aloud mishears. Add "Kubernetes" and
+              "cuber netties" comes out right. One word or name per line — this
+              helps a lot of the time, but it is not a promise.
+            </p>
+          </TermListEditor>
+
+          <TermListEditor
+            title="Say it, keep it"
+            terms={preservePhrases}
+            placeholder="I am um boss"
+            addLabel="Add Phrase"
+            empty={{
+              title: "Nothing Here Yet",
+              body: "Add a phrase Aloud should type word for word.",
+            }}
+            onChange={(preservePhrases) => update({ preservePhrases })}
+          >
+            <p className="max-w-[520px] text-hint text-ink-2">
+              Aloud tidies what you say — it drops "um", trims repeated words
+              and smooths sentences out. Anything listed here it types word for
+              word instead. Say "I am um boss" and you get "I am um boss". The
+              rest of the sentence is still tidied.
+            </p>
+          </TermListEditor>
+
           <MacroEditor
             macros={macros}
             onChange={(macros) => update({ macros })}
-          />
+          >
+            <p className="max-w-[520px] text-hint text-ink-2">
+              Say something short, get something long. Say "my email" and Aloud
+              types your full address. This one always happens, every time.
+              Dictation only — it does not apply when you ask a question or use
+              the agent.
+            </p>
+          </MacroEditor>
         </>
       )}
 

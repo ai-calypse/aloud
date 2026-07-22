@@ -29,6 +29,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt,
         context: "",
         vocabulary: &[],
+        preserve: &[],
         output_language,
         instruction_guard: true,
     };

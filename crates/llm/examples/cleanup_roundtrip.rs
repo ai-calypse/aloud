@@ -61,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         context: "",
         vocabulary: &vocabulary,
+        preserve: &[],
         output_language: "",
         instruction_guard: true,
     };
@@ -80,11 +81,17 @@ async fn main() -> anyhow::Result<()> {
     assert_eq!(request["messages"][0]["role"], "system");
     assert_eq!(request["messages"][1]["role"], "user");
     assert!(
-        request["messages"][1]["content"]
+        request["messages"][0]["content"]
             .as_str()
             .unwrap()
-            .starts_with("VOCABULARY: Aloud, Tauri"),
+            .contains("Aloud, Tauri"),
         "the vocabulary must reach the model"
+    );
+    // In the system turn and nowhere near the transcript: a `VOCABULARY:` line
+    // in the user turn is text the model is told to preserve, and it pasted it.
+    assert_eq!(
+        request["messages"][1]["content"], "um so this is the raw transcript ok",
+        "the user turn is the transcript, alone"
     );
     assert_eq!(cleaned, "This is the cleaned up text.");
 
@@ -99,6 +106,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         context: "",
         vocabulary: &[],
+        preserve: &[],
         output_language: "",
         instruction_guard: true,
     };
@@ -116,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         context: "",
         vocabulary: &[],
+        preserve: &[],
         output_language: "",
         instruction_guard: true,
     };
@@ -135,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         context: "",
         vocabulary: &[],
+        preserve: &[],
         output_language: "German",
         instruction_guard: true,
     };
@@ -164,6 +174,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         context: "",
         vocabulary: &[],
+        preserve: &[],
         output_language: "",
         instruction_guard: true,
     };
@@ -183,6 +194,7 @@ async fn main() -> anyhow::Result<()> {
         custom_prompt: "",
         context: "",
         vocabulary: &[],
+        preserve: &[],
         output_language: "",
         instruction_guard: false,
     };

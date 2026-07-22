@@ -11,7 +11,7 @@ pub const CLEANUP: &str = include_str!("prompts/cleanup.md");
 /// stops receiving improvements silently; the app compares this against what
 /// they last acknowledged and offers the new default. Bump it whenever
 /// `cleanup.md` changes — `cleanup_version_tracks_the_prompt` fails if you don't.
-pub const CLEANUP_VERSION: &str = "2026-05-13";
+pub const CLEANUP_VERSION: &str = "2026-07-21";
 
 /// Transforms selected text per a spoken editing command.
 pub const COMMAND: &str = include_str!("prompts/command.md");
@@ -61,7 +61,7 @@ mod tests {
         });
         assert_eq!(
             (hash, CLEANUP_VERSION),
-            (0x998e_0b71_0b10_4748, "2026-05-13"),
+            (0xc47c_40d8_dac1_2adb, "2026-07-21"),
             "cleanup.md changed — bump CLEANUP_VERSION and this hash together"
         );
     }

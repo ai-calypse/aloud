@@ -522,8 +522,22 @@ export type Settings = {
 	 *  user never dictated, and a false positive only costs the raw transcript.
 	 */
 	instructionGuardEnabled?: boolean,
-	/**  Proper nouns and jargon fed to the model as a spelling reference. */
+	/**
+	 *  Proper nouns and jargon fed to the model as a spelling reference, and to
+	 *  the transcriber as a recognition bias. See `aloud_transcribe::bias_prompt`.
+	 */
 	vocabulary?: string[],
+	/**
+	 *  Phrases cleanup must return exactly as spoken — no filler removal, no
+	 *  rewording, no punctuation "fixes" inside them.
+	 * 
+	 *  Distinct from [`vocabulary`], which only steers *spelling* and leaves the
+	 *  model free to tidy the sentence around it. "I am um boss" needs the "um"
+	 *  kept, and the filler rule would otherwise delete it.
+	 * 
+	 *  [`vocabulary`]: Settings::vocabulary
+	 */
+	preservePhrases?: string[],
 	/**
 	 *  Tell cleanup what app and window are in front, so it can spell names the
 	 *  way the screen does. Off by default: a window title is a document name,

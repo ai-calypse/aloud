@@ -381,6 +381,7 @@ impl Pipeline {
                     // tap and has no runtime of its own.
                     tauri::async_runtime::handle().inner(),
                     async move { pipeline.preview_transcriber(&for_build).await },
+                    settings.vocabulary.clone(),
                     Box::new(move |partial| crate::overlay::send_partial(&app, partial)),
                 )
             });
@@ -718,6 +719,7 @@ impl Pipeline {
                     fallback: Some(settings.fallback_model.as_str()),
                     custom_prompt: &settings.custom_system_prompt,
                     vocabulary: &settings.vocabulary,
+                    preserve: &settings.preserve_phrases,
                     context,
                     output_language: &settings.output_language,
                     instruction_guard: settings.instruction_guard_enabled,
@@ -791,7 +793,12 @@ impl Pipeline {
         wav: &std::path::Path,
     ) -> Result<(String, Engine)> {
         let engine = effective_engine(settings);
-        let error = match self.transcriber(settings).await?.transcribe(wav).await {
+        let error = match self
+            .transcriber(settings)
+            .await?
+            .transcribe(wav, &settings.vocabulary)
+            .await
+        {
             Ok(text) => return Ok((text, engine)),
             Err(e) if engine == Engine::Cloud && aloud_transcribe::is_recoverable_locally(&e) => e,
             Err(e) => return Err(e),
@@ -813,7 +820,7 @@ impl Pipeline {
         let text = self
             .transcriber(&local)
             .await?
-            .transcribe(wav)
+            .transcribe(wav, &settings.vocabulary)
             .await
             // Without the cloud error the user is told the local model failed
             // and never learns why it was reached for.
@@ -1165,7 +1172,11 @@ impl Pipeline {
         if let Some(engine) = engine {
             settings.engine = engine;
         }
-        let raw = self.transcriber(&settings).await?.transcribe(&wav).await?;
+        let raw = self
+            .transcriber(&settings)
+            .await?
+            .transcribe(&wav, &settings.vocabulary)
+            .await?;
         if raw.trim().is_empty() {
             bail!("the recording transcribed to nothing — it may be silence");
         }

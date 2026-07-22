@@ -21,7 +21,9 @@ pub fn expand(text: &str, macros: &[Macro]) -> String {
         .iter()
         .filter(|m| !m.trigger.trim().is_empty())
         .collect();
-    ordered.sort_by_key(|m| std::cmp::Reverse(m.trigger.trim().len()));
+    // Chars, not bytes: a smart quote is three bytes, which would rank a
+    // possessive trigger above a longer one that has none.
+    ordered.sort_by_key(|m| std::cmp::Reverse(m.trigger.trim().chars().count()));
 
     let mut result = text.to_string();
     for m in ordered {
@@ -33,36 +35,77 @@ pub fn expand(text: &str, macros: &[Macro]) -> String {
 /// Case-insensitive, word-boundary replacement of `phrase` with `to`. Hand-rolled
 /// rather than a regex dependency for one pattern; the boundary rule is just
 /// "not flanked by an alphanumeric".
+///
+/// Compared over [`fold`]ed chars rather than bytes, then mapped back through
+/// `origin` to slice the original text — the fold drops and merges characters,
+/// so the two are not positionally the same.
 fn replace_phrase(haystack: &str, phrase: &str, to: &str) -> String {
-    let hay_lower = haystack.to_lowercase();
-    let needle = phrase.to_lowercase();
-    let bytes = haystack.as_bytes();
+    let hay: Vec<char> = haystack.chars().collect();
+    let (folded, origin) = fold(&hay);
+    let (needle, _) = fold(&phrase.chars().collect::<Vec<_>>());
+    if needle.is_empty() {
+        return haystack.to_string();
+    }
 
     let mut out = String::with_capacity(haystack.len());
     let mut cursor = 0;
-    while let Some(rel) = hay_lower[cursor..].find(&needle) {
-        let start = cursor + rel;
-        let end = start + needle.len();
-
-        let before_ok = start == 0 || !is_alnum(bytes[start - 1]);
-        let after_ok = end == bytes.len() || !is_alnum(bytes[end]);
-
-        if before_ok && after_ok {
-            out.push_str(&haystack[cursor..start]);
+    let mut i = 0;
+    while i + needle.len() <= folded.len() {
+        let end = i + needle.len();
+        // Where the match starts and ends in the original, which spans any
+        // characters the fold dropped inside it.
+        let from = origin[i];
+        let to_ = origin.get(end).copied().unwrap_or(hay.len());
+        let matched = folded[i..end] == needle[..]
+            && (from == 0 || !hay[from - 1].is_alphanumeric())
+            && (to_ == hay.len() || !hay[to_].is_alphanumeric());
+        if matched {
+            out.extend(&hay[cursor..from]);
             out.push_str(to);
-            cursor = end;
+            cursor = to_;
+            i = end;
         } else {
-            // Advance past this false match to avoid a loop.
-            out.push_str(&haystack[cursor..=start]);
-            cursor = start + 1;
+            i += 1;
         }
     }
-    out.push_str(&haystack[cursor..]);
+    out.extend(&hay[cursor..]);
     out
 }
 
-fn is_alnum(b: u8) -> bool {
-    b.is_ascii_alphanumeric()
+/// Folds away the differences between a trigger typed into Settings and the
+/// same words coming back from Whisper, alongside each folded char's index in
+/// `text` — the fold is not 1:1, so the caller cannot recover them.
+///
+/// Apostrophes are the reason this exists: WKWebView applies macOS smart-quote
+/// substitution inside text inputs, so a trigger typed as "Sam's email" is
+/// stored as U+2019 while a transcript spells it U+0027, or drops it entirely.
+/// Removing it rather than normalising it makes all three the same trigger. The
+/// cost is that a trigger of "well" also fires on "we'll"; single common words
+/// make poor triggers anyway.
+///
+/// `to_lowercase().next()` keeps Unicode case folding for the 1:1 majority and
+/// degrades to the first char for the few that expand (İ → i); both sides fold
+/// identically, so the comparison stays consistent either way.
+fn fold(text: &[char]) -> (Vec<char>, Vec<usize>) {
+    let mut folded = Vec::with_capacity(text.len());
+    let mut origin = Vec::with_capacity(text.len());
+    for (i, &c) in text.iter().enumerate() {
+        let f = match c {
+            '\'' | '\u{2018}' | '\u{2019}' | '\u{02BC}' => continue,
+            // A run of spaces, or a line break cleanup put mid-phrase, is still
+            // one word gap.
+            c if c.is_whitespace() => {
+                if folded.last() == Some(&' ') {
+                    continue;
+                }
+                ' '
+            }
+            c => c.to_lowercase().next().unwrap_or(c),
+        };
+        folded.push(f);
+        origin.push(i);
+    }
+    (folded, origin)
 }
 
 #[cfg(test)]
@@ -124,6 +167,74 @@ mod tests {
     #[test]
     fn no_macros_is_the_identity() {
         assert_eq!(expand("unchanged", &[]), "unchanged");
+    }
+
+    /// Regression: the Settings input smart-quotes a typed apostrophe, so this
+    /// is the shape every possessive trigger actually has on disk.
+    #[test]
+    fn a_smart_quoted_trigger_matches_a_plain_transcript() {
+        let macros = [m("Sam\u{2019}s email", "sam@example.com")];
+        assert_eq!(
+            expand("Send it to Sam's email please", &macros),
+            "Send it to sam@example.com please"
+        );
+    }
+
+    /// And the reverse: Whisper punctuates with a curly apostrophe often enough
+    /// that folding only the trigger would leave the same hole.
+    #[test]
+    fn a_plain_trigger_matches_a_smart_quoted_transcript() {
+        let macros = [m("sam's email", "sam@example.com")];
+        assert_eq!(
+            expand("send it to Sam\u{2019}s email", &macros),
+            "send it to sam@example.com"
+        );
+    }
+
+    /// Whisper is not reliable about the possessive apostrophe on a name.
+    #[test]
+    fn a_dropped_apostrophe_still_matches() {
+        let macros = [m("Sam\u{2019}s email", "sam@example.com")];
+        assert_eq!(
+            expand("send it to Sams email", &macros),
+            "send it to sam@example.com"
+        );
+    }
+
+    /// The fold drops characters inside the match, so the replaced span is
+    /// wider than the trigger — a mapping bug shows up as a stray apostrophe.
+    #[test]
+    fn nothing_of_the_match_is_left_behind() {
+        let macros = [m("sams email", "sam@example.com")];
+        assert_eq!(expand("[Sam\u{2019}s email]", &macros), "[sam@example.com]");
+    }
+
+    /// Cleanup can break a line anywhere, including between a trigger's words.
+    #[test]
+    fn a_line_break_inside_the_trigger_still_matches() {
+        let macros = [m("my email", "jane@example.com")];
+        assert_eq!(
+            expand("send my\nemail now", &macros),
+            "send jane@example.com now"
+        );
+    }
+
+    /// Byte-indexed matching read the boundary off the first byte of a
+    /// multi-byte char, which is never ASCII-alphanumeric — so any trigger
+    /// ending a word before an accent fired.
+    #[test]
+    fn a_multibyte_char_is_still_a_word_boundary() {
+        let macros = [m("caf", "COFFEE")];
+        assert_eq!(expand("caf\u{e9} au lait", &macros), "café au lait");
+    }
+
+    #[test]
+    fn text_around_the_match_keeps_its_original_characters() {
+        let macros = [m("sig", "— Jane")];
+        assert_eq!(
+            expand("It\u{2019}s CAF\u{c9}, sig", &macros),
+            "It\u{2019}s CAF\u{c9}, — Jane"
+        );
     }
 
     #[test]

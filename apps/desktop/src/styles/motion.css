@@ -133,6 +133,64 @@
   animation: materialize var(--spring-dur) var(--spring) both;
 }
 
+/* A row added to or deleted from an editor list. The card it sits in has no
+ * height of its own, so growing the row *is* the card growing — the alternative
+ * is the rest of the pane snapping down a row's worth, which is the clearest
+ * tell of web UI in a native app.
+ *
+ * `grid-template-rows` and not `height`: the natural height is the content's,
+ * and `auto` does not interpolate. The child needs `overflow: hidden` or it
+ * spills out of the 0fr track instead of being clipped by it.
+ *
+ * Both ends of both keyframes are stated. An implicit end resolves to the
+ * element's computed `1fr`, which reads as "no animation" on the way in and as
+ * a hard cut on the way out.
+ */
+@keyframes row-in {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    filter: blur(3px);
+  }
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@keyframes row-out {
+  from {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    filter: blur(3px);
+  }
+}
+
+.motion-row {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.motion-row > * {
+  overflow: hidden;
+}
+
+.motion-row[data-motion="in"] {
+  animation: row-in var(--spring-dur) var(--spring) both;
+}
+
+/* Slower than the entrance, per the app's open/close asymmetry, and eased
+ * rather than sprung: a row on its way out must not overshoot back into view. */
+.motion-row[data-motion="out"] {
+  animation: row-out var(--spring-dur-slow) var(--ease-in) both;
+}
+
 /* A highlight sweeping across text while the agent is thinking. CSS, not a JS
  * loop, so the reduced-motion switch above actually reaches it. */
 @keyframes shimmer {

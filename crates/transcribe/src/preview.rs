@@ -26,14 +26,18 @@ static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
 /// Transcribes one buffer of 24 kHz mono PCM16 — the rate the realtime tap
 /// emits — by staging it as the 16 kHz WAV both engines want. The file is
 /// removed whether or not transcription succeeded.
-pub async fn transcribe_pcm16(transcriber: &dyn Transcriber, pcm16: &[u8]) -> Result<String> {
+pub async fn transcribe_pcm16(
+    transcriber: &dyn Transcriber,
+    pcm16: &[u8],
+    vocabulary: &[String],
+) -> Result<String> {
     let path = std::env::temp_dir().join(format!(
         "aloud-chunk-{}-{}.wav",
         std::process::id(),
         NEXT_STAGE.fetch_add(1, Ordering::Relaxed)
     ));
     aloud_audio::write_pcm16_wav(&path, pcm16)?;
-    let result = transcriber.transcribe(&path).await;
+    let result = transcriber.transcribe(&path, vocabulary).await;
     let _ = std::fs::remove_file(&path);
     result
 }
@@ -75,12 +79,13 @@ impl Preview {
     pub fn spawn(
         runtime: &tokio::runtime::Handle,
         transcriber: impl std::future::Future<Output = Result<Arc<dyn Transcriber>>> + Send + 'static,
+        vocabulary: Vec<String>,
         on_partial: Box<dyn Fn(&str) + Send>,
     ) -> Self {
         let audio = Arc::new(Mutex::new(Vec::new()));
         Self {
             audio: audio.clone(),
-            worker: Some(runtime.spawn(run(audio, transcriber, on_partial))),
+            worker: Some(runtime.spawn(run(audio, transcriber, vocabulary, on_partial))),
         }
     }
 
@@ -108,6 +113,9 @@ impl Drop for Preview {
 async fn run(
     audio: Arc<Mutex<Vec<u8>>>,
     transcriber: impl std::future::Future<Output = Result<Arc<dyn Transcriber>>>,
+    // Biased the same way the real transcription will be, or the preview shows
+    // "cuber netties" and the paste shows "Kubernetes", which reads as a bug.
+    vocabulary: Vec<String>,
     on_partial: Box<dyn Fn(&str) + Send>,
 ) {
     let mut committed = String::new();
@@ -139,15 +147,18 @@ async fn run(
             }
         }
 
-        let text = match transcribe_pcm16(built.as_deref().expect("built above"), &window).await {
-            Ok(text) => text,
-            // One failure means every pass fails the same way; stop rather than
-            // log four times a second for the rest of the dictation.
-            Err(e) => {
-                tracing::warn!(%e, "live preview stopped");
-                return;
-            }
-        };
+        let text =
+            match transcribe_pcm16(built.as_deref().expect("built above"), &window, &vocabulary)
+                .await
+            {
+                Ok(text) => text,
+                // One failure means every pass fails the same way; stop rather than
+                // log four times a second for the rest of the dictation.
+                Err(e) => {
+                    tracing::warn!(%e, "live preview stopped");
+                    return;
+                }
+            };
 
         // Whisper answers an uncertain window with nothing, and the
         // hallucination filter blanks others; replacing the tail with that makes
@@ -191,7 +202,7 @@ mod tests {
 
     #[async_trait]
     impl Transcriber for Fake {
-        async fn transcribe(&self, _: &Path) -> Result<String> {
+        async fn transcribe(&self, _: &Path, _: &[String]) -> Result<String> {
             self.replies
                 .lock()
                 .unwrap()
@@ -223,6 +234,7 @@ mod tests {
         let preview = Preview::spawn(
             &tokio::runtime::Handle::current(),
             async move { Ok(t) },
+            Vec::new(),
             Box::new(move |p| seen.lock().unwrap().push(p.to_string())),
         );
         let mut tap = preview.tap();
@@ -250,6 +262,7 @@ mod tests {
         let preview = Preview::spawn(
             &tokio::runtime::Handle::current(),
             async move { Ok(t) },
+            Vec::new(),
             Box::new(move |p| seen.lock().unwrap().push(p.to_string())),
         );
         let mut tap = preview.tap();

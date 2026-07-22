@@ -1,6 +1,11 @@
 //! Downloads the default model (once) and transcribes a WAV with no network.
 //!
-//! `cargo run -p aloud-transcribe --example transcribe_local -- <file.wav>`
+//! `cargo run -p aloud-transcribe --example transcribe_local -- <file.wav> [terms,…]`
+//!
+//! The optional second argument is the vocabulary. Only a real decode shows
+//! whether biasing does anything: run the same WAV twice, once with the term
+//! and once without, and diff the transcript. A unit test can only prove the
+//! prompt was built.
 
 use aloud_transcribe::{download, local};
 use std::path::PathBuf;
@@ -13,6 +18,11 @@ async fn main() -> anyhow::Result<()> {
         .nth(1)
         .unwrap_or_else(|| "/tmp/aloud-test.wav".into())
         .into();
+
+    let vocabulary: Vec<String> = std::env::args()
+        .nth(2)
+        .map(|v| v.split(',').map(|t| t.trim().to_string()).collect())
+        .unwrap_or_default();
 
     let dir = local::model_dir()?;
     println!("Model dir: {}", dir.display());
@@ -34,8 +44,12 @@ async fn main() -> anyhow::Result<()> {
     println!("Loaded in {:?}", started.elapsed());
 
     let started = std::time::Instant::now();
-    let text = aloud_transcribe::Transcriber::transcribe(&transcriber, &wav).await?;
+    let text = aloud_transcribe::Transcriber::transcribe(&transcriber, &wav, &vocabulary).await?;
     println!("Transcribed in {:?}", started.elapsed());
+    println!(
+        "Bias prompt: {:?}",
+        aloud_transcribe::bias_prompt(&vocabulary)
+    );
     println!("\nTranscript: {text:?}");
     Ok(())
 }

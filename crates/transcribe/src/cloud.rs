@@ -98,7 +98,7 @@ impl CloudTranscriber {
 
 #[async_trait]
 impl Transcriber for CloudTranscriber {
-    async fn transcribe(&self, wav_path: &Path) -> Result<String> {
+    async fn transcribe(&self, wav_path: &Path, vocabulary: &[String]) -> Result<String> {
         let audio = tokio::fs::read(wav_path)
             .await
             .with_context(|| format!("reading {}", wav_path.display()))?;
@@ -115,6 +115,11 @@ impl Transcriber for CloudTranscriber {
 
         if let Some(language) = &self.language {
             form = form.text("language", language.clone());
+        }
+        // Same field name and same meaning as whisper.cpp's initial prompt —
+        // the OpenAI transcription API exposes it as `prompt`.
+        if let Some(bias) = crate::bias_prompt(vocabulary) {
+            form = form.text("prompt", bias);
         }
 
         let response = self

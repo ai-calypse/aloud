@@ -195,7 +195,7 @@ async fn transcribe_chunks(
         let Some(t) = transcriber.as_deref() else {
             continue;
         };
-        match aloud_transcribe::preview::transcribe_pcm16(t, &chunk).await {
+        match aloud_transcribe::preview::transcribe_pcm16(t, &chunk, &settings.vocabulary).await {
             Ok(text) if !text.trim().is_empty() => segments.push((index, text)),
             Ok(_) => segments.push((index, "[inaudible]".to_string())),
             Err(e) => {

@@ -82,8 +82,18 @@ pub struct Settings {
     /// see [`aloud_llm::guard`]. On by default: it catches pasting text the
     /// user never dictated, and a false positive only costs the raw transcript.
     pub instruction_guard_enabled: bool,
-    /// Proper nouns and jargon fed to the model as a spelling reference.
+    /// Proper nouns and jargon fed to the model as a spelling reference, and to
+    /// the transcriber as a recognition bias. See `aloud_transcribe::bias_prompt`.
     pub vocabulary: Vec<String>,
+    /// Phrases cleanup must return exactly as spoken — no filler removal, no
+    /// rewording, no punctuation "fixes" inside them.
+    ///
+    /// Distinct from [`vocabulary`], which only steers *spelling* and leaves the
+    /// model free to tidy the sentence around it. "I am um boss" needs the "um"
+    /// kept, and the filler rule would otherwise delete it.
+    ///
+    /// [`vocabulary`]: Settings::vocabulary
+    pub preserve_phrases: Vec<String>,
     /// Tell cleanup what app and window are in front, so it can spell names the
     /// way the screen does. Off by default: a window title is a document name,
     /// a chat participant or a URL, sent to a third party on every dictation.
@@ -167,6 +177,7 @@ impl Default for Settings {
             output_language: String::new(),
             instruction_guard_enabled: true,
             vocabulary: Vec::new(),
+            preserve_phrases: Vec::new(),
             context_enabled: false,
             context_screenshot_enabled: false,
             macros: Vec::new(),
@@ -546,10 +557,9 @@ mod rename_tests {
             "the rest of the file survives"
         );
 
-        let glass = Settings::from_json(
-            r#"{ "overlayStyle": "liquidGlass", "groqApiKey": "keep-me" }"#,
-        )
-        .expect("a retired style must not fail the document");
+        let glass =
+            Settings::from_json(r#"{ "overlayStyle": "liquidGlass", "groqApiKey": "keep-me" }"#)
+                .expect("a retired style must not fail the document");
         assert_eq!(glass.overlay_style, Settings::default().overlay_style);
         assert_eq!(glass.groq_api_key, "keep-me");
 

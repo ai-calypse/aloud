@@ -37,6 +37,7 @@ async fn main() -> anyhow::Result<()> {
     let preview = aloud_transcribe::preview::Preview::spawn(
         &tokio::runtime::Handle::current(),
         async move { Ok(transcriber) },
+        Vec::new(),
         Box::new(move |partial| {
             println!("[{:>5.1?}] {partial}", started.elapsed());
         }),

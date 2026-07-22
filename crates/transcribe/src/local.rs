@@ -53,6 +53,7 @@ fn threads() -> i32 {
 fn run_whisper(
     context: &WhisperContext,
     language: Option<&str>,
+    bias: Option<&str>,
     samples: &[f32],
 ) -> Result<String> {
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
@@ -71,6 +72,14 @@ fn run_whisper(
     // A dictation is one utterance: priming the decoder with the previous
     // window's text only invites a run-on.
     params.set_no_context(true);
+
+    // After `set_no_context`, which reads as a conflict and is not:
+    // whisper.cpp clears the prompt history *before* pushing the initial
+    // prompt, so the vocabulary survives and only the previous window's text
+    // is dropped.
+    if let Some(bias) = bias {
+        params.set_initial_prompt(bias);
+    }
 
     let mut state = context.create_state().context("creating state")?;
     state.full(params, samples).context("running whisper")?;
@@ -98,7 +107,7 @@ fn run_whisper(
 
 #[async_trait]
 impl Transcriber for LocalTranscriber {
-    async fn transcribe(&self, wav_path: &Path) -> Result<String> {
+    async fn transcribe(&self, wav_path: &Path, vocabulary: &[String]) -> Result<String> {
         let samples = read_wav_16k_mono(wav_path)?;
 
         // Seconds of blocking CPU: on an async worker this starves the runtime
@@ -106,9 +115,12 @@ impl Transcriber for LocalTranscriber {
         // publish the result never gets scheduled.
         let context = self.context.clone();
         let language = self.language.clone();
-        tokio::task::spawn_blocking(move || run_whisper(&context, language.as_deref(), &samples))
-            .await
-            .context("whisper task panicked")?
+        let bias = crate::bias_prompt(vocabulary);
+        tokio::task::spawn_blocking(move || {
+            run_whisper(&context, language.as_deref(), bias.as_deref(), &samples)
+        })
+        .await
+        .context("whisper task panicked")?
     }
 }
 

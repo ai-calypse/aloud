@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
         fallback: None,
         custom_prompt: "",
         vocabulary: &[],
+        preserve: &[],
         context,
         output_language: "",
         instruction_guard: true,

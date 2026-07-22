@@ -18,7 +18,77 @@ use std::path::Path;
 pub trait Transcriber: Send + Sync {
     /// Transcribes a 16 kHz mono PCM16 WAV. Silence returns an empty string,
     /// which is a normal outcome, not an error.
-    async fn transcribe(&self, wav_path: &Path) -> Result<String>;
+    ///
+    /// `vocabulary` biases recognition — see [`bias_prompt`]. Per call rather
+    /// than per engine because the user can edit the list between two
+    /// dictations, and the engine is built once and reused.
+    async fn transcribe(&self, wav_path: &Path, vocabulary: &[String]) -> Result<String>;
+}
+
+/// Longest bias prompt sent to either engine.
+///
+/// Whisper's prompt is capped at `n_text_ctx / 2` = 224 tokens and the rest is
+/// silently dropped, so the cap belongs here where it can drop whole entries
+/// rather than half of one — a truncated name biases toward a nonsense token.
+/// ~4 chars per token, kept well under.
+const MAX_BIAS_CHARS: usize = 700;
+
+/// The vocabulary as a prompt that nudges the decoder toward these spellings.
+///
+/// This is *biasing*, not substitution: it raises the odds of "Kubernetes"
+/// over "cuber netties", and cannot promise it. Exact, guaranteed output is what
+/// `aloud_store::macros` is for.
+///
+/// A bare comma-separated list rather than a sentence: whisper conditions on
+/// the prompt as if it were preceding speech, so prose invites it to continue
+/// the prose — the failure mode where a primed word appears in a transcript
+/// that never contained it.
+pub fn bias_prompt(vocabulary: &[String]) -> Option<String> {
+    let mut prompt = String::new();
+    for term in vocabulary
+        .iter()
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+    {
+        let separator = if prompt.is_empty() { "" } else { ", " };
+        if prompt.len() + separator.len() + term.len() > MAX_BIAS_CHARS {
+            break;
+        }
+        prompt.push_str(separator);
+        prompt.push_str(term);
+    }
+    (!prompt.is_empty()).then_some(prompt)
+}
+
+#[cfg(test)]
+mod bias_tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_vocabulary_sends_no_prompt() {
+        assert_eq!(bias_prompt(&[]), None);
+        assert_eq!(bias_prompt(&["".into(), "   ".into()]), None);
+    }
+
+    #[test]
+    fn terms_are_joined_and_trimmed() {
+        assert_eq!(
+            bias_prompt(&["  Kubernetes ".into(), "Tauri".into()]),
+            Some("Kubernetes, Tauri".to_string())
+        );
+    }
+
+    /// A term cut in half biases toward a token the user never said, so the cap
+    /// drops whole entries.
+    #[test]
+    fn the_cap_never_splits_a_term() {
+        let long: Vec<String> = (0..100).map(|i| format!("Term{i:03}Padding")).collect();
+        let prompt = bias_prompt(&long).unwrap();
+        assert!(prompt.len() <= MAX_BIAS_CHARS);
+        for term in prompt.split(", ") {
+            assert!(long.contains(&term.to_string()), "{term} was cut");
+        }
+    }
 }
 
 /// Whether a failed cloud transcription is worth retrying on-device.
