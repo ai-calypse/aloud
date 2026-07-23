@@ -1407,6 +1407,7 @@ function Overlay() {
                 permissions={permissions}
                 onOpenAgent={openAgent}
                 onOpenAgents={openAgents}
+                onResolve={resolvePermission}
               />
             )
           ) : panelOpen ? (
@@ -1698,11 +1699,13 @@ function NotchAgents({
   permissions,
   onOpenAgent,
   onOpenAgents,
+  onResolve,
 }: {
   sessions: AgentSession[];
   permissions: AgentPermission[];
   onOpenAgent: (id: string) => void;
   onOpenAgents: () => void;
+  onResolve: (id: string, reply: ApprovalReply) => void;
 }) {
   const askingIds = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
   const cats = ambientCats(sessions);
@@ -1762,12 +1765,15 @@ function NotchAgents({
           />
         ))}
       </div>
-      {/* The detail plate — unfolds under the row for the hovered card. One
-          shared surface: gliding across cards re-keys its contents. */}
-      <NotchPlate
+      {/* The peek under the row for the hovered card: a compact head on a quick
+          hover, and — once dwelt on past DWELL_MS — the *same* full detail view
+          a click opens (`AgentDetailBody`), so you can read what an agent is
+          doing without clicking in. One shared surface; gliding re-keys it. */}
+      <NotchPeekPlate
         session={hoveredSession}
-        asking={hoveredSession ? askingIds.has(hoveredSession.id) : false}
+        permissions={permissions}
         dwelling={dwelling}
+        onResolve={onResolve}
       />
       <button className="notch-agents__all" type="button" onClick={onOpenAgents}>
         View all agents
@@ -1883,49 +1889,46 @@ const AGENT_NAME: Record<string, string> = {
 };
 
 /**
- * The detail plate under the dealt row, revealed *progressively* on hover — no
- * click needed to read what an agent is doing:
+ * The peek under the dealt row for the hovered card — read an agent without a
+ * click, in two tiers:
  *
- * - A quick hover shows the compact head: `project @ branch`, the stage, a live
- *   "Now" line (the running tool), and the agent · model · subagent count.
- * - *Dwelling* on one card past `DWELL_MS` unfolds the rest — cwd, the user's
- *   prompt, and each subagent — so you can actually read it. Sweeping the row
- *   only peeks; lingering commits. Clicking the card still opens the pinned
- *   detail view that survives mouse-leave.
+ * - A quick hover shows a compact head: `project @ branch`, the stage, the
+ *   agent · model · subagent count, and the live "Now" tool.
+ * - *Dwelling* past `DWELL_MS` swaps that for the **same full detail view a
+ *   click opens** (`AgentDetailBody`: avatar, cwd, the "You:" prompt, the
+ *   approve/deny card if it is asking, Now, and every subagent) — the identical
+ *   component and width, so the peek is the real thing, just without the click.
+ *   Clicking still opens the pinned version that survives mouse-leave.
  *
- * One shared plate for the whole row: gliding between cards keeps it open and
- * re-keys its contents (crossfade, not a jump). Emerges downward from the row,
- * the direction the notch grows — the `aloud-motion` "things emerge from where
- * they came from". `session` null = collapsed; it stays mounted (and holds the
- * last session) so the fold has something to animate and never blanks mid-way.
+ * One shared surface for the whole row: gliding re-keys it. It holds the last
+ * session through the collapse so the fold never blanks mid-way; and both tiers
+ * are pinned to the detail's own width (a `min-width`), so the peek is always
+ * the notch-panel size, never as wide as its longest line of text.
  */
-function NotchPlate({
+function NotchPeekPlate({
   session,
-  asking,
+  permissions,
   dwelling,
+  onResolve,
 }: {
   session: AgentSession | null;
-  asking: boolean;
-  /** The cursor has rested on this card long enough to unfold the full detail. */
+  permissions: AgentPermission[];
+  /** The cursor has rested on this card long enough to show the full detail. */
   dwelling: boolean;
+  onResolve: (id: string, reply: ApprovalReply) => void;
 }) {
-  // Hold the last session through the collapse, so the text does not blank out
-  // while the plate is still folding away.
+  // Hold the last session through the collapse, so it does not blank out while
+  // the plate is still folding away.
   const shown = useRef<AgentSession | null>(null);
-  const wasAsking = useRef(false);
-  if (session) {
-    shown.current = session;
-    wasAsking.current = asking;
-  }
+  if (session) shown.current = session;
   const s = shown.current;
-  const subs = s?.subagents ?? [];
-  // What it is doing right now — the same stage the cat and badge encode, spelt
-  // out ("thinking", "reading files", …). Held with the session so it does not
-  // blank mid-collapse.
-  const stage = s ? agentStage(s, wasAsking.current) : "idle";
+  const permission = s ? (permissions.find((p) => p.sessionId === s.id) ?? null) : null;
+  const asking = permission !== null;
+  const stage = s ? agentStage(s, asking) : "idle";
   const state = s ? rowState(s) : "done";
-  // Only fully open once the cursor has actually settled on a card — never mid
-  // fold-away (no session), or the plate would grow as it is trying to leave.
+  const subs = s?.subagents.length ?? 0;
+  // Full detail only once the cursor has settled on a card — never mid fold-away
+  // (no session), or it would grow as it is trying to leave.
   const expanded = dwelling && session !== null;
   return (
     <div
@@ -1934,67 +1937,51 @@ function NotchPlate({
       data-expanded={expanded ? "" : undefined}
       aria-hidden={!session}
     >
-      {s && (
-        <div className="notch-plate__inner" key={s.id}>
-          <span className="notch-plate__title">{rowName(s)}</span>
-          {/* What it is doing right now, led by the badge's own status dot. */}
-          <span className="notch-plate__stage">
-            <span
-              className="notch-plate__pip"
-              data-state={wasAsking.current ? "asking" : state}
-              aria-hidden
+      {s &&
+        (expanded ? (
+          // The real detail view a click opens — no back button (nowhere to go),
+          // and no cat-peek inside a peek.
+          <div className="notch-plate__inner notch-plate__inner--full" key={`${s.id}-full`}>
+            <AgentDetailBody
+              session={s}
+              permission={permission}
+              onResolve={onResolve}
+              onPeek={NO_PEEK}
             />
-            {STAGE_LABEL[stage]}
-          </span>
-          <span className="notch-plate__meta">
-            {AGENT_NAME[s.agent] ?? s.agent}
-            {s.model && <span className="notch-plate__dot"> · {s.model}</span>}
-            {subs.length > 0 && (
-              <span className="notch-plate__dot">
-                {" "}
-                · {subs.length} subagent{subs.length === 1 ? "" : "s"}
-              </span>
-            )}
-          </span>
-
-          {/* The live tool — always shown, the quick "what is it doing" answer. */}
-          <span className="notch-plate__now">
-            <span className="notch-plate__now-label">Now</span>
-            <span className="notch-plate__now-tool" data-idle={!s.tool || undefined}>
-              {s.tool ?? (s.busy ? "thinking…" : "idle")}
-            </span>
-          </span>
-
-          {/* Dwell reveal: the rest of the detail, so a linger reads the whole
-              picture without a click. Folds open under the head. */}
-          <div className="notch-plate__more">
-            {s.cwd && <p className="notch-plate__cwd">{s.cwd}</p>}
-            {s.prompt ? (
-              <p className="notch-plate__prompt">You: {s.prompt}</p>
-            ) : (
-              s.title && <p className="notch-plate__prompt">{s.title}</p>
-            )}
-            {subs.length > 0 && (
-              <ul className="notch-plate__subs">
-                {subs.map((sub, i) => (
-                  <li className="notch-plate__sub" key={i}>
-                    <span
-                      className="notch-plate__pip"
-                      data-state={sub.busy ? "busy" : "done"}
-                      aria-hidden
-                    />
-                    <span className="notch-plate__sub-label">{sub.label}</span>
-                    {sub.tool && <span className="notch-plate__sub-tool">{sub.tool}</span>}
-                  </li>
-                ))}
-              </ul>
-            )}
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="notch-plate__inner" key={s.id}>
+            <span className="notch-plate__title">{rowName(s)}</span>
+            {/* What it is doing right now, led by the badge's own status dot. */}
+            <span className="notch-plate__stage">
+              <span className="notch-plate__pip" data-state={asking ? "asking" : state} aria-hidden />
+              {STAGE_LABEL[stage]}
+            </span>
+            <span className="notch-plate__meta">
+              {AGENT_NAME[s.agent] ?? s.agent}
+              {s.model && <span className="notch-plate__dot"> · {s.model}</span>}
+              {subs > 0 && (
+                <span className="notch-plate__dot">
+                  {" "}
+                  · {subs} subagent{subs === 1 ? "" : "s"}
+                </span>
+              )}
+            </span>
+            <span className="notch-plate__now">
+              <span className="notch-plate__now-label">Now</span>
+              <span className="notch-plate__now-tool" data-idle={!s.tool || undefined}>
+                {s.tool ?? (s.busy ? "thinking…" : "idle")}
+              </span>
+            </span>
+          </div>
+        ))}
     </div>
   );
 }
+
+/** The hover peek shows the detail inline; the enlarged cat-peek does not fire
+ *  inside it, so `AgentDetailBody`'s avatar gets a no-op peek. */
+const NO_PEEK: PeekFn = () => {};
 
 /** The input keys worth leading with, per tool — the headline before the rest. */
 const HEADLINE_ARG: Record<string, string> = {
@@ -2510,64 +2497,101 @@ function AgentDetail({
   onBack: () => void;
   onPeek: PeekFn;
 }) {
+  return (
+    <Panel title={rowName(session)} onClose={onBack}>
+      <AgentDetailBody
+        session={session}
+        permission={permission}
+        onResolve={onResolve}
+        onBack={onBack}
+        onPeek={onPeek}
+      />
+    </Panel>
+  );
+}
+
+/**
+ * The detail's inner content, without the `Panel` chrome — one agent in full:
+ * avatar + tag, cwd, prompt, the approve/deny card if it is asking, the live
+ * "Now" tool, and every subagent. Shared verbatim between the clicked-in
+ * detail (`AgentDetail`, in the opened panel) and the hover peek (`NotchAgents`
+ * on dwell), so the two are the same view — one just needs no click.
+ *
+ * `onBack` renders the "‹ All agents" link only when given; the hover peek
+ * omits it (there is nowhere to go back to). `onPeek` may be a no-op: the
+ * enlarged cat-peek does not fire inside a hover peek.
+ */
+function AgentDetailBody({
+  session,
+  permission,
+  onResolve,
+  onBack,
+  onPeek,
+}: {
+  session: AgentSession;
+  permission: AgentPermission | null;
+  onResolve: (id: string, reply: ApprovalReply) => void;
+  onBack?: () => void;
+  onPeek: PeekFn;
+}) {
   const state = rowState(session);
   const stage = agentStage(session, permission !== null);
   return (
-    <Panel title={rowName(session)} onClose={onBack}>
-      <div className="agent-detail">
+    <div className="agent-detail">
+      {onBack && (
         <button className="agent-detail__back" onClick={onBack}>
           ‹ All agents
         </button>
-        {/* The same stage avatar as the list, so the detail view matches. */}
-        <div className="agent-detail__meta">
-          <StageAvatar session={session} stage={stage} state={state} onPeek={onPeek} />
-          <span className="agent-detail__tag" data-state={state}>
-            {rowTag(session)}
-          </span>
-        </div>
-        {session.cwd && <p className="agent-detail__cwd">{session.cwd}</p>}
-        {session.prompt ? (
-          <p className="agent-detail__prompt">You: {session.prompt}</p>
-        ) : (
-          session.title && <p className="agent-detail__prompt">{session.title}</p>
-        )}
-
-        {/* The card for this exact agent — the whole point of the detail view. */}
-        {permission && (
-          <PermissionCard request={permission} queued={0} onResolve={onResolve} />
-        )}
-
-        {/* What it is doing right now, live. */}
-        <div className="agent-detail__now">
-          <span className="agent-detail__label">Now</span>
-          <span className="agent-detail__tool" data-idle={!session.tool || undefined}>
-            {session.tool ?? (session.busy ? "thinking…" : "idle")}
-          </span>
-        </div>
-
-        {session.subagents.length > 0 && (
-          <div className="agent-detail__subs">
-            <span className="agent-detail__label">
-              Subagents ({session.subagents.length})
-            </span>
-            <ul className="subagents">
-              {session.subagents.map((sub, i) => (
-                <li className="subagent-row" key={i}>
-                  <span
-                    className="agent-row__state"
-                    data-state={sub.busy ? "busy" : "done"}
-                    aria-hidden
-                  />
-                  <span className="subagent-row__label">{sub.label}</span>
-                  {sub.tool && <span className="subagent-row__tool">{sub.tool}</span>}
-                  {sub.model && <span className="subagent-row__model">{sub.model}</span>}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+      )}
+      {/* The same stage avatar as the list, so the detail view matches. */}
+      <div className="agent-detail__meta">
+        <StageAvatar session={session} stage={stage} state={state} onPeek={onPeek} />
+        <span className="agent-detail__tag" data-state={state}>
+          {rowTag(session)}
+        </span>
       </div>
-    </Panel>
+      {session.cwd && <p className="agent-detail__cwd">{session.cwd}</p>}
+      {session.prompt ? (
+        <p className="agent-detail__prompt">You: {session.prompt}</p>
+      ) : (
+        session.title && <p className="agent-detail__prompt">{session.title}</p>
+      )}
+
+      {/* The card for this exact agent — the whole point of the detail view. */}
+      {permission && (
+        <PermissionCard request={permission} queued={0} onResolve={onResolve} />
+      )}
+
+      {/* What it is doing right now, live. */}
+      <div className="agent-detail__now">
+        <span className="agent-detail__label">Now</span>
+        <span className="agent-detail__tool" data-idle={!session.tool || undefined}>
+          {session.tool ?? (session.busy ? "thinking…" : "idle")}
+        </span>
+      </div>
+
+      {session.subagents.length > 0 && (
+        <div className="agent-detail__subs">
+          <span className="agent-detail__label">
+            Subagents ({session.subagents.length})
+          </span>
+          <ul className="subagents">
+            {session.subagents.map((sub, i) => (
+              <li className="subagent-row" key={i}>
+                <span
+                  className="agent-row__state"
+                  data-state={sub.busy ? "busy" : "done"}
+                  aria-hidden
+                />
+                <span className="subagent-row__label">{sub.label}</span>
+                {sub.tool && <span className="subagent-row__tool">{sub.tool}</span>}
+                {sub.model && <span className="subagent-row__model">{sub.model}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 

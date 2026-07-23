@@ -226,15 +226,18 @@
   padding: 0;
 }
 
-/* Resting-hover: the agent rows the notch grows into. Top-aligned and
-   content-sized (not the 40px centred status row), so the rows sit below the
-   cutout and the drop-pill's height spring measures the real stack. Width is
-   `max-content` from the base body — the rows set their own. */
+/* Resting-hover: the dealt row + peek the notch grows into. Top-aligned so the
+   row sits below the cutout, and a FIXED width matching the clicked-in detail
+   panel — so the hover peek (which renders that same detail) is always the
+   notch-panel size, never as wide as its longest line of text (a long cwd path
+   under `max-content` blew the notch out to most of the screen). The dealt row
+   is narrower and centres within it. */
 .drop-pill__body--agents {
   flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   justify-content: flex-start;
   gap: 0;
+  width: 460px;
   height: auto;
   padding: 0;
 }
@@ -1806,10 +1809,23 @@
   opacity: 1;
 }
 
-/* Dwelled long enough to unfold the rest (cwd, prompt, subagents). A taller
-   ceiling; `.notch-plate__more` inside supplies the actual expanded height. */
+/* Dwelled long enough to show the full detail view — a much taller ceiling; the
+   `.agent-detail` inside supplies the real height (it can scroll if huge). */
 .notch-plate[data-open][data-expanded] {
-  max-height: 320px;
+  max-height: 520px;
+}
+
+/* The full-detail tier: the real AgentDetail, sized to the plate (never wider,
+   so a long cwd wraps instead of stretching the notch), scrolling if it is
+   taller than the ceiling. Left-aligned like the pinned view. */
+.notch-plate__inner--full {
+  text-align: left;
+  max-height: 500px;
+  overflow-y: auto;
+}
+.notch-plate__inner--full .agent-detail {
+  min-width: 0;
+  width: 100%;
 }
 
 /* The contents are keyed on the session, so gliding to another card remounts
@@ -1921,78 +1937,12 @@
   opacity: 0.5;
 }
 
-/* The dwell reveal: cwd, prompt, subagents. Folded to nothing until the plate
-   is `[data-expanded]`; then it grows open under the head. Its own max-height
-   fold, inside the plate's — the head stays put and only this grows. */
-.notch-plate__more {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  text-align: left;
-  transition:
-    max-height var(--spring-dur) var(--spring),
-    opacity var(--dur-fast) var(--ease-out);
-}
-.notch-plate[data-expanded] .notch-plate__more {
-  max-height: 220px;
-  opacity: 1;
-  margin-top: 8px;
-}
-
-.notch-plate__cwd {
-  margin: 0;
-  font-size: 10px;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  color: var(--pill-ink);
-  opacity: 0.45;
-  word-break: break-all;
-}
-.notch-plate__prompt {
-  margin: 4px 0 0;
-  font-size: 11px;
-  color: var(--pill-ink);
-  opacity: 0.8;
-  /* A couple of lines, then clamp — the pinned view has the rest. */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.notch-plate__subs {
-  list-style: none;
-  margin: 6px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.notch-plate__sub {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--pill-ink);
-}
-.notch-plate__sub-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.notch-plate__sub-tool {
-  flex: none;
-  margin-left: auto;
-  font-size: 10px;
-  opacity: 0.5;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-}
-
 /* Movement can make some users unwell — collapse the deal to a snap. The cards
    still appear (opacity), they just do not travel; the 1ms durations in
    motion.css shrink the shimmer/attn loops. */
 @media (prefers-reduced-motion: reduce) {
   .notch-card,
-  .notch-plate,
-  .notch-plate__more {
+  .notch-plate {
     transition-duration: 1ms;
   }
   .notch-plate__inner {
