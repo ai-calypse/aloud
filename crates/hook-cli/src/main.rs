@@ -53,7 +53,10 @@ fn run() {
     let Some(reply) = socket::request(&event, socket::timeout_for(&event)) else {
         return;
     };
-    let Some(directive) = reply.directive(source) else {
+    // Encoded in the event's own shape: a `PreToolUse` answered in
+    // `PermissionRequest`'s vocabulary is silently ignored by the agent.
+    let event_name = event.hook_event_name.as_deref().unwrap_or_default();
+    let Some(directive) = reply.directive_for(source, event_name) else {
         return;
     };
     let Ok(text) = serde_json::to_string(&directive) else {

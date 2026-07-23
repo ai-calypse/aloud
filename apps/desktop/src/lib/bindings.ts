@@ -230,6 +230,12 @@ export type AgentEvent =
 export type AgentPermission = {
 	/**  `tool_use_id` — how a decision is routed back to the waiting hook. */
 	id: string,
+	/**
+	 *  The agent's session id, so the card can be shown under the exact row
+	 *  that is asking — with several terminals open, this is what tells them
+	 *  apart.
+	 */
+	sessionId: string | null,
 	agent: string,
 	tool: string,
 	/**

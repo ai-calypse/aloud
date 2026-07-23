@@ -85,11 +85,35 @@ pub struct Event {
     pub terminal_title: Option<String>,
 }
 
+/// The tools worth gating: the ones that change something. Reads, searches and
+/// fetches run silently, or every file the agent opens is a card.
+///
+/// `PreToolUse` fires on every call, so the filter is what keeps it from being
+/// a card storm — see [`Event::wants_gate`].
+pub const GATED_TOOLS: &[&str] = &["Bash", "Write", "Edit", "NotebookEdit"];
+
 impl Event {
     /// Whether this event is the blocking kind — the agent is parked on the
     /// hook's stdout waiting for an answer.
     pub fn is_permission_request(&self) -> bool {
         self.hook_event_name.as_deref() == Some("PermissionRequest")
+    }
+
+    /// Whether this call should stop for approval.
+    ///
+    /// Two ways in: a `PermissionRequest` (the agent explicitly asking, when it
+    /// fires at all), or a `PreToolUse` for a tool in [`GATED_TOOLS`]. The
+    /// latter is what actually carries the gate on current Claude builds, where
+    /// `PermissionRequest` is silent.
+    pub fn wants_gate(&self) -> bool {
+        if self.is_permission_request() {
+            return true;
+        }
+        self.hook_event_name.as_deref() == Some("PreToolUse")
+            && self
+                .tool_name
+                .as_deref()
+                .is_some_and(|name| GATED_TOOLS.contains(&name))
     }
 }
 
@@ -137,6 +161,22 @@ impl Reply {
             Source::Claude => claude_directive(decision, self.message.as_deref()),
             Source::Codex => codex_directive(decision, self.message.as_deref()),
         })
+    }
+
+    /// The directive in the shape the *event* expects.
+    ///
+    /// `PreToolUse` and `PermissionRequest` both gate a call, but spell the
+    /// decision differently (`permissionDecision` vs `decision`). Which event
+    /// the gate rode in on decides the encoding — a `PreToolUse` answered in
+    /// `PermissionRequest`'s shape is silently ignored, which looks exactly like
+    /// approvals not working. `PermissionRequest` never fires on current Claude
+    /// builds, so `PreToolUse` is the one that carries the gate in practice.
+    pub fn directive_for(&self, source: Source, event_name: &str) -> Option<serde_json::Value> {
+        let decision = self.decision?;
+        if source == Source::Claude && event_name == "PreToolUse" {
+            return Some(pre_tool_use_directive(decision, self.message.as_deref()));
+        }
+        self.directive(source)
     }
 }
 
@@ -237,6 +277,64 @@ mod tests {
     fn no_decision_produces_no_directive_at_all() {
         assert_eq!(Reply::default().directive(Source::Claude), None);
         assert_eq!(Reply::default().directive(Source::Codex), None);
+    }
+
+    /// The gate rides in on `PreToolUse` for a write/bash tool, since
+    /// `PermissionRequest` is silent on current Claude builds. Reads must not
+    /// gate, or every file the agent opens is a card.
+    #[test]
+    fn a_write_or_bash_pretooluse_wants_the_gate_but_a_read_does_not() {
+        let pre = |tool: &str| Event {
+            hook_event_name: Some("PreToolUse".into()),
+            tool_name: Some(tool.into()),
+            ..Event::default()
+        };
+        assert!(pre("Bash").wants_gate());
+        assert!(pre("Write").wants_gate());
+        assert!(pre("Edit").wants_gate());
+        assert!(!pre("Read").wants_gate());
+        assert!(!pre("Grep").wants_gate());
+        // A PermissionRequest still gates whatever the tool, when it fires.
+        assert!(Event {
+            hook_event_name: Some("PermissionRequest".into()),
+            tool_name: Some("Read".into()),
+            ..Event::default()
+        }
+        .wants_gate());
+        // A PostToolUse never gates — the call already ran.
+        assert!(!Event {
+            hook_event_name: Some("PostToolUse".into()),
+            tool_name: Some("Bash".into()),
+            ..Event::default()
+        }
+        .wants_gate());
+    }
+
+    /// The reply's shape follows the event it answers: a `PreToolUse` decision
+    /// spelled in `PermissionRequest`'s vocabulary is silently ignored, which
+    /// is exactly the bug that made approvals look broken.
+    #[test]
+    fn a_pretooluse_reply_uses_permission_decision_not_decision() {
+        let allow = Reply::allow()
+            .directive_for(Source::Claude, "PreToolUse")
+            .unwrap();
+        let hook = &allow["hookSpecificOutput"];
+        assert_eq!(hook["hookEventName"], "PreToolUse");
+        assert_eq!(hook["permissionDecision"], "allow");
+        assert!(hook.get("decision").is_none());
+
+        let deny = Reply::deny("no")
+            .directive_for(Source::Claude, "PreToolUse")
+            .unwrap();
+        let hook = &deny["hookSpecificOutput"];
+        assert_eq!(hook["permissionDecision"], "deny");
+        assert_eq!(hook["permissionDecisionReason"], "no");
+
+        // A PermissionRequest still gets the older `decision` shape.
+        let pr = Reply::allow()
+            .directive_for(Source::Claude, "PermissionRequest")
+            .unwrap();
+        assert_eq!(pr["hookSpecificOutput"]["decision"]["behavior"], "allow");
     }
 
     /// `PreToolUse` spells the same decision with different keys.

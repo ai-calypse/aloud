@@ -112,9 +112,13 @@ pub fn request(_event: &Event, _timeout: Duration) -> Option<Reply> {
     None
 }
 
-/// The timeout an event deserves: the long block only for the one that blocks.
+/// The timeout an event deserves: the long block for anything that gates.
+///
+/// A `PreToolUse` on a gated tool now blocks for a decision just like a
+/// `PermissionRequest`, so it earns the same day-long ceiling — the agent is
+/// parked on the hook's stdout until the user answers.
 pub fn timeout_for(event: &Event) -> Duration {
-    if event.is_permission_request() {
+    if event.wants_gate() {
         PERMISSION_TIMEOUT
     } else {
         EVENT_TIMEOUT
@@ -126,15 +130,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_a_permission_request_gets_the_long_block() {
-        let mut event = Event {
+    fn a_gating_event_gets_the_long_block_and_nothing_else_does() {
+        let permission = Event {
             hook_event_name: Some("PermissionRequest".into()),
             ..Event::default()
         };
-        assert_eq!(timeout_for(&event), PERMISSION_TIMEOUT);
+        assert_eq!(timeout_for(&permission), PERMISSION_TIMEOUT);
 
-        event.hook_event_name = Some("PreToolUse".into());
-        assert_eq!(timeout_for(&event), EVENT_TIMEOUT);
+        // A PreToolUse on a gated tool now blocks for a decision too.
+        let gated = Event {
+            hook_event_name: Some("PreToolUse".into()),
+            tool_name: Some("Bash".into()),
+            ..Event::default()
+        };
+        assert_eq!(timeout_for(&gated), PERMISSION_TIMEOUT);
+
+        // A PreToolUse on a read does not — it never gates.
+        let read = Event {
+            hook_event_name: Some("PreToolUse".into()),
+            tool_name: Some("Read".into()),
+            ..Event::default()
+        };
+        assert_eq!(timeout_for(&read), EVENT_TIMEOUT);
         // An event with no name at all must not block for a day.
         assert_eq!(timeout_for(&Event::default()), EVENT_TIMEOUT);
     }

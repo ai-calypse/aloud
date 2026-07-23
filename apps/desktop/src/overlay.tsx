@@ -400,6 +400,8 @@ function Overlay() {
   // Tool calls awaiting Approve / Deny, newest first — a swarm can ask several
   // at once, so this is a queue, not a single card. Keyed by tool_use_id.
   const [permissions, setPermissions] = useState<AgentPermission[]>([]);
+  // The agent row the user drilled into, by session id, or null for the list.
+  const [selected, setSelected] = useState<string | null>(null);
   // Any of them owns the panel; almost everything below only cares that one
   // does. A pending permission counts: the card has to be on screen to answer.
   const panelOpen = ask !== null || agent !== null || browsing || permissions.length > 0;
@@ -469,6 +471,9 @@ function Overlay() {
       setPermissions(
         Array.from({ length: perms }, (_, i) => ({
           id: `preview:${i}`,
+          // Ties the card to the first preview agent, so `?agents=2&perm` shows
+          // the card under that row.
+          sessionId: "preview:0",
           agent: "claude",
           tool: "Bash",
           input: { command: "rm -rf build/ && cargo clean", timeout: "120000" },
@@ -568,6 +573,15 @@ function Overlay() {
    */
   const resting = !panelOpen && phase === "idle" && !dismissing;
   const busyCount = sessions.filter((s) => s.busy).length;
+
+  // The agents surface owns the panel when the user opened it, or when an agent
+  // is asking permission — a request has to put its card somewhere visible.
+  const agentsOpen = (browsing || permissions.length > 0) && !ask && !agent;
+  // A pending permission drills straight to the agent that is asking, so the
+  // card lands under the right row without the user hunting for it.
+  const askingId = permissions[0]?.sessionId ?? null;
+  const focusedId = selected ?? askingId;
+  const selectedSession = sessions.find((s) => s.id === focusedId) ?? null;
 
   // Rust tests the pointer against this box to decide when the window takes
   // clicks (`track_cursor` in overlay.rs). Reported only when it changes: the
@@ -1054,20 +1068,34 @@ function Overlay() {
           }`}
           ref={panel.content}
         >
-          {permissions.length > 0 ? (
-            // A permission is a demand — it takes the panel over everything
-            // else while one is pending, and the queue shows newest first.
-            <PermissionCard
-              request={permissions[0]}
-              queued={permissions.length - 1}
-              onResolve={resolvePermission}
-            />
-          ) : resting ? (
+          {resting && !agentsOpen ? (
             // At rest the panel is exactly the cutout and this is empty, so
             // there is nothing to see; hovering grows it by the height of this
             // row. The spring in `useNotchPanel` does the growing — this only
             // states what it is growing around.
             hovering && <NotchPeek sessions={sessions} busy={busyCount} />
+          ) : agentsOpen ? (
+            // The agents surface: the list, or one agent's live detail, with
+            // any pending permission shown under the exact row that is asking.
+            selectedSession ? (
+              <AgentDetail
+                session={selectedSession}
+                permission={permissions.find((p) => p.sessionId === selectedSession.id) ?? null}
+                onResolve={resolvePermission}
+                onBack={() => setSelected(null)}
+              />
+            ) : (
+              <AgentList
+                sessions={sessions}
+                permissions={permissions}
+                onSelect={setSelected}
+                onResolve={resolvePermission}
+                onClose={() => {
+                  setBrowsing(false);
+                  setSelected(null);
+                }}
+              />
+            )
           ) : panelOpen ? (
             <>
               <TabStrip
@@ -1078,7 +1106,7 @@ function Overlay() {
                   agent?.heard ??
                   // Opened from the notch rather than by speaking, so there is
                   // no utterance to name the tab after.
-                  (browsing ? "Agents" : "Aloud")
+                  "Aloud"
                 }
                 onSelect={setActiveTab}
                 onClose={closeTab}
@@ -1089,8 +1117,6 @@ function Overlay() {
                   than having the content appear already settled. */}
               {tabs.find((tab) => tab.id === activeTab)?.blank ? (
                 <div className="tab-blank" key={activeTab} />
-              ) : browsing && !ask && !agent ? (
-                <AgentList sessions={sessions} onClose={() => setBrowsing(false)} />
               ) : ask ? (
                 // Keyed on the question so a new one resets copy state and input.
                 <Answer
@@ -1252,46 +1278,167 @@ function PermissionCard({
   );
 }
 
-/**
- * One session row: the agent in bold, a `model · time` tag coloured by state,
- * the user's own last prompt, and — folded behind a disclosure — its subagents.
- *
- * This is the shape `agent-notch` draws (main.swift `row(for:)`), ported: name
- * on the left, tag on the right, `You:` line under, `▸ N subagents` beneath.
- */
-function AgentRow({ session }: { session: AgentSession }) {
-  const [open, setOpen] = useState(false);
-  const subagents = session.subagents;
-  // The tag colour is the state: blue while busy (the swift app's systemBlue),
-  // grey when merely alive, green when the turn is done.
-  const state = session.busy ? "busy" : session.tool ? "live" : "done";
-  const tag = [session.model ?? session.agent, session.lastActivity && timeAgo(session.lastActivity)]
+/** The row's dot state: busy mid-turn, live between tools, else done. */
+function rowState(session: AgentSession): "busy" | "live" | "done" {
+  return session.busy ? "busy" : session.tool ? "live" : "done";
+}
+
+/** The `model · time` tag next to a row. */
+function rowTag(session: AgentSession): string {
+  return [session.model ?? session.agent, session.lastActivity && timeAgo(session.lastActivity)]
     .filter(Boolean)
     .join(" · ");
+}
 
+/**
+ * One session in the list: the agent in bold, a `model · time` tag coloured by
+ * state, the prompt or running tool, and a subagent count. The whole row is a
+ * button into the detail view, and it lights up when that agent is asking.
+ *
+ * Ported from `agent-notch`'s `row(for:)`, made clickable.
+ */
+function AgentRow({
+  session,
+  asking,
+  onSelect,
+}: {
+  session: AgentSession;
+  asking: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const state = rowState(session);
   return (
-    <li className="agent-row">
-      <div className="agent-row__head">
-        <span className="agent-row__state" data-state={state} aria-hidden />
-        <span className="agent-row__name">{AGENT_NAME[session.agent] ?? session.agent}</span>
-        <span className="agent-row__tag" data-state={state}>
-          {tag}
-        </span>
-      </div>
-      {/* The user's own words, the way the swift app shows them. Falls back to
-          the title (an ai-title) when there is no prompt to quote. */}
-      <p className="agent-row__prompt">
-        {session.tool ?? (session.title ? `You: ${session.title}` : "")}
-      </p>
-      {subagents.length > 0 && (
-        <>
-          <button className="agent-row__disclose" onClick={() => setOpen((o) => !o)}>
-            {open ? "▾" : "▸"} {subagents.length} subagent
-            {subagents.length === 1 ? "" : "s"}
-          </button>
-          {open && (
+    <li>
+      <button
+        className="agent-row agent-row--button"
+        data-asking={asking || undefined}
+        onClick={() => onSelect(session.id)}
+      >
+        <div className="agent-row__head">
+          <span className="agent-row__state" data-state={state} aria-hidden />
+          <span className="agent-row__name">{AGENT_NAME[session.agent] ?? session.agent}</span>
+          <span className="agent-row__tag" data-state={state}>
+            {rowTag(session)}
+          </span>
+        </div>
+        <p className="agent-row__prompt">
+          {/* When asking, that is the most important thing about the row. */}
+          {asking
+            ? "⚠ wants permission"
+            : (session.tool ?? (session.title ? `You: ${session.title}` : ""))}
+        </p>
+        {session.subagents.length > 0 && (
+          <p className="agent-row__subcount">
+            ▸ {session.subagents.length} subagent{session.subagents.length === 1 ? "" : "s"}
+          </p>
+        )}
+      </button>
+    </li>
+  );
+}
+
+/**
+ * The agent sessions, once the notch has been clicked open. Each row drills
+ * into a live detail view; a row whose agent is asking permission is flagged.
+ */
+function AgentList({
+  sessions,
+  permissions,
+  onSelect,
+  onResolve,
+  onClose,
+}: {
+  sessions: AgentSession[];
+  permissions: AgentPermission[];
+  onSelect: (id: string) => void;
+  onResolve: (id: string, allow: boolean) => void;
+  onClose: () => void;
+}) {
+  const askingIds = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
+  return (
+    <Panel title="Agents" onClose={onClose}>
+      {sessions.length === 0 ? (
+        <p className="agents-empty">No agents running</p>
+      ) : (
+        <ul className="agents">
+          {sessions.map((session) => (
+            <AgentRow
+              session={session}
+              asking={askingIds.has(session.id)}
+              onSelect={onSelect}
+              key={session.id}
+            />
+          ))}
+        </ul>
+      )}
+      {/* A permission for an agent not in the list (rare — a hooked session the
+          poll has not folded yet) still needs answering, so it falls through
+          here rather than being lost. */}
+      {permissions
+        .filter((p) => !p.sessionId || !sessions.some((s) => s.id === p.sessionId))
+        .map((p) => (
+          <PermissionCard key={p.id} request={p} queued={0} onResolve={onResolve} />
+        ))}
+    </Panel>
+  );
+}
+
+/**
+ * One agent, in full: its live tool, model, elapsed and cwd, every subagent
+ * expanded, and — if it is asking — the Approve / Deny card right here, so the
+ * decision sits with the terminal it belongs to.
+ *
+ * Reads live: it is handed the session straight from the `agentSessions` state,
+ * which the event listener replaces on every poll, so the tool line updates
+ * without anything here subscribing.
+ */
+function AgentDetail({
+  session,
+  permission,
+  onResolve,
+  onBack,
+}: {
+  session: AgentSession;
+  permission: AgentPermission | null;
+  onResolve: (id: string, allow: boolean) => void;
+  onBack: () => void;
+}) {
+  const state = rowState(session);
+  return (
+    <Panel title={AGENT_NAME[session.agent] ?? session.agent} onClose={onBack}>
+      <div className="agent-detail">
+        <button className="agent-detail__back" onClick={onBack}>
+          ‹ All agents
+        </button>
+        <div className="agent-detail__meta">
+          <span className="agent-row__state" data-state={state} aria-hidden />
+          <span className="agent-detail__tag" data-state={state}>
+            {rowTag(session)}
+          </span>
+        </div>
+        {session.cwd && <p className="agent-detail__cwd">{session.cwd}</p>}
+        {session.title && <p className="agent-detail__prompt">You: {session.title}</p>}
+
+        {/* The card for this exact agent — the whole point of the detail view. */}
+        {permission && (
+          <PermissionCard request={permission} queued={0} onResolve={onResolve} />
+        )}
+
+        {/* What it is doing right now, live. */}
+        <div className="agent-detail__now">
+          <span className="agent-detail__label">Now</span>
+          <span className="agent-detail__tool" data-idle={!session.tool || undefined}>
+            {session.tool ?? (session.busy ? "thinking…" : "idle")}
+          </span>
+        </div>
+
+        {session.subagents.length > 0 && (
+          <div className="agent-detail__subs">
+            <span className="agent-detail__label">
+              Subagents ({session.subagents.length})
+            </span>
             <ul className="subagents">
-              {subagents.map((sub, i) => (
+              {session.subagents.map((sub, i) => (
                 <li className="subagent-row" key={i}>
                   <span
                     className="agent-row__state"
@@ -1299,37 +1446,14 @@ function AgentRow({ session }: { session: AgentSession }) {
                     aria-hidden
                   />
                   <span className="subagent-row__label">{sub.label}</span>
+                  {sub.tool && <span className="subagent-row__tool">{sub.tool}</span>}
                   {sub.model && <span className="subagent-row__model">{sub.model}</span>}
                 </li>
               ))}
             </ul>
-          )}
-        </>
-      )}
-    </li>
-  );
-}
-
-/**
- * The agent sessions, once the notch has been clicked open.
- *
- * Sizes nothing: like every other panel body it is the measured content node's
- * only child, and the springs settle around it through the ResizeObserver.
- */
-function AgentList({
-  sessions,
-  onClose,
-}: {
-  sessions: AgentSession[];
-  onClose: () => void;
-}) {
-  return (
-    <Panel title="Agents" onClose={onClose}>
-      <ul className="agents">
-        {sessions.map((session) => (
-          <AgentRow session={session} key={session.id} />
-        ))}
-      </ul>
+          </div>
+        )}
+      </div>
     </Panel>
   );
 }

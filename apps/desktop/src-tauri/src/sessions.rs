@@ -63,10 +63,15 @@ pub struct AgentSessions(pub Vec<AgentSession>);
 /// draws a card; several can be in flight at once (a Codex swarm asks in
 /// parallel), so the panel renders them as a queue keyed by `id`.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
+#[serde(rename_all = "camelCase")]
 #[tauri_specta(event_name = "agent-permission")]
 pub struct AgentPermission {
     /// `tool_use_id` — how a decision is routed back to the waiting hook.
     pub id: String,
+    /// The agent's session id, so the card can be shown under the exact row
+    /// that is asking — with several terminals open, this is what tells them
+    /// apart.
+    pub session_id: Option<String>,
     pub agent: String,
     pub tool: String,
     /// The tool's arguments, flattened to strings the same way sessions are —
@@ -209,6 +214,9 @@ fn await_decision(app: &AppHandle, event: &HookEvent) -> Reply {
     // the sessions do, keeping the real Value out of the binding.
     let card = AgentPermission {
         id: id.clone(),
+        // Matches the hooked row's id (see `record`), so the webview can show
+        // the card under the exact agent that is asking.
+        session_id: event.session_id.clone(),
         agent: match event.source {
             Some(aloud_bridge::Source::Codex) => "codex",
             _ => "claude",
@@ -351,9 +359,11 @@ fn handle(app: &AppHandle, stream: std::os::unix::net::UnixStream) {
 
     record(app, &event);
 
-    // A blocking request parks here until the user answers; everything else is
-    // fire-and-forget and gets no directive.
-    let reply = if event.is_permission_request() {
+    // A gate-worthy call parks here until the user answers; everything else is
+    // fire-and-forget and gets no directive. On current Claude builds the gate
+    // rides in on `PreToolUse` for a write/bash tool — `PermissionRequest` is
+    // silent — so `wants_gate` covers both.
+    let reply = if event.wants_gate() {
         await_decision(app, &event)
     } else {
         Reply::default()
