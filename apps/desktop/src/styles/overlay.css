@@ -1513,9 +1513,121 @@
 }
 
 /* Movement makes some users unwell — collapse the travel, keep the reveal. */
+/* --- Ambient sign: cats beside the notch at rest ------------------------- */
+
+/* Sits on the canvas just left of the physical cutout, at the menu-bar's own
+   height, so it reads as part of the notch rather than a floating pill. Painted
+   here rather than grown out of the drop-pill (which only grows downward), the
+   way agent-notch draws its mascot beside the notch. Visual only — the click
+   region is untouched. Its right edge lands a hair left of the cutout's left
+   edge: the cutout is centred and `--notch-w` wide, so half of it plus a small
+   gap is the offset from centre. */
+.ambient {
+  position: absolute;
+  top: 0;
+  right: calc(50% + var(--notch-w, 200px) / 2 + 6px);
+  height: var(--notch-h, 32px);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  /* Fades/slides in from the notch when an agent becomes busy. */
+  animation: ambient-in var(--dur-base) var(--ease-out) both;
+}
+
+@keyframes ambient-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.ambient__cats {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+}
+
+.ambient__cat {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.12);
+}
+
+/* Overlap when several, newest/leftmost on top — a little stack. */
+.ambient__cat + .ambient__cat {
+  margin-left: -6px;
+}
+
+.ambient__count {
+  margin-left: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pill-ink);
+  opacity: 0.8;
+}
+
+/* Busy: a soft shimmer sweeps the cats, so the strip reads as *working* rather
+   than a static badge. Opacity-only movement — nothing reflows. */
+.ambient[data-busy] .ambient__cats {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.ambient[data-busy] .ambient__cats::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgb(255 255 255 / 0.14) 50%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  animation: ambient-sweep 2.2s var(--ease-in-out) infinite;
+}
+
+@keyframes ambient-sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  60%,
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+/* Wants permission (only shown when the notch did not auto-open): the lead cat
+   rings orange and pulses — the one thing the user must act on. */
+.ambient[data-asking] .ambient__cat:first-child {
+  box-shadow: 0 0 0 2px var(--sys-orange, #ff9f0a);
+  animation: ambient-attn 1.1s var(--ease-in-out) infinite;
+}
+
+@keyframes ambient-attn {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px var(--sys-orange, #ff9f0a);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgb(255 159 10 / 0.35);
+  }
+}
+
+/* Movement can make some users unwell — hold the sign, drop the motion. */
 @media (prefers-reduced-motion: reduce) {
-  .cat-peek {
-    transform: scale(1);
+  .ambient,
+  .ambient[data-busy] .ambient__cats::after,
+  .ambient[data-asking] .ambient__cat:first-child {
+    animation: none;
   }
 }
 

@@ -124,6 +124,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             ask::close_ask,
             overlay::set_panel_box,
             overlay::set_panel_interactive,
+            overlay::close_browse,
             sessions::agent_hook_status,
             sessions::install_agent_hooks,
             sessions::uninstall_agent_hooks,
@@ -228,6 +229,20 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             // The notch is permanent: an agent can start at any time, and a
             // notch that only exists during a dictation cannot show one.
             overlay::show_notch(app.handle());
+
+            // Outside-click closes the panel, popover-style: the overlay only
+            // holds key focus while a panel is open, so losing it means the
+            // user clicked elsewhere. The click reaches the app behind because
+            // the canvas no longer catches clicks outside the panel rect.
+            if let Some(ov) = app.get_webview_window("overlay") {
+                let handle = app.handle().clone();
+                ov.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(false) = event {
+                        overlay::dismiss_on_focus_loss(&handle);
+                    }
+                });
+            }
+
             sessions::start(app.handle());
 
             tray::init(app)?;

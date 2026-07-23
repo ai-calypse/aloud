@@ -175,6 +175,10 @@ pub fn show(app: &AppHandle, phase: Phase) {
     // Click-through: the pill must never steal focus or clicks from the app
     // the user is dictating into.
     let _ = window.set_ignore_cursor_events(true);
+    // Reset the click region to the cutout, so a leftover open-panel box from a
+    // previous run does not make a swathe of the pill clickable mid-dictation.
+    // `notch` is the one `style_for` already resolved above.
+    reset_panel_box_to_notch(notch);
     let _ = window.show();
 
     // Both sent *after* `show`: a hidden window's webview is created lazily, so
@@ -206,11 +210,14 @@ const EXIT_MS: u64 = 280;
 /// the previous run's timer — a live recording with no overlay.
 static HIDE_GENERATION: AtomicU64 = AtomicU64::new(0);
 
-/// True while an Ask/Agent panel owns the overlay window.
+/// True while any panel owns the overlay window — an ask, an agent run, or a
+/// browse of the notch.
 ///
-/// Both paths end on `Phase::Idle`, which hides the overlay — right for a
+/// Ask/Agent both end on `Phase::Idle`, which hides the overlay — right for a
 /// status pill, wrong for an answer the user is still reading. The run's hide
 /// is suppressed while this is set; only [`end_panel`] or a new [`show`] wins.
+/// `show_panel` sets it for ask/agent, [`set_panel_interactive`] for a browse;
+/// [`end_panel`] and [`show`] are the sole clearers.
 static PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 
 /// Hands the overlay to Ask or Agent, in place. The panel is already on screen
@@ -262,28 +269,55 @@ const CURSOR_POLL: Duration = Duration::from_millis(60);
 static PANEL_W: AtomicU32 = AtomicU32::new(0);
 static PANEL_H: AtomicU32 = AtomicU32::new(0);
 
-/// True while the webview says an interactive surface is open — the agents
-/// list, a permission card, an answer. Interactivity is **state, not cursor
-/// position**: while open, the whole window takes clicks and the DOM does its
-/// own hit-testing. The polled box (above) gates clicks only at rest, where
-/// it is the cutout strip. Gating an open panel on a box that had to chase
-/// every content change was a race per transition — clicking "back" resized
-/// the list, the new box excluded the pointer, and the poll turned the panel
-/// click-through under the user's cursor.
+/// True while the webview has an interactive surface open — the agents list, a
+/// permission card, an answer, or a browse of the notch. This is the *focus*
+/// gate, not the click-through one: clicks are governed solely by the polled
+/// box against the panel rect ([`track_cursor`]), in every regime. `INTERACTIVE`
+/// only says "a panel holds the window's focus", which is what
+/// [`dismiss_on_focus_loss`] reads to tell an outside-click resign apart from
+/// the resting notch losing focus for some other reason.
+///
+/// It now moves in lockstep with [`PANEL_OPEN`] (both set on any panel open,
+/// via [`set_panel_interactive`]), but they are not redundant: `PANEL_OPEN`
+/// gates the dictation hide-suppression and window lifecycle, `INTERACTIVE` is
+/// the focus/dismiss gate. Keeping them apart keeps those two concerns from
+/// tangling if the lifecycle ever diverges.
 static INTERACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// The webview declaring its interactive state; see [`INTERACTIVE`].
+///
+/// This no longer toggles `ignore_cursor_events` for the whole window — the
+/// cursor poll ([`track_cursor`]) is the sole authority for that, keyed on the
+/// panel rect, so an open panel never turns the whole canvas into a click trap.
+/// It only takes focus (so text inputs can type) and does one immediate
+/// hit-test so a card takes its first click without waiting a poll tick.
 #[tauri::command]
 #[specta::specta]
 pub fn set_panel_interactive(app: AppHandle, open: bool) {
     INTERACTIVE.store(open, Ordering::SeqCst);
+    // Mark the window owned by a panel, browse included — the webview reports
+    // every kind through here (`panelOpen = ask || agent || browsing`), so this
+    // is what gives a browse the same `PANEL_OPEN` an ask/agent gets from
+    // `show_panel`, letting `dismiss_on_focus_loss` treat them all alike.
+    //
+    // Only *set*, never clear: `end_panel` (and `show`) are the sole clearers,
+    // and `end_panel` guards on being the one to flip it false
+    // (`!PANEL_OPEN.swap(false)`). Clearing it here too would let the close
+    // effect race ahead of `closeAsk`/`closeAgent` and no-op the teardown.
+    if open {
+        PANEL_OPEN.store(true, Ordering::SeqCst);
+    }
     if let Some(window) = window(&app) {
-        let _ = window.set_ignore_cursor_events(!open);
-        // Focus rides along so text inputs (a deny message, a freeform
-        // answer) can type. Only here — focusing on hover would steal the
-        // keyboard from whatever the user is working in.
+        // Focus rides along so text inputs (a deny message, a freeform answer)
+        // can type. Only here — focusing on hover would steal the keyboard from
+        // whatever the user is working in.
         if open {
             let _ = window.set_focus();
+            // Don't wait up to CURSOR_POLL for the pointer to be re-judged: if
+            // it is already over the panel (it usually is — the click that
+            // opened this landed there), let it take the mouse now.
+            let over = cursor_over_panel(&window).unwrap_or(false);
+            let _ = window.set_ignore_cursor_events(!over);
         }
     }
 }
@@ -294,6 +328,24 @@ pub fn set_panel_interactive(app: AppHandle, open: bool) {
 pub fn set_panel_box(width: f64, height: f64) {
     PANEL_W.store(width.max(0.0) as u32, Ordering::Relaxed);
     PANEL_H.store(height.max(0.0) as u32, Ordering::Relaxed);
+}
+
+/// Snaps the click-region box back to the resting cutout, synchronously.
+///
+/// The webview reports the box only when it *changes* (`reported` dedup in
+/// overlay.tsx), and a settled notch never resizes — so without this, an open
+/// panel's large box would linger in `PANEL_W/H` after a hide and the poll
+/// would hit-test the cursor against it, reading the pointer over the real
+/// notch as "outside" and stranding the window click-through. Called wherever
+/// the panel goes away, so the poll always judges against a box that matches
+/// what is drawn.
+///
+/// Takes the already-resolved notch: [`target_notch`] enumerates the displays,
+/// so a caller that already has it (`show`, `show_notch`) must not pay for a
+/// second resolution.
+fn reset_panel_box_to_notch(notch: Option<crate::notch::Notch>) {
+    let (w, h) = notch.map_or((0.0, 0.0), |n| (n.width, n.height));
+    set_panel_box(w, h);
 }
 
 /// Gives the window clicks only while the pointer is over the answer panel.
@@ -323,12 +375,16 @@ fn track_cursor(app: &AppHandle) {
                 TRACKING.store(false, Ordering::SeqCst);
                 return;
             };
-            // An open panel owns its clicks outright; the poll must not
-            // fight it by re-judging the pointer against a stale box.
-            if INTERACTIVE.load(Ordering::SeqCst) {
-                clickable = true;
-                continue;
-            }
+            // The panel rect is the *sole* authority for who gets the mouse, in
+            // every regime — open or resting. The window catches clicks only
+            // over the box it actually drew, so the rest of the transparent
+            // canvas never eats a click aimed at the app behind. This replaced
+            // an `INTERACTIVE` short-circuit that made the whole window catch
+            // clicks while a panel was open (blocking the screen) and, paired
+            // with a box that was never reset on hide, could strand the window
+            // click-through over the resting notch until a restart. The box is
+            // now force-written to the cutout on hide (`end_panel`,
+            // `show_notch`), so no stale open-panel box can survive.
             let over = cursor_over_panel(&window).unwrap_or(false);
             if over != clickable {
                 clickable = over;
@@ -367,7 +423,12 @@ pub fn show_notch(app: &AppHandle) {
     let _ = window.show();
     NOTCH_RESTING.store(true, Ordering::SeqCst);
 
+    // Resolved once — the reset and the style event both want it, and
+    // `target_notch` enumerates the displays.
     let notch = target_notch(&window);
+    // Resting: the click region is the cutout, never a leftover panel box.
+    reset_panel_box_to_notch(notch);
+
     let style = OverlayStyleChanged {
         style: OverlayStyle::DropPill,
         notch_width: notch.map_or(0.0, |n| n.width),
@@ -422,18 +483,59 @@ fn point_in_panel(
         && cursor.1 <= origin.1 + height
 }
 
+/// Drops the window back to its resting, click-through state: no panel holds
+/// focus, the window ignores the mouse again, and the click region is the
+/// cutout — not a leftover open-panel box that would strand the click-through
+/// over the real notch. The teardown every panel-close routes through (today
+/// just [`end_panel`], and everything funnels there); a named seam so a future
+/// close path cannot re-open the stranding bug by forgetting a step.
+fn reset_to_resting(app: &AppHandle) {
+    INTERACTIVE.store(false, Ordering::SeqCst);
+    if let Some(window) = window(app) {
+        // Immediately, not after any collapse: the window lingers for EXIT_MS,
+        // and a transparent canvas eating clicks for that long is worse.
+        let _ = window.set_ignore_cursor_events(true);
+        reset_panel_box_to_notch(target_notch(&window));
+    }
+}
+
 /// Dismisses the panel, letting it collapse back into the notch first.
 pub fn end_panel(app: &AppHandle) {
     if !PANEL_OPEN.swap(false, Ordering::SeqCst) {
         return;
     }
-    INTERACTIVE.store(false, Ordering::SeqCst);
-    if let Some(window) = window(app) {
-        // Immediately, not after the collapse: the window lingers for EXIT_MS,
-        // and a transparent canvas eating clicks for that long is worse.
-        let _ = window.set_ignore_cursor_events(true);
-    }
+    reset_to_resting(app);
     hide(app);
+}
+
+/// Closes a browse of the notch. Symmetric with `close_ask`/`close_agent`: a
+/// browse now sets `PANEL_OPEN` (via [`set_panel_interactive`]), so it needs an
+/// explicit close to clear it — the webview clearing `browsing` alone would
+/// leave `PANEL_OPEN` stuck true. Idempotent, so the several frontend paths
+/// that dismiss a browse (cross, Escape, click-away) can all call it.
+#[tauri::command]
+#[specta::specta]
+pub fn close_browse(app: AppHandle) {
+    end_panel(&app);
+}
+
+/// Closes the panel when the overlay loses key focus — the popover contract:
+/// a click anywhere outside dismisses it, and (because our canvas no longer
+/// eats clicks outside the panel rect) that same click still reaches the app
+/// behind. The overlay only holds focus while a panel is open
+/// (`set_panel_interactive` takes it), so this never fires for the resting
+/// notch. Wired from `on_window_event` in `lib.rs`.
+pub fn dismiss_on_focus_loss(app: &AppHandle) {
+    // Nothing open owns focus — a stray resign (or the resting notch) is not a
+    // dismiss.
+    if !INTERACTIVE.load(Ordering::SeqCst) {
+        return;
+    }
+    // Every panel now sets `PANEL_OPEN` (ask/agent via `show_panel`, browse via
+    // `set_panel_interactive`), so one path closes them all. `end_panel` resets
+    // to resting and emits `OverlayDismiss`; its `hide` never takes the notch
+    // window away, because the notch is always resting (`NOTCH_RESTING`).
+    end_panel(app);
 }
 
 pub fn hide(app: &AppHandle) {
@@ -645,5 +747,42 @@ mod tests {
 
         // Before the panel reports a size, the fallback must be click-through.
         assert!(!point_in_panel((700.0, 160.0), origin, canvas, (0.0, 0.0)));
+    }
+
+    /// The unrecoverable bug (Symptom 2): a panel closes but its large box is
+    /// left in `PANEL_W/H`, so the poll hit-tests the resting notch against the
+    /// open-panel rect. A point over the real cutout reads "outside" and the
+    /// window is stranded click-through over the notch until a restart.
+    ///
+    /// The fix resets the box to the cutout on hide. This asserts the geometry:
+    /// with the resting cutout box, a point that WAS inside the open panel but
+    /// is outside the cutout must read as not-over (so it clicks through), while
+    /// the cutout itself still takes clicks.
+    #[test]
+    fn a_closed_panel_does_not_strand_clicks_over_the_notch() {
+        let origin = (200.0, 0.0);
+        let canvas = 1000.0;
+        // The cutout: a ~200x32 notch centred in the canvas (what
+        // `reset_panel_box_to_notch` writes on hide).
+        let cutout = (200.0, 32.0);
+        let over_cutout = |x, y| point_in_panel((x, y), origin, canvas, cutout);
+
+        // The cutout spans x 600..800, y 0..32 — the notch still takes clicks.
+        assert!(
+            over_cutout(700.0, 16.0),
+            "the resting notch still takes clicks"
+        );
+
+        // A point that was well inside the old 512x332 open panel (x 444..956,
+        // y 0..332) but is outside the cutout must now click through — this is
+        // the exact point that used to be stranded.
+        assert!(
+            !over_cutout(500.0, 200.0),
+            "a point inside the old panel but outside the cutout must click through"
+        );
+        assert!(
+            !over_cutout(900.0, 16.0),
+            "the old panel's right edge, outside the cutout, must click through"
+        );
     }
 }

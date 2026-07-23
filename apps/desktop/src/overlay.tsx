@@ -739,6 +739,13 @@ function Overlay() {
    */
   const resting = !panelOpen && phase === "idle" && !dismissing;
   const busyCount = sessions.filter((s) => s.busy).length;
+  // The ambient sign: what the resting notch shows *without* a hover — a small
+  // right-aligned strip of stage cats while agents are busy, or an attention
+  // pulse when one wants permission and the notch did not auto-open (that
+  // setting off; when on, the panel is up and we are not resting). Grows the
+  // resting box a little on both sides of the camera (symmetric, cats pushed
+  // right), so it never needs the hover to be seen.
+  const ambient = resting && (busyCount > 0 || permissions.length > 0);
 
   // The drill is plain navigation state. A permission arriving *sets* it
   // (one-shot, in the event listener) — deriving it from the queue every
@@ -787,12 +794,11 @@ function Overlay() {
   const populated = panelOpen || phase !== "idle" || (resting && hovering);
   const panel = useNotchPanel(effectiveStyle, run, populated, dismissing, reportBox);
 
-  // Interactivity is state, not cursor position. While a panel is open the
-  // whole window takes clicks and the DOM does its own hit-testing — gating
-  // an open panel on Rust's polled box was a race per content change: click
-  // "back", the list resizes, the new box excludes the pointer, and the poll
-  // turns the buttons click-through under the cursor. The polled box still
-  // gates the *resting* strip, where it is the cutout and never moves.
+  // Tells Rust whether a panel holds the window's focus. This is the *focus*
+  // signal, not the click signal: clicks are gated entirely by Rust's cursor
+  // poll against the panel rect (in every regime), so an open panel never turns
+  // the whole window into a click trap. This just lets the panel take focus for
+  // text inputs and lets an outside-click dismiss it (focus-loss in Rust).
   useEffect(() => {
     try {
       void commands.setPanelInteractive(panelOpen);
@@ -1195,10 +1201,11 @@ function Overlay() {
     if (!panelOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      // Browsing the agents is webview state, so Escape clears it here —
-      // asking Rust to close a panel it never opened left `browsing` stuck
-      // true with the window dismissed, which read as the notch dying.
+      // A browse sets `PANEL_OPEN` in Rust (via `setPanelInteractive`), so
+      // closing it has to clear that too — `closeBrowse` does, and clearing
+      // only the webview `browsing` would leave the Rust flag stuck.
       if (!agent && !ask) {
+        void commands.closeBrowse();
         setBrowsing(false);
         setSelected(null);
         return;
@@ -1256,16 +1263,19 @@ function Overlay() {
       className="overlay-root"
       ref={root}
       data-exiting={dismissing || undefined}
-      // While open the window takes every click, so a click on the bare
-      // canvas is one the user aimed at nothing — close, like a popover.
-      // (The reference reposts the click to the app underneath via a
-      // synthetic event; consuming it is the simpler contract.)
+      // Belt-and-suspenders close. The primary popover dismiss is now
+      // focus-loss in Rust (`dismiss_on_focus_loss`) — a click outside the
+      // panel rect reaches the app behind *and* resigns the overlay's key
+      // focus. This only fires for a click that lands inside the window's own
+      // clickable rect but outside the pill (e.g. a rect edge), where no focus
+      // change happens.
       onMouseDown={(e) => {
         if (!panelOpen) return;
         if ((e.target as HTMLElement).closest(".drop-pill")) return;
         if (agent) void commands.closeAgent();
         else if (ask) void commands.closeAsk();
         else {
+          void commands.closeBrowse();
           setBrowsing(false);
           setSelected(null);
         }
@@ -1333,7 +1343,9 @@ function Overlay() {
             // At rest the panel is exactly the cutout and this is empty, so
             // there is nothing to see; hovering grows it by the height of this
             // row. The spring in `useNotchPanel` does the growing — this only
-            // states what it is growing around.
+            // states what it is growing around. The ambient sign (cats while
+            // busy) is NOT here: it lives on the canvas beside the cutout, not
+            // in this grow-downward body — see `AmbientSign` at the root.
             hovering && (
               <NotchPeek
                 sessions={sessions}
@@ -1387,8 +1399,10 @@ function Overlay() {
                       setBrowsing(false);
                       setSelected(null);
                       // With a run open the X leaves the panel up on that run;
-                      // only a browse-only panel actually closes.
+                      // only a browse-only panel actually closes — and that is
+                      // the case that has to clear Rust's `PANEL_OPEN`.
                       if (ask || agent) setActiveTab(0);
+                      else void commands.closeBrowse();
                     }}
                   />
                 )
@@ -1436,6 +1450,11 @@ function Overlay() {
         scroll clip. Grows out of the hovered avatar's box (its origin), which
         is why it is positioned from the anchor rect rather than centred. */}
     {peek && <CatPeek stage={peek.stage} seed={peek.seed} rect={peek.rect} />}
+    {/* The ambient sign lives on the canvas beside the cutout, not in the pill —
+        agent-notch's trick: a full transparent top-bar canvas lets a mascot be
+        drawn left of the notch without growing any box. Click-through
+        (`pointer-events: none`), so it never touches the hit-test region. */}
+    {ambient && <AmbientSign sessions={sessions} asking={permissions.length > 0} />}
     </div>
   );
 }
@@ -1513,6 +1532,55 @@ function NotchPeek({
         <span className="notch-peek__count">+{sessions.length - 1}</span>
       )}
     </p>
+  );
+}
+
+/** How many stage cats the ambient strip shows before collapsing to a `+N`. */
+const AMBIENT_CATS = 3;
+
+/**
+ * The always-on ambient sign, shown at rest without a hover: a small strip of
+ * stage cats for the busy agents, sitting on the canvas just *left* of the
+ * physical camera — agent-notch's approach, not a growth of the drop-pill. The
+ * overlay canvas is far wider than the cutout, so the cats are simply painted
+ * beside it; being `pointer-events: none`, they never touch the click region.
+ * A shimmer plays while any agent is busy; a pending permission (reachable here
+ * only when the notch did not auto-open) turns the strip's attention on.
+ *
+ * One row, cats only — naming what each is doing is the hover's job (`NotchPeek`)
+ * and the click's (the full list). This is just "something is happening, here".
+ */
+function AmbientSign({
+  sessions,
+  asking,
+}: {
+  sessions: AgentSession[];
+  asking: boolean;
+}) {
+  // Busy-first from Rust; the busy ones are what the sign is about.
+  const shown = sessions.filter((s) => s.busy).slice(0, AMBIENT_CATS);
+  // Asking but nothing busy (a parked agent waiting on the user) still needs a
+  // face — fall back to the asking session so the pulse has something to ring.
+  const cats = shown.length > 0 ? shown : sessions.slice(0, 1);
+  const extra = sessions.filter((s) => s.busy).length - cats.length;
+  return (
+    <div className="ambient" data-asking={asking || undefined} data-busy={shown.length > 0 || undefined}>
+      <span className="ambient__cats">
+        {cats.map((session) => {
+          const stage = agentStage(session, asking);
+          return (
+            <img
+              key={session.id}
+              className="ambient__cat"
+              src={stageCat(stage, stageSeed(session.id, stage))}
+              alt=""
+              aria-hidden
+            />
+          );
+        })}
+        {extra > 0 && <span className="ambient__count">+{extra}</span>}
+      </span>
+    </div>
   );
 }
 
