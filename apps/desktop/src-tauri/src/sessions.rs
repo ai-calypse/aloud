@@ -766,25 +766,6 @@ pub fn uninstall_agent_hooks() -> Result<HookStatus, String> {
     agent_hook_status()
 }
 
-/// Which CLI a new coding-agent tab opens. Its own type rather than a string so
-/// the binding is a union, not `string`, and an unknown agent is a type error at
-/// the call site instead of a silent fall-through in Rust.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub enum CodingAgent {
-    Claude,
-    Codex,
-}
-
-impl From<CodingAgent> for aloud_agent_spawn::Agent {
-    fn from(agent: CodingAgent) -> Self {
-        match agent {
-            CodingAgent::Claude => aloud_agent_spawn::Agent::Claude,
-            CodingAgent::Codex => aloud_agent_spawn::Agent::Codex,
-        }
-    }
-}
-
 /// Cuts a worktree off `origin/main` in `repo` and opens `agent` on `task` in a
 /// Terminal tab there. Returns the new branch name so the panel can show it
 /// without waiting on the discovery poll that will surface the session itself.
@@ -794,8 +775,12 @@ impl From<CodingAgent> for aloud_agent_spawn::Agent {
 /// tracking path is needed here — only the starting of it.
 #[tauri::command]
 #[specta::specta]
-pub fn spawn_coding_agent(repo: String, task: String, agent: CodingAgent) -> Result<String, String> {
-    aloud_agent_spawn::start_coding_agent(std::path::Path::new(&repo), &task, agent.into())
+pub fn spawn_coding_agent(
+    repo: String,
+    task: String,
+    agent: aloud_agent_spawn::Agent,
+) -> Result<String, String> {
+    aloud_agent_spawn::start_coding_agent(std::path::Path::new(&repo), &task, agent)
         .map_err(|e| e.to_string())
 }
 

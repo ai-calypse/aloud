@@ -17,8 +17,10 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Which CLI to open in the worktree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which CLI to open in the worktree. Serde/specta so this is the one type the
+/// Tauri command and its TS binding use — no parallel enum to keep in sync.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub enum Agent {
     Claude,
     Codex,
@@ -109,6 +111,12 @@ pub fn create_worktree(repo: &Path, branch: &str) -> Result<PathBuf> {
 /// quotes, `$`, or backticks, and building a shell/AppleScript command out of it
 /// by hand is an injection waiting to happen. `System Events` types the
 /// prompt-launching line; the env var carries the untrusted text verbatim.
+///
+/// ponytail: hardcodes Terminal.app. Discovery (`aloud_sessions`) is
+/// terminal-agnostic — it finds a session under iTerm/Ghostty/Alacritty too —
+/// so the asymmetry is that we can *find* an agent anywhere but only *start* one
+/// here. The upgrade path is a per-terminal `do script` dialect keyed on a
+/// preference; worth it once someone asks to spawn into their own terminal.
 #[cfg(target_os = "macos")]
 pub fn spawn(dir: &Path, agent: Agent, task: &str) -> Result<()> {
     // The command Terminal runs. `$ALOUD_AGENT_TASK` is expanded by the shell

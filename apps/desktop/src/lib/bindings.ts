@@ -190,7 +190,7 @@ export const commands = {
 	 *  discovery finds it, and the globally-installed hooks fire for it, so no new
 	 *  tracking path is needed here — only the starting of it.
 	 */
-	spawnCodingAgent: (repo: string, task: string, agent: CodingAgent) => typedError<string, string>(__TAURI_INVOKE("spawn_coding_agent", { repo, task, agent })),
+	spawnCodingAgent: (repo: string, task: string, agent: Agent) => typedError<string, string>(__TAURI_INVOKE("spawn_coding_agent", { repo, task, agent })),
 	/**
 	 *  Resolves the pending confirmation. Called by the panel's Cancel/Confirm
 	 *  buttons; `edits` carries any field the user filled in or corrected before
@@ -227,6 +227,12 @@ export const events = {
 };
 
 /* Types */
+/**
+ *  Which CLI to open in the worktree. Serde/specta so this is the one type the
+ *  Tauri command and its TS binding use — no parallel enum to keep in sync.
+ */
+export type Agent = "claude" | "codex";
+
 /**
  *  Streamed to the agent panel. Names follow the AG-UI protocol's tool-call
  *  lifecycle (https://docs.ag-ui.com) so the shape maps onto AI Elements' tool
@@ -439,13 +445,6 @@ export type BuildInfo = {
 	commit: string,
 	date: string,
 };
-
-/**
- *  Which CLI a new coding-agent tab opens. Its own type rather than a string so
- *  the binding is a union, not `string`, and an unknown agent is a type error at
- *  the call site instead of a silent fall-through in Rust.
- */
-export type CodingAgent = "claude" | "codex";
 
 export type Config = {
 	hold: Binding | null,

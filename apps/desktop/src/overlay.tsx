@@ -21,8 +21,8 @@ import {
   events,
   type AgentPermission,
   type AgentSession,
+  type Agent as CodingAgent,
   type ApprovalReply,
-  type CodingAgent,
   type OverlayStyle,
   type Phase,
 } from "./lib/bindings";
@@ -2682,10 +2682,10 @@ function TabStrip({
         >
           <div className="tab__chip" data-active={tab.id === active || undefined}>
             <button className="tab__select" onClick={() => onSelect(tab.id)}>
-              {/* Numbered by position, not by id, so the strip always reads
-                  1..n after a close — the same thing a terminal does. Four
-                  tabs all called "New Tab" are unswitchable-between. */}
-              {tab.blank ? `Tab ${i + 1}` : title}
+              {/* A blank tab is a coding-agent composer, so name it one —
+                  numbered by position, not id, so the strip reads 1..n after a
+                  close and two of them stay switchable-between. */}
+              {tab.blank ? `Agent ${i + 1}` : title}
             </button>
             {/* Tab 0 is the run itself; closing it would leave the panel with
                 nothing to show but no way back. Escape still closes the lot. */}
@@ -2934,8 +2934,10 @@ function CodingAgentComposer({
     });
   }, []);
 
+  const canStart = !busy && repo.trim() !== "" && task.trim() !== "";
+
   const go = useCallback(() => {
-    if (!repo.trim() || !task.trim() || busy) return;
+    if (!canStart) return;
     setBusy(true);
     setError(null);
     localStorage.setItem(LAST_REPO_KEY, repo.trim());
@@ -2944,7 +2946,7 @@ function CodingAgentComposer({
       if (res.status === "ok") setStarted(res.data);
       else setError(res.error);
     });
-  }, [repo, task, agent, busy]);
+  }, [canStart, repo, task, agent]);
 
   return (
     <Panel
@@ -2991,11 +2993,7 @@ function CodingAgentComposer({
                 </button>
               ))}
             </div>
-            <button
-              className="composer__go"
-              disabled={busy || !repo.trim() || !task.trim()}
-              onClick={go}
-            >
+            <button className="composer__go" disabled={!canStart} onClick={go}>
               {busy ? "Starting…" : "Start"}
             </button>
           </div>
