@@ -102,6 +102,14 @@ export function agentStage(session: AgentSession, asking: boolean): AgentStage {
   return "idle";
 }
 
+/** A stable non-negative hash of a string — the one primitive both the cat
+ *  picker and the identity-ring hue derive from, so they cannot drift apart. */
+export function hash(seed: string): number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
 /**
  * A cat for the stage, chosen by hashing `seed`. Pure: same seed → same cat.
  * The variation over an agent's life comes from what seed the caller passes —
@@ -109,10 +117,23 @@ export function agentStage(session: AgentSession, asking: boolean): AgentStage {
  */
 export function stageCat(stage: AgentStage, seed = ""): string {
   const count = STAGE_IMAGE_COUNT[stage];
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
-  const n = (Math.abs(hash) % count) + 1;
+  const n = (hash(seed) % count) + 1;
   return `/cats/${stage}/${n}.png`;
+}
+
+/**
+ * A stable hue for an agent, hashed from its id. Same agent → same ring colour
+ * every time it deals, so the ring becomes learnable identity ("the green one
+ * is aloud") the way the cat — keyed to the transient *stage* — cannot be. The
+ * cat says what it is doing; the ring says which agent it is. Multiplied into
+ * the wheel by 137 so ids that differ by one character still land far apart
+ * rather than a degree away; 40–320 skips the reds so the ring is never
+ * confused with a red "denied" badge.
+ * ponytail: not stable across restarts — the id is per-session. Hash `cwd` here
+ * instead if the colour should persist per project.
+ */
+export function agentHue(id: string): number {
+  return 40 + ((hash(id) * 137) % 281);
 }
 
 /**

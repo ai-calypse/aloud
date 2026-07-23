@@ -46,6 +46,7 @@ import {
 import { diffLines, diffStat } from "./lib/diff";
 import {
   agentStage,
+  agentHue,
   stageCat,
   stageSeed,
   syncStages,
@@ -142,6 +143,15 @@ function useNotchPanel(
    * behind the notch.
    */
   populated: boolean,
+  /**
+   * The resting strip is showing beside the cutout and owns the resting
+   * click-box itself (it is wider than the cutout, and off-centre-left) so that
+   * hovering it flips Rust's `hovering` and grows the notch. While that is true
+   * the panel must not also write the box in its *unpopulated* branch, or the
+   * two writers fight through the same report. Once hovering grows the notch
+   * (populated), the panel reclaims the box — the strip bows out (`handedOff`).
+   */
+  ambientOwnsBox: boolean,
   dismissing: boolean,
   /** Called with the box the panel is settling to, whenever that changes. */
   onTarget: (width: number, height: number) => void,
@@ -155,6 +165,13 @@ function useNotchPanel(
     collapse: () => void;
     remeasure: () => void;
   } | null>(null);
+  // Bumped when the body mounts populated but has not laid out yet (offsetWidth
+  // 0), so the build effect re-runs the instant it gets a size. Without it a
+  // first paint with zero-width content bailed and never re-measured — the
+  // notch grew on hover but reported only the cutout box, so Rust's poll judged
+  // the cursor (now over a card) as outside and the hover never took until a
+  // click forced a fresh cycle.
+  const [layoutTick, setLayoutTick] = useState(0);
 
   // Rebuilt each time the panel appears, so every dictation starts its growth
   // from the cutout rather than from wherever the last one left the springs.
@@ -188,12 +205,24 @@ function useNotchPanel(
         "d",
         notchPath(width, height, Math.max(0, height / 3 - 4), height / 3),
       );
-      onTarget(width, height);
+      // When the ambient strip is up it owns the click-box (it is wider than
+      // the cutout and reaches left of it); reporting the bare cutout here
+      // would clobber that and the strip would stop taking clicks.
+      if (!ambientOwnsBox) onTarget(width, height);
       return;
     }
-    // On screen but not yet laid out (`display: none`): nothing to measure,
-    // and the rebuild on `populated`/`run` will come back around.
-    if (!contentElement.offsetWidth) return;
+    // On screen but not laid out yet (just mounted, or `display: none`):
+    // nothing to measure. Watch for the layout and bump `layoutTick` to re-run
+    // this effect the instant it has a size — `populated`/`run` may not change
+    // again (a first hover flips `populated` once), so relying on them to come
+    // back around stranded the notch reporting only the cutout box.
+    if (!contentElement.offsetWidth) {
+      const pending = new ResizeObserver(() => {
+        if (contentElement.offsetWidth) setLayoutTick((n) => n + 1);
+      });
+      pending.observe(contentElement);
+      return () => pending.disconnect();
+    }
 
     // Read once per rebuild, not per retarget: it is a style recalc, and
     // `remeasure` fires once a frame while an answer streams.
@@ -320,7 +349,7 @@ function useNotchPanel(
       height.stop();
       driver.current = null;
     };
-  }, [style, run, populated]);
+  }, [style, run, populated, ambientOwnsBox, layoutTick]);
 
   // Declared after the effect above so that on a rebuild the driver exists
   // before this runs — effects fire in declaration order.
@@ -740,12 +769,23 @@ function Overlay() {
   const resting = !panelOpen && phase === "idle" && !dismissing;
   const busyCount = sessions.filter((s) => s.busy).length;
   // The ambient sign: what the resting notch shows *without* a hover — a small
-  // right-aligned strip of stage cats while agents are busy, or an attention
-  // pulse when one wants permission and the notch did not auto-open (that
-  // setting off; when on, the panel is up and we are not resting). Grows the
-  // resting box a little on both sides of the camera (symmetric, cats pushed
-  // right), so it never needs the hover to be seen.
+  // strip of stage cats left of the camera while agents are busy, or an
+  // attention pulse when one wants permission and the notch did not auto-open
+  // (that setting off; when on, the panel is up and we are not resting).
+  // Hovering it expands the stack into a labelled horizontal row and offers a
+  // "view all agents" button; it owns the resting click-box while up.
   const ambient = resting && (busyCount > 0 || permissions.length > 0);
+  // Drill into one agent (opens the panel on its detail) or open the whole
+  // list — the two things the expanded ambient row can do. Both route through
+  // the same open-the-notch state a click does today.
+  const openAgent = useCallback((id: string) => {
+    setBrowsing(true);
+    setSelected(id);
+  }, []);
+  const openAgents = useCallback(() => {
+    setBrowsing(true);
+    setSelected(null);
+  }, []);
 
   // The drill is plain navigation state. A permission arriving *sets* it
   // (one-shot, in the event listener) — deriving it from the queue every
@@ -792,7 +832,20 @@ function Overlay() {
   // `display: none` pill measures 0 with content, an empty body measures its
   // padding without any), so the decision is state, never pixels.
   const populated = panelOpen || phase !== "idle" || (resting && hovering);
-  const panel = useNotchPanel(effectiveStyle, run, populated, dismissing, reportBox);
+  // The strip owns the click-box only while it is the thing on screen — i.e. at
+  // rest, NOT once a hover has grown the notch. Passing bare `ambient` here left
+  // the strip's small resting box reported after the panel grew, so the cursor
+  // (now over a dealt card well below the old cutout) tested as OUTSIDE and the
+  // window went click-through: the card never got `mouseenter`, so the hover
+  // pop/plate did not fire until a click→back forced the grown box to report.
+  const panel = useNotchPanel(
+    effectiveStyle,
+    run,
+    populated,
+    ambient && !hovering,
+    dismissing,
+    reportBox,
+  );
 
   // Tells Rust whether a panel holds the window's focus. This is the *focus*
   // signal, not the click signal: clicks are gated entirely by Rust's cursor
@@ -1333,24 +1386,27 @@ function Overlay() {
           className={`drop-pill__body${
             panelOpen
               ? " drop-pill__body--ask"
-              : transcript
-                ? " drop-pill__body--transcript"
-                : ""
+              : resting && hovering
+                ? " drop-pill__body--agents"
+                : transcript
+                  ? " drop-pill__body--transcript"
+                  : ""
           }`}
           ref={panel.content}
         >
           {resting ? (
-            // At rest the panel is exactly the cutout and this is empty, so
-            // there is nothing to see; hovering grows it by the height of this
-            // row. The spring in `useNotchPanel` does the growing — this only
-            // states what it is growing around. The ambient sign (cats while
-            // busy) is NOT here: it lives on the canvas beside the cutout, not
-            // in this grow-downward body — see `AmbientSign` at the root.
+            // At rest the panel is exactly the cutout and this body is empty;
+            // the cats show on the strip left of the notch (`AmbientSign`).
+            // Hovering grows the notch down (the spring in `useNotchPanel`) and
+            // deals the same agents out into it as a row of bigger cards
+            // (`NotchAgents`), while the strip fades. This is the "agents
+            // animate inside the notch on hover" the notch is for.
             hovering && (
-              <NotchPeek
+              <NotchAgents
                 sessions={sessions}
-                busy={busyCount}
-                asking={permissions.length > 0}
+                permissions={permissions}
+                onOpenAgent={openAgent}
+                onOpenAgents={openAgents}
               />
             )
           ) : panelOpen ? (
@@ -1454,7 +1510,16 @@ function Overlay() {
         agent-notch's trick: a full transparent top-bar canvas lets a mascot be
         drawn left of the notch without growing any box. Click-through
         (`pointer-events: none`), so it never touches the hit-test region. */}
-    {ambient && <AmbientSign sessions={sessions} asking={permissions.length > 0} />}
+    {ambient && (
+      <AmbientSign
+        sessions={sessions}
+        permissions={permissions}
+        // Hovering grew the notch and the dealt row took over: fade the strip
+        // out (it is the same agents, now shown bigger inside the notch).
+        handedOff={hovering}
+        onBox={reportBox}
+      />
+    )}
     </div>
   );
 }
@@ -1497,90 +1562,299 @@ function CatPeek({ stage, seed, rect }: { stage: AgentStage; seed: string; rect:
   );
 }
 
-/**
- * What the resting notch shows on hover: one line saying what the agents are
- * doing, and that it can be clicked.
- *
- * Deliberately one row. The notch grows by exactly this element's height, and
- * a hover that unfurls a whole list is a panel opening by accident — the click
- * is what opens the list.
- */
-function NotchPeek({
-  sessions,
-  busy,
-  asking,
-}: {
-  sessions: AgentSession[];
-  busy: number;
-  asking: boolean;
-}) {
-  if (sessions.length === 0) {
-    return <p className="notch-peek notch-peek--empty">No agents running</p>;
-  }
-  // The busy one is what the user is waiting on; `sessions` arrives busy-first
-  // from Rust, so the head of the list is the right one to name.
-  const lead = sessions[0];
-  return (
-    <p className="notch-peek">
-      {busy > 0 && <span className="notch-peek__dot" aria-hidden />}
-      <span className="notch-peek__title">
-        {/* A waiting request outranks everything — with auto-open off, this
-            hover line is how the user finds out at all. */}
-        {asking ? "⚠ wants permission" : (lead.tool ?? lead.title)}
-      </span>
-      {sessions.length > 1 && (
-        <span className="notch-peek__count">+{sessions.length - 1}</span>
-      )}
-    </p>
-  );
-}
-
-/** How many stage cats the ambient strip shows before collapsing to a `+N`. */
-const AMBIENT_CATS = 3;
+/** How many stage cats the resting strip shows before collapsing to a `+N`. */
+const AMBIENT_CATS = 4;
 
 /**
- * The always-on ambient sign, shown at rest without a hover: a small strip of
- * stage cats for the busy agents, sitting on the canvas just *left* of the
- * physical camera — agent-notch's approach, not a growth of the drop-pill. The
- * overlay canvas is far wider than the cutout, so the cats are simply painted
- * beside it; being `pointer-events: none`, they never touch the click region.
- * A shimmer plays while any agent is busy; a pending permission (reachable here
- * only when the notch did not auto-open) turns the strip's attention on.
+ * The resting strip: a tight stack of stage cats on the canvas just *left* of
+ * the camera (agent-notch's approach, not a growth of the drop-pill), shown at
+ * rest without a hover. It does NOT expand in place — hovering hands off to the
+ * notch, which grows down and *deals* the same cats out into a row of bigger
+ * circles (`NotchAgents`, dealing from the strip's side via `--from`). The
+ * strip just fades out once the notch takes over.
  *
- * One row, cats only — naming what each is doing is the hover's job (`NotchPeek`)
- * and the click's (the full list). This is just "something is happening, here".
+ * It still reports the resting click-box, though — the window only takes the
+ * mouse over a reported box, and the strip sits left of the cutout, so without
+ * this the hover that grows the notch would never fire when the cursor is over
+ * the strip. Symmetric across the canvas (see `point_in_panel`): a width that
+ * reaches the strip on the left also reaches its mirror on the right, with the
+ * centred notch inside it either way — harmless dead canvas.
  */
 function AmbientSign({
   sessions,
-  asking,
+  permissions,
+  handedOff,
+  onBox,
 }: {
   sessions: AgentSession[];
-  asking: boolean;
+  permissions: AgentPermission[];
+  /** The notch has grown and shows the dealt row now — fade the strip out. */
+  handedOff: boolean;
+  onBox: (width: number, height: number) => void;
 }) {
-  // Busy-first from Rust; the busy ones are what the sign is about.
-  const shown = sessions.filter((s) => s.busy).slice(0, AMBIENT_CATS);
-  // Asking but nothing busy (a parked agent waiting on the user) still needs a
-  // face — fall back to the asking session so the pulse has something to ring.
-  const cats = shown.length > 0 ? shown : sessions.slice(0, 1);
-  const extra = sessions.filter((s) => s.busy).length - cats.length;
+  const el = useRef<HTMLDivElement>(null);
+  const asking = permissions.length > 0;
+  const askingIds = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
+  // Busy-first from Rust; the busy ones are what the sign is about. Asking but
+  // nothing busy (a parked agent) still needs a face, so fall back to it.
+  const busy = sessions.filter((s) => s.busy);
+  const cats = ambientCats(sessions);
+  const extra = (busy.length > 0 ? busy.length : sessions.length) - cats.length;
+
+  // Report the strip's rect as the resting click-box, so hovering the strip (or
+  // the notch) makes Rust's poll flip `hovering` — which is what grows the
+  // notch. A ResizeObserver keeps it current if the cat count changes. Once
+  // handed off, the grown notch owns the box (`useNotchPanel` reports it): the
+  // strip bows out so the two do not fight over the shared report each frame.
+  useEffect(() => {
+    if (handedOff) return;
+    const node = el.current;
+    const root = node?.offsetParent as HTMLElement | null;
+    if (!node || !root) return;
+    const report = () => {
+      const rect = node.getBoundingClientRect();
+      const rootRect = root.getBoundingClientRect();
+      const centre = rootRect.left + rootRect.width / 2;
+      const halfWidth = centre - rect.left;
+      onBox(halfWidth * 2, rect.height);
+    };
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [onBox, handedOff]);
+
   return (
-    <div className="ambient" data-asking={asking || undefined} data-busy={shown.length > 0 || undefined}>
-      <span className="ambient__cats">
+    <div
+      ref={el}
+      className="ambient"
+      data-handed-off={handedOff || undefined}
+      data-asking={asking || undefined}
+      data-busy={busy.length > 0 || undefined}
+    >
+      <div className="ambient__cats">
         {cats.map((session) => {
-          const stage = agentStage(session, asking);
+          const stage = agentStage(session, askingIds.has(session.id));
           return (
             <img
               key={session.id}
-              className="ambient__cat"
+              className="ambient__cat-img"
               src={stageCat(stage, stageSeed(session.id, stage))}
               alt=""
               aria-hidden
+              data-asking={askingIds.has(session.id) || undefined}
             />
           );
         })}
         {extra > 0 && <span className="ambient__count">+{extra}</span>}
-      </span>
+      </div>
     </div>
+  );
+}
+
+/**
+ * The cats the resting strip (and, one-to-one, the dealt row) show: the busy
+ * agents, or — if none are busy but one is asking — that one, so the sign has a
+ * face to ring. Capped at `AMBIENT_CATS`. Shared so the strip and the row agree
+ * on exactly which cats exist.
+ */
+function ambientCats(sessions: AgentSession[]): AgentSession[] {
+  const busy = sessions.filter((s) => s.busy);
+  return (busy.length > 0 ? busy : sessions).slice(0, AMBIENT_CATS);
+}
+
+/**
+ * Deal tuning, chosen on the mockup at
+ * claude.ai/code/artifact/e0d1601a-a6e3-453e-8ee2-f64e172e3244 (layout B).
+ * `SPACING` is the gap between dealt circles' centres; `STAGGER` the beat
+ * between each card being flicked out — small, so the row deals as a quick
+ * ripple rather than one-at-a-time. `520ms` is the per-card travel, set in CSS.
+ */
+const DEAL_SPACING = 92;
+const DEAL_STAGGER = 40;
+/** The dealt card's width — matches `.notch-card` in overlay.css. Sizes the
+ *  deal layer so the panel measures the full row (absolute cards do not). */
+const DEAL_CARD_W = 86;
+
+/**
+ * The agents dealt into the notch, shown while the resting notch is hovered.
+ * The same cats the resting strip shows, but bigger and circular — they deal
+ * out from the strip's stacked position into a straight row (layout B), each
+ * flicked a beat after the last, like a dealer going round the table. One
+ * card per agent: the cat, its status underneath. Hovering a card lifts it;
+ * clicking opens that agent's detail. "View all agents" opens the full list.
+ *
+ * The deal is pure CSS: each card starts collapsed on the resting stack
+ * (`--from`, left of the cutout) and transitions to `translateX(--tx)` with a
+ * per-card `transition-delay`. Mount plays it once (the notch only mounts this
+ * on hover), armed by flipping `data-dealt` a frame after mount so the cards
+ * have a from-state to leave.
+ */
+function NotchAgents({
+  sessions,
+  permissions,
+  onOpenAgent,
+  onOpenAgents,
+}: {
+  sessions: AgentSession[];
+  permissions: AgentPermission[];
+  onOpenAgent: (id: string) => void;
+  onOpenAgents: () => void;
+}) {
+  const askingIds = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
+  const cats = ambientCats(sessions);
+  // Deal on mount: `dealt` is false for the first paint (cards sit on the
+  // stack), true the next frame (they deal out). A ref-free flag driven by one
+  // rAF — no per-frame state, just the single flip the transition needs.
+  const [dealt, setDealt] = useState(false);
+  // Which card the cursor is on, or null. Drives the shared detail plate below
+  // the row — one plate, not one per card, so gliding across just re-keys its
+  // contents rather than opening and closing three separate surfaces.
+  const [hovered, setHovered] = useState<string | null>(null);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setDealt(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  if (cats.length === 0) {
+    return <p className="notch-peek--empty">No agents running</p>;
+  }
+  const mid = (cats.length - 1) / 2;
+  // The deal layer must be sized *explicitly*: its cards are absolutely
+  // positioned, so they contribute nothing to the content box the drop-pill
+  // spring measures — without this the panel collapses to the button's width
+  // and the dealt row overflows a too-narrow notch. Width spans edge card to
+  // edge card; height fits a card + its label.
+  const dealWidth = (cats.length - 1) * DEAL_SPACING + DEAL_CARD_W;
+  // Only scan when something is actually hovered; the height is a constant the
+  // CSS owns, so only the derivable width is set inline here.
+  const hoveredSession = hovered ? (cats.find((s) => s.id === hovered) ?? null) : null;
+  return (
+    <div className="notch-agents" data-dealt={dealt || undefined}>
+      <div className="notch-deal" style={{ width: dealWidth }}>
+        {cats.map((session, i) => (
+          <NotchCard
+            key={session.id}
+            session={session}
+            asking={askingIds.has(session.id)}
+            tx={(i - mid) * DEAL_SPACING}
+            stagger={i * DEAL_STAGGER}
+            onOpen={() => onOpenAgent(session.id)}
+            // A leave clears only if this card still owns the hover — the
+            // browser fires the next card's enter before this leave, so a bare
+            // `null` would wipe the freshly-hovered card.
+            onHover={(on) =>
+              setHovered((h) => (on ? session.id : h === session.id ? null : h))
+            }
+          />
+        ))}
+      </div>
+      {/* The detail plate — unfolds under the row for the hovered card. One
+          shared surface: gliding across cards re-keys its contents. */}
+      <NotchPlate session={hoveredSession} asking={hoveredSession ? askingIds.has(hoveredSession.id) : false} />
+      <button className="notch-agents__all" type="button" onClick={onOpenAgents}>
+        View all agents
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The hover pop's spring. Matches the app's pop character (motion.css
+ * `--spring-pop`, damping 0.62 → ~8% overshoot — the little rebound that reads
+ * as landing), on a snappy response because it fires every time the cursor
+ * crosses a card. `response` is seconds, per `lib/spring.ts`.
+ */
+const POP_DAMPING = 0.62;
+const POP_RESPONSE = 0.28;
+
+/**
+ * One dealt card: the meme cat (its *stage*), inside a per-agent colour ring
+ * with a stage-state badge in the corner, and `project @ branch` underneath —
+ * so which agent it is, and which one you are about to click, reads before any
+ * hover. The cat alone could not carry that: it is keyed to the stage, which is
+ * transient and identical across two agents doing the same thing.
+ *
+ * The card also has a *live* hover pop. The pop can be redirected mid-flight —
+ * glide from one cat to the next and the first retracts while the second grows,
+ * reversible halfway without stalling — which is exactly what `lib/spring.ts`
+ * is for (a baked CSS curve retargeted halfway restarts from zero velocity; the
+ * live spring carries its momentum through). A spring drives a `--pop` value
+ * 0→1 written straight onto the node each frame (no React state between
+ * frames); CSS turns it into a scale+lift on the profile image. The image, not
+ * the card: the card's transform is owned by the deal, so layering the pop on
+ * the image keeps the two from fighting.
+ */
+function NotchCard({
+  session,
+  asking,
+  tx,
+  stagger,
+  onOpen,
+  onHover,
+}: {
+  session: AgentSession;
+  asking: boolean;
+  tx: number;
+  stagger: number;
+  onOpen: () => void;
+  /** Cursor entered (true) or left (false) this card — drives the shared plate. */
+  onHover: (on: boolean) => void;
+}) {
+  const stage = agentStage(session, asking);
+  const seed = stageSeed(session.id, stage);
+  const state = rowState(session);
+  const el = useRef<HTMLButtonElement>(null);
+  const pop = useRef<ReturnType<typeof createSpring> | null>(null);
+  useEffect(() => {
+    const node = el.current;
+    if (!node) return;
+    const spring = createSpring((value) => node.style.setProperty("--pop", String(value)), {
+      damping: POP_DAMPING,
+      response: POP_RESPONSE,
+    });
+    pop.current = spring;
+    return () => spring.stop();
+  }, []);
+  return (
+    <button
+      ref={el}
+      className="notch-card"
+      type="button"
+      data-asking={asking || undefined}
+      title={rowName(session)}
+      // Only the genuinely per-card values live here: the dealt slot `--tx`, the
+      // identity hue `--ring`, and the deal's stagger. `--from` (where it deals
+      // from) is identical for every card, so it lives in the CSS rule.
+      style={
+        {
+          "--tx": `${tx}px`,
+          "--ring": `hsl(${agentHue(session.id)} 70% 58%)`,
+          transitionDelay: `${stagger}ms`,
+        } as React.CSSProperties
+      }
+      onMouseEnter={() => {
+        pop.current?.to(1);
+        onHover(true);
+      }}
+      onMouseLeave={() => {
+        pop.current?.to(0);
+        onHover(false);
+      }}
+      onClick={onOpen}
+    >
+      <span className="notch-card__disc">
+        <img className="notch-card__cat" src={stageCat(stage, seed)} alt="" aria-hidden />
+        {/* The stage badge: what it is doing right now, colour-coded the same
+            way the agent-list rows are (busy/live/done, orange when asking). */}
+        <span
+          className="notch-card__badge"
+          data-state={asking ? "asking" : state}
+          aria-hidden
+        />
+      </span>
+      {/* Identity, not stage: project @ branch, so the card says *which* agent. */}
+      <span className="notch-card__label">{rowName(session)}</span>
+    </button>
   );
 }
 
@@ -1589,6 +1863,48 @@ const AGENT_NAME: Record<string, string> = {
   claude: "Claude Code",
   codex: "Codex",
 };
+
+/**
+ * The detail plate under the dealt row (option A). Unfolds when a card is
+ * hovered, showing that agent's full `project @ branch`, its type (Claude /
+ * Codex), the model, and how many subagents it is running — the things the
+ * 56px circle cannot say. One shared plate for the whole row: gliding between
+ * cards keeps it open and swaps its contents (keyed on the session, so the text
+ * crossfades rather than jumping). Emerges downward from the row, the same
+ * direction the notch itself grows, so it reads as one surface opening — the
+ * `aloud-motion` "things emerge from where they came from".
+ *
+ * `session` null = nothing hovered = collapsed. The plate stays mounted so its
+ * fold has something to animate; only `data-open` and the contents change.
+ */
+function NotchPlate({ session, asking }: { session: AgentSession | null; asking: boolean }) {
+  // Hold the last session through the collapse, so the text does not blank out
+  // while the plate is still folding away.
+  const shown = useRef<AgentSession | null>(null);
+  if (session) shown.current = session;
+  const s = shown.current;
+  const subs = s?.subagents.length ?? 0;
+  return (
+    <div className="notch-plate" data-open={session ? "" : undefined} aria-hidden={!session}>
+      {s && (
+        <div className="notch-plate__inner" key={s.id}>
+          <span className="notch-plate__title">{rowName(s)}</span>
+          <span className="notch-plate__meta">
+            {AGENT_NAME[s.agent] ?? s.agent}
+            {s.model && <span className="notch-plate__dot"> · {s.model}</span>}
+            {subs > 0 && (
+              <span className="notch-plate__dot">
+                {" "}
+                · {subs} subagent{subs === 1 ? "" : "s"}
+              </span>
+            )}
+            {asking && <span className="notch-plate__wants"> · wants permission</span>}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** The input keys worth leading with, per tool — the headline before the rest. */
 const HEADLINE_ARG: Record<string, string> = {

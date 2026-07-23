@@ -1,7 +1,15 @@
 import { existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { agentStage, stageCat, stageSeed, syncStages, STAGE_LABEL } from "./agent-stage";
+import {
+  agentStage,
+  agentHue,
+  hash,
+  stageCat,
+  stageSeed,
+  syncStages,
+  STAGE_LABEL,
+} from "./agent-stage";
 import type { AgentSession } from "./bindings";
 
 const base: AgentSession = {
@@ -64,6 +72,33 @@ describe("stageCat", () => {
     for (const seed of ["a", "b", "c", "zzz", "session-123"]) {
       expect(stageCat("editing", seed)).toMatch(/^\/cats\/editing\/[1-3]\.png$/);
     }
+  });
+});
+
+describe("hash / agentHue", () => {
+  it("hash is non-negative and stable per string", () => {
+    expect(hash("aloud")).toBe(hash("aloud"));
+    expect(hash("")).toBeGreaterThanOrEqual(0);
+    for (const s of ["", "a", "session-1", "pid:4022", "🐱"]) {
+      expect(hash(s)).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("agentHue stays in the red-skipping 40–320 band and is stable per id", () => {
+    for (const id of ["preview:0", "preview:1", "sess-abc", "pid:99"]) {
+      const h = agentHue(id);
+      expect(h).toBeGreaterThanOrEqual(40);
+      expect(h).toBeLessThanOrEqual(320);
+      expect(agentHue(id)).toBe(h); // stable
+    }
+  });
+
+  it("spreads near-identical ids far apart, not a degree away", () => {
+    // The ×137 spread is why preview:0/1/2 do not all land on the same hue —
+    // a plain modulo clustered them within a couple of degrees.
+    const hues = ["preview:0", "preview:1", "preview:2"].map(agentHue);
+    const maxGap = Math.max(...hues) - Math.min(...hues);
+    expect(maxGap).toBeGreaterThan(20);
   });
 });
 
