@@ -327,6 +327,17 @@
   color: rgb(255 255 255 / 0.7);
 }
 
+/* An agent is waiting on an answer: the chip carries the flag so the ask is
+   visible even while another tab has the panel. */
+.tab__chip[data-asking]::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--sys-orange, #ff9f0a);
+}
+
 .tab__chip[data-active] {
   background: rgb(255 255 255 / 0.16);
   color: rgb(255 255 255 / 0.92);
@@ -1057,6 +1068,181 @@
   color: #fff;
 }
 
+/* The terminal's own options, stacked the way the CLI stacks them. */
+.perm__options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.perm__option {
+  padding: 7px 12px;
+  border: none;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.1);
+  color: var(--pill-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.perm__option:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.perm__option--yes {
+  background: var(--sys-blue, #0a84ff);
+  color: #fff;
+}
+
+.perm__option--no {
+  color: rgb(255 255 255 / 0.75);
+}
+
+.perm__deny-form {
+  display: flex;
+  gap: 6px;
+}
+
+.perm__deny-form .perm__option--no {
+  flex: none;
+}
+
+.perm__deny-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.08);
+  color: var(--pill-ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.perm__deny-input::placeholder {
+  color: rgb(255 255 255 / 0.4);
+}
+
+/* --- The edit diff on a permission card ---------------------------------- */
+
+.perm__stat {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(255 255 255 / 0.55);
+}
+
+.diff {
+  max-height: 240px;
+  overflow: auto;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.05);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.diff__line {
+  display: flex;
+  gap: 8px;
+  padding: 0 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgb(255 255 255 / 0.75);
+}
+
+.diff__sign {
+  flex: none;
+  width: 1ch;
+  user-select: none;
+  color: rgb(255 255 255 / 0.4);
+}
+
+.diff__line[data-kind="add"] {
+  background: rgb(48 209 88 / 0.16);
+  color: rgb(198 245 208);
+}
+
+.diff__line[data-kind="add"] .diff__sign {
+  color: var(--sys-green, #30d158);
+}
+
+.diff__line[data-kind="del"] {
+  background: rgb(255 69 58 / 0.14);
+  color: rgb(250 205 202);
+  text-decoration: line-through;
+  text-decoration-color: rgb(255 69 58 / 0.5);
+}
+
+.diff__line[data-kind="del"] .diff__sign {
+  color: var(--sys-red, #ff453a);
+}
+
+/* --- A question from the model (AskUserQuestion) ------------------------- */
+
+.q {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.q__header {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.12);
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(255 255 255 / 0.75);
+}
+
+.q__text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--pill-ink);
+}
+
+.q__options {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.q__option {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.08);
+  color: var(--pill-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.q__option[data-selected] {
+  border-color: var(--sys-blue, #0a84ff);
+  background: rgb(10 132 255 / 0.18);
+}
+
+.q__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.q__desc {
+  font-size: 12px;
+  color: rgb(255 255 255 / 0.6);
+}
+
 /* --- The agent list ------------------------------------------------------ */
 
 .agents {
@@ -1119,7 +1305,7 @@
 }
 
 .agent-row__subcount {
-  margin: 2px 0 0 15px;
+  margin: 2px 0 0;
   font-size: 12px;
   color: var(--sys-blue, #0a84ff);
   opacity: 0.8;

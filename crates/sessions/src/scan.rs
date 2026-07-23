@@ -8,8 +8,8 @@
 //! rather than any published schema, so each rule below names the record it
 //! came from.
 
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use serde::Deserialize;
@@ -39,6 +39,9 @@ pub struct Scan {
     /// prefix stripped: `claude-opus-4-8` reads as `opus-4-8`. What the row's
     /// tag shows.
     pub model: Option<String>,
+    /// The git branch the agent is on, from any record's `gitBranch` — with
+    /// the project folder, it names what the session is working on.
+    pub branch: Option<String>,
 }
 
 /// A tool call the agent has started.
@@ -77,6 +80,8 @@ enum Record {
 struct Turn {
     timestamp: Option<String>,
     cwd: Option<String>,
+    #[serde(rename = "gitBranch")]
+    git_branch: Option<String>,
     #[serde(default)]
     message: Message,
 }
@@ -120,11 +125,12 @@ enum Block {
     Other,
 }
 
-/// Reads the tail of a transcript.
+/// Reads a whole transcript in one pass.
 ///
 /// Malformed lines are skipped rather than failing the scan: a transcript is
 /// appended to live, so the last line can be half-written at the moment it is
-/// read.
+/// read. The polling path uses [`Tail`] instead, which remembers its offset;
+/// this stays for one-shot reads and the tests.
 pub fn scan(path: &Path) -> anyhow::Result<Scan> {
     let text = std::fs::read_to_string(path)?;
     Ok(scan_lines(&text))
@@ -133,46 +139,128 @@ pub fn scan(path: &Path) -> anyhow::Result<Scan> {
 /// The parse itself, over the text — so every rule below is testable without a
 /// file on disk.
 pub fn scan_lines(text: &str) -> Scan {
-    let mut out = Scan::default();
-    // A tool is only "running" if nothing later answered it, and the answer can
-    // arrive several records after the call. So collect both and resolve after.
-    let mut pending: Vec<(String, Tool)> = Vec::new();
-    let mut answered: HashSet<String> = HashSet::new();
-
+    let mut state = TailState::default();
     for line in text.lines() {
+        state.apply(line);
+    }
+    state.resolved()
+}
+
+/// Transcript readers that remember how far they got.
+///
+/// A transcript reaches hundreds of megabytes over a long session, and the
+/// poll runs every few seconds — re-reading whole files was measurable I/O for
+/// no new information. Each path keeps its byte offset and its accumulated
+/// scan; a poll reads only what was appended. A file that *shrank* is a new
+/// session reusing the path, and its state restarts from zero.
+#[derive(Default)]
+pub struct Tail {
+    states: HashMap<PathBuf, TailState>,
+    /// Bumped by [`Tail::begin`]; states not touched since the last bump are
+    /// dropped by [`Tail::prune`], so paths that stopped being scanned do not
+    /// accumulate forever.
+    generation: u64,
+}
+
+impl Tail {
+    /// Marks the start of a poll cycle, for [`Tail::prune`].
+    pub fn begin(&mut self) {
+        self.generation += 1;
+    }
+
+    /// Drops state for every path not scanned since [`Tail::begin`].
+    pub fn prune(&mut self) {
+        let generation = self.generation;
+        self.states.retain(|_, s| s.generation == generation);
+    }
+
+    /// The scan so far, advanced by whatever the file gained since last time.
+    pub fn scan(&mut self, path: &Path) -> anyhow::Result<Scan> {
+        use std::io::{Read, Seek, SeekFrom};
+
+        let state = self.states.entry(path.to_path_buf()).or_default();
+        state.generation = self.generation;
+
+        let mut file = std::fs::File::open(path)?;
+        let len = file.metadata()?.len();
+        if len < state.offset {
+            // Shrunk: a new transcript took the path. Start over.
+            *state = TailState {
+                generation: self.generation,
+                ..TailState::default()
+            };
+        }
+        if len > state.offset {
+            file.seek(SeekFrom::Start(state.offset))?;
+            let mut bytes = Vec::with_capacity((len - state.offset) as usize);
+            file.read_to_end(&mut bytes)?;
+            // Only complete lines are consumed; a half-written last line stays
+            // unread and is picked up whole on the next poll. `\n` is a single
+            // byte, so the cut can never land inside a UTF-8 sequence.
+            let complete = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+            for line in String::from_utf8_lossy(&bytes[..complete]).lines() {
+                state.apply(line);
+            }
+            state.offset += complete as u64;
+        }
+        Ok(state.resolved())
+    }
+}
+
+/// One transcript's accumulated read: the scan fields plus the tool calls not
+/// yet answered — the part that has to survive between polls for the running
+/// tool to resolve across an increment boundary.
+#[derive(Default)]
+struct TailState {
+    offset: u64,
+    generation: u64,
+    scan: Scan,
+    /// Calls with no result yet, in file order. A result removes its call, so
+    /// the last entry is what the agent is doing right now. Results always
+    /// follow their call in an append-only file, so no "answered" set is
+    /// needed — arrival order resolves everything.
+    pending: Vec<(String, Tool)>,
+}
+
+impl TailState {
+    fn apply(&mut self, line: &str) {
         let line = line.trim();
         if line.is_empty() {
-            continue;
+            return;
         }
         let Ok(record) = serde_json::from_str::<Record>(line) else {
-            continue;
+            return;
         };
         match record {
-            Record::AiTitle { title } => out.title = Some(title),
-            Record::LastPrompt { prompt } => out.prompt = Some(prompt),
+            Record::AiTitle { title } => self.scan.title = Some(title),
+            Record::LastPrompt { prompt } => self.scan.prompt = Some(prompt),
             Record::Assistant(turn) | Record::User(turn) => {
                 // Only conversational records move the clock. This is the whole
                 // reason the enum skips `attachment` and friends.
                 if turn.timestamp.is_some() {
-                    out.last_activity = turn.timestamp;
+                    self.scan.last_activity = turn.timestamp;
                 }
                 if turn.cwd.is_some() {
-                    out.cwd = turn.cwd;
+                    self.scan.cwd = turn.cwd;
+                }
+                if turn.git_branch.is_some() {
+                    self.scan.branch = turn.git_branch;
                 }
                 // The model can change mid-session (a /model switch); the last
                 // one wins, matching what the agent is answering with now.
                 if let Some(model) = turn.message.model {
-                    out.model = Some(model.strip_prefix("claude-").unwrap_or(&model).to_string());
+                    self.scan.model =
+                        Some(model.strip_prefix("claude-").unwrap_or(&model).to_string());
                 }
                 if let Content::Blocks(blocks) = turn.message.content {
                     for block in blocks {
                         match block {
                             Block::ToolUse { id, name, input } => {
                                 let detail = headline(&name, &input);
-                                pending.push((id, Tool { name, detail }));
+                                self.pending.push((id, Tool { name, detail }));
                             }
                             Block::ToolResult { tool_use_id } => {
-                                answered.insert(tool_use_id);
+                                self.pending.retain(|(id, _)| *id != tool_use_id);
                             }
                             Block::Other => {}
                         }
@@ -182,22 +270,22 @@ pub fn scan_lines(text: &str) -> Scan {
         }
     }
 
-    // The last unanswered call is the one on screen. Later beats earlier: a
-    // parallel batch shows its most recent, not its first.
-    out.running = pending
-        .into_iter()
-        .rev()
-        .find(|(id, _)| !answered.contains(id))
-        .map(|(_, tool)| tool);
-    out
+    /// The scan with `running` filled in from the unanswered tail.
+    fn resolved(&self) -> Scan {
+        let mut out = self.scan.clone();
+        // Later beats earlier: a parallel batch shows its most recent call.
+        out.running = self.pending.last().map(|(_, tool)| tool.clone());
+        out
+    }
 }
 
 /// The argument worth putting in a row this narrow.
 ///
 /// Named per tool rather than "first string field": `Bash` wants its command,
 /// `Read` its path, and picking whichever key happens to serialize first gives
-/// a different answer as the model varies its arguments.
-fn headline(name: &str, input: &serde_json::Value) -> Option<String> {
+/// a different answer as the model varies its arguments. Public because hook
+/// payloads carry the same `tool_input` shape and want the same one line.
+pub fn headline(name: &str, input: &serde_json::Value) -> Option<String> {
     let key = match name {
         "Bash" | "BashOutput" => "command",
         "Read" | "Write" | "NotebookEdit" => "file_path",
@@ -223,13 +311,20 @@ impl Scan {
     ///
     /// `now` is a parameter so the rule is testable without waiting 30 seconds.
     pub fn busy(&self, now: SystemTime) -> bool {
+        self.active_within(now, BUSY_WINDOW)
+    }
+
+    /// Whether the last conversational record falls inside `window` — the
+    /// generalised form of [`Scan::busy`], for callers with a longer horizon
+    /// (retiring finished subagents wants minutes, not seconds).
+    pub fn active_within(&self, now: SystemTime, window: Duration) -> bool {
         let Some(stamp) = self.last_activity.as_deref() else {
             return false;
         };
         let Some(at) = parse_timestamp(stamp) else {
             return false;
         };
-        now.duration_since(at).map_or(true, |age| age < BUSY_WINDOW)
+        now.duration_since(at).map_or(true, |age| age < window)
     }
 }
 
@@ -265,6 +360,36 @@ fn parse_timestamp(text: &str) -> Option<SystemTime> {
     let seconds = days * 86_400 + hour * 3_600 + minute * 60 + second;
     let seconds = u64::try_from(seconds).ok()?;
     Some(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds))
+}
+
+/// The inverse of [`parse_timestamp`]: a `SystemTime` in the transcripts' own
+/// ISO-8601 UTC shape, so hook-born rows and scan-born rows carry timestamps
+/// the webview formats the same way.
+///
+/// Same civil-date algorithm as the parse (Howard Hinnant's `civil_from_days`),
+/// and pinned against it by a roundtrip test — the two must agree or a row's
+/// `· now` tag drifts.
+pub fn format_timestamp(at: SystemTime) -> Option<String> {
+    let seconds = at.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_secs();
+    let seconds = i64::try_from(seconds).ok()?;
+    let days = seconds.div_euclid(86_400);
+    let in_day = seconds.rem_euclid(86_400);
+    let (hour, minute, second) = (in_day / 3_600, (in_day % 3_600) / 60, in_day % 60);
+
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let mp = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+
+    Some(format!(
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.000Z"
+    ))
 }
 
 #[cfg(test)]
@@ -399,5 +524,124 @@ mod tests {
         assert_eq!(seconds("2024-02-29T00:00:00.000Z"), 1_709_164_800);
         assert_eq!(seconds("2024-03-01T00:00:00.000Z"), 1_709_251_200);
         assert_eq!(parse_timestamp("not a date"), None);
+    }
+
+    /// The formatter and the parser must agree, or hook-born timestamps drift
+    /// against transcript-born ones and a row's `· now` tag lies.
+    #[test]
+    fn format_and_parse_roundtrip() {
+        for stamp in [
+            "1970-01-01T00:00:00.000Z",
+            "2024-02-29T00:00:00.000Z",
+            "2024-03-01T00:00:00.000Z",
+            "2026-07-22T21:19:09.000Z",
+            "2026-12-31T23:59:59.000Z",
+        ] {
+            let at = parse_timestamp(stamp).unwrap();
+            assert_eq!(format_timestamp(at).as_deref(), Some(stamp));
+        }
+    }
+
+    /// The whole point of the tail: an append advances the scan without the
+    /// earlier bytes being re-read, and the running tool resolves across the
+    /// increment boundary — the call arrived in one poll, its result in the next.
+    #[test]
+    fn a_tail_resolves_a_tool_call_across_two_reads() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let mut file = std::fs::File::create(&path).unwrap();
+        writeln!(file, r#"{{"type":"ai-title","aiTitle":"Fix the parser"}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"assistant","timestamp":"2026-07-22T21:00:00.000Z","message":{{"content":[{{"type":"tool_use","id":"a","name":"Bash","input":{{"command":"cargo test"}}}}]}}}}"#
+        )
+        .unwrap();
+
+        let mut tail = Tail::default();
+        tail.begin();
+        let scan = tail.scan(&path).unwrap();
+        assert_eq!(scan.title.as_deref(), Some("Fix the parser"));
+        assert_eq!(scan.running.as_ref().unwrap().name, "Bash");
+
+        writeln!(
+            file,
+            r#"{{"type":"user","timestamp":"2026-07-22T21:00:01.000Z","message":{{"content":[{{"type":"tool_result","tool_use_id":"a"}}]}}}}"#
+        )
+        .unwrap();
+        let scan = tail.scan(&path).unwrap();
+        assert_eq!(scan.running, None, "the result answered the earlier call");
+        assert_eq!(scan.title.as_deref(), Some("Fix the parser"));
+    }
+
+    /// A half-written last line stays unconsumed and is read whole next poll —
+    /// consuming it early would drop the record's tail when the rest lands.
+    #[test]
+    fn a_tail_leaves_a_half_written_line_for_the_next_read() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let mut file = std::fs::File::create(&path).unwrap();
+        let half = concat!(
+            r#"{"type":"last-prompt","lastPrompt":"hello"}"#,
+            "\n",
+            r#"{"type":"ai-title","aiTi"#
+        );
+        write!(file, "{half}").unwrap();
+
+        let mut tail = Tail::default();
+        let scan = tail.scan(&path).unwrap();
+        assert_eq!(scan.prompt.as_deref(), Some("hello"));
+        assert_eq!(scan.title, None);
+
+        // The rest of the line lands; the record must apply exactly once.
+        writeln!(file, r#"tle":"Now whole"}}"#).unwrap();
+        let scan = tail.scan(&path).unwrap();
+        assert_eq!(scan.title.as_deref(), Some("Now whole"));
+    }
+
+    /// A shrunk file is a new transcript reusing the path — stale state kept
+    /// across that boundary shows the old session's tools on the new one.
+    #[test]
+    fn a_shrunk_file_restarts_its_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        std::fs::write(
+            &path,
+            format!(
+                "{}\n{}\n",
+                r#"{"type":"ai-title","aiTitle":"An earlier, longer session title"}"#,
+                r#"{"type":"assistant","timestamp":"2026-07-22T21:00:00.000Z","message":{"content":[{"type":"tool_use","id":"a","name":"Bash","input":{"command":"ls"}}]}}"#
+            ),
+        )
+        .unwrap();
+        let mut tail = Tail::default();
+        assert!(tail.scan(&path).unwrap().running.is_some());
+
+        std::fs::write(&path, "{\"type\":\"ai-title\",\"aiTitle\":\"New\"}\n").unwrap();
+        let scan = tail.scan(&path).unwrap();
+        assert_eq!(scan.title.as_deref(), Some("New"));
+        assert_eq!(scan.running, None, "the old session's tool must not leak");
+    }
+
+    /// Paths that stop being scanned are pruned, or a long-running app holds
+    /// state for every transcript it ever watched.
+    #[test]
+    fn prune_drops_paths_not_scanned_this_generation() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.jsonl");
+        let b = dir.path().join("b.jsonl");
+        std::fs::write(&a, "{}\n").unwrap();
+        std::fs::write(&b, "{}\n").unwrap();
+
+        let mut tail = Tail::default();
+        tail.begin();
+        tail.scan(&a).unwrap();
+        tail.scan(&b).unwrap();
+        tail.begin();
+        tail.scan(&b).unwrap();
+        tail.prune();
+        assert_eq!(tail.states.len(), 1);
+        assert!(tail.states.contains_key(&b));
     }
 }

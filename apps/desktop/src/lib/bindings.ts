@@ -146,20 +146,25 @@ export const commands = {
 	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
 	/**  Records the panel's settled box, so the click region can be exactly it. */
 	setPanelBox: (width: number | null, height: number | null) => __TAURI_INVOKE<void>("set_panel_box", { width, height }),
+	/**  The webview declaring its interactive state; see [`INTERACTIVE`]. */
+	setPanelInteractive: (open: boolean) => __TAURI_INVOKE<void>("set_panel_interactive", { open }),
 	agentHookStatus: () => typedError<HookStatus, string>(__TAURI_INVOKE("agent_hook_status")),
 	/**
 	 *  Installs our hooks, copying the sidecar out of the bundle first.
 	 * 
-	 *  Status events only. Approvals stay off until step 4 can answer them — and
-	 *  on this machine another tool owns that event anyway.
+	 *  Approvals ride along unless another tool owns `PermissionRequest` — the
+	 *  event only fires when the agent would have asked the user anyway, so
+	 *  taking it is not putting Aloud in front of calls the user already allowed.
+	 *  A foreign owner downgrades this to status-only; taking over is a separate,
+	 *  deliberate act (`install::take_over`) that the settings pane will own.
 	 */
 	installAgentHooks: () => typedError<HookStatus, string>(__TAURI_INVOKE("install_agent_hooks")),
 	uninstallAgentHooks: () => typedError<HookStatus, string>(__TAURI_INVOKE("uninstall_agent_hooks")),
 	/**
-	 *  Approve or deny a pending request. The socket thread parked on it wakes with
-	 *  this reply and writes the directive to the agent.
+	 *  Resolve a pending request, by session id. The socket thread parked on it
+	 *  wakes with this reply and writes the directive to the agent.
 	 */
-	resolvePermission: (id: string, allow: boolean) => __TAURI_INVOKE<void>("resolve_permission", { id, allow }),
+	resolvePermission: (id: string, reply: ApprovalReply) => __TAURI_INVOKE<void>("resolve_permission", { id, reply }),
 	/**
 	 *  Resolves the pending confirmation. Called by the panel's Cancel/Confirm
 	 *  buttons; `edits` carries any field the user filled in or corrected before
@@ -223,18 +228,19 @@ export type AgentEvent =
 { kind: "status"; value: string } | { kind: "runFinished"; value: string } | { kind: "runError"; value: string };
 
 /**
- *  One tool call awaiting an Approve / Deny. The notch opens itself on this and
- *  draws a card; several can be in flight at once (a Codex swarm asks in
- *  parallel), so the panel renders them as a queue keyed by `id`.
+ *  One request awaiting an Approve / Deny. The notch opens itself on this and
+ *  draws a card. Keyed by **session id** — the `PermissionRequest` payload
+ *  carries no `tool_use_id`, and the agent blocks its turn on the request, so
+ *  one card per session is the protocol's own invariant. Several *sessions*
+ *  can ask at once, so the panel still renders a queue.
  */
 export type AgentPermission = {
-	/**  `tool_use_id` — how a decision is routed back to the waiting hook. */
-	id: string,
 	/**
-	 *  The agent's session id, so the card can be shown under the exact row
-	 *  that is asking — with several terminals open, this is what tells them
-	 *  apart.
+	 *  The session id — how a decision is routed back to the waiting hook,
+	 *  and what ties the card to its row.
 	 */
+	id: string,
+	/**  Same as `id`; kept so the card→row linkage reads by name in the UI. */
 	sessionId: string | null,
 	agent: string,
 	tool: string,
@@ -244,11 +250,37 @@ export type AgentPermission = {
 	 */
 	input: { [key in string]: string },
 	cwd: string | null,
+	/**
+	 *  Non-empty exactly when this is an `AskUserQuestion`: the card renders
+	 *  the model's own questions and options instead of Approve / Deny.
+	 */
+	questions: AgentQuestion[],
+	/**
+	 *  Whether this arrival should raise the notch — the "open notch for
+	 *  permissions" setting, decided here so the webview and the window
+	 *  cannot disagree. Off: the card queues quietly behind the hover.
+	 */
+	open: boolean,
 };
 
 /**  A request has been answered or the agent gave up on it; the card comes down. */
 export type AgentPermissionResolved = {
 	id: string,
+};
+
+/**  One question on a card, mirroring the CLI's own prompt. */
+export type AgentQuestion = {
+	question: string,
+	/**  The short chip above the question — "Auth method", "Library". */
+	header: string,
+	multiSelect: boolean,
+	options: AgentQuestionOption[],
+};
+
+/**  One choice under a question. */
+export type AgentQuestionOption = {
+	label: string,
+	description: string,
 };
 
 /**
@@ -268,11 +300,18 @@ export type AgentSession = {
 	agent: string,
 	/**  What to call the row: the model's title, the prompt, or the folder. */
 	title: string,
+	/**
+	 *  The user's latest prompt, verbatim — what a "You:" line shows. The
+	 *  title is the model's and can be a session-old summary.
+	 */
+	prompt: string | null,
 	cwd: string | null,
 	/**  The tool running right now, already flattened to one line. */
 	tool: string | null,
 	/**  The model, vendor prefix stripped: `opus-4-8`, `gpt-5.6-sol`. */
 	model: string | null,
+	/**  The git branch, for the row head: `aloud-tauri @ feat/agent-notch`. */
+	branch: string | null,
 	/**
 	 *  ISO-8601 of last activity, for the row's `· now` / `· 10m` tag. The tag
 	 *  is rendered in the webview so it updates without a new event.
@@ -311,6 +350,26 @@ export type AppRule = {
 	/**  A prompt to use instead of the global one. Empty leaves the global. */
 	custom_prompt: string,
 };
+
+/**
+ *  What the user decided on a card, from the webview. Mirrors the terminal's
+ *  own three options plus the question path.
+ */
+export type ApprovalReply = 
+/**  "Yes" — this call only. */
+{ kind: "allowOnce" } | 
+/**  "Yes, don't ask again for <tool> this session." */
+{ kind: "allowAlways" } | 
+/**
+ *  "No, and tell Claude what to do differently" — the text reaches the
+ *  model as the deny message.
+ */
+{ kind: "deny"; message: string | null } | 
+/**
+ *  The answers to an `AskUserQuestion`, keyed by each question's text;
+ *  multi-select answers pre-joined with `", "`.
+ */
+{ kind: "answer"; answers: { [key in string]: string } };
 
 /**  Streamed to the panel as the answer arrives. */
 export type AskEvent = 
@@ -711,6 +770,12 @@ export type Settings = {
 	showMenuBarIcon?: boolean,
 	/**  Drop-down pill or menu-bar wings; wings are macOS-only. */
 	overlayStyle?: OverlayStyle,
+	/**
+	 *  Whether a coding agent's permission request opens the notch by itself.
+	 *  Off means the request waits quietly — the Agents surface flags it, and
+	 *  the user opens the notch when they hover. The hook waits either way.
+	 */
+	agentOpenOnPermission?: boolean,
 	overlayDisplay?: OverlayDisplay,
 	/**
 	 *  Put the previous clipboard back after pasting. Off leaves the dictated

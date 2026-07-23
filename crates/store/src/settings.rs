@@ -128,6 +128,10 @@ pub struct Settings {
     pub show_menu_bar_icon: bool,
     /// Drop-down pill or menu-bar wings; wings are macOS-only.
     pub overlay_style: OverlayStyle,
+    /// Whether a coding agent's permission request opens the notch by itself.
+    /// Off means the request waits quietly — the Agents surface flags it, and
+    /// the user opens the notch when they hover. The hook waits either way.
+    pub agent_open_on_permission: bool,
     pub overlay_display: OverlayDisplay,
     /// Put the previous clipboard back after pasting. Off leaves the dictated
     /// text on the clipboard so it can be pasted again.
@@ -181,6 +185,9 @@ impl Default for Settings {
             mute_system_audio: false,
             show_menu_bar_icon: true,
             overlay_style: OverlayStyle::DropPill,
+            // On: a blocked agent is usually why the user looks up. The
+            // toggle exists for people who find the self-opening notch rude.
+            agent_open_on_permission: true,
             overlay_display: OverlayDisplay::Active,
             preserve_clipboard: true,
             history_retention: 50,

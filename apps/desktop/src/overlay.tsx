@@ -20,6 +20,7 @@ import {
   events,
   type AgentPermission,
   type AgentSession,
+  type ApprovalReply,
   type OverlayStyle,
   type Phase,
 } from "./lib/bindings";
@@ -41,6 +42,7 @@ import {
   labelFor,
   type ToolArgs,
 } from "./lib/tool-views";
+import { diffLines, diffStat } from "./lib/diff";
 import { notchPath } from "./lib/notch-shape";
 import { timeAgo } from "./lib/format";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
@@ -122,6 +124,15 @@ const PANEL_WIDTH_FACTOR = 1.5;
 function useNotchPanel(
   style: OverlayStyle,
   run: number,
+  /**
+   * Whether the panel currently has content worth measuring. Part of the
+   * rebuild key: the agents surface and the hover peek appear without a
+   * dictation ever bumping `run`, and a driver built against an empty (or
+   * `display: none`) body measured nothing — so the box never reached Rust
+   * and every click on a visible permission card fell through to the app
+   * behind the notch.
+   */
+  populated: boolean,
   dismissing: boolean,
   /** Called with the box the panel is settling to, whenever that changes. */
   onTarget: (width: number, height: number) => void,
@@ -144,8 +155,35 @@ function useNotchPanel(
     const pathElement = path.current;
     const contentElement = content.current;
     if (!surfaceElement || !shapeElement || !pathElement || !contentElement) return;
-    // Nothing on screen yet (the pill is `display: none` until the first run);
-    // measuring here would set the target from a zero-width box.
+    // Nothing to show: at rest the surface *is* the cutout, nothing more.
+    // Snap it there rather than leaving whatever inline size the last
+    // driver's springs wrote — an empty panel keeping its old size is a
+    // black slab hanging under the menu bar. The cutout box is still
+    // reported, so hovering that strip is what grows the notch.
+    //
+    // Judged from `populated`, never from the body's measured width: a
+    // `display: none` pill measures 0 while holding real content, and an
+    // empty body measures its own padding — both lied here before.
+    if (!populated) {
+      const computed = getComputedStyle(surfaceElement);
+      const measured = (name: string, fallback: number) => {
+        const value = parseFloat(computed.getPropertyValue(name));
+        return Number.isFinite(value) ? value : fallback;
+      };
+      const width = measured("--notch-w", NOTCH_FALLBACK.width);
+      const height = measured("--notch-h", NOTCH_FALLBACK.height);
+      surfaceElement.style.width = `${width}px`;
+      surfaceElement.style.height = `${height}px`;
+      shapeElement.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      pathElement.setAttribute(
+        "d",
+        notchPath(width, height, Math.max(0, height / 3 - 4), height / 3),
+      );
+      onTarget(width, height);
+      return;
+    }
+    // On screen but not yet laid out (`display: none`): nothing to measure,
+    // and the rebuild on `populated`/`run` will come back around.
     if (!contentElement.offsetWidth) return;
 
     // Read once per rebuild, not per retarget: it is a style recalc, and
@@ -273,7 +311,7 @@ function useNotchPanel(
       height.stop();
       driver.current = null;
     };
-  }, [style, run]);
+  }, [style, run, populated]);
 
   // Declared after the effect above so that on a rebuild the driver exists
   // before this runs — effects fire in declaration order.
@@ -363,6 +401,13 @@ type Tab = { id: number; blank: boolean; closing?: boolean };
 const FIRST_TABS: Tab[] = [{ id: 0, blank: false }];
 
 /**
+ * The agents surface's slot in the strip — a fixed pseudo-tab, not an entry in
+ * `tabs`: it cannot be closed, survives every run reset, and is what makes
+ * "everything under one notch" true. Negative so no real tab id collides.
+ */
+const AGENTS_TAB = -1;
+
+/**
  * Where `+` stops. The strip has the answer body's 480pt and no more, and past
  * this every label is ellipsed to two characters — a notch panel is not a
  * browser. ponytail: a hard cap, not overflow scrolling; if tabs ever carry
@@ -404,7 +449,13 @@ function Overlay() {
   const [selected, setSelected] = useState<string | null>(null);
   // Any of them owns the panel; almost everything below only cares that one
   // does. A pending permission counts: the card has to be on screen to answer.
-  const panelOpen = ask !== null || agent !== null || browsing || permissions.length > 0;
+  // A pending permission is deliberately NOT part of this: a card *arriving*
+  // opens the panel (the event listener sets `browsing`), but it must not
+  // *hold* it — deriving openness from the queue pinned the panel so hard
+  // that the cross, click-away and Escape all read as broken. Closing with a
+  // card pending is fine: the hook waits (24h), the card stays queued under
+  // the Agents tab's dot, and reopening the notch finds it again.
+  const panelOpen = ask !== null || agent !== null || browsing;
   // A ref, not the state it mirrors: the phase listener subscribes once, and
   // depending on `panelOpen` would rebuild it on every streamed token.
   const openRef = useRef(panelOpen);
@@ -433,6 +484,13 @@ function Overlay() {
     setActiveTab(0);
   }, [run]);
 
+  // With no run to show, the agents tab is the only content the panel has —
+  // opening by click, by a permission arriving, or by the run closing out
+  // from under the strip all land there rather than on an empty tab 0.
+  useEffect(() => {
+    if (panelOpen && !ask && !agent) setActiveTab(AGENTS_TAB);
+  }, [panelOpen, ask, agent]);
+
   // Dev/QA: `?agents=2` fakes a session list and `?hover` holds the peek row
   // open, so the resting notch's two states are reachable in a browser. The
   // real ones only arrive from Rust, and the hover only from a cursor poll.
@@ -449,7 +507,12 @@ function Overlay() {
             i === 0
               ? "yo no, the gif in the readme sucks. please fix"
               : `hello world. write ${i + 4} haikus`,
+          prompt:
+            i === 0
+              ? "yo no, the gif in the readme sucks. please fix"
+              : `hello world. write ${i + 4} haikus`,
           cwd: "/Users/y/dev/aloud-tauri",
+          branch: i === 0 ? "feat/agent-notch" : null,
           tool: i === 0 ? "Bash: cargo test --workspace" : null,
           model: i % 2 ? "gpt-5.6-sol" : "fable-5",
           lastActivity: ago(i === 0 ? 0 : i * 10),
@@ -478,8 +541,72 @@ function Overlay() {
           tool: "Bash",
           input: { command: "rm -rf build/ && cargo clean", timeout: "120000" },
           cwd: "/Users/y/dev/aloud-tauri",
+          questions: [],
+          open: true,
         })),
       );
+      // Mirrors what a real arrival does — open and drill.
+      setBrowsing(true);
+      setSelected("preview:0");
+    }
+    // `?edit` stages an Edit card — the diff view.
+    if (params.has("edit")) {
+      setPermissions([
+        {
+          id: "preview:e",
+          sessionId: "preview:0",
+          agent: "claude",
+          tool: "Edit",
+          input: {
+            file_path: "/Users/y/dev/aloud-tauri/README.md",
+            old_string: "## Why Aloud?\n\nHold a key, speak, and clean text lands\nin whatever app has focus.",
+            new_string:
+              "## Why Aloud?\n\nHold a key, speak, and clean text lands\nin whatever app has focus.\nAgents live in the notch now, too.",
+            replace_all: "false",
+          },
+          cwd: "/Users/y/dev/aloud-tauri",
+          open: true,
+          questions: [],
+        },
+      ]);
+      setBrowsing(true);
+      setSelected("preview:0");
+    }
+    // `?question` stages an AskUserQuestion card — the multi-option prompt.
+    if (params.has("question")) {
+      setPermissions([
+        {
+          id: "preview:q",
+          sessionId: "preview:0",
+          agent: "claude",
+          tool: "AskUserQuestion",
+          input: {},
+          cwd: "/Users/y/dev/aloud-tauri",
+          open: true,
+          questions: [
+            {
+              question: "Which auth method should the API use?",
+              header: "Auth method",
+              multiSelect: false,
+              options: [
+                { label: "OAuth", description: "Redirect flow, refresh tokens" },
+                { label: "API keys", description: "Simple, per-service secrets" },
+              ],
+            },
+            {
+              question: "Which environments should this ship to?",
+              header: "Environments",
+              multiSelect: true,
+              options: [
+                { label: "Staging", description: "" },
+                { label: "Production", description: "Behind the canary" },
+              ],
+            },
+          ],
+        },
+      ]);
+      setBrowsing(true);
+      setSelected("preview:0");
     }
   }, []);
 
@@ -488,10 +615,18 @@ function Overlay() {
     const sessionsOff = events.agentSessions.listen((e) => setSessions(e.payload));
     const hoverOff = events.notchHover.listen((e) => setHovering(e.payload.over));
     // Newest on top, and de-duplicated by id: a hook that fires twice for one
-    // call must not stack two cards for it.
-    const permOff = events.agentPermission.listen((e) =>
-      setPermissions((queue) => [e.payload, ...queue.filter((p) => p.id !== e.payload.id)]),
-    );
+    // call must not stack two cards for it. Arrival is the one-shot that
+    // opens the panel and drills to the asking agent — an *event*, not a
+    // derived state, so the user can navigate away and close afterwards.
+    const permOff = events.agentPermission.listen((e) => {
+      setPermissions((queue) => [e.payload, ...queue.filter((p) => p.id !== e.payload.id)]);
+      // `open` is the "open notch for permissions" setting, decided in Rust
+      // so this and the window agree. Off: the card queues behind the hover.
+      if (e.payload.open) {
+        setBrowsing(true);
+        setSelected(e.payload.sessionId ?? e.payload.id);
+      }
+    });
     // Answered here, abandoned by the agent, or the app deciding for us: the
     // card comes down the same way in every case.
     const resolvedOff = events.agentPermissionResolved.listen((e) =>
@@ -508,8 +643,8 @@ function Overlay() {
   // Answer, then drop it locally — the resolved event will also drop it, and
   // whichever lands first wins. Removing it here keeps the next card from
   // waiting on the round-trip.
-  const resolvePermission = useCallback((id: string, allow: boolean) => {
-    void commands.resolvePermission(id, allow);
+  const resolvePermission = useCallback((id: string, reply: ApprovalReply) => {
+    void commands.resolvePermission(id, reply);
     setPermissions((queue) => queue.filter((p) => p.id !== id));
   }, []);
 
@@ -526,12 +661,18 @@ function Overlay() {
 
   // Marked, not removed: unmounting here would cut the exit off mid-frame. The
   // removal is `dropTab`, downstream of the animation finishing.
-  const closeTab = useCallback((id: number) => {
-    setTabs((current) =>
-      current.map((tab) => (tab.id === id ? { ...tab, closing: true } : tab)),
-    );
-    setActiveTab((active) => (active === id ? 0 : active));
-  }, []);
+  const closeTab = useCallback(
+    (id: number) => {
+      setTabs((current) =>
+        current.map((tab) => (tab.id === id ? { ...tab, closing: true } : tab)),
+      );
+      // Closing the active tab lands on the run when there is one, else on
+      // the agents — tab 0 without a run is an empty panel.
+      const home = ask || agent ? 0 : AGENTS_TAB;
+      setActiveTab((active) => (active === id ? home : active));
+    },
+    [ask, agent],
+  );
 
   const dropTab = useCallback(
     (id: number) => setTabs((current) => current.filter((tab) => tab.id !== id)),
@@ -574,14 +715,11 @@ function Overlay() {
   const resting = !panelOpen && phase === "idle" && !dismissing;
   const busyCount = sessions.filter((s) => s.busy).length;
 
-  // The agents surface owns the panel when the user opened it, or when an agent
-  // is asking permission — a request has to put its card somewhere visible.
-  const agentsOpen = (browsing || permissions.length > 0) && !ask && !agent;
-  // A pending permission drills straight to the agent that is asking, so the
-  // card lands under the right row without the user hunting for it.
-  const askingId = permissions[0]?.sessionId ?? null;
-  const focusedId = selected ?? askingId;
-  const selectedSession = sessions.find((s) => s.id === focusedId) ?? null;
+  // The drill is plain navigation state. A permission arriving *sets* it
+  // (one-shot, in the event listener) — deriving it from the queue every
+  // render meant "back" un-drilled and the fallback instantly re-drilled,
+  // which read as the button not working.
+  const selectedSession = sessions.find((s) => s.id === selected) ?? null;
 
   // Rust tests the pointer against this box to decide when the window takes
   // clicks (`track_cursor` in overlay.rs). Reported only when it changes: the
@@ -599,7 +737,27 @@ function Overlay() {
       /* no Tauri; nothing is polling the pointer either */
     }
   }, []);
-  const panel = useNotchPanel(effectiveStyle, run, dismissing, reportBox);
+  // Whether the notch has anything to show: a panel, a dictation in some
+  // phase, or the hover peek. This is the state the driver sizes from —
+  // judging by the body's measured width instead was wrong twice (a
+  // `display: none` pill measures 0 with content, an empty body measures its
+  // padding without any), so the decision is state, never pixels.
+  const populated = panelOpen || phase !== "idle" || (resting && hovering);
+  const panel = useNotchPanel(effectiveStyle, run, populated, dismissing, reportBox);
+
+  // Interactivity is state, not cursor position. While a panel is open the
+  // whole window takes clicks and the DOM does its own hit-testing — gating
+  // an open panel on Rust's polled box was a race per content change: click
+  // "back", the list resizes, the new box excludes the pointer, and the poll
+  // turns the buttons click-through under the cursor. The polled box still
+  // gates the *resting* strip, where it is the cutout and never moves.
+  useEffect(() => {
+    try {
+      void commands.setPanelInteractive(panelOpen);
+    } catch {
+      /* browser preview — nothing is tracking the pointer either */
+    }
+  }, [panelOpen]);
   // The root, not the bar row: --level inherits, so the wings style can draw
   // two waves off one write.
   const root = useRef<HTMLDivElement>(null);
@@ -637,15 +795,30 @@ function Overlay() {
       setDismissing(false);
       if (e.payload === "recording") {
         setError(null);
-        // A dictation started over the top of an answer takes the panel back.
+        // A dictation started over the top of an answer takes the panel back —
+        // including from the agents surface, or the pill and the panel fight
+        // over the same strip.
         setAsk(null);
         setAgent(null);
+        setBrowsing(false);
+        setSelected(null);
         setPartial("");
         setDroppedDown(false);
         setRun((previous) => previous + 1);
       }
     });
-    const unlistenDismiss = events.overlayDismiss.listen(() => setDismissing(true));
+    // A dismiss is Rust declaring the panel over, so the panel *state* goes
+    // with it. Leaving `ask`/`agent` latched here is what made the panel
+    // spring back open the moment `dismissing` reset — and the second click
+    // on the cross was then a no-op, because Rust's `end_panel` had already
+    // cleared its side and had nothing left to close.
+    const unlistenDismiss = events.overlayDismiss.listen(() => {
+      setDismissing(true);
+      setAsk(null);
+      setAgent(null);
+      setBrowsing(false);
+      setSelected(null);
+    });
     const unlistenError = events.overlayError.listen((e) => setError(e.payload));
     const unlistenStyle = events.overlayStyle.listen((e) => {
       setStyle(e.payload.style);
@@ -979,13 +1152,41 @@ function Overlay() {
   useEffect(() => {
     if (!panelOpen) return;
     const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Browsing the agents is webview state, so Escape clears it here —
+      // asking Rust to close a panel it never opened left `browsing` stuck
+      // true with the window dismissed, which read as the notch dying.
+      if (!agent && !ask) {
+        setBrowsing(false);
+        setSelected(null);
+        return;
+      }
       // `closeAgent` also abandons a pending confirmation, so Escape reads as
       // "no" rather than leaving a write waiting on a channel nobody answers.
-      if (e.key === "Escape") void (agent ? commands.closeAgent() : commands.closeAsk());
+      void (agent ? commands.closeAgent() : commands.closeAsk());
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [panelOpen, agent]);
+  }, [panelOpen, agent, ask]);
+
+  // A dismissal is an animation, not a state of being: once the collapse has
+  // settled, the panel is back to resting so the notch (and the agents under
+  // it) are reachable again. Without this, Escape after an ask left
+  // `dismissing` true forever — a live window rendering nothing, hover dead.
+  //
+  // The phase resets here too, and only here. The `idle` that ended the run
+  // is deliberately never stored while the exit plays (blanking mid-collapse
+  // cut a no-speech run off dead), so the last real phase is still latched —
+  // and a resting notch that re-opens onto a stale "Transcribing…" pill is
+  // that latch showing. Collapse settled = the run is over = idle.
+  useEffect(() => {
+    if (!dismissing) return;
+    const timer = setTimeout(() => {
+      setDismissing(false);
+      setPhase("idle");
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [dismissing]);
 
   // Follow the stream to the bottom; simpler than tracking manual scroll.
   useEffect(() => {
@@ -1009,7 +1210,25 @@ function Overlay() {
 
   return (
     // The exit is a state of the whole surface, not of one style.
-    <div className="overlay-root" ref={root} data-exiting={dismissing || undefined}>
+    <div
+      className="overlay-root"
+      ref={root}
+      data-exiting={dismissing || undefined}
+      // While open the window takes every click, so a click on the bare
+      // canvas is one the user aimed at nothing — close, like a popover.
+      // (The reference reposts the click to the app underneath via a
+      // synthetic event; consuming it is the simpler contract.)
+      onMouseDown={(e) => {
+        if (!panelOpen) return;
+        if ((e.target as HTMLElement).closest(".drop-pill")) return;
+        if (agent) void commands.closeAgent();
+        else if (ask) void commands.closeAsk();
+        else {
+          setBrowsing(false);
+          setSelected(null);
+        }
+      }}
+    >
     {/* Left rendered *underneath* the panel once it takes over: hiding the
         wings on hand-over snaps the bar down to the bare cutout for a frame.
         Relies on the panel settling wider than the tabs — its floor
@@ -1068,39 +1287,28 @@ function Overlay() {
           }`}
           ref={panel.content}
         >
-          {resting && !agentsOpen ? (
+          {resting ? (
             // At rest the panel is exactly the cutout and this is empty, so
             // there is nothing to see; hovering grows it by the height of this
             // row. The spring in `useNotchPanel` does the growing — this only
             // states what it is growing around.
-            hovering && <NotchPeek sessions={sessions} busy={busyCount} />
-          ) : agentsOpen ? (
-            // The agents surface: the list, or one agent's live detail, with
-            // any pending permission shown under the exact row that is asking.
-            selectedSession ? (
-              <AgentDetail
-                session={selectedSession}
-                permission={permissions.find((p) => p.sessionId === selectedSession.id) ?? null}
-                onResolve={resolvePermission}
-                onBack={() => setSelected(null)}
-              />
-            ) : (
-              <AgentList
+            hovering && (
+              <NotchPeek
                 sessions={sessions}
-                permissions={permissions}
-                onSelect={setSelected}
-                onResolve={resolvePermission}
-                onClose={() => {
-                  setBrowsing(false);
-                  setSelected(null);
-                }}
+                busy={busyCount}
+                asking={permissions.length > 0}
               />
             )
           ) : panelOpen ? (
+            // Everything under one notch: the strip always shows, the agents
+            // are a tab on it, and a dictation's ask/agent panel is another —
+            // so escaping one never takes the other away.
             <>
               <TabStrip
                 tabs={tabs}
                 active={activeTab}
+                runOpen={ask !== null || agent !== null}
+                asking={permissions.length > 0}
                 title={
                   ask?.question ??
                   agent?.heard ??
@@ -1113,9 +1321,36 @@ function Overlay() {
                 onClosed={dropTab}
                 onAdd={addTab}
               />
-              {/* Keyed so switching back to a tab replays its entrance rather
-                  than having the content appear already settled. */}
-              {tabs.find((tab) => tab.id === activeTab)?.blank ? (
+              {activeTab === AGENTS_TAB ? (
+                // The agents surface: the list, or one agent's live detail,
+                // with any pending permission under the row that is asking.
+                selectedSession ? (
+                  <AgentDetail
+                    session={selectedSession}
+                    permission={
+                      permissions.find((p) => p.sessionId === selectedSession.id) ?? null
+                    }
+                    onResolve={resolvePermission}
+                    onBack={() => setSelected(null)}
+                  />
+                ) : (
+                  <AgentList
+                    sessions={sessions}
+                    permissions={permissions}
+                    onSelect={setSelected}
+                    onResolve={resolvePermission}
+                    onClose={() => {
+                      setBrowsing(false);
+                      setSelected(null);
+                      // With a run open the X leaves the panel up on that run;
+                      // only a browse-only panel actually closes.
+                      if (ask || agent) setActiveTab(0);
+                    }}
+                  />
+                )
+              ) : /* Keyed so switching back to a tab replays its entrance rather
+                  than having the content appear already settled. */
+              tabs.find((tab) => tab.id === activeTab)?.blank ? (
                 <div className="tab-blank" key={activeTab} />
               ) : ask ? (
                 // Keyed on the question so a new one resets copy state and input.
@@ -1168,9 +1403,11 @@ function Overlay() {
 function NotchPeek({
   sessions,
   busy,
+  asking,
 }: {
   sessions: AgentSession[];
   busy: number;
+  asking: boolean;
 }) {
   if (sessions.length === 0) {
     return <p className="notch-peek notch-peek--empty">No agents running</p>;
@@ -1181,7 +1418,11 @@ function NotchPeek({
   return (
     <p className="notch-peek">
       {busy > 0 && <span className="notch-peek__dot" aria-hidden />}
-      <span className="notch-peek__title">{lead.tool ?? lead.title}</span>
+      <span className="notch-peek__title">
+        {/* A waiting request outranks everything — with auto-open off, this
+            hover line is how the user finds out at all. */}
+        {asking ? "⚠ wants permission" : (lead.tool ?? lead.title)}
+      </span>
       {sessions.length > 1 && (
         <span className="notch-peek__count">+{sessions.length - 1}</span>
       )}
@@ -1213,6 +1454,11 @@ const HEADLINE_ARG: Record<string, string> = {
  * (a command, a path), then the rest, then the cwd — the point of a gate is
  * that the user can see exactly what would run.
  */
+/**
+ * One pending request: the model asking a question gets the question card,
+ * anything else gets the approval card. Both resolve through the same
+ * command — a question's answers are just a richer reply.
+ */
 function PermissionCard({
   request,
   queued,
@@ -1220,25 +1466,63 @@ function PermissionCard({
 }: {
   request: AgentPermission;
   queued: number;
-  onResolve: (id: string, allow: boolean) => void;
+  onResolve: (id: string, reply: ApprovalReply) => void;
+}) {
+  return request.questions.length > 0 ? (
+    <QuestionCard request={request} queued={queued} onResolve={onResolve} />
+  ) : (
+    <ApprovalCard request={request} queued={queued} onResolve={onResolve} />
+  );
+}
+
+/**
+ * The permission prompt, with the terminal's own three options — the point is
+ * that answering here reads exactly like answering in the terminal would.
+ */
+function ApprovalCard({
+  request,
+  queued,
+  onResolve,
+}: {
+  request: AgentPermission;
+  queued: number;
+  onResolve: (id: string, reply: ApprovalReply) => void;
 }) {
   const headlineKey = HEADLINE_ARG[request.tool];
   const headline = headlineKey ? request.input[headlineKey] : undefined;
-  const rest = Object.entries(request.input).filter(([k]) => k !== headlineKey);
+  // An edit's before/after renders as a real diff, not two walls of text
+  // under `old_string` / `new_string` keys. Neither reference app does this —
+  // open-vibe-island decodes the strings and discards them — but the card
+  // already carries them whole, so showing the actual change is nearly free.
+  const change =
+    request.tool === "Edit" && request.input.old_string !== undefined
+      ? diffLines(request.input.old_string, request.input.new_string ?? "")
+      : request.tool === "Write" && request.input.content !== undefined
+        ? diffLines("", request.input.content)
+        : null;
+  const DIFFED = ["old_string", "new_string", "content"];
+  const rest = Object.entries(request.input).filter(
+    ([k]) => k !== headlineKey && (change === null || !DIFFED.includes(k)),
+  );
+  // The third option opens a message box instead of denying outright — the
+  // "tell Claude what to do differently" the terminal offers.
+  const [denying, setDenying] = useState(false);
+  const [message, setMessage] = useState("");
 
-  // Enter approves, Escape denies — the two things a hand on the keyboard
-  // reaches for. Scoped to the card so it does not fight the panel's own Escape.
+  // Enter allows, Escape denies — the two things a hand on the keyboard
+  // reaches for. Scoped to the card so it does not fight the panel's own
+  // Escape. While the message box is open, Enter belongs to it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter") onResolve(request.id, true);
+      if (e.key === "Enter" && !denying) onResolve(request.id, { kind: "allowOnce" });
       if (e.key === "Escape") {
         e.stopPropagation();
-        onResolve(request.id, false);
+        onResolve(request.id, { kind: "deny", message: null });
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [request.id, onResolve]);
+  }, [request.id, onResolve, denying]);
 
   return (
     <div className="perm">
@@ -1251,7 +1535,22 @@ function PermissionCard({
       <div className="perm__call">
         <span className="perm__tool">{request.tool}</span>
         {headline && <code className="perm__headline">{headline}</code>}
+        {change && <span className="perm__stat">{diffStat(change)}</span>}
       </div>
+
+      {change && (
+        <div className="diff">
+          {change.map((line, i) => (
+            <div className="diff__line" data-kind={line.kind} key={i}>
+              <span className="diff__sign" aria-hidden>
+                {line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
+              </span>
+              {/* `|| " "` keeps an empty line at line height. */}
+              {line.text || " "}
+            </div>
+          ))}
+        </div>
+      )}
 
       {rest.length > 0 && (
         <dl className="perm__args">
@@ -1266,14 +1565,197 @@ function PermissionCard({
 
       {request.cwd && <p className="perm__cwd">{request.cwd}</p>}
 
-      <div className="perm__actions">
-        <button className="perm__deny" onClick={() => onResolve(request.id, false)}>
-          Deny
+      <div className="perm__options">
+        <button
+          className="perm__option perm__option--yes"
+          onClick={() => onResolve(request.id, { kind: "allowOnce" })}
+        >
+          Yes
         </button>
-        <button className="perm__approve" onClick={() => onResolve(request.id, true)}>
-          Approve
-        </button>
+        {request.tool && (
+          <button
+            className="perm__option"
+            onClick={() => onResolve(request.id, { kind: "allowAlways" })}
+          >
+            Yes, don't ask again for {request.tool} this session
+          </button>
+        )}
+        {denying ? (
+          <form
+            className="perm__deny-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onResolve(request.id, { kind: "deny", message: message.trim() || null });
+            }}
+          >
+            <input
+              className="perm__deny-input"
+              autoFocus
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Tell Claude what to do differently…"
+            />
+            <button className="perm__option perm__option--no" type="submit">
+              Send
+            </button>
+          </form>
+        ) : (
+          <button className="perm__option perm__option--no" onClick={() => setDenying(true)}>
+            No, and tell Claude what to do differently (esc)
+          </button>
+        )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The label the CLI gives its injected freeform choice; not in the payload,
+ * so it cannot collide with a real option of the same name — a real "Other"
+ * from the model would simply merge with it, which is what the CLI does too.
+ */
+const OTHER = "Other";
+
+/**
+ * The model's own multi-option prompt (`AskUserQuestion`), one section per
+ * question, mirroring the terminal: options with descriptions, multi-select
+ * where the model asked for it, and an injected freeform "Other".
+ *
+ * Answers resolve as `{ kind: "answer" }` keyed by each question's text, with
+ * multi-select labels joined `", "` — the exact shape the agent reads back
+ * out of `updatedInput.answers`.
+ */
+function QuestionCard({
+  request,
+  queued,
+  onResolve,
+}: {
+  request: AgentPermission;
+  queued: number;
+  onResolve: (id: string, reply: ApprovalReply) => void;
+}) {
+  // Selections per question index; `Other` selects the freeform text below.
+  const [picked, setPicked] = useState<Record<number, string[]>>({});
+  const [other, setOther] = useState<Record<number, string>>({});
+
+  // Escape declines the question the way it declines a permission — the
+  // model is told and moves on, rather than waiting a day on a card the user
+  // has walked away from.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onResolve(request.id, { kind: "deny", message: null });
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [request.id, onResolve]);
+
+  const toggle = (index: number, label: string, multi: boolean) => {
+    setPicked((prev) => {
+      const current = prev[index] ?? [];
+      const next = multi
+        ? current.includes(label)
+          ? current.filter((l) => l !== label)
+          : [...current, label]
+        : [label];
+      return { ...prev, [index]: next };
+    });
+  };
+
+  /** The answer string for one question, or null while it is incomplete. */
+  const answerFor = (index: number): string | null => {
+    const labels = picked[index] ?? [];
+    if (labels.length === 0) return null;
+    const resolved = labels.map((label) =>
+      label === OTHER ? (other[index] ?? "").trim() : label,
+    );
+    if (resolved.some((text) => text === "")) return null;
+    return resolved.join(", ");
+  };
+
+  const complete = request.questions.every((_, i) => answerFor(i) !== null);
+
+  const submit = () => {
+    const answers: Record<string, string> = {};
+    request.questions.forEach((q, i) => {
+      answers[q.question] = answerFor(i) ?? "";
+    });
+    onResolve(request.id, { kind: "answer", answers });
+  };
+
+  // One single-choice question answers on tap — the common case, and the
+  // terminal's own feel. Anything richer gets an explicit Answer button.
+  const tapSubmits = request.questions.length === 1 && !request.questions[0].multiSelect;
+
+  return (
+    <div className="perm">
+      <div className="perm__head">
+        <span className="perm__agent">{AGENT_NAME[request.agent] ?? request.agent}</span>
+        <span className="perm__wants">has a question</span>
+        {queued > 0 && <span className="perm__queue">+{queued} more</span>}
+      </div>
+
+      {request.questions.map((question, index) => (
+        <div className="q" key={index}>
+          <span className="q__header">{question.header}</span>
+          <p className="q__text">{question.question}</p>
+          <div className="q__options">
+            {[...question.options, { label: OTHER, description: "" }].map((option) => {
+              const selected = (picked[index] ?? []).includes(option.label);
+              return (
+                <button
+                  key={option.label}
+                  className="q__option"
+                  data-selected={selected || undefined}
+                  onClick={() => {
+                    if (tapSubmits && option.label !== OTHER) {
+                      onResolve(request.id, {
+                        kind: "answer",
+                        answers: { [question.question]: option.label },
+                      });
+                      return;
+                    }
+                    toggle(index, option.label, question.multiSelect);
+                  }}
+                >
+                  <span className="q__label">{option.label}</span>
+                  {option.description && (
+                    <span className="q__desc">{option.description}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {(picked[index] ?? []).includes(OTHER) && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (complete) submit();
+              }}
+            >
+              <input
+                className="perm__deny-input"
+                autoFocus
+                value={other[index] ?? ""}
+                onChange={(e) => setOther((prev) => ({ ...prev, [index]: e.target.value }))}
+                placeholder="Your own answer…"
+              />
+            </form>
+          )}
+        </div>
+      ))}
+
+      {/* Tap-to-answer needs no button — except when "Other" is picked and
+          there is typed text to send. */}
+      {(!tapSubmits || (picked[0] ?? []).includes(OTHER)) && (
+        <div className="perm__options">
+          <button className="perm__option perm__option--yes" disabled={!complete} onClick={submit}>
+            Answer
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1281,6 +1763,17 @@ function PermissionCard({
 /** The row's dot state: busy mid-turn, live between tools, else done. */
 function rowState(session: AgentSession): "busy" | "live" | "done" {
   return session.busy ? "busy" : session.tool ? "live" : "done";
+}
+
+/**
+ * The row's name: what the session is working on, not what it is —
+ * `aloud-tauri @ feat/agent-notch`. The agent's own name is the fallback for
+ * a session with no known folder, and its model tag says the rest.
+ */
+function rowName(session: AgentSession): string {
+  const project = session.cwd?.split("/").filter(Boolean).pop();
+  if (!project) return AGENT_NAME[session.agent] ?? session.agent;
+  return session.branch ? `${project} @ ${session.branch}` : project;
 }
 
 /** The `model · time` tag next to a row. */
@@ -1316,16 +1809,20 @@ function AgentRow({
       >
         <div className="agent-row__head">
           <span className="agent-row__state" data-state={state} aria-hidden />
-          <span className="agent-row__name">{AGENT_NAME[session.agent] ?? session.agent}</span>
+          <span className="agent-row__name">{rowName(session)}</span>
           <span className="agent-row__tag" data-state={state}>
             {rowTag(session)}
           </span>
         </div>
         <p className="agent-row__prompt">
-          {/* When asking, that is the most important thing about the row. */}
+          {/* When asking, that is the most important thing about the row.
+              Otherwise the running tool, else the user's own latest words —
+              never the ai-title under a "You:" label; the title is the
+              model's and is written once at session start. */}
           {asking
             ? "⚠ wants permission"
-            : (session.tool ?? (session.title ? `You: ${session.title}` : ""))}
+            : (session.tool ??
+              (session.prompt ? `You: ${session.prompt}` : (session.title ?? "")))}
         </p>
         {session.subagents.length > 0 && (
           <p className="agent-row__subcount">
@@ -1351,7 +1848,7 @@ function AgentList({
   sessions: AgentSession[];
   permissions: AgentPermission[];
   onSelect: (id: string) => void;
-  onResolve: (id: string, allow: boolean) => void;
+  onResolve: (id: string, reply: ApprovalReply) => void;
   onClose: () => void;
 }) {
   const askingIds = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
@@ -1400,12 +1897,12 @@ function AgentDetail({
 }: {
   session: AgentSession;
   permission: AgentPermission | null;
-  onResolve: (id: string, allow: boolean) => void;
+  onResolve: (id: string, reply: ApprovalReply) => void;
   onBack: () => void;
 }) {
   const state = rowState(session);
   return (
-    <Panel title={AGENT_NAME[session.agent] ?? session.agent} onClose={onBack}>
+    <Panel title={rowName(session)} onClose={onBack}>
       <div className="agent-detail">
         <button className="agent-detail__back" onClick={onBack}>
           ‹ All agents
@@ -1417,7 +1914,11 @@ function AgentDetail({
           </span>
         </div>
         {session.cwd && <p className="agent-detail__cwd">{session.cwd}</p>}
-        {session.title && <p className="agent-detail__prompt">You: {session.title}</p>}
+        {session.prompt ? (
+          <p className="agent-detail__prompt">You: {session.prompt}</p>
+        ) : (
+          session.title && <p className="agent-detail__prompt">{session.title}</p>
+        )}
 
         {/* The card for this exact agent — the whole point of the detail view. */}
         {permission && (
@@ -1469,6 +1970,10 @@ function AgentDetail({
 function TabStrip({
   tabs,
   active,
+  /** Whether an ask/agent run exists — its tabs and `+` only show then. */
+  runOpen,
+  /** An agent is waiting on an answer: the Agents chip carries the flag. */
+  asking,
   /** What tab 0 is called: the question asked, or what the agent heard. */
   title,
   onSelect,
@@ -1478,6 +1983,8 @@ function TabStrip({
 }: {
   tabs: Tab[];
   active: number;
+  runOpen: boolean;
+  asking: boolean;
   title: string;
   onSelect: (id: number) => void;
   onClose: (id: number) => void;
@@ -1486,7 +1993,25 @@ function TabStrip({
 }) {
   return (
     <div className="tabs">
-      {tabs.map((tab, i) => (
+      {/* The agents' fixed slot: leftmost, always present, never closable —
+          home base for the strip, the way a browser pins its first tab. New
+          tabs open to its right. */}
+      <div className="tab" data-motion="in">
+        <div
+          className="tab__chip"
+          data-active={active === AGENTS_TAB || undefined}
+          data-asking={asking || undefined}
+        >
+          <button className="tab__select" onClick={() => onSelect(AGENTS_TAB)}>
+            Agents
+          </button>
+        </div>
+      </div>
+      {/* The run's own tab only exists while a run does; blank tabs belong
+          to the strip and open from anywhere — the notch is one surface. */}
+      {tabs
+        .filter((tab) => runOpen || tab.blank)
+        .map((tab, i) => (
         // The wrapper is what collapses; the chip inside it is what is clipped.
         <div
           key={tab.id}

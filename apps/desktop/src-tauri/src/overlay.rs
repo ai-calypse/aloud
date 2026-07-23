@@ -82,13 +82,29 @@ fn window(app: &AppHandle) -> Option<WebviewWindow> {
 /// Must run on the main thread — AppKit. Called from `setup`, which is on it.
 #[cfg(target_os = "macos")]
 pub fn raise_over_menu_bar(app: &AppHandle) {
-    use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow};
+    use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior};
 
     let Some(window) = window(app) else { return };
     let Ok(ptr) = window.ns_window() else { return };
     // Safety: `ns_window` returns this webview's live `NSWindow`.
     let ns_window: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
     ns_window.setLevel(NSScreenSaverWindowLevel);
+    // A plain window belongs to one Space, so switching Spaces (or entering a
+    // fullscreen app) leaves the notch behind — it read as "the notch is gone
+    // on the other screen". CanJoinAllSpaces pins it to every Space,
+    // FullScreenAuxiliary lets it sit over fullscreen apps, Stationary keeps
+    // Mission Control from dragging it around, IgnoresCycle keeps it out of
+    // Cmd-backtick.
+    // Safety: setting flags on the live NSWindow from the main thread — this
+    // is called from `setup`, which is on it.
+    unsafe {
+        ns_window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::FullScreenAuxiliary
+                | NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -150,6 +166,7 @@ pub fn show(app: &AppHandle, phase: Phase) {
     // A dictation started over the top of an answer takes the window back: the
     // pill is click-through and drives its own dismissal again from here.
     PANEL_OPEN.store(false, Ordering::SeqCst);
+    INTERACTIVE.store(false, Ordering::SeqCst);
 
     let (style, notch) = style_for(&window, phase);
     if let Err(e) = position_top_center(&window, 0.0) {
@@ -206,6 +223,10 @@ pub fn show_panel(app: &AppHandle) {
 
     HIDE_GENERATION.fetch_add(1, Ordering::SeqCst);
     PANEL_OPEN.store(true, Ordering::SeqCst);
+    // Interactive from the first frame — the webview confirms via
+    // `set_panel_interactive`, but a card must not wait a round-trip to
+    // take its first click.
+    INTERACTIVE.store(true, Ordering::SeqCst);
 
     let notch = target_notch(&window);
     // Forced rather than read from settings: a 40pt wing has nowhere to put the
@@ -240,6 +261,32 @@ const CURSOR_POLL: Duration = Duration::from_millis(60);
 /// on, not layout.
 static PANEL_W: AtomicU32 = AtomicU32::new(0);
 static PANEL_H: AtomicU32 = AtomicU32::new(0);
+
+/// True while the webview says an interactive surface is open — the agents
+/// list, a permission card, an answer. Interactivity is **state, not cursor
+/// position**: while open, the whole window takes clicks and the DOM does its
+/// own hit-testing. The polled box (above) gates clicks only at rest, where
+/// it is the cutout strip. Gating an open panel on a box that had to chase
+/// every content change was a race per transition — clicking "back" resized
+/// the list, the new box excluded the pointer, and the poll turned the panel
+/// click-through under the user's cursor.
+static INTERACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// The webview declaring its interactive state; see [`INTERACTIVE`].
+#[tauri::command]
+#[specta::specta]
+pub fn set_panel_interactive(app: AppHandle, open: bool) {
+    INTERACTIVE.store(open, Ordering::SeqCst);
+    if let Some(window) = window(&app) {
+        let _ = window.set_ignore_cursor_events(!open);
+        // Focus rides along so text inputs (a deny message, a freeform
+        // answer) can type. Only here — focusing on hover would steal the
+        // keyboard from whatever the user is working in.
+        if open {
+            let _ = window.set_focus();
+        }
+    }
+}
 
 /// Records the panel's settled box, so the click region can be exactly it.
 #[tauri::command]
@@ -276,6 +323,12 @@ fn track_cursor(app: &AppHandle) {
                 TRACKING.store(false, Ordering::SeqCst);
                 return;
             };
+            // An open panel owns its clicks outright; the poll must not
+            // fight it by re-judging the pointer against a stale box.
+            if INTERACTIVE.load(Ordering::SeqCst) {
+                clickable = true;
+                continue;
+            }
             let over = cursor_over_panel(&window).unwrap_or(false);
             if over != clickable {
                 clickable = over;
@@ -374,6 +427,7 @@ pub fn end_panel(app: &AppHandle) {
     if !PANEL_OPEN.swap(false, Ordering::SeqCst) {
         return;
     }
+    INTERACTIVE.store(false, Ordering::SeqCst);
     if let Some(window) = window(app) {
         // Immediately, not after the collapse: the window lingers for EXIT_MS,
         // and a transparent canvas eating clicks for that long is worse.

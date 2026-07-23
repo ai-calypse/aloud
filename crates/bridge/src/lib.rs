@@ -85,36 +85,93 @@ pub struct Event {
     pub terminal_title: Option<String>,
 }
 
-/// The tools worth gating: the ones that change something. Reads, searches and
-/// fetches run silently, or every file the agent opens is a card.
-///
-/// `PreToolUse` fires on every call, so the filter is what keeps it from being
-/// a card storm — see [`Event::wants_gate`].
-pub const GATED_TOOLS: &[&str] = &["Bash", "Write", "Edit", "NotebookEdit"];
-
 impl Event {
     /// Whether this event is the blocking kind — the agent is parked on the
     /// hook's stdout waiting for an answer.
+    ///
+    /// `PermissionRequest` and nothing else. It only fires when the agent
+    /// would have asked the user anyway, so permission modes and allowlists
+    /// are respected without this crate knowing they exist. Gating on
+    /// `PreToolUse` instead was tried and reverted: it fires on calls the
+    /// agent would auto-approve, overrides the user's own permission modes,
+    /// and freezes the terminal with no visible prompt. See AGENT_NOTCH.md's
+    /// diagnosis.
     pub fn is_permission_request(&self) -> bool {
         self.hook_event_name.as_deref() == Some("PermissionRequest")
     }
 
-    /// Whether this call should stop for approval.
+    /// The questions inside an `AskUserQuestion` call, empty for anything else.
     ///
-    /// Two ways in: a `PermissionRequest` (the agent explicitly asking, when it
-    /// fires at all), or a `PreToolUse` for a tool in [`GATED_TOOLS`]. The
-    /// latter is what actually carries the gate on current Claude builds, where
-    /// `PermissionRequest` is silent.
-    pub fn wants_gate(&self) -> bool {
-        if self.is_permission_request() {
-            return true;
+    /// A question is not its own event: it arrives as a `PermissionRequest`
+    /// whose `tool_name` is `AskUserQuestion`, with the questions in
+    /// `tool_input.questions`. The parse mirrors the CLI's own rules — a
+    /// question missing its text, header, or every option is dropped rather
+    /// than rendered half-blank, and an option's description defaults empty.
+    pub fn questions(&self) -> Vec<Question> {
+        if self.tool_name.as_deref() != Some("AskUserQuestion") {
+            return Vec::new();
         }
-        self.hook_event_name.as_deref() == Some("PreToolUse")
-            && self
-                .tool_name
-                .as_deref()
-                .is_some_and(|name| GATED_TOOLS.contains(&name))
+        let Some(items) = self
+            .tool_input
+            .as_ref()
+            .and_then(|input| input.get("questions"))
+            .and_then(serde_json::Value::as_array)
+        else {
+            return Vec::new();
+        };
+        items
+            .iter()
+            .filter_map(|item| {
+                let question = item.get("question")?.as_str()?.to_string();
+                let header = item.get("header")?.as_str()?.to_string();
+                let options: Vec<QuestionOption> = item
+                    .get("options")?
+                    .as_array()?
+                    .iter()
+                    .filter_map(|option| {
+                        Some(QuestionOption {
+                            label: option.get("label")?.as_str()?.to_string(),
+                            description: option
+                                .get("description")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or_default()
+                                .to_string(),
+                        })
+                    })
+                    .collect();
+                if options.is_empty() {
+                    return None;
+                }
+                Some(Question {
+                    question,
+                    header,
+                    multi_select: item
+                        .get("multiSelect")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                    options,
+                })
+            })
+            .collect()
     }
+}
+
+/// One question from an `AskUserQuestion` call, as the card renders it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Question {
+    pub question: String,
+    /// The short chip above the question — "Auth method", "Library".
+    pub header: String,
+    pub multi_select: bool,
+    pub options: Vec<QuestionOption>,
+}
+
+/// One choice under a question. The freeform "Other" the CLI offers is not in
+/// the payload — the UI injects it, matching the terminal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuestionOption {
+    pub label: String,
+    pub description: String,
 }
 
 /// What the app decides about a tool call.
@@ -130,16 +187,65 @@ pub enum Decision {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Reply {
     pub decision: Option<Decision>,
-    /// Shown to the model on a deny, so it can say why it stopped.
+    /// Shown to the model on a deny, so it can say why it stopped — the "No,
+    /// and tell Claude what to do differently" text.
     #[serde(default)]
     pub message: Option<String>,
+    /// Replaces the tool's input on an allow. This is how an answered
+    /// question rides back: the original `AskUserQuestion` input plus an
+    /// `answers` map — there is no separate answer message in the protocol.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_input: Option<serde_json::Value>,
+    /// Permission rules persisted on an allow — the "don't ask again" button.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_permissions: Option<serde_json::Value>,
 }
 
 impl Reply {
     pub fn allow() -> Self {
         Self {
             decision: Some(Decision::Allow),
-            message: None,
+            ..Self::default()
+        }
+    }
+
+    /// Allow, and stop asking for this tool for the rest of the session.
+    ///
+    /// The rule is synthesized here rather than taken from the payload's
+    /// `permission_suggestions`: a bare tool-name rule scoped to `session` is
+    /// what "don't ask again this session" means, whatever was suggested.
+    pub fn allow_always(tool_name: &str) -> Self {
+        Self {
+            decision: Some(Decision::Allow),
+            updated_permissions: Some(serde_json::json!([{
+                "type": "addRules",
+                "destination": "session",
+                "rules": [{ "toolName": tool_name }],
+                "behavior": "allow",
+            }])),
+            ..Self::default()
+        }
+    }
+
+    /// Allow with the questions answered: the original `tool_input` gains an
+    /// `answers` object mapping each question's text to its answer string
+    /// (multi-select answers arrive pre-joined with `", "`).
+    pub fn answer(
+        original_input: Option<&serde_json::Value>,
+        answers: &std::collections::BTreeMap<String, String>,
+    ) -> Self {
+        let mut input = match original_input {
+            Some(serde_json::Value::Object(map)) => map.clone(),
+            _ => serde_json::Map::new(),
+        };
+        input.insert(
+            "answers".into(),
+            serde_json::to_value(answers).unwrap_or_default(),
+        );
+        Self {
+            decision: Some(Decision::Allow),
+            updated_input: Some(serde_json::Value::Object(input)),
+            ..Self::default()
         }
     }
 
@@ -147,6 +253,7 @@ impl Reply {
         Self {
             decision: Some(Decision::Deny),
             message: Some(message.into()),
+            ..Self::default()
         }
     }
 
@@ -158,7 +265,7 @@ impl Reply {
     pub fn directive(&self, source: Source) -> Option<serde_json::Value> {
         let decision = self.decision?;
         Some(match source {
-            Source::Claude => claude_directive(decision, self.message.as_deref()),
+            Source::Claude => claude_directive(self, decision),
             Source::Codex => codex_directive(decision, self.message.as_deref()),
         })
     }
@@ -185,12 +292,25 @@ impl Reply {
 /// `interrupt: false` on a deny is deliberate: it declines this one call and
 /// lets the turn continue, where `true` ends the turn outright. Denying a
 /// single command should not kill the run.
-fn claude_directive(decision: Decision, message: Option<&str>) -> serde_json::Value {
+fn claude_directive(reply: &Reply, decision: Decision) -> serde_json::Value {
     let inner = match decision {
-        Decision::Allow => serde_json::json!({ "behavior": "allow" }),
+        Decision::Allow => {
+            let mut inner = serde_json::Map::new();
+            inner.insert("behavior".into(), "allow".into());
+            // Only present when there is something to say: an allow that
+            // repeats the input verbatim and an allow that omits it read the
+            // same to the agent, and the smaller directive is the safer one.
+            if let Some(input) = &reply.updated_input {
+                inner.insert("updatedInput".into(), input.clone());
+            }
+            if let Some(rules) = &reply.updated_permissions {
+                inner.insert("updatedPermissions".into(), rules.clone());
+            }
+            serde_json::Value::Object(inner)
+        }
         Decision::Deny => serde_json::json!({
             "behavior": "deny",
-            "message": message.unwrap_or("Denied in Aloud"),
+            "message": reply.message.as_deref().unwrap_or("Denied in Aloud"),
             "interrupt": false,
         }),
     };
@@ -279,35 +399,128 @@ mod tests {
         assert_eq!(Reply::default().directive(Source::Codex), None);
     }
 
-    /// The gate rides in on `PreToolUse` for a write/bash tool, since
-    /// `PermissionRequest` is silent on current Claude builds. Reads must not
-    /// gate, or every file the agent opens is a card.
+    /// Only `PermissionRequest` gates. A `PreToolUse` must not — it fires on
+    /// calls the agent would auto-approve, and gating there overrides the
+    /// user's own permission modes and freezes the terminal. The bug this
+    /// guards against is a regression to that design.
     #[test]
-    fn a_write_or_bash_pretooluse_wants_the_gate_but_a_read_does_not() {
-        let pre = |tool: &str| Event {
-            hook_event_name: Some("PreToolUse".into()),
+    fn only_a_permission_request_is_the_blocking_event() {
+        let named = |event: &str, tool: &str| Event {
+            hook_event_name: Some(event.into()),
             tool_name: Some(tool.into()),
             ..Event::default()
         };
-        assert!(pre("Bash").wants_gate());
-        assert!(pre("Write").wants_gate());
-        assert!(pre("Edit").wants_gate());
-        assert!(!pre("Read").wants_gate());
-        assert!(!pre("Grep").wants_gate());
-        // A PermissionRequest still gates whatever the tool, when it fires.
-        assert!(Event {
+        // Whatever the tool — the filtering is the agent's, not ours.
+        assert!(named("PermissionRequest", "Bash").is_permission_request());
+        assert!(named("PermissionRequest", "Read").is_permission_request());
+        assert!(!named("PreToolUse", "Bash").is_permission_request());
+        assert!(!named("PostToolUse", "Bash").is_permission_request());
+        assert!(!Event::default().is_permission_request());
+    }
+
+    /// "Don't ask again this session" is an allow carrying a session-scoped
+    /// rule for the tool. Pinned key by key: a typo'd rule is silently ignored
+    /// and the next identical call asks again, which looks like the button
+    /// doing nothing.
+    #[test]
+    fn allow_always_carries_a_session_rule_for_the_tool() {
+        let value = Reply::allow_always("Bash")
+            .directive(Source::Claude)
+            .unwrap();
+        let decision = &value["hookSpecificOutput"]["decision"];
+        assert_eq!(decision["behavior"], "allow");
+        let rule = &decision["updatedPermissions"][0];
+        assert_eq!(rule["type"], "addRules");
+        assert_eq!(rule["destination"], "session");
+        assert_eq!(rule["behavior"], "allow");
+        assert_eq!(rule["rules"][0]["toolName"], "Bash");
+        // A plain allow must not carry the key at all.
+        let plain = Reply::allow().directive(Source::Claude).unwrap();
+        assert!(plain["hookSpecificOutput"]["decision"]
+            .get("updatedPermissions")
+            .is_none());
+    }
+
+    /// An answered question is an *allow with `updatedInput`* — the original
+    /// input plus an `answers` map keyed by question text. There is no other
+    /// answer channel in the protocol.
+    #[test]
+    fn a_question_answer_is_an_allow_with_answers_in_updated_input() {
+        let original = serde_json::json!({
+            "questions": [{ "question": "Which framework?", "header": "Framework",
+                            "options": [{ "label": "React" }] }],
+        });
+        let mut answers = std::collections::BTreeMap::new();
+        answers.insert("Which framework?".to_string(), "React, Vue".to_string());
+
+        let value = Reply::answer(Some(&original), &answers)
+            .directive(Source::Claude)
+            .unwrap();
+        let decision = &value["hookSpecificOutput"]["decision"];
+        assert_eq!(decision["behavior"], "allow");
+        // The original questions survive alongside the new answers key.
+        assert_eq!(
+            decision["updatedInput"]["questions"][0]["question"],
+            "Which framework?"
+        );
+        assert_eq!(
+            decision["updatedInput"]["answers"]["Which framework?"],
+            "React, Vue"
+        );
+    }
+
+    /// The user's "tell Claude what to do differently" text reaches the model.
+    #[test]
+    fn a_deny_carries_the_users_own_words() {
+        let value = Reply::deny("use rg, not grep")
+            .directive(Source::Claude)
+            .unwrap();
+        let decision = &value["hookSpecificOutput"]["decision"];
+        assert_eq!(decision["message"], "use rg, not grep");
+        assert_eq!(decision["interrupt"], serde_json::json!(false));
+    }
+
+    /// Question detection and parsing, pinned against the AskUserQuestion
+    /// input shape: a malformed question or option is dropped, not rendered
+    /// half-blank, and `multiSelect` defaults off.
+    #[test]
+    fn ask_user_question_input_parses_to_cards() {
+        let event = Event {
             hook_event_name: Some("PermissionRequest".into()),
-            tool_name: Some("Read".into()),
+            tool_name: Some("AskUserQuestion".into()),
+            tool_input: Some(serde_json::json!({
+                "questions": [
+                    { "question": "Which auth method?", "header": "Auth",
+                      "multiSelect": true,
+                      "options": [
+                        { "label": "OAuth", "description": "Redirect flow" },
+                        { "label": "API key" },
+                      ] },
+                    { "question": "No header, dropped",
+                      "options": [{ "label": "x" }] },
+                    { "question": "No options, dropped", "header": "Empty",
+                      "options": [] },
+                ],
+            })),
             ..Event::default()
-        }
-        .wants_gate());
-        // A PostToolUse never gates — the call already ran.
-        assert!(!Event {
-            hook_event_name: Some("PostToolUse".into()),
+        };
+        let questions = event.questions();
+        assert_eq!(questions.len(), 1);
+        let q = &questions[0];
+        assert_eq!(q.question, "Which auth method?");
+        assert_eq!(q.header, "Auth");
+        assert!(q.multi_select);
+        assert_eq!(q.options.len(), 2);
+        assert_eq!(q.options[0].description, "Redirect flow");
+        assert_eq!(q.options[1].description, "");
+
+        // Any other tool has no questions, whatever its input says.
+        let bash = Event {
             tool_name: Some("Bash".into()),
+            tool_input: Some(serde_json::json!({ "questions": [] })),
             ..Event::default()
-        }
-        .wants_gate());
+        };
+        assert!(bash.questions().is_empty());
     }
 
     /// The reply's shape follows the event it answers: a `PreToolUse` decision

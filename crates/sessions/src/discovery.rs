@@ -86,6 +86,12 @@ fn classify(command: &str) -> Option<Agent> {
         if command.contains("--claude-in-chrome-mcp") {
             return None;
         }
+        // The background daemon keeps warm standbys (`--bg-spare`, with a
+        // `--bg-pty-host` each) parked in /tmp/cc-daemon-*/spare/ — processes
+        // with no conversation, which rendered as rows called "spare".
+        if command.contains("--bg-") {
+            return None;
+        }
         return Some(Agent::Claude);
     }
     if is_agent("codex") {
@@ -292,6 +298,10 @@ mod tests {
         "31337 31336 s004     codex --model gpt-5\n",
         "  501     1 ??       /usr/libexec/secinitd\n",
         "42424 31336 s005     vim crates/sessions/src/discovery.rs\n",
+        // The daemon's warm standbys, captured from this machine: same binary,
+        // no conversation. Rendered as rows called "spare" until filtered.
+        "93963     1 ??       /opt/homebrew/Caskroom/claude-code/2.1.197/claude --bg-pty-host /tmp/cc-daemon-501/c7c4fdd6/spare/343a808e.pty.sock 200 50\n",
+        "93981     1 ??       /opt/homebrew/Caskroom/claude-code/2.1.197/claude --bg-spare /tmp/cc-daemon-501/c7c4fdd6/spare/343a808e.claim.sock\n",
     );
 
     #[test]
@@ -314,6 +324,10 @@ mod tests {
         assert!(!pids.contains(&501));
         // An editor open on this very file mentions no agent name in argv[0].
         assert!(!pids.contains(&42424));
+        // The daemon's warm standbys are not sessions — dropping them is what
+        // keeps "spare" rows out of the notch.
+        assert!(!pids.contains(&93963));
+        assert!(!pids.contains(&93981));
         assert_eq!(pids, vec![20825, 31337]);
     }
 

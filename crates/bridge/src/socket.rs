@@ -112,13 +112,12 @@ pub fn request(_event: &Event, _timeout: Duration) -> Option<Reply> {
     None
 }
 
-/// The timeout an event deserves: the long block for anything that gates.
-///
-/// A `PreToolUse` on a gated tool now blocks for a decision just like a
-/// `PermissionRequest`, so it earns the same day-long ceiling — the agent is
-/// parked on the hook's stdout until the user answers.
+/// The timeout an event deserves: the day-long block for `PermissionRequest`,
+/// where the agent is parked on the hook's stdout until a human answers, and
+/// 45 s for everything else — a status event nobody answers must not hold a
+/// process open.
 pub fn timeout_for(event: &Event) -> Duration {
-    if event.wants_gate() {
+    if event.is_permission_request() {
         PERMISSION_TIMEOUT
     } else {
         EVENT_TIMEOUT
@@ -130,28 +129,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_gating_event_gets_the_long_block_and_nothing_else_does() {
+    fn only_a_permission_request_gets_the_long_block() {
         let permission = Event {
             hook_event_name: Some("PermissionRequest".into()),
             ..Event::default()
         };
         assert_eq!(timeout_for(&permission), PERMISSION_TIMEOUT);
 
-        // A PreToolUse on a gated tool now blocks for a decision too.
-        let gated = Event {
+        // A PreToolUse never blocks — even on a write tool. Gating there was
+        // tried and reverted; see AGENT_NOTCH.md's diagnosis.
+        let pre = Event {
             hook_event_name: Some("PreToolUse".into()),
             tool_name: Some("Bash".into()),
             ..Event::default()
         };
-        assert_eq!(timeout_for(&gated), PERMISSION_TIMEOUT);
-
-        // A PreToolUse on a read does not — it never gates.
-        let read = Event {
-            hook_event_name: Some("PreToolUse".into()),
-            tool_name: Some("Read".into()),
-            ..Event::default()
-        };
-        assert_eq!(timeout_for(&read), EVENT_TIMEOUT);
+        assert_eq!(timeout_for(&pre), EVENT_TIMEOUT);
         // An event with no name at all must not block for a day.
         assert_eq!(timeout_for(&Event::default()), EVENT_TIMEOUT);
     }

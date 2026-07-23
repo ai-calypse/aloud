@@ -123,6 +123,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             ask::ask_text,
             ask::close_ask,
             overlay::set_panel_box,
+            overlay::set_panel_interactive,
             sessions::agent_hook_status,
             sessions::install_agent_hooks,
             sessions::uninstall_agent_hooks,
