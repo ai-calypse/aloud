@@ -160,6 +160,13 @@
   width: max-content;
   align-self: center;
   flex: none;
+  /* Above the shape SVG (absolute, inset:0), which is the panel's black
+     background. Without a stacking context the dealt row's absolute cards
+     escaped above the shape but the static "view all agents" button painted
+     under it and vanished. One `position: relative; z-index` puts the whole
+     body over the background for good. */
+  position: relative;
+  z-index: 1;
 }
 
 /* Live-transcript mode. Same row as the status body so "Listening…" simply
@@ -215,6 +222,19 @@
   justify-content: flex-start;
   gap: 0;
   width: 480px;
+  height: auto;
+  padding: 0;
+}
+
+/* Resting-hover: the agent rows the notch grows into. Top-aligned and
+   content-sized (not the 40px centred status row), so the rows sit below the
+   cutout and the drop-pill's height spring measures the real stack. Width is
+   `max-content` from the base body — the rows set their own. */
+.drop-pill__body--agents {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
   height: auto;
   padding: 0;
 }
@@ -888,22 +908,18 @@
   cursor: pointer;
 }
 
-.notch-peek {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* The "No agents running" line shown when the notch is hovered with an empty
+   list. The only surviving `.notch-peek`: the old one-line hover row it styled
+   is now the dealt cards (`.notch-card`). */
+.notch-peek--empty {
   margin: 0;
   padding: 2px 14px 8px;
-  max-width: 340px;
   font-size: 12px;
   font-weight: 500;
   color: var(--pill-ink);
+  opacity: 0.55;
   white-space: nowrap;
   animation: peek-in var(--dur-fast) var(--ease-out) both;
-}
-
-.notch-peek--empty {
-  opacity: 0.55;
 }
 
 @keyframes peek-in {
@@ -913,30 +929,6 @@
   to {
     opacity: 1;
   }
-}
-
-/* Busy: the same pulse the recording dot uses, so "something is happening"
-   reads the same way everywhere in this window. */
-.notch-peek__dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--sys-green, #32d74b);
-  /* `breathe` is what the recording dot already uses; a second pulse keyframe
-     with its own timing would drift out of step with it. */
-  animation: breathe 1.6s var(--ease-in-out) infinite;
-}
-
-.notch-peek__title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.notch-peek__count {
-  flex: none;
-  opacity: 0.5;
-  font-variant-numeric: tabular-nums;
 }
 
 /* --- The permission card -------------------------------------------------
@@ -1512,16 +1504,17 @@
     opacity var(--dur-instant) var(--ease-out);
 }
 
-/* Movement makes some users unwell — collapse the travel, keep the reveal. */
-/* --- Ambient sign: cats beside the notch at rest ------------------------- */
+/* --- Resting strip + notch agent rows ----------------------------------- */
 
-/* Sits on the canvas just left of the physical cutout, at the menu-bar's own
-   height, so it reads as part of the notch rather than a floating pill. Painted
-   here rather than grown out of the drop-pill (which only grows downward), the
-   way agent-notch draws its mascot beside the notch. Visual only — the click
-   region is untouched. Its right edge lands a hair left of the cutout's left
-   edge: the cutout is centred and `--notch-w` wide, so half of it plus a small
-   gap is the offset from centre. */
+/* The resting strip: a tight stack of stage cats on the canvas just left of
+   the camera, shown at rest. Anchored by its RIGHT edge a hair left of the
+   cutout (centred, `--notch-w` wide, so half of it plus a gap is the offset).
+   It does NOT expand in place — hovering hands off to the notch, which grows
+   down and deals the same agents out as a bigger row (`.notch-card`, dealt
+   from the strip's side via `--from`). `pointer-events: none`: it is a sign,
+   not a target; the notch takes the clicks. It still reports its rect as the
+   resting click-box (so the hover that grows the notch fires over the strip),
+   but that is Rust's poll, not DOM events. */
 .ambient {
   position: absolute;
   top: 0;
@@ -1530,14 +1523,25 @@
   display: flex;
   align-items: center;
   pointer-events: none;
-  /* Fades/slides in from the notch when an agent becomes busy. */
+  /* Slides in from the notch when an agent first becomes busy. */
   animation: ambient-in var(--dur-base) var(--ease-out) both;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+/* Handed off: the notch has grown and its dealt row shows the same agents, so
+   the strip fades out. Fade (not `display:none`) so the exit actually plays.
+   `animation: none` so the entrance keyframe's `both` fill mode stops pinning
+   opacity at 1 (a running/filled animation outranks the declared value; the
+   transition would never take). */
+.ambient[data-handed-off] {
+  animation: none;
+  opacity: 0;
 }
 
 @keyframes ambient-in {
   from {
     opacity: 0;
-    transform: translateX(8px);
+    transform: translateX(10px);
   }
   to {
     opacity: 1;
@@ -1549,19 +1553,21 @@
   display: flex;
   align-items: center;
   padding: 0 6px;
+  border-radius: 12px;
 }
 
-.ambient__cat {
+.ambient__cat-img {
   width: 20px;
   height: 20px;
+  flex: none;
   border-radius: 50%;
   object-fit: cover;
   box-shadow: 0 0 0 1px rgb(255 255 255 / 0.12);
 }
 
-/* Overlap when several, newest/leftmost on top — a little stack. */
-.ambient__cat + .ambient__cat {
-  margin-left: -6px;
+/* Overlap into a little stack, newest/leftmost on top. */
+.ambient__cat-img + .ambient__cat-img {
+  margin-left: -12px;
 }
 
 .ambient__count {
@@ -1572,12 +1578,11 @@
   opacity: 0.8;
 }
 
-/* Busy: a soft shimmer sweeps the cats, so the strip reads as *working* rather
-   than a static badge. Opacity-only movement — nothing reflows. */
+/* Busy: a soft shimmer sweeps the stack, so it reads as *working* rather than a
+   static badge. Opacity-only, nothing reflows. */
 .ambient[data-busy] .ambient__cats {
   position: relative;
   overflow: hidden;
-  border-radius: 12px;
 }
 
 .ambient[data-busy] .ambient__cats::after {
@@ -1605,9 +1610,9 @@
   }
 }
 
-/* Wants permission (only shown when the notch did not auto-open): the lead cat
+/* Wants permission (only when the notch did not auto-open): the asking cat
    rings orange and pulses — the one thing the user must act on. */
-.ambient[data-asking] .ambient__cat:first-child {
+.ambient[data-asking] .ambient__cat-img[data-asking] {
   box-shadow: 0 0 0 2px var(--sys-orange, #ff9f0a);
   animation: ambient-attn 1.1s var(--ease-in-out) infinite;
 }
@@ -1622,11 +1627,273 @@
   }
 }
 
-/* Movement can make some users unwell — hold the sign, drop the motion. */
+/* The agents dealt into the notch, shown while the resting notch is hovered.
+   The cats deal out from the resting stack into a straight row of bigger
+   circles (layout B), staggered like a dealer going round the table, then a
+   quiet "view all agents" underneath. Grows downward with the drop-pill. */
+.notch-agents {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 10px 10px;
+}
+
+/* The deal table: the layer the cards are dealt across. Sized inline (absolute
+   cards contribute nothing, so the panel would collapse without it). Its centre
+   (`left: 50%`) is the notch centre, so a card's `--tx` places it symmetrically
+   about the cutout. */
+.notch-deal {
+  position: relative;
+  margin-top: 4px;
+  /* Fits a 56px disc + gap + label. The width is set inline (it depends on the
+     card count and the absolute cards do not measure); the height is constant,
+     so it lives here. */
+  height: 84px;
+}
+
+/* One dealt card: a button into that agent's detail, centred on the deal layer
+   then slid to its `--tx` slot. Before the deal (`:not([data-dealt])`) it sits
+   collapsed on the resting stack (`--from`, left of the cutout), tiny and
+   faded; the `data-dealt` flip transitions it out to its slot — 520ms travel,
+   with the per-card `transition-delay` (set inline) giving the round-the-table
+   stagger. `--tx` also carries into the resting state so it deals from the
+   stack, not from centre. */
+.notch-card {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  /* ponytail: width must equal `DEAL_CARD_W` in overlay.tsx (it sizes the deal
+     layer, which the panel measures); keep the two in sync. */
+  width: 86px;
+  margin-left: -43px; /* centre the card on its --tx (half of width) */
+  /* Where a card deals FROM: the resting stack, a hair left of the cutout —
+     identical for every card, so it lives here, not inline per card. */
+  --from: calc(-1 * (var(--notch-w, 200px) / 2 + 20px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pill-ink);
+  cursor: pointer;
+  opacity: 0;
+  transform: translate(var(--from), 4px) scale(0.34);
+  transition:
+    transform 520ms cubic-bezier(0.2, 0.72, 0.24, 1),
+    opacity 320ms var(--ease-out);
+}
+
+.notch-agents[data-dealt] .notch-card {
+  opacity: 1;
+  transform: translateX(var(--tx, 0));
+}
+
+/* The disc holds the cat and its corner badge, and is the thing that pops. The
+   pop is driven by `--pop` (0→1) written each frame by the live spring in
+   `NotchCard` — NOT a CSS transition, or a glide between cats would restart its
+   curve from zero and stall. `--pop` is the spring's position (it overshoots
+   past 1 and settles, so the scale rides the rebound). The card's own transform
+   stays owned by the deal; the pop rides here, so the two never fight.
+   `transform-origin` at the bottom so it grows *up* out of the row, not its own
+   centre. Badge is a child so it scales with the disc and stays in the corner. */
+.notch-card__disc {
+  position: relative;
+  display: block;
+  width: 56px;
+  height: 56px;
+  transform-origin: 50% 100%;
+  transform:
+    translateY(calc(var(--pop, 0) * -5px))
+    scale(calc(1 + var(--pop, 0) * 0.16));
+  /* The spring writes --pop every frame; own layer so the pop composites and
+     never repaints the row behind it. */
+  will-change: transform;
+}
+
+/* The profile image, ringed in this agent's stable identity hue (`--ring`) so
+   two agents in the same stage are still told apart at a glance. The ring
+   brightens with the pop (the glow), so a popped cat also reads as picked. */
+.notch-card__cat {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow:
+    0 6px 16px rgb(0 0 0 / 0.5),
+    0 0 0 2px var(--ring, rgb(255 255 255 / 0.3));
+  filter: drop-shadow(
+    0 0 calc(var(--pop, 0) * 8px) color-mix(in srgb, var(--ring, #fff) 60%, transparent)
+  );
+}
+
+/* The stage badge: a small dot in the disc's corner saying what the agent is
+   doing right now, coloured like the agent-list rows. A ring of the notch fill
+   punches it off the cat so it reads at 12px. */
+.notch-card__badge {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--notch-fill, #000);
+  background: var(--sys-grey, #8e8e93);
+}
+.notch-card__badge[data-state="busy"] {
+  background: var(--sys-green, #32d74b);
+  animation: breathe 1.6s var(--ease-in-out) infinite;
+}
+.notch-card__badge[data-state="live"] {
+  background: var(--sys-green, #32d74b);
+}
+.notch-card__badge[data-state="asking"] {
+  background: var(--sys-orange, #ff9f0a);
+  animation: breathe 1.2s var(--ease-in-out) infinite;
+}
+
+.notch-card__label {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.9;
+  white-space: nowrap;
+  max-width: 86px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "View all agents": opens the full list. Sits under the dealt row, quieter
+   than the cards so it reads as the way out rather than another agent. */
+.notch-agents__all {
+  margin-top: 6px;
+  padding: 7px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.12);
+  color: var(--pill-ink);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.notch-agents__all:hover {
+  background: rgb(255 255 255 / 0.2);
+}
+
+/* The detail plate (option A): unfolds under the dealt row for the hovered
+   card. Collapsed to nothing at rest — max-height + opacity + margin so it
+   *grows* out of the row rather than popping in, the same downward direction
+   the notch itself grows, timed to the card's pop so the two read as one. */
+.notch-plate {
+  width: 100%;
+  max-height: 0;
+  margin-top: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    max-height var(--spring-dur) var(--spring),
+    opacity var(--dur-fast) var(--ease-out),
+    margin-top var(--spring-dur) var(--spring);
+}
+
+.notch-plate[data-open] {
+  /* Fits three lines (project @ branch, stage, agent · model · subagents) plus
+     the hairline + padding. A ceiling for the fold; the real height is content. */
+  max-height: 84px;
+  margin-top: 10px;
+  opacity: 1;
+}
+
+/* The contents are keyed on the session, so gliding to another card remounts
+   this and it crossfades in rather than the text swapping under you. */
+.notch-plate__inner {
+  border-top: 1px solid var(--sep, rgb(255 255 255 / 0.1));
+  padding-top: 8px;
+  text-align: center;
+  animation: notch-plate-in var(--dur-fast) var(--ease-out) both;
+}
+
+@keyframes notch-plate-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.notch-plate__title {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pill-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* What it is doing right now, led by the same status dot as the card badge —
+   the live status, brighter than the "what it is" meta below it. */
+.notch-plate__stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--pill-ink);
+  white-space: nowrap;
+}
+
+.notch-plate__pip {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--sys-grey, #8e8e93);
+}
+.notch-plate__pip[data-state="busy"] {
+  background: var(--sys-green, #32d74b);
+  animation: breathe 1.6s var(--ease-in-out) infinite;
+}
+.notch-plate__pip[data-state="live"] {
+  background: var(--sys-green, #32d74b);
+}
+.notch-plate__pip[data-state="asking"] {
+  background: var(--sys-orange, #ff9f0a);
+  animation: breathe 1.2s var(--ease-in-out) infinite;
+}
+
+.notch-plate__meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--pill-ink);
+  opacity: 0.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Movement can make some users unwell — collapse the deal to a snap. The cards
+   still appear (opacity), they just do not travel; the 1ms durations in
+   motion.css shrink the shimmer/attn loops. */
 @media (prefers-reduced-motion: reduce) {
+  .notch-card,
+  .notch-plate {
+    transition-duration: 1ms;
+  }
+  .notch-plate__inner {
+    animation: none;
+  }
   .ambient,
   .ambient[data-busy] .ambient__cats::after,
-  .ambient[data-asking] .ambient__cat:first-child {
+  .ambient[data-asking] .ambient__cat-img[data-asking] {
     animation: none;
   }
 }
