@@ -1818,7 +1818,10 @@
 /* The full-detail tier: the real AgentDetail, sized to the plate (never wider,
    so a long cwd wraps instead of stretching the notch), scrolling if it is
    taller than the ceiling. Left-aligned like the pinned view. */
-.notch-plate__inner--full {
+/* Both classes, so this outranks the base `.notch-plate__inner`'s
+   `text-align: center` regardless of source order — the full detail is
+   left-aligned like the clicked-in page, not centred like the quick head. */
+.notch-plate__inner.notch-plate__inner--full {
   text-align: left;
   max-height: 500px;
   overflow-y: auto;
