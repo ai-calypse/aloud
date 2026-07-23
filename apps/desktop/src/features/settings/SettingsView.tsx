@@ -590,6 +590,18 @@ export function SettingsView({
           </Group>
 
           <Group title="Overlay">
+            <Row
+              label="Open notch for permissions"
+              hint="A coding agent asking to run something opens the notch by itself so the request is not missed. Off: the request waits quietly — hovering the notch shows it, and the agent keeps waiting either way."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={settings.agentOpenOnPermission ?? true}
+                label="Open notch for permissions"
+                onChange={(c) => update({ agentOpenOnPermission: c })}
+              />
+            </Row>
+
             {IS_MAC && (
               <Row
                 label="Style"

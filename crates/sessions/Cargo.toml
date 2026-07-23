@@ -1,0 +1,18 @@
+[package]
+name = "aloud-sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Finding running coding agents and reading what they are doing"
+
+[dependencies]
+# The hook wire format — `SessionStore::apply` folds bridge events into the
+# same table the discovery poll fills, which is what keeps this one store.
+aloud-bridge = { path = "../bridge" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

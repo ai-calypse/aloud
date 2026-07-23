@@ -1,0 +1,18 @@
+[package]
+name = "aloud-hook-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The tiny binary an agent's hooks spawn"
+
+# The name the installer writes into settings.json. Deliberately short: it
+# appears in every hook entry the user might read.
+[[bin]]
+name = "aloud-hook"
+path = "src/main.rs"
+
+# No tokio, no tracing. This is spawned on every tool call of every agent, so
+# its whole job is to start fast and get out of the way.
+[dependencies]
+aloud-bridge = { path = "../bridge" }
+serde_json.workspace = true

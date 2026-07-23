@@ -35,6 +35,18 @@ pub struct DictationPartial(pub String);
 #[tauri_specta(event_name = "overlay-error")]
 pub struct OverlayError(pub String);
 
+/// Whether the pointer is over the notch.
+///
+/// The window ignores the mouse while it is click-through, and a window that
+/// ignores the mouse cannot see it move — so the webview has no `mouseenter` to
+/// listen for and the hover has to be pushed in from the cursor poll.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, Event)]
+#[serde(rename_all = "camelCase")]
+#[tauri_specta(event_name = "notch-hover")]
+pub struct NotchHover {
+    pub over: bool,
+}
+
 /// Tells the overlay to play its exit, ahead of the window actually going away:
 /// the pill collapses while the window is still up, and [`hide`] takes the
 /// window away once it has.
@@ -70,13 +82,29 @@ fn window(app: &AppHandle) -> Option<WebviewWindow> {
 /// Must run on the main thread — AppKit. Called from `setup`, which is on it.
 #[cfg(target_os = "macos")]
 pub fn raise_over_menu_bar(app: &AppHandle) {
-    use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow};
+    use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior};
 
     let Some(window) = window(app) else { return };
     let Ok(ptr) = window.ns_window() else { return };
     // Safety: `ns_window` returns this webview's live `NSWindow`.
     let ns_window: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
     ns_window.setLevel(NSScreenSaverWindowLevel);
+    // A plain window belongs to one Space, so switching Spaces (or entering a
+    // fullscreen app) leaves the notch behind — it read as "the notch is gone
+    // on the other screen". CanJoinAllSpaces pins it to every Space,
+    // FullScreenAuxiliary lets it sit over fullscreen apps, Stationary keeps
+    // Mission Control from dragging it around, IgnoresCycle keeps it out of
+    // Cmd-backtick.
+    // Safety: setting flags on the live NSWindow from the main thread — this
+    // is called from `setup`, which is on it.
+    unsafe {
+        ns_window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::FullScreenAuxiliary
+                | NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -138,6 +166,7 @@ pub fn show(app: &AppHandle, phase: Phase) {
     // A dictation started over the top of an answer takes the window back: the
     // pill is click-through and drives its own dismissal again from here.
     PANEL_OPEN.store(false, Ordering::SeqCst);
+    INTERACTIVE.store(false, Ordering::SeqCst);
 
     let (style, notch) = style_for(&window, phase);
     if let Err(e) = position_top_center(&window, 0.0) {
@@ -194,6 +223,10 @@ pub fn show_panel(app: &AppHandle) {
 
     HIDE_GENERATION.fetch_add(1, Ordering::SeqCst);
     PANEL_OPEN.store(true, Ordering::SeqCst);
+    // Interactive from the first frame — the webview confirms via
+    // `set_panel_interactive`, but a card must not wait a round-trip to
+    // take its first click.
+    INTERACTIVE.store(true, Ordering::SeqCst);
 
     let notch = target_notch(&window);
     // Forced rather than read from settings: a 40pt wing has nowhere to put the
@@ -229,6 +262,32 @@ const CURSOR_POLL: Duration = Duration::from_millis(60);
 static PANEL_W: AtomicU32 = AtomicU32::new(0);
 static PANEL_H: AtomicU32 = AtomicU32::new(0);
 
+/// True while the webview says an interactive surface is open — the agents
+/// list, a permission card, an answer. Interactivity is **state, not cursor
+/// position**: while open, the whole window takes clicks and the DOM does its
+/// own hit-testing. The polled box (above) gates clicks only at rest, where
+/// it is the cutout strip. Gating an open panel on a box that had to chase
+/// every content change was a race per transition — clicking "back" resized
+/// the list, the new box excluded the pointer, and the poll turned the panel
+/// click-through under the user's cursor.
+static INTERACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// The webview declaring its interactive state; see [`INTERACTIVE`].
+#[tauri::command]
+#[specta::specta]
+pub fn set_panel_interactive(app: AppHandle, open: bool) {
+    INTERACTIVE.store(open, Ordering::SeqCst);
+    if let Some(window) = window(&app) {
+        let _ = window.set_ignore_cursor_events(!open);
+        // Focus rides along so text inputs (a deny message, a freeform
+        // answer) can type. Only here — focusing on hover would steal the
+        // keyboard from whatever the user is working in.
+        if open {
+            let _ = window.set_focus();
+        }
+    }
+}
+
 /// Records the panel's settled box, so the click region can be exactly it.
 #[tauri::command]
 #[specta::specta]
@@ -248,23 +307,76 @@ pub fn set_panel_box(width: f64, height: f64) {
 /// event-driven, at the cost of maintaining an AppKit view that shadows a box
 /// the web layer already owns.
 fn track_cursor(app: &AppHandle) {
+    // The resting notch keeps one tracker running for the app's life, so a
+    // second one from `show_panel` would fight it over `ignore_cursor_events`.
+    if TRACKING.swap(true, Ordering::SeqCst) {
+        return;
+    }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         // Matches what `show_panel` just set.
         let mut clickable = false;
+        let mut hovering = false;
         loop {
             tokio::time::sleep(CURSOR_POLL).await;
-            if !PANEL_OPEN.load(Ordering::SeqCst) {
+            let Some(window) = window(&app) else {
+                TRACKING.store(false, Ordering::SeqCst);
                 return;
+            };
+            // An open panel owns its clicks outright; the poll must not
+            // fight it by re-judging the pointer against a stale box.
+            if INTERACTIVE.load(Ordering::SeqCst) {
+                clickable = true;
+                continue;
             }
-            let Some(window) = window(&app) else { return };
             let over = cursor_over_panel(&window).unwrap_or(false);
             if over != clickable {
                 clickable = over;
                 let _ = window.set_ignore_cursor_events(!over);
             }
+            // The webview cannot see the pointer while the window ignores it,
+            // so the hover that grows the resting notch has to come from here.
+            if over != hovering {
+                hovering = over;
+                if let Err(e) = (NotchHover { over }).emit_to(&app, LABEL) {
+                    tracing::warn!(%e, "could not send notch hover");
+                }
+            }
         }
     });
+}
+
+/// True while a cursor tracker is running, so only one ever is.
+static TRACKING: AtomicBool = AtomicBool::new(false);
+
+/// Shows the resting notch and starts tracking the pointer over it.
+///
+/// The window then stays up for the app's life: an agent can start at any time,
+/// and a notch that only exists during a dictation cannot show one. Dictation
+/// still takes the strip over — `show` and `show_panel` simply retarget what is
+/// already on screen.
+pub fn show_notch(app: &AppHandle) {
+    let Some(window) = window(app) else {
+        tracing::warn!("overlay window missing");
+        return;
+    };
+    if let Err(e) = position_top_center(&window, 0.0) {
+        tracing::warn!(%e, "could not position notch");
+    }
+    let _ = window.set_ignore_cursor_events(true);
+    let _ = window.show();
+    NOTCH_RESTING.store(true, Ordering::SeqCst);
+
+    let notch = target_notch(&window);
+    let style = OverlayStyleChanged {
+        style: OverlayStyle::DropPill,
+        notch_width: notch.map_or(0.0, |n| n.width),
+        notch_height: notch.map_or(0.0, |n| n.height),
+    };
+    if let Err(e) = style.emit_to(app, LABEL) {
+        tracing::warn!(%e, "could not send notch style");
+    }
+    track_cursor(app);
 }
 
 /// Whether the pointer is inside the panel's box. Just the OS reads; the
@@ -315,6 +427,7 @@ pub fn end_panel(app: &AppHandle) {
     if !PANEL_OPEN.swap(false, Ordering::SeqCst) {
         return;
     }
+    INTERACTIVE.store(false, Ordering::SeqCst);
     if let Some(window) = window(app) {
         // Immediately, not after the collapse: the window lingers for EXIT_MS,
         // and a transparent canvas eating clicks for that long is worse.
@@ -350,11 +463,20 @@ pub fn hide(app: &AppHandle) {
             return;
         }
 
+        // The resting notch owns the window between dictations, so the pill
+        // collapsing is the end of the *pill*, not of the window. Hiding it
+        // here would take the notch away with it.
+        if NOTCH_RESTING.load(Ordering::SeqCst) {
+            return;
+        }
         if let Some(window) = window(&app) {
             let _ = window.hide();
         }
     });
 }
+
+/// True once the always-on notch owns the window.
+static NOTCH_RESTING: AtomicBool = AtomicBool::new(false);
 
 fn named_monitor(names: &[Option<String>], wanted: &str) -> Option<usize> {
     names.iter().position(|n| n.as_deref() == Some(wanted))

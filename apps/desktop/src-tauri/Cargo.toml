@@ -24,6 +24,8 @@ aloud-meeting = { path = "../../../crates/meeting" }
 aloud-hotkey = { path = "../../../crates/hotkey" }
 aloud-llm = { path = "../../../crates/llm" }
 aloud-notes = { path = "../../../crates/notes" }
+aloud-sessions = { path = "../../../crates/sessions" }
+aloud-bridge = { path = "../../../crates/bridge" }
 aloud-paste = { path = "../../../crates/paste" }
 aloud-permissions = { path = "../../../crates/permissions" }
 aloud-volume = { path = "../../../crates/volume" }

@@ -44,6 +44,7 @@ version = "0.1.0"
 dependencies = [
  "aloud-agent",
  "aloud-audio",
+ "aloud-bridge",
  "aloud-hotkey",
  "aloud-llm",
  "aloud-meeting",
@@ -51,6 +52,7 @@ dependencies = [
  "aloud-paste",
  "aloud-permissions",
  "aloud-selection",
+ "aloud-sessions",
  "aloud-store",
  "aloud-transcribe",
  "aloud-volume",
@@ -108,6 +110,24 @@ dependencies = [
  "tempfile",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "aloud-bridge"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "aloud-hook-cli"
+version = "0.1.0"
+dependencies = [
+ "aloud-bridge",
+ "serde_json",
 ]
 
 [[package]]
@@ -196,6 +216,18 @@ dependencies = [
  "core-foundation",
  "serde",
  "specta",
+ "tracing",
+]
+
+[[package]]
+name = "aloud-sessions"
+version = "0.1.0"
+dependencies = [
+ "aloud-bridge",
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tracing",
 ]
 
