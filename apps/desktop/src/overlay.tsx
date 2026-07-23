@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -43,6 +44,14 @@ import {
   type ToolArgs,
 } from "./lib/tool-views";
 import { diffLines, diffStat } from "./lib/diff";
+import {
+  agentStage,
+  stageCat,
+  stageSeed,
+  syncStages,
+  STAGE_LABEL,
+  type AgentStage,
+} from "./lib/agent-stage";
 import { notchPath } from "./lib/notch-shape";
 import { timeAgo } from "./lib/format";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
@@ -447,6 +456,21 @@ function Overlay() {
   const [permissions, setPermissions] = useState<AgentPermission[]>([]);
   // The agent row the user drilled into, by session id, or null for the list.
   const [selected, setSelected] = useState<string | null>(null);
+  // The enlarged cat preview: the stage + session it belongs to (from which the
+  // image and caption derive) and the on-screen box to grow it from. Rendered
+  // fixed at the root so it escapes the list's scroll clip; a 48px avatar hover
+  // cannot show the meme, and the joke is the point.
+  const [peek, setPeek] = useState<{
+    stage: AgentStage;
+    seed: string;
+    rect: DOMRect;
+  } | null>(null);
+  const showPeek = useCallback(
+    (stage: AgentStage | null, seed: string, anchor: HTMLElement | null) => {
+      setPeek(stage && anchor ? { stage, seed, rect: anchor.getBoundingClientRect() } : null);
+    },
+    [],
+  );
   // Any of them owns the panel; almost everything below only cares that one
   // does. A pending permission counts: the card has to be on screen to answer.
   // A pending permission is deliberately NOT part of this: a card *arriving*
@@ -524,6 +548,7 @@ function Overlay() {
                 ]
               : [],
           busy: i === 0,
+          transient: null,
         })),
       );
     }
@@ -720,6 +745,23 @@ function Overlay() {
   // render meant "back" un-drilled and the fallback instantly re-drilled,
   // which read as the button not working.
   const selectedSession = sessions.find((s) => s.id === selected) ?? null;
+
+  // Reconcile the cat-variation counters once for the whole list before any
+  // avatar reads a seed: bumps a session's counter on stage change and prunes
+  // sessions that are gone, so the map stays bounded. Memoised on the sessions'
+  // (id, stage) signature — the only inputs that move the counters — so it runs
+  // on a real change, not on every streamed token. `asking` here mirrors the
+  // per-row derivation: a pending permission is `waiting_input`.
+  const askingNow = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
+  const stageSig = sessions
+    .map((s) => `${s.id}:${agentStage(s, askingNow.has(s.id))}`)
+    .join("|");
+  useMemo(() => {
+    syncStages(
+      sessions.map((s) => ({ id: s.id, stage: agentStage(s, askingNow.has(s.id)) })),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageSig]);
 
   // Rust tests the pointer against this box to decide when the window takes
   // clicks (`track_cursor` in overlay.rs). Reported only when it changes: the
@@ -1332,6 +1374,7 @@ function Overlay() {
                     }
                     onResolve={resolvePermission}
                     onBack={() => setSelected(null)}
+                    onPeek={showPeek}
                   />
                 ) : (
                   <AgentList
@@ -1339,6 +1382,7 @@ function Overlay() {
                     permissions={permissions}
                     onSelect={setSelected}
                     onResolve={resolvePermission}
+                    onPeek={showPeek}
                     onClose={() => {
                       setBrowsing(false);
                       setSelected(null);
@@ -1388,6 +1432,48 @@ function Overlay() {
         </div>
       </div>
     )}
+    {/* The enlarged cat, fixed at the root so it escapes the agent list's
+        scroll clip. Grows out of the hovered avatar's box (its origin), which
+        is why it is positioned from the anchor rect rather than centred. */}
+    {peek && <CatPeek stage={peek.stage} seed={peek.seed} rect={peek.rect} />}
+    </div>
+  );
+}
+
+/**
+ * The blown-up meme on avatar hover. Anchored to the avatar's on-screen box and
+ * grown from there — the small round cat loses the joke, this gives it back.
+ * CSS owns the grow (the target never changes mid-flight), so it is a plain
+ * mount + a class the next frame flips.
+ */
+function CatPeek({ stage, seed, rect }: { stage: AgentStage; seed: string; rect: DOMRect }) {
+  const [shown, setShown] = useState(false);
+  // A frame after mount, so the transition has a from-state to leave.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  const SIZE = 180;
+  // Grow up-and-right out of the avatar, clamped to the viewport so it never
+  // clips off the top or right edge of the overlay canvas.
+  const left = Math.min(rect.left, window.innerWidth - SIZE - 8);
+  const top = Math.max(8, rect.bottom - SIZE);
+  return (
+    <div
+      className="cat-peek"
+      data-shown={shown || undefined}
+      aria-hidden
+      style={{
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${SIZE}px`,
+        // Origin = where the avatar sits relative to the peek's top-left, so it
+        // scales out of the cat rather than out of its own centre.
+        transformOrigin: `${rect.left - left + rect.width / 2}px ${rect.top - top + rect.height / 2}px`,
+      }}
+    >
+      <img className="cat-peek__img" src={stageCat(stage, seed)} alt="" />
+      <span className="cat-peek__cap">{STAGE_LABEL[stage]}</span>
     </div>
   );
 }
@@ -1784,6 +1870,44 @@ function rowTag(session: AgentSession): string {
 }
 
 /**
+ * Show/hide the enlarged cat preview, anchored to the given avatar element.
+ * `null` stage hides it.
+ */
+type PeekFn = (stage: AgentStage | null, seed: string, anchor: HTMLElement | null) => void;
+
+/**
+ * The stage cat as a round avatar with a corner status badge, and the hover that
+ * pops the meme up large. One component so the list row and the drilled-in
+ * detail show the exact same thing — they used to carry byte-identical copies.
+ */
+function StageAvatar({
+  session,
+  stage,
+  state,
+  onPeek,
+}: {
+  session: AgentSession;
+  stage: AgentStage;
+  state: "busy" | "live" | "done";
+  onPeek: PeekFn;
+}) {
+  // One seed for both the avatar and its peek, so they never disagree — it is
+  // fixed while the agent stays in this stage and changes on re-entry.
+  const seed = stageSeed(session.id, stage);
+  const src = stageCat(stage, seed);
+  return (
+    <span
+      className="agent-row__avatar"
+      onMouseEnter={(e) => onPeek(stage, seed, e.currentTarget)}
+      onMouseLeave={() => onPeek(null, "", null)}
+    >
+      <img className="agent-row__cat" src={src} alt="" aria-hidden width={48} height={48} decoding="async" />
+      <span className="agent-row__badge" data-state={state} aria-hidden />
+    </span>
+  );
+}
+
+/**
  * One session in the list: the agent in bold, a `model · time` tag coloured by
  * state, the prompt or running tool, and a subagent count. The whole row is a
  * button into the detail view, and it lights up when that agent is asking.
@@ -1794,12 +1918,15 @@ function AgentRow({
   session,
   asking,
   onSelect,
+  onPeek,
 }: {
   session: AgentSession;
   asking: boolean;
   onSelect: (id: string) => void;
+  onPeek: PeekFn;
 }) {
   const state = rowState(session);
+  const stage = agentStage(session, asking);
   return (
     <li>
       <button
@@ -1807,28 +1934,32 @@ function AgentRow({
         data-asking={asking || undefined}
         onClick={() => onSelect(session.id)}
       >
-        <div className="agent-row__head">
-          <span className="agent-row__state" data-state={state} aria-hidden />
-          <span className="agent-row__name">{rowName(session)}</span>
-          <span className="agent-row__tag" data-state={state}>
-            {rowTag(session)}
-          </span>
-        </div>
-        <p className="agent-row__prompt">
+        <div className="agent-row__lead">
+          <StageAvatar session={session} stage={stage} state={state} onPeek={onPeek} />
+          <div className="agent-row__body">
+            <div className="agent-row__head">
+              <span className="agent-row__name">{rowName(session)}</span>
+              <span className="agent-row__tag" data-state={state}>
+                {rowTag(session)}
+              </span>
+            </div>
+            <p className="agent-row__prompt">
           {/* When asking, that is the most important thing about the row.
               Otherwise the running tool, else the user's own latest words —
               never the ai-title under a "You:" label; the title is the
               model's and is written once at session start. */}
-          {asking
-            ? "⚠ wants permission"
-            : (session.tool ??
-              (session.prompt ? `You: ${session.prompt}` : (session.title ?? "")))}
-        </p>
-        {session.subagents.length > 0 && (
-          <p className="agent-row__subcount">
-            ▸ {session.subagents.length} subagent{session.subagents.length === 1 ? "" : "s"}
-          </p>
-        )}
+              {asking
+                ? "⚠ wants permission"
+                : (session.tool ??
+                  (session.prompt ? `You: ${session.prompt}` : (session.title ?? "")))}
+            </p>
+            {session.subagents.length > 0 && (
+              <p className="agent-row__subcount">
+                ▸ {session.subagents.length} subagent{session.subagents.length === 1 ? "" : "s"}
+              </p>
+            )}
+          </div>
+        </div>
       </button>
     </li>
   );
@@ -1844,12 +1975,14 @@ function AgentList({
   onSelect,
   onResolve,
   onClose,
+  onPeek,
 }: {
   sessions: AgentSession[];
   permissions: AgentPermission[];
   onSelect: (id: string) => void;
   onResolve: (id: string, reply: ApprovalReply) => void;
   onClose: () => void;
+  onPeek: PeekFn;
 }) {
   const askingIds = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
   return (
@@ -1863,6 +1996,7 @@ function AgentList({
               session={session}
               asking={askingIds.has(session.id)}
               onSelect={onSelect}
+              onPeek={onPeek}
               key={session.id}
             />
           ))}
@@ -1894,21 +2028,25 @@ function AgentDetail({
   permission,
   onResolve,
   onBack,
+  onPeek,
 }: {
   session: AgentSession;
   permission: AgentPermission | null;
   onResolve: (id: string, reply: ApprovalReply) => void;
   onBack: () => void;
+  onPeek: PeekFn;
 }) {
   const state = rowState(session);
+  const stage = agentStage(session, permission !== null);
   return (
     <Panel title={rowName(session)} onClose={onBack}>
       <div className="agent-detail">
         <button className="agent-detail__back" onClick={onBack}>
           ‹ All agents
         </button>
+        {/* The same stage avatar as the list, so the detail view matches. */}
         <div className="agent-detail__meta">
-          <span className="agent-row__state" data-state={state} aria-hidden />
+          <StageAvatar session={session} stage={stage} state={state} onPeek={onPeek} />
           <span className="agent-detail__tag" data-state={state}>
             {rowTag(session)}
           </span>

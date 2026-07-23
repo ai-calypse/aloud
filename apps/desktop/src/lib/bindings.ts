@@ -320,6 +320,11 @@ export type AgentSession = {
 	/**  Subagents spawned under this session. */
 	subagents: AgentSubagent[],
 	busy: boolean,
+	/**
+	 *  A recent one-shot stage — `"denied"` or `"session_ended"` — the webview
+	 *  shows over the tool-derived stage while it lasts, else `None`.
+	 */
+	transient: string | null,
 };
 
 /**  The live session list, pushed whenever it actually changes. */
