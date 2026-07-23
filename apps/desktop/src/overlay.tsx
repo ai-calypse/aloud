@@ -1881,14 +1881,32 @@ function NotchPlate({ session, asking }: { session: AgentSession | null; asking:
   // Hold the last session through the collapse, so the text does not blank out
   // while the plate is still folding away.
   const shown = useRef<AgentSession | null>(null);
-  if (session) shown.current = session;
+  const wasAsking = useRef(false);
+  if (session) {
+    shown.current = session;
+    wasAsking.current = asking;
+  }
   const s = shown.current;
   const subs = s?.subagents.length ?? 0;
+  // What it is doing right now — the same stage the cat and badge encode, spelt
+  // out ("thinking", "reading files", …). Held with the session so it does not
+  // blank mid-collapse.
+  const stage = s ? agentStage(s, wasAsking.current) : "idle";
+  const state = s ? rowState(s) : "done";
   return (
     <div className="notch-plate" data-open={session ? "" : undefined} aria-hidden={!session}>
       {s && (
         <div className="notch-plate__inner" key={s.id}>
           <span className="notch-plate__title">{rowName(s)}</span>
+          {/* What it is doing right now, led by the badge's own status dot. */}
+          <span className="notch-plate__stage">
+            <span
+              className="notch-plate__pip"
+              data-state={wasAsking.current ? "asking" : state}
+              aria-hidden
+            />
+            {STAGE_LABEL[stage]}
+          </span>
           <span className="notch-plate__meta">
             {AGENT_NAME[s.agent] ?? s.agent}
             {s.model && <span className="notch-plate__dot"> · {s.model}</span>}
@@ -1898,7 +1916,6 @@ function NotchPlate({ session, asking }: { session: AgentSession | null; asking:
                 · {subs} subagent{subs === 1 ? "" : "s"}
               </span>
             )}
-            {asking && <span className="notch-plate__wants"> · wants permission</span>}
           </span>
         </div>
       )}

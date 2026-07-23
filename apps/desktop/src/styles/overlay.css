@@ -1799,7 +1799,9 @@
 }
 
 .notch-plate[data-open] {
-  max-height: 60px;
+  /* Fits three lines (project @ branch, stage, agent · model · subagents) plus
+     the hairline + padding. A ceiling for the fold; the real height is content. */
+  max-height: 84px;
   margin-top: 10px;
   opacity: 1;
 }
@@ -1834,6 +1836,39 @@
   text-overflow: ellipsis;
 }
 
+/* What it is doing right now, led by the same status dot as the card badge —
+   the live status, brighter than the "what it is" meta below it. */
+.notch-plate__stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--pill-ink);
+  white-space: nowrap;
+}
+
+.notch-plate__pip {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--sys-grey, #8e8e93);
+}
+.notch-plate__pip[data-state="busy"] {
+  background: var(--sys-green, #32d74b);
+  animation: breathe 1.6s var(--ease-in-out) infinite;
+}
+.notch-plate__pip[data-state="live"] {
+  background: var(--sys-green, #32d74b);
+}
+.notch-plate__pip[data-state="asking"] {
+  background: var(--sys-orange, #ff9f0a);
+  animation: breathe 1.2s var(--ease-in-out) infinite;
+}
+
 .notch-plate__meta {
   display: block;
   margin-top: 2px;
@@ -1843,11 +1878,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.notch-plate__wants {
-  color: var(--sys-orange, #ff9f0a);
-  opacity: 1;
 }
 
 /* Movement can make some users unwell — collapse the deal to a snap. The cards
