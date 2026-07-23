@@ -129,6 +129,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sessions::install_agent_hooks,
             sessions::uninstall_agent_hooks,
             sessions::resolve_permission,
+            sessions::spawn_coding_agent,
             agent::confirm_agent,
             agent::answer_agent,
             agent::close_agent,

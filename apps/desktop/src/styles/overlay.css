@@ -444,14 +444,92 @@
   transform: scale(0.88);
 }
 
-/* What a new tab holds is undecided. The height is a floor, not a placeholder:
-   an empty body would collapse the panel back up through the cutout it grew
-   out of, which reads as the window closing rather than a tab opening. */
-.tab-blank {
-  height: 220px;
-  animation:
-    ask-rise var(--spring-pop-dur) var(--spring-pop) both,
-    ask-fade var(--dur-fast) var(--ease-out) both;
+/* A new tab holds the coding-agent composer, inside a `.ask` panel — so its
+   entrance, dark chrome and exit all come from `.ask`, and only the fields
+   below need their own layout. */
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.composer__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The claude/codex choice: a two-segment pill, matching the input's surface. */
+.composer__agents {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 0.06);
+}
+
+.composer__agent {
+  flex: 1;
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: rgb(255 255 255 / 0.55);
+  font: inherit;
+  font-size: 12px;
+  text-transform: capitalize;
+  cursor: default;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.composer__agent[data-active] {
+  background: rgb(255 255 255 / 0.14);
+  color: var(--pill-ink);
+}
+
+.composer__go {
+  flex: none;
+  height: 30px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--sys-blue);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: default;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.composer__go:disabled {
+  opacity: 0.4;
+}
+
+.composer__hint {
+  margin: 0;
+  color: rgb(255 255 255 / 0.5);
+  font-size: 12px;
+}
+
+.composer__link {
+  border: 0;
+  background: none;
+  color: var(--sys-blue);
+  font: inherit;
+  font-size: 12px;
+  cursor: default;
+}
+
+.ask__done {
+  margin: 0;
+  color: var(--pill-ink);
+}
+
+.ask__branch {
+  font-family: ui-monospace, monospace;
+  color: var(--sys-blue);
 }
 
 .ask {
@@ -2069,7 +2147,7 @@
 /* The answer must be gone before the panel collapses over it — the collapse
    clips its contents, and a paragraph sliced off line by line reads as the
    window being killed. Faster than the collapse for that reason. */
-.overlay-root[data-exiting] :is(.ask > *, .tabs, .tab-blank) {
+.overlay-root[data-exiting] :is(.ask > *, .tabs) {
   animation: ask-out var(--dur-fast) var(--ease-in) both;
   animation-delay: 0ms;
 }

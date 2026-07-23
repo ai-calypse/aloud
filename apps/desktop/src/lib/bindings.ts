@@ -182,6 +182,16 @@ export const commands = {
 	 */
 	resolvePermission: (id: string, reply: ApprovalReply) => __TAURI_INVOKE<void>("resolve_permission", { id, reply }),
 	/**
+	 *  Cuts a worktree off `origin/main` in `repo` and opens `agent` on `task` in a
+	 *  Terminal tab there. Returns the new branch name so the panel can show it
+	 *  without waiting on the discovery poll that will surface the session itself.
+	 * 
+	 *  The spawned process is a normal interactive session: the existing `ps`/`lsof`
+	 *  discovery finds it, and the globally-installed hooks fire for it, so no new
+	 *  tracking path is needed here — only the starting of it.
+	 */
+	spawnCodingAgent: (repo: string, task: string, agent: CodingAgent) => typedError<string, string>(__TAURI_INVOKE("spawn_coding_agent", { repo, task, agent })),
+	/**
 	 *  Resolves the pending confirmation. Called by the panel's Cancel/Confirm
 	 *  buttons; `edits` carries any field the user filled in or corrected before
 	 *  approving, in the same flattened form the panel was given.
@@ -429,6 +439,13 @@ export type BuildInfo = {
 	commit: string,
 	date: string,
 };
+
+/**
+ *  Which CLI a new coding-agent tab opens. Its own type rather than a string so
+ *  the binding is a union, not `string`, and an unknown agent is a type error at
+ *  the call site instead of a silent fall-through in Rust.
+ */
+export type CodingAgent = "claude" | "codex";
 
 export type Config = {
 	hold: Binding | null,

@@ -19,6 +19,7 @@ chrono = "0.4"
 
 [dependencies]
 aloud-agent = { path = "../../../crates/agent" }
+aloud-agent-spawn = { path = "../../../crates/agent-spawn" }
 aloud-audio = { path = "../../../crates/audio" }
 aloud-meeting = { path = "../../../crates/meeting" }
 aloud-hotkey = { path = "../../../crates/hotkey" }

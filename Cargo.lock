@@ -43,6 +43,7 @@ name = "aloud"
 version = "0.1.0"
 dependencies = [
  "aloud-agent",
+ "aloud-agent-spawn",
  "aloud-audio",
  "aloud-bridge",
  "aloud-hotkey",
@@ -94,6 +95,15 @@ dependencies = [
  "serde_json",
  "specta",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "aloud-agent-spawn"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tempfile",
  "tracing",
 ]
 

@@ -22,6 +22,7 @@ import {
   type AgentPermission,
   type AgentSession,
   type ApprovalReply,
+  type CodingAgent,
   type OverlayStyle,
   type Phase,
 } from "./lib/bindings";
@@ -1473,7 +1474,14 @@ function Overlay() {
               ) : /* Keyed so switching back to a tab replays its entrance rather
                   than having the content appear already settled. */
               tabs.find((tab) => tab.id === activeTab)?.blank ? (
-                <div className="tab-blank" key={activeTab} />
+                // A new tab is where you start a coding agent. Keyed on the tab
+                // so switching back replays its entrance, like the run tabs.
+                <CodingAgentComposer
+                  key={activeTab}
+                  bodyRef={answerRef}
+                  onClose={() => closeTab(activeTab)}
+                  onAddTab={tabs.length < MAX_TABS ? addTab : undefined}
+                />
               ) : ask ? (
                 // Keyed on the question so a new one resets copy state and input.
                 <Answer
@@ -2876,6 +2884,135 @@ function AgentRun({
 
       {run.finished && <MessageResponse>{run.finished}</MessageResponse>}
       {run.error && <p className="ask__error">{run.error}</p>}
+    </Panel>
+  );
+}
+
+/** Where the last-used repo path is remembered between sessions, so the
+ *  common case (same repo again) is one field pre-filled rather than retyped.
+ *  ponytail: one string in localStorage, not a recent-repos list — add the
+ *  list if people work across many repos often enough to miss it. */
+const LAST_REPO_KEY = "aloud.codingAgent.lastRepo";
+
+/**
+ * What a blank tab holds: the composer for starting a coding agent. Give it a
+ * repo, a task and an agent, and Rust cuts a worktree off `origin/main` and
+ * opens the agent in a Terminal tab there — the running session then shows up
+ * under the Agents tab through the same discovery every other session uses.
+ *
+ * A `Panel` like `Answer`/`AgentRun` so it inherits the strip's `+`, close, and
+ * the always-dark chrome. On success it does not track the session itself —
+ * that is the Agents tab's job — it just reports the branch it started.
+ */
+function CodingAgentComposer({
+  bodyRef,
+  onClose,
+  onAddTab,
+}: {
+  bodyRef: React.RefObject<HTMLDivElement | null>;
+  onClose: () => void;
+  onAddTab?: () => void;
+}) {
+  const [repo, setRepo] = useState(() => localStorage.getItem(LAST_REPO_KEY) ?? "");
+  const [task, setTask] = useState("");
+  const [agent, setAgent] = useState<CodingAgent>("claude");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Started branch name on success — the one thing worth showing before the
+  // discovery poll surfaces the session itself under the Agents tab.
+  const [started, setStarted] = useState<string | null>(null);
+  // null until the hook check returns; true/false after. Without hooks the
+  // session still shows up (ps/lsof finds it) but its permission requests will
+  // not route into Aloud's cards, so the composer says so rather than pretend.
+  const [hooksInstalled, setHooksInstalled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    void commands.agentHookStatus().then((res) => {
+      // A failed status read is not worth blocking on — treat it as "unknown,
+      // assume present" so the check never stands between the user and a spawn.
+      setHooksInstalled(res.status === "ok" ? res.data.installed.length > 0 : true);
+    });
+  }, []);
+
+  const go = useCallback(() => {
+    if (!repo.trim() || !task.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    localStorage.setItem(LAST_REPO_KEY, repo.trim());
+    void commands.spawnCodingAgent(repo.trim(), task.trim(), agent).then((res) => {
+      setBusy(false);
+      if (res.status === "ok") setStarted(res.data);
+      else setError(res.error);
+    });
+  }, [repo, task, agent, busy]);
+
+  return (
+    <Panel
+      title="New coding agent"
+      bodyRef={bodyRef}
+      onClose={onClose}
+      onAddTab={onAddTab}
+    >
+      {started ? (
+        <p className="ask__done">
+          Started on <span className="ask__branch">{started}</span>. It will
+          appear under Agents in a moment.
+        </p>
+      ) : (
+        <div className="composer">
+          <input
+            className="ask__input"
+            placeholder="Repo path (e.g. ~/dev/my-app)"
+            value={repo}
+            disabled={busy}
+            onChange={(e) => setRepo(e.target.value)}
+          />
+          <input
+            className="ask__input"
+            placeholder="What should it do?"
+            value={task}
+            disabled={busy}
+            onChange={(e) => setTask(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && go()}
+          />
+          <div className="composer__row">
+            <div className="composer__agents" role="radiogroup" aria-label="Agent">
+              {(["claude", "codex"] as const).map((option) => (
+                <button
+                  key={option}
+                  className="composer__agent"
+                  role="radio"
+                  aria-checked={agent === option}
+                  data-active={agent === option || undefined}
+                  disabled={busy}
+                  onClick={() => setAgent(option)}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+            <button
+              className="composer__go"
+              disabled={busy || !repo.trim() || !task.trim()}
+              onClick={go}
+            >
+              {busy ? "Starting…" : "Start"}
+            </button>
+          </div>
+          {error ? <p className="ask__error">{error}</p> : null}
+          {hooksInstalled === false ? (
+            <p className="composer__hint">
+              Approvals won't reach the notch until agent hooks are installed.{" "}
+              <button
+                className="composer__link"
+                onClick={() => void commands.installAgentHooks().then(() => setHooksInstalled(true))}
+              >
+                Install hooks
+              </button>
+            </p>
+          ) : null}
+        </div>
+      )}
     </Panel>
   );
 }
