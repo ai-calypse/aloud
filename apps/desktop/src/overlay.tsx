@@ -1675,6 +1675,9 @@ const DEAL_STAGGER = 40;
 /** The dealt card's width — matches `.notch-card` in overlay.css. Sizes the
  *  deal layer so the panel measures the full row (absolute cards do not). */
 const DEAL_CARD_W = 86;
+/** How long the cursor must rest on one card before the plate unfolds the full
+ *  detail. Long enough that a sweep across the row never triggers it. */
+const DWELL_MS = 500;
 
 /**
  * The agents dealt into the notch, shown while the resting notch is hovered.
@@ -1711,10 +1714,21 @@ function NotchAgents({
   // the row — one plate, not one per card, so gliding across just re-keys its
   // contents rather than opening and closing three separate surfaces.
   const [hovered, setHovered] = useState<string | null>(null);
+  // Progressive reveal: a quick hover shows the compact plate (+ live "Now"
+  // line); *dwelling* on one card past `DWELL_MS` unfolds the full detail
+  // (cwd, prompt, subagents). Sweeping the row peeks; lingering commits to
+  // reading — without a click. Reset whenever the hovered card changes.
+  const [dwelling, setDwelling] = useState(false);
   useEffect(() => {
     const id = requestAnimationFrame(() => setDealt(true));
     return () => cancelAnimationFrame(id);
   }, []);
+  useEffect(() => {
+    setDwelling(false);
+    if (!hovered) return;
+    const t = setTimeout(() => setDwelling(true), DWELL_MS);
+    return () => clearTimeout(t);
+  }, [hovered]);
   if (cats.length === 0) {
     return <p className="notch-peek--empty">No agents running</p>;
   }
@@ -1750,7 +1764,11 @@ function NotchAgents({
       </div>
       {/* The detail plate — unfolds under the row for the hovered card. One
           shared surface: gliding across cards re-keys its contents. */}
-      <NotchPlate session={hoveredSession} asking={hoveredSession ? askingIds.has(hoveredSession.id) : false} />
+      <NotchPlate
+        session={hoveredSession}
+        asking={hoveredSession ? askingIds.has(hoveredSession.id) : false}
+        dwelling={dwelling}
+      />
       <button className="notch-agents__all" type="button" onClick={onOpenAgents}>
         View all agents
       </button>
@@ -1865,19 +1883,32 @@ const AGENT_NAME: Record<string, string> = {
 };
 
 /**
- * The detail plate under the dealt row (option A). Unfolds when a card is
- * hovered, showing that agent's full `project @ branch`, its type (Claude /
- * Codex), the model, and how many subagents it is running — the things the
- * 56px circle cannot say. One shared plate for the whole row: gliding between
- * cards keeps it open and swaps its contents (keyed on the session, so the text
- * crossfades rather than jumping). Emerges downward from the row, the same
- * direction the notch itself grows, so it reads as one surface opening — the
- * `aloud-motion` "things emerge from where they came from".
+ * The detail plate under the dealt row, revealed *progressively* on hover — no
+ * click needed to read what an agent is doing:
  *
- * `session` null = nothing hovered = collapsed. The plate stays mounted so its
- * fold has something to animate; only `data-open` and the contents change.
+ * - A quick hover shows the compact head: `project @ branch`, the stage, a live
+ *   "Now" line (the running tool), and the agent · model · subagent count.
+ * - *Dwelling* on one card past `DWELL_MS` unfolds the rest — cwd, the user's
+ *   prompt, and each subagent — so you can actually read it. Sweeping the row
+ *   only peeks; lingering commits. Clicking the card still opens the pinned
+ *   detail view that survives mouse-leave.
+ *
+ * One shared plate for the whole row: gliding between cards keeps it open and
+ * re-keys its contents (crossfade, not a jump). Emerges downward from the row,
+ * the direction the notch grows — the `aloud-motion` "things emerge from where
+ * they came from". `session` null = collapsed; it stays mounted (and holds the
+ * last session) so the fold has something to animate and never blanks mid-way.
  */
-function NotchPlate({ session, asking }: { session: AgentSession | null; asking: boolean }) {
+function NotchPlate({
+  session,
+  asking,
+  dwelling,
+}: {
+  session: AgentSession | null;
+  asking: boolean;
+  /** The cursor has rested on this card long enough to unfold the full detail. */
+  dwelling: boolean;
+}) {
   // Hold the last session through the collapse, so the text does not blank out
   // while the plate is still folding away.
   const shown = useRef<AgentSession | null>(null);
@@ -1887,14 +1918,22 @@ function NotchPlate({ session, asking }: { session: AgentSession | null; asking:
     wasAsking.current = asking;
   }
   const s = shown.current;
-  const subs = s?.subagents.length ?? 0;
+  const subs = s?.subagents ?? [];
   // What it is doing right now — the same stage the cat and badge encode, spelt
   // out ("thinking", "reading files", …). Held with the session so it does not
   // blank mid-collapse.
   const stage = s ? agentStage(s, wasAsking.current) : "idle";
   const state = s ? rowState(s) : "done";
+  // Only fully open once the cursor has actually settled on a card — never mid
+  // fold-away (no session), or the plate would grow as it is trying to leave.
+  const expanded = dwelling && session !== null;
   return (
-    <div className="notch-plate" data-open={session ? "" : undefined} aria-hidden={!session}>
+    <div
+      className="notch-plate"
+      data-open={session ? "" : undefined}
+      data-expanded={expanded ? "" : undefined}
+      aria-hidden={!session}
+    >
       {s && (
         <div className="notch-plate__inner" key={s.id}>
           <span className="notch-plate__title">{rowName(s)}</span>
@@ -1910,13 +1949,47 @@ function NotchPlate({ session, asking }: { session: AgentSession | null; asking:
           <span className="notch-plate__meta">
             {AGENT_NAME[s.agent] ?? s.agent}
             {s.model && <span className="notch-plate__dot"> · {s.model}</span>}
-            {subs > 0 && (
+            {subs.length > 0 && (
               <span className="notch-plate__dot">
                 {" "}
-                · {subs} subagent{subs === 1 ? "" : "s"}
+                · {subs.length} subagent{subs.length === 1 ? "" : "s"}
               </span>
             )}
           </span>
+
+          {/* The live tool — always shown, the quick "what is it doing" answer. */}
+          <span className="notch-plate__now">
+            <span className="notch-plate__now-label">Now</span>
+            <span className="notch-plate__now-tool" data-idle={!s.tool || undefined}>
+              {s.tool ?? (s.busy ? "thinking…" : "idle")}
+            </span>
+          </span>
+
+          {/* Dwell reveal: the rest of the detail, so a linger reads the whole
+              picture without a click. Folds open under the head. */}
+          <div className="notch-plate__more">
+            {s.cwd && <p className="notch-plate__cwd">{s.cwd}</p>}
+            {s.prompt ? (
+              <p className="notch-plate__prompt">You: {s.prompt}</p>
+            ) : (
+              s.title && <p className="notch-plate__prompt">{s.title}</p>
+            )}
+            {subs.length > 0 && (
+              <ul className="notch-plate__subs">
+                {subs.map((sub, i) => (
+                  <li className="notch-plate__sub" key={i}>
+                    <span
+                      className="notch-plate__pip"
+                      data-state={sub.busy ? "busy" : "done"}
+                      aria-hidden
+                    />
+                    <span className="notch-plate__sub-label">{sub.label}</span>
+                    {sub.tool && <span className="notch-plate__sub-tool">{sub.tool}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
     </div>

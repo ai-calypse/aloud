@@ -1799,11 +1799,17 @@
 }
 
 .notch-plate[data-open] {
-  /* Fits three lines (project @ branch, stage, agent · model · subagents) plus
-     the hairline + padding. A ceiling for the fold; the real height is content. */
-  max-height: 84px;
+  /* The quick-peek head: title, stage, meta, and the "Now" line, plus the
+     hairline + padding. A ceiling for the fold; the real height is content. */
+  max-height: 104px;
   margin-top: 10px;
   opacity: 1;
+}
+
+/* Dwelled long enough to unfold the rest (cwd, prompt, subagents). A taller
+   ceiling; `.notch-plate__more` inside supplies the actual expanded height. */
+.notch-plate[data-open][data-expanded] {
+  max-height: 320px;
 }
 
 /* The contents are keyed on the session, so gliding to another card remounts
@@ -1880,12 +1886,113 @@
   text-overflow: ellipsis;
 }
 
+/* The live "Now" line — always shown, the quick "what is it doing" answer. A
+   monospace tool string on a faint chip, matching the pinned detail's Now. */
+.notch-plate__now {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 6px;
+  font-size: 11px;
+  min-width: 0;
+}
+.notch-plate__now-label {
+  flex: none;
+  font-weight: 600;
+  opacity: 0.5;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+.notch-plate__now-tool {
+  min-width: 0;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.08);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--pill-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notch-plate__now-tool[data-idle] {
+  background: none;
+  opacity: 0.5;
+}
+
+/* The dwell reveal: cwd, prompt, subagents. Folded to nothing until the plate
+   is `[data-expanded]`; then it grows open under the head. Its own max-height
+   fold, inside the plate's — the head stays put and only this grows. */
+.notch-plate__more {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  text-align: left;
+  transition:
+    max-height var(--spring-dur) var(--spring),
+    opacity var(--dur-fast) var(--ease-out);
+}
+.notch-plate[data-expanded] .notch-plate__more {
+  max-height: 220px;
+  opacity: 1;
+  margin-top: 8px;
+}
+
+.notch-plate__cwd {
+  margin: 0;
+  font-size: 10px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--pill-ink);
+  opacity: 0.45;
+  word-break: break-all;
+}
+.notch-plate__prompt {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--pill-ink);
+  opacity: 0.8;
+  /* A couple of lines, then clamp — the pinned view has the rest. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.notch-plate__subs {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.notch-plate__sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--pill-ink);
+}
+.notch-plate__sub-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notch-plate__sub-tool {
+  flex: none;
+  margin-left: auto;
+  font-size: 10px;
+  opacity: 0.5;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
 /* Movement can make some users unwell — collapse the deal to a snap. The cards
    still appear (opacity), they just do not travel; the 1ms durations in
    motion.css shrink the shimmer/attn loops. */
 @media (prefers-reduced-motion: reduce) {
   .notch-card,
-  .notch-plate {
+  .notch-plate,
+  .notch-plate__more {
     transition-duration: 1ms;
   }
   .notch-plate__inner {
