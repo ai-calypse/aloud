@@ -226,15 +226,18 @@
   padding: 0;
 }
 
-/* Resting-hover: the agent rows the notch grows into. Top-aligned and
-   content-sized (not the 40px centred status row), so the rows sit below the
-   cutout and the drop-pill's height spring measures the real stack. Width is
-   `max-content` from the base body — the rows set their own. */
+/* Resting-hover: the dealt row + peek the notch grows into. Top-aligned so the
+   row sits below the cutout, and a FIXED width matching the clicked-in detail
+   panel — so the hover peek (which renders that same detail) is always the
+   notch-panel size, never as wide as its longest line of text (a long cwd path
+   under `max-content` blew the notch out to most of the screen). The dealt row
+   is narrower and centres within it. */
 .drop-pill__body--agents {
   flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   justify-content: flex-start;
   gap: 0;
+  width: 460px;
   height: auto;
   padding: 0;
 }
@@ -1799,11 +1802,30 @@
 }
 
 .notch-plate[data-open] {
-  /* Fits three lines (project @ branch, stage, agent · model · subagents) plus
-     the hairline + padding. A ceiling for the fold; the real height is content. */
-  max-height: 84px;
+  /* The quick-peek head: title, stage, meta, and the "Now" line, plus the
+     hairline + padding. A ceiling for the fold; the real height is content. */
+  max-height: 104px;
   margin-top: 10px;
   opacity: 1;
+}
+
+/* Dwelled long enough to show the full detail view — a much taller ceiling; the
+   `.agent-detail` inside supplies the real height (it can scroll if huge). */
+.notch-plate[data-open][data-expanded] {
+  max-height: 520px;
+}
+
+/* The full-detail tier: the real AgentDetail, sized to the plate (never wider,
+   so a long cwd wraps instead of stretching the notch), scrolling if it is
+   taller than the ceiling. Left-aligned like the pinned view. */
+.notch-plate__inner--full {
+  text-align: left;
+  max-height: 500px;
+  overflow-y: auto;
+}
+.notch-plate__inner--full .agent-detail {
+  min-width: 0;
+  width: 100%;
 }
 
 /* The contents are keyed on the session, so gliding to another card remounts
@@ -1878,6 +1900,41 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The live "Now" line — always shown, the quick "what is it doing" answer. A
+   monospace tool string on a faint chip, matching the pinned detail's Now. */
+.notch-plate__now {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 6px;
+  font-size: 11px;
+  min-width: 0;
+}
+.notch-plate__now-label {
+  flex: none;
+  font-weight: 600;
+  opacity: 0.5;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+.notch-plate__now-tool {
+  min-width: 0;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.08);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--pill-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notch-plate__now-tool[data-idle] {
+  background: none;
+  opacity: 0.5;
 }
 
 /* Movement can make some users unwell — collapse the deal to a snap. The cards

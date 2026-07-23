@@ -1,7 +1,8 @@
-//! Alert chimes for recording start / stop / error.
+//! Alert chimes for recording start / stop / error, and an agent asking for
+//! permission.
 //!
 //! Shells out to each OS's own sound facility rather than bundling audio and a
-//! mixer (rodio) for three UI chimes; Linux gets silence. Fire-and-forget — a
+//! mixer (rodio) for a few UI chimes; Linux gets silence. Fire-and-forget — a
 //! chime must never block or fail the dictation pipeline, so errors are logged
 //! and swallowed.
 
@@ -10,6 +11,9 @@ pub enum Chime {
     Start,
     Stop,
     Error,
+    /// An agent is blocked on the user (a permission request). Distinct from
+    /// `Start` so it does not read as "recording began".
+    Attention,
 }
 
 /// Plays `chime` if `enabled`, at `volume` (0.0–1.0). Spawns a detached
@@ -30,6 +34,9 @@ fn play_impl(chime: Chime, volume: f32) -> std::io::Result<()> {
         Chime::Start => "Tink",
         Chime::Stop => "Pop",
         Chime::Error => "Basso",
+        // A soft "look here" — the submarine ping reads as an alert without the
+        // harshness of Basso (which we reserve for real errors).
+        Chime::Attention => "Submarine",
     };
     std::process::Command::new("afplay")
         .arg("-v")
@@ -47,6 +54,8 @@ fn play_impl(chime: Chime, _volume: f32) -> std::io::Result<()> {
         Chime::Start => "Asterisk",
         Chime::Stop => "Beep",
         Chime::Error => "Hand",
+        // The system's own "attention needed" tone.
+        Chime::Attention => "Exclamation",
     };
     std::process::Command::new("powershell")
         .args([
