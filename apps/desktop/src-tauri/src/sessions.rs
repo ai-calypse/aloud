@@ -408,6 +408,20 @@ fn await_decision(
         tracing::warn!(%e, "could not send permission card");
     }
 
+    // A chime, so a blocked agent is noticed even when the notch is not being
+    // watched — the audio counterpart of raising the notch. Gated on the same
+    // sound settings as the dictation chimes; distinct tone (`Attention`) so it
+    // never reads as "recording started". Fire-and-forget, like `play` itself.
+    if let Some((enabled, volume)) = app.try_state::<crate::AppState>().and_then(|state| {
+        state
+            .settings
+            .lock()
+            .ok()
+            .map(|s| (s.play_sounds, s.sound_volume))
+    }) {
+        crate::sound::play(crate::sound::Chime::Attention, enabled, volume);
+    }
+
     // Bring the notch forward so the card is not missed — unless the user
     // asked it not to. `show_panel` drives NSWindow, which is
     // main-thread-only — and this runs on the socket's OS thread, so it has
