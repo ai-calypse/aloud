@@ -1,0 +1,288 @@
+{
+  "idle": {
+    "description": "Agent spun up, nothing happening \u2014 sleepy/bored cat",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "cat-idle-1.png"
+      },
+      {
+        "file": "2.png",
+        "from": "cat-idle-2.png"
+      },
+      {
+        "file": "3.png",
+        "from": "cat-idle-3.png"
+      },
+      {
+        "file": "4.png",
+        "from": "cat-idle-4.png"
+      }
+    ]
+  },
+  "planning": {
+    "description": "laying out the plan / TODOs before acting \u2014 scheming squint",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "pikachu-planning.png"
+      },
+      {
+        "file": "2.png",
+        "from": "sponge-planning.png"
+      },
+      {
+        "file": "3.png",
+        "from": "planning-2.png"
+      },
+      {
+        "file": "4.png",
+        "from": "planningn-3.png"
+      }
+    ]
+  },
+  "thinking": {
+    "description": "model reasoning between tool calls \u2014 'let me think'",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "cat-let-me-think.png"
+      },
+      {
+        "file": "2.png",
+        "from": "cat-idk.png"
+      },
+      {
+        "file": "3.png",
+        "from": "thinking.png"
+      },
+      {
+        "file": "4.png",
+        "from": "monkey-think.png"
+      },
+      {
+        "file": "5.png",
+        "from": "pray-monkey.png"
+      }
+    ]
+  },
+  "reading": {
+    "description": "grep, file reads, exploring \u2014 studious glasses cat",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "cat-reading-1.png"
+      },
+      {
+        "file": "2.png",
+        "from": "cat-reading-2.png"
+      },
+      {
+        "file": "3.png",
+        "from": "cat-reading-3.png"
+      },
+      {
+        "file": "4.png",
+        "from": "cat-reading-4.png"
+      }
+    ]
+  },
+  "editing": {
+    "description": "active Edit/Write \u2014 cat with paws on keyboard",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "cat-write-1.png"
+      },
+      {
+        "file": "2.png",
+        "from": "cat-write-2.png"
+      },
+      {
+        "file": "3.png",
+        "from": "cat-reading-1.png"
+      }
+    ]
+  },
+  "running": {
+    "description": "Bash executing \u2014 cat anxiously watching washing machine",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "cat-bash-1.png"
+      },
+      {
+        "file": "2.png",
+        "from": "cat-bash-4.png"
+      },
+      {
+        "file": "3.png",
+        "from": "cat-bash-2.png"
+      },
+      {
+        "file": "4.png",
+        "from": "cat-bash-3.png"
+      }
+    ]
+  },
+  "waiting_input": {
+    "description": "permission / question \u2014 cat raising paw, demanding attention",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "i-have-a-question-cat.png"
+      },
+      {
+        "file": "2.png",
+        "from": "i-am-listening-cat.png"
+      },
+      {
+        "file": "3.png",
+        "from": "middle.png"
+      },
+      {
+        "file": "4.png",
+        "from": "confused.png"
+      }
+    ]
+  },
+  "test_passed": {
+    "description": "tests green \u2014 smug satisfied cat",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "car-thumbs-up.png"
+      },
+      {
+        "file": "2.png",
+        "from": "cat-happy.png"
+      },
+      {
+        "file": "3.png",
+        "from": "cat-chill.png"
+      },
+      {
+        "file": "4.png",
+        "from": "tounge-out.png"
+      },
+      {
+        "file": "5.png",
+        "from": "moneky-done.png"
+      }
+    ]
+  },
+  "test_failed": {
+    "description": "tests red \u2014 calm-amid-explosion / screaming / oh-no",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "cat-error.png"
+      },
+      {
+        "file": "2.png",
+        "from": "blast-behind-cat.png"
+      },
+      {
+        "file": "3.png",
+        "from": "bomb-error.png"
+      },
+      {
+        "file": "4.png",
+        "from": "hand-on-face-cat-ohno.png"
+      },
+      {
+        "file": "5.png",
+        "from": "monkey-two-hands-on-head.png"
+      }
+    ]
+  },
+  "denied": {
+    "description": "you hit deny \u2014 sad rejected cat",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "cat-banana-cry.png"
+      },
+      {
+        "file": "2.png",
+        "from": "phone-crying.png"
+      },
+      {
+        "file": "3.png",
+        "from": "thumbs-up.png"
+      }
+    ]
+  },
+  "stuck": {
+    "description": "same call running too long \u2014 impatient, escalates 1->3",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "loader-on-cat.png"
+      },
+      {
+        "file": "2.png",
+        "from": "error-loader.png"
+      },
+      {
+        "file": "3.png",
+        "from": "monkey-two-hands-on-head.png"
+      }
+    ]
+  },
+  "rate_limited": {
+    "description": "hit usage / quota cap \u2014 empty-wallet cat",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "empty-wallet-cat.png"
+      },
+      {
+        "file": "2.png",
+        "from": "cat-wallet-empty-handout.png"
+      },
+      {
+        "file": "3.png",
+        "from": "change-wallet-empty-cat.png"
+      },
+      {
+        "file": "4.png",
+        "from": "cat-giving-credit-card.png"
+      },
+      {
+        "file": "5.png",
+        "from": "hamster.png"
+      }
+    ]
+  },
+  "context_low": {
+    "description": "context window / tokens running out (NOT YET WIRED in app) \u2014 tapping-watch, empty-wallet",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "time-running-out-context-running-out-cat.png"
+      },
+      {
+        "file": "2.png",
+        "from": "empty-wallet-cat.png"
+      },
+      {
+        "file": "3.png",
+        "from": "change-wallet-empty-cat.png"
+      }
+    ]
+  },
+  "session_ended": {
+    "description": "session closed \u2014 cat looking / walking away",
+    "images": [
+      {
+        "file": "1.png",
+        "from": "middle.png"
+      },
+      {
+        "file": "2.png",
+        "from": "cat-idle-4.png"
+      }
+    ]
+  }
+}

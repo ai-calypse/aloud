@@ -35,7 +35,7 @@
         "shadow": false,
         "skipTaskbar": true,
         "focus": false,
-        "acceptFirstMouse": false
+        "acceptFirstMouse": true
       }
     ],
     "macOSPrivateApi": true,

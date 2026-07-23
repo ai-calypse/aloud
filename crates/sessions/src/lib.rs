@@ -68,6 +68,9 @@ pub struct Session {
     /// Mid-turn: the transcript moved within [`scan::BUSY_WINDOW`], or a hook
     /// said a turn is open and `Stop` has not.
     pub busy: bool,
+    /// A recent one-shot state — `"denied"` or `"session_ended"` — while still
+    /// fresh, else `None`. The webview shows its cat over the derived stage.
+    pub transient: Option<String>,
 }
 
 /// A subagent, flattened the same way as its parent.
@@ -118,6 +121,33 @@ const GRACE_POLLS: u8 = 2;
 /// not thirty dead rows.
 const SUBAGENT_WINDOW: Duration = Duration::from_secs(300);
 
+/// A one-shot event the row should reflect briefly, then forget — the two
+/// stages with no standing state to read: a denial and a session ending. Both
+/// fire once and are gone, so they live as a timestamped marker that decays
+/// rather than a field the poll would have to keep clearing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Transient {
+    /// The user denied a permission the agent asked for.
+    Denied,
+    /// `SessionEnd` arrived — the row is kept this long so the "walking away"
+    /// state is seen, then reaped.
+    Ended,
+}
+
+impl Transient {
+    /// The webview stage string; matches a `public/cats/<name>/` folder.
+    fn as_str(self) -> &'static str {
+        match self {
+            Transient::Denied => "denied",
+            Transient::Ended => "session_ended",
+        }
+    }
+}
+
+/// How long a [`Transient`] marker shows before it decays — long enough to
+/// read the cat, short enough that an ended row does not linger.
+const TRANSIENT_TTL: Duration = Duration::from_secs(6);
+
 /// How long a hook session whose process was never discovered survives
 /// without a hook event.
 ///
@@ -159,6 +189,9 @@ struct Hooked {
     tool: Option<Tool>,
     /// A turn is open: set by prompts and tool calls, cleared by `Stop`.
     busy: bool,
+    /// A one-shot state and when it fired; decays after [`TRANSIENT_TTL`]. An
+    /// `Ended` marker also keeps the row alive for that window (see the reaper).
+    transient: Option<(Transient, SystemTime)>,
     last_event: SystemTime,
     /// Enrichment from the transcript, refreshed each poll.
     scan: Scan,
@@ -183,6 +216,7 @@ impl Hooked {
             model: None,
             tool: None,
             busy: false,
+            transient: None,
             last_event: now,
             scan: Scan::default(),
             scan_busy: false,
@@ -196,7 +230,10 @@ impl Hooked {
     /// The merged row: hook fields win where they are fresher by nature
     /// (identity, the open turn, the announced tool), scan fields where the
     /// transcript knows more (title, model, subagents).
-    fn session(&self, id: &str) -> Session {
+    ///
+    /// `now` resolves the [`Transient`] marker's freshness — a decayed one
+    /// reads as `None` even between the polls that prune it.
+    fn session(&self, id: &str, now: SystemTime) -> Session {
         Session {
             pid: self.pid.unwrap_or(0),
             agent: self.agent,
@@ -224,7 +261,24 @@ impl Hooked {
             ),
             subagents: self.subagents.clone(),
             busy: self.busy || self.scan_busy,
+            transient: self.fresh_transient(now).map(|t| t.as_str().to_string()),
         }
+    }
+
+    /// The transient marker if it is still within [`TRANSIENT_TTL`] of `now`,
+    /// else `None`. A clock that jumped backwards counts as fresh, not expired.
+    fn fresh_transient(&self, now: SystemTime) -> Option<Transient> {
+        self.transient
+            .and_then(|(t, at)| match now.duration_since(at) {
+                Ok(age) if age >= TRANSIENT_TTL => None,
+                _ => Some(t),
+            })
+    }
+
+    /// Record a one-shot state, replacing any earlier one — a denial or the
+    /// session ending is the newest thing worth showing.
+    fn mark(&mut self, transient: Transient, now: SystemTime) {
+        self.transient = Some((transient, now));
     }
 }
 
@@ -256,10 +310,16 @@ impl SessionStore {
             return;
         };
         let name = event.hook_event_name.as_deref().unwrap_or_default();
-        // The session is over: drop it rather than leaving a row that never
-        // clears. The transcript stays on disk; a resume re-creates the row.
+        // The session is over. Rather than dropping the row at once, mark it
+        // ended and busy-off so the "walking away" cat shows; the reaper
+        // removes it once the marker decays. A row with no prior hook state
+        // (SessionEnd is the first thing we heard) is nothing worth flashing.
         if name == "SessionEnd" {
-            self.hooked.remove(&id);
+            if let Some(hooked) = self.hooked.get_mut(&id) {
+                hooked.busy = false;
+                hooked.tool = None;
+                hooked.mark(Transient::Ended, now);
+            }
             return;
         }
 
@@ -312,6 +372,15 @@ impl SessionStore {
         }
     }
 
+    /// Flag a hook session as just-denied, so its next emit shows the rejected
+    /// cat. A no-op for an unknown id — the permission's session may have been
+    /// reaped, and there is nothing to mark. The marker decays on its own.
+    pub fn mark_denied(&mut self, session_id: &str, now: SystemTime) {
+        if let Some(hooked) = self.hooked.get_mut(session_id) {
+            hooked.mark(Transient::Denied, now);
+        }
+    }
+
     /// Refreshes each hook session's transcript enrichment and decides its
     /// liveness against the processes this poll found.
     fn reconcile_hooked(&mut self, now: SystemTime) {
@@ -351,6 +420,12 @@ impl SessionStore {
             }
         }
         hooked.retain(|_, session| {
+            // An ended session is kept only while its marker is fresh — the row
+            // shows "walking away" for the window, then it goes. This overrides
+            // the liveness rules below: `SessionEnd` already declared it done.
+            if matches!(session.transient, Some((Transient::Ended, _))) {
+                return session.fresh_transient(now) == Some(Transient::Ended);
+            }
             if session.seen_process {
                 session.missed < GRACE_POLLS
             } else {
@@ -380,13 +455,19 @@ impl SessionStore {
     /// row whose transcript or pid a hook session claimed is suppressed —
     /// showing both would be showing the same conversation twice.
     pub fn sessions(&self) -> Vec<Session> {
+        self.sessions_at(SystemTime::now())
+    }
+
+    /// The rows as of `now` — factored out so tests can drive the clock that
+    /// resolves each row's [`Transient`] freshness.
+    fn sessions_at(&self, now: SystemTime) -> Vec<Session> {
         let mut out: Vec<Session> = Vec::new();
 
         // Id-sorted, so the walk is deterministic between polls.
         let mut hooked: Vec<(&String, &Hooked)> = self.hooked.iter().collect();
         hooked.sort_by(|a, b| a.0.cmp(b.0));
         for (id, session) in &hooked {
-            out.push(session.session(id));
+            out.push(session.session(id, now));
         }
 
         // By pid first: the map's iteration order varies per poll, and the fold
@@ -480,6 +561,8 @@ fn merge_into(
                 .unwrap_or_default(),
             busy: scan.is_some_and(|s| s.busy(now)),
             transcript,
+            // Discovery-only rows carry no hook-driven one-shot state.
+            transient: None,
         };
         live.insert(process.pid, Tracked { session, missed: 0 });
     }
@@ -568,6 +651,7 @@ mod tests {
             last_activity: None,
             subagents: Vec::new(),
             busy: false,
+            transient: None,
         }
     }
 
@@ -847,16 +931,56 @@ mod tests {
         assert!(!store.sessions()[0].busy);
     }
 
-    /// `SessionEnd` removes the row immediately — the one event that must not
-    /// wait for a grace window.
+    /// `SessionEnd` keeps the row briefly with an `ended` marker so the
+    /// "walking away" cat shows, then the reaper drops it once it decays.
     #[test]
-    fn a_session_end_removes_the_row_at_once() {
+    fn a_session_end_shows_ended_then_reaps() {
         let mut store = SessionStore::default();
         let now = active_at();
         store.apply(&event("SessionStart", "s1"), now);
         assert_eq!(store.sessions().len(), 1);
+
         store.apply(&event("SessionEnd", "s1"), now);
+        // Still present, flagged ended, and no longer busy.
+        let rows = store.sessions_at(now);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].transient.as_deref(), Some("session_ended"));
+        assert!(!rows[0].busy);
+
+        // Past the TTL, the reaper (run inside the poll) drops it.
+        let later = now + TRANSIENT_TTL + Duration::from_secs(1);
+        store.reconcile_hooked(later);
+        assert!(store.sessions_at(later).is_empty());
+    }
+
+    /// A `SessionEnd` for an id we never heard of is a no-op — nothing to flag,
+    /// nothing to keep.
+    #[test]
+    fn a_session_end_for_an_unknown_id_creates_no_row() {
+        let mut store = SessionStore::default();
+        store.apply(&event("SessionEnd", "ghost"), active_at());
         assert!(store.sessions().is_empty());
+    }
+
+    /// A denial flags the row so the rejected cat shows, and the marker decays.
+    #[test]
+    fn a_denial_flags_the_row_then_clears() {
+        let mut store = SessionStore::default();
+        let now = active_at();
+        store.apply(&event("SessionStart", "s1"), now);
+
+        store.mark_denied("s1", now);
+        assert_eq!(
+            store.sessions_at(now)[0].transient.as_deref(),
+            Some("denied")
+        );
+
+        // A denial does not remove the row — the session is still live.
+        let later = now + TRANSIENT_TTL + Duration::from_secs(1);
+        store.reconcile_hooked(later);
+        let rows = store.sessions_at(later);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].transient, None);
     }
 
     /// The bug the single store exists to prevent: a discovered process whose

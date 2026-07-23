@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -43,6 +44,14 @@ import {
   type ToolArgs,
 } from "./lib/tool-views";
 import { diffLines, diffStat } from "./lib/diff";
+import {
+  agentStage,
+  stageCat,
+  stageSeed,
+  syncStages,
+  STAGE_LABEL,
+  type AgentStage,
+} from "./lib/agent-stage";
 import { notchPath } from "./lib/notch-shape";
 import { timeAgo } from "./lib/format";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
@@ -447,6 +456,21 @@ function Overlay() {
   const [permissions, setPermissions] = useState<AgentPermission[]>([]);
   // The agent row the user drilled into, by session id, or null for the list.
   const [selected, setSelected] = useState<string | null>(null);
+  // The enlarged cat preview: the stage + session it belongs to (from which the
+  // image and caption derive) and the on-screen box to grow it from. Rendered
+  // fixed at the root so it escapes the list's scroll clip; a 48px avatar hover
+  // cannot show the meme, and the joke is the point.
+  const [peek, setPeek] = useState<{
+    stage: AgentStage;
+    seed: string;
+    rect: DOMRect;
+  } | null>(null);
+  const showPeek = useCallback(
+    (stage: AgentStage | null, seed: string, anchor: HTMLElement | null) => {
+      setPeek(stage && anchor ? { stage, seed, rect: anchor.getBoundingClientRect() } : null);
+    },
+    [],
+  );
   // Any of them owns the panel; almost everything below only cares that one
   // does. A pending permission counts: the card has to be on screen to answer.
   // A pending permission is deliberately NOT part of this: a card *arriving*
@@ -524,6 +548,7 @@ function Overlay() {
                 ]
               : [],
           busy: i === 0,
+          transient: null,
         })),
       );
     }
@@ -714,12 +739,36 @@ function Overlay() {
    */
   const resting = !panelOpen && phase === "idle" && !dismissing;
   const busyCount = sessions.filter((s) => s.busy).length;
+  // The ambient sign: what the resting notch shows *without* a hover — a small
+  // right-aligned strip of stage cats while agents are busy, or an attention
+  // pulse when one wants permission and the notch did not auto-open (that
+  // setting off; when on, the panel is up and we are not resting). Grows the
+  // resting box a little on both sides of the camera (symmetric, cats pushed
+  // right), so it never needs the hover to be seen.
+  const ambient = resting && (busyCount > 0 || permissions.length > 0);
 
   // The drill is plain navigation state. A permission arriving *sets* it
   // (one-shot, in the event listener) — deriving it from the queue every
   // render meant "back" un-drilled and the fallback instantly re-drilled,
   // which read as the button not working.
   const selectedSession = sessions.find((s) => s.id === selected) ?? null;
+
+  // Reconcile the cat-variation counters once for the whole list before any
+  // avatar reads a seed: bumps a session's counter on stage change and prunes
+  // sessions that are gone, so the map stays bounded. Memoised on the sessions'
+  // (id, stage) signature — the only inputs that move the counters — so it runs
+  // on a real change, not on every streamed token. `asking` here mirrors the
+  // per-row derivation: a pending permission is `waiting_input`.
+  const askingNow = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
+  const stageSig = sessions
+    .map((s) => `${s.id}:${agentStage(s, askingNow.has(s.id))}`)
+    .join("|");
+  useMemo(() => {
+    syncStages(
+      sessions.map((s) => ({ id: s.id, stage: agentStage(s, askingNow.has(s.id)) })),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageSig]);
 
   // Rust tests the pointer against this box to decide when the window takes
   // clicks (`track_cursor` in overlay.rs). Reported only when it changes: the
@@ -745,12 +794,11 @@ function Overlay() {
   const populated = panelOpen || phase !== "idle" || (resting && hovering);
   const panel = useNotchPanel(effectiveStyle, run, populated, dismissing, reportBox);
 
-  // Interactivity is state, not cursor position. While a panel is open the
-  // whole window takes clicks and the DOM does its own hit-testing — gating
-  // an open panel on Rust's polled box was a race per content change: click
-  // "back", the list resizes, the new box excludes the pointer, and the poll
-  // turns the buttons click-through under the cursor. The polled box still
-  // gates the *resting* strip, where it is the cutout and never moves.
+  // Tells Rust whether a panel holds the window's focus. This is the *focus*
+  // signal, not the click signal: clicks are gated entirely by Rust's cursor
+  // poll against the panel rect (in every regime), so an open panel never turns
+  // the whole window into a click trap. This just lets the panel take focus for
+  // text inputs and lets an outside-click dismiss it (focus-loss in Rust).
   useEffect(() => {
     try {
       void commands.setPanelInteractive(panelOpen);
@@ -1153,10 +1201,11 @@ function Overlay() {
     if (!panelOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      // Browsing the agents is webview state, so Escape clears it here —
-      // asking Rust to close a panel it never opened left `browsing` stuck
-      // true with the window dismissed, which read as the notch dying.
+      // A browse sets `PANEL_OPEN` in Rust (via `setPanelInteractive`), so
+      // closing it has to clear that too — `closeBrowse` does, and clearing
+      // only the webview `browsing` would leave the Rust flag stuck.
       if (!agent && !ask) {
+        void commands.closeBrowse();
         setBrowsing(false);
         setSelected(null);
         return;
@@ -1214,16 +1263,19 @@ function Overlay() {
       className="overlay-root"
       ref={root}
       data-exiting={dismissing || undefined}
-      // While open the window takes every click, so a click on the bare
-      // canvas is one the user aimed at nothing — close, like a popover.
-      // (The reference reposts the click to the app underneath via a
-      // synthetic event; consuming it is the simpler contract.)
+      // Belt-and-suspenders close. The primary popover dismiss is now
+      // focus-loss in Rust (`dismiss_on_focus_loss`) — a click outside the
+      // panel rect reaches the app behind *and* resigns the overlay's key
+      // focus. This only fires for a click that lands inside the window's own
+      // clickable rect but outside the pill (e.g. a rect edge), where no focus
+      // change happens.
       onMouseDown={(e) => {
         if (!panelOpen) return;
         if ((e.target as HTMLElement).closest(".drop-pill")) return;
         if (agent) void commands.closeAgent();
         else if (ask) void commands.closeAsk();
         else {
+          void commands.closeBrowse();
           setBrowsing(false);
           setSelected(null);
         }
@@ -1291,7 +1343,9 @@ function Overlay() {
             // At rest the panel is exactly the cutout and this is empty, so
             // there is nothing to see; hovering grows it by the height of this
             // row. The spring in `useNotchPanel` does the growing — this only
-            // states what it is growing around.
+            // states what it is growing around. The ambient sign (cats while
+            // busy) is NOT here: it lives on the canvas beside the cutout, not
+            // in this grow-downward body — see `AmbientSign` at the root.
             hovering && (
               <NotchPeek
                 sessions={sessions}
@@ -1332,6 +1386,7 @@ function Overlay() {
                     }
                     onResolve={resolvePermission}
                     onBack={() => setSelected(null)}
+                    onPeek={showPeek}
                   />
                 ) : (
                   <AgentList
@@ -1339,12 +1394,15 @@ function Overlay() {
                     permissions={permissions}
                     onSelect={setSelected}
                     onResolve={resolvePermission}
+                    onPeek={showPeek}
                     onClose={() => {
                       setBrowsing(false);
                       setSelected(null);
                       // With a run open the X leaves the panel up on that run;
-                      // only a browse-only panel actually closes.
+                      // only a browse-only panel actually closes — and that is
+                      // the case that has to clear Rust's `PANEL_OPEN`.
                       if (ask || agent) setActiveTab(0);
+                      else void commands.closeBrowse();
                     }}
                   />
                 )
@@ -1388,6 +1446,53 @@ function Overlay() {
         </div>
       </div>
     )}
+    {/* The enlarged cat, fixed at the root so it escapes the agent list's
+        scroll clip. Grows out of the hovered avatar's box (its origin), which
+        is why it is positioned from the anchor rect rather than centred. */}
+    {peek && <CatPeek stage={peek.stage} seed={peek.seed} rect={peek.rect} />}
+    {/* The ambient sign lives on the canvas beside the cutout, not in the pill —
+        agent-notch's trick: a full transparent top-bar canvas lets a mascot be
+        drawn left of the notch without growing any box. Click-through
+        (`pointer-events: none`), so it never touches the hit-test region. */}
+    {ambient && <AmbientSign sessions={sessions} asking={permissions.length > 0} />}
+    </div>
+  );
+}
+
+/**
+ * The blown-up meme on avatar hover. Anchored to the avatar's on-screen box and
+ * grown from there — the small round cat loses the joke, this gives it back.
+ * CSS owns the grow (the target never changes mid-flight), so it is a plain
+ * mount + a class the next frame flips.
+ */
+function CatPeek({ stage, seed, rect }: { stage: AgentStage; seed: string; rect: DOMRect }) {
+  const [shown, setShown] = useState(false);
+  // A frame after mount, so the transition has a from-state to leave.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  const SIZE = 180;
+  // Grow up-and-right out of the avatar, clamped to the viewport so it never
+  // clips off the top or right edge of the overlay canvas.
+  const left = Math.min(rect.left, window.innerWidth - SIZE - 8);
+  const top = Math.max(8, rect.bottom - SIZE);
+  return (
+    <div
+      className="cat-peek"
+      data-shown={shown || undefined}
+      aria-hidden
+      style={{
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${SIZE}px`,
+        // Origin = where the avatar sits relative to the peek's top-left, so it
+        // scales out of the cat rather than out of its own centre.
+        transformOrigin: `${rect.left - left + rect.width / 2}px ${rect.top - top + rect.height / 2}px`,
+      }}
+    >
+      <img className="cat-peek__img" src={stageCat(stage, seed)} alt="" />
+      <span className="cat-peek__cap">{STAGE_LABEL[stage]}</span>
     </div>
   );
 }
@@ -1427,6 +1532,55 @@ function NotchPeek({
         <span className="notch-peek__count">+{sessions.length - 1}</span>
       )}
     </p>
+  );
+}
+
+/** How many stage cats the ambient strip shows before collapsing to a `+N`. */
+const AMBIENT_CATS = 3;
+
+/**
+ * The always-on ambient sign, shown at rest without a hover: a small strip of
+ * stage cats for the busy agents, sitting on the canvas just *left* of the
+ * physical camera — agent-notch's approach, not a growth of the drop-pill. The
+ * overlay canvas is far wider than the cutout, so the cats are simply painted
+ * beside it; being `pointer-events: none`, they never touch the click region.
+ * A shimmer plays while any agent is busy; a pending permission (reachable here
+ * only when the notch did not auto-open) turns the strip's attention on.
+ *
+ * One row, cats only — naming what each is doing is the hover's job (`NotchPeek`)
+ * and the click's (the full list). This is just "something is happening, here".
+ */
+function AmbientSign({
+  sessions,
+  asking,
+}: {
+  sessions: AgentSession[];
+  asking: boolean;
+}) {
+  // Busy-first from Rust; the busy ones are what the sign is about.
+  const shown = sessions.filter((s) => s.busy).slice(0, AMBIENT_CATS);
+  // Asking but nothing busy (a parked agent waiting on the user) still needs a
+  // face — fall back to the asking session so the pulse has something to ring.
+  const cats = shown.length > 0 ? shown : sessions.slice(0, 1);
+  const extra = sessions.filter((s) => s.busy).length - cats.length;
+  return (
+    <div className="ambient" data-asking={asking || undefined} data-busy={shown.length > 0 || undefined}>
+      <span className="ambient__cats">
+        {cats.map((session) => {
+          const stage = agentStage(session, asking);
+          return (
+            <img
+              key={session.id}
+              className="ambient__cat"
+              src={stageCat(stage, stageSeed(session.id, stage))}
+              alt=""
+              aria-hidden
+            />
+          );
+        })}
+        {extra > 0 && <span className="ambient__count">+{extra}</span>}
+      </span>
+    </div>
   );
 }
 
@@ -1784,6 +1938,44 @@ function rowTag(session: AgentSession): string {
 }
 
 /**
+ * Show/hide the enlarged cat preview, anchored to the given avatar element.
+ * `null` stage hides it.
+ */
+type PeekFn = (stage: AgentStage | null, seed: string, anchor: HTMLElement | null) => void;
+
+/**
+ * The stage cat as a round avatar with a corner status badge, and the hover that
+ * pops the meme up large. One component so the list row and the drilled-in
+ * detail show the exact same thing — they used to carry byte-identical copies.
+ */
+function StageAvatar({
+  session,
+  stage,
+  state,
+  onPeek,
+}: {
+  session: AgentSession;
+  stage: AgentStage;
+  state: "busy" | "live" | "done";
+  onPeek: PeekFn;
+}) {
+  // One seed for both the avatar and its peek, so they never disagree — it is
+  // fixed while the agent stays in this stage and changes on re-entry.
+  const seed = stageSeed(session.id, stage);
+  const src = stageCat(stage, seed);
+  return (
+    <span
+      className="agent-row__avatar"
+      onMouseEnter={(e) => onPeek(stage, seed, e.currentTarget)}
+      onMouseLeave={() => onPeek(null, "", null)}
+    >
+      <img className="agent-row__cat" src={src} alt="" aria-hidden width={48} height={48} decoding="async" />
+      <span className="agent-row__badge" data-state={state} aria-hidden />
+    </span>
+  );
+}
+
+/**
  * One session in the list: the agent in bold, a `model · time` tag coloured by
  * state, the prompt or running tool, and a subagent count. The whole row is a
  * button into the detail view, and it lights up when that agent is asking.
@@ -1794,12 +1986,15 @@ function AgentRow({
   session,
   asking,
   onSelect,
+  onPeek,
 }: {
   session: AgentSession;
   asking: boolean;
   onSelect: (id: string) => void;
+  onPeek: PeekFn;
 }) {
   const state = rowState(session);
+  const stage = agentStage(session, asking);
   return (
     <li>
       <button
@@ -1807,28 +2002,32 @@ function AgentRow({
         data-asking={asking || undefined}
         onClick={() => onSelect(session.id)}
       >
-        <div className="agent-row__head">
-          <span className="agent-row__state" data-state={state} aria-hidden />
-          <span className="agent-row__name">{rowName(session)}</span>
-          <span className="agent-row__tag" data-state={state}>
-            {rowTag(session)}
-          </span>
-        </div>
-        <p className="agent-row__prompt">
+        <div className="agent-row__lead">
+          <StageAvatar session={session} stage={stage} state={state} onPeek={onPeek} />
+          <div className="agent-row__body">
+            <div className="agent-row__head">
+              <span className="agent-row__name">{rowName(session)}</span>
+              <span className="agent-row__tag" data-state={state}>
+                {rowTag(session)}
+              </span>
+            </div>
+            <p className="agent-row__prompt">
           {/* When asking, that is the most important thing about the row.
               Otherwise the running tool, else the user's own latest words —
               never the ai-title under a "You:" label; the title is the
               model's and is written once at session start. */}
-          {asking
-            ? "⚠ wants permission"
-            : (session.tool ??
-              (session.prompt ? `You: ${session.prompt}` : (session.title ?? "")))}
-        </p>
-        {session.subagents.length > 0 && (
-          <p className="agent-row__subcount">
-            ▸ {session.subagents.length} subagent{session.subagents.length === 1 ? "" : "s"}
-          </p>
-        )}
+              {asking
+                ? "⚠ wants permission"
+                : (session.tool ??
+                  (session.prompt ? `You: ${session.prompt}` : (session.title ?? "")))}
+            </p>
+            {session.subagents.length > 0 && (
+              <p className="agent-row__subcount">
+                ▸ {session.subagents.length} subagent{session.subagents.length === 1 ? "" : "s"}
+              </p>
+            )}
+          </div>
+        </div>
       </button>
     </li>
   );
@@ -1844,12 +2043,14 @@ function AgentList({
   onSelect,
   onResolve,
   onClose,
+  onPeek,
 }: {
   sessions: AgentSession[];
   permissions: AgentPermission[];
   onSelect: (id: string) => void;
   onResolve: (id: string, reply: ApprovalReply) => void;
   onClose: () => void;
+  onPeek: PeekFn;
 }) {
   const askingIds = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
   return (
@@ -1863,6 +2064,7 @@ function AgentList({
               session={session}
               asking={askingIds.has(session.id)}
               onSelect={onSelect}
+              onPeek={onPeek}
               key={session.id}
             />
           ))}
@@ -1894,21 +2096,25 @@ function AgentDetail({
   permission,
   onResolve,
   onBack,
+  onPeek,
 }: {
   session: AgentSession;
   permission: AgentPermission | null;
   onResolve: (id: string, reply: ApprovalReply) => void;
   onBack: () => void;
+  onPeek: PeekFn;
 }) {
   const state = rowState(session);
+  const stage = agentStage(session, permission !== null);
   return (
     <Panel title={rowName(session)} onClose={onBack}>
       <div className="agent-detail">
         <button className="agent-detail__back" onClick={onBack}>
           ‹ All agents
         </button>
+        {/* The same stage avatar as the list, so the detail view matches. */}
         <div className="agent-detail__meta">
-          <span className="agent-row__state" data-state={state} aria-hidden />
+          <StageAvatar session={session} stage={stage} state={state} onPeek={onPeek} />
           <span className="agent-detail__tag" data-state={state}>
             {rowTag(session)}
           </span>

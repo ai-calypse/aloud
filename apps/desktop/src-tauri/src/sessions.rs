@@ -48,6 +48,9 @@ pub struct AgentSession {
     /// Subagents spawned under this session.
     pub subagents: Vec<AgentSubagent>,
     pub busy: bool,
+    /// A recent one-shot stage — `"denied"` or `"session_ended"` — the webview
+    /// shows over the tool-derived stage while it lasts, else `None`.
+    pub transient: Option<String>,
 }
 
 /// A subagent under a session, for the `▸ N subagents` disclosure.
@@ -292,6 +295,7 @@ fn rows(store: &SessionStore) -> Vec<AgentSession> {
                 })
                 .collect(),
             busy: s.busy,
+            transient: s.transient.clone(),
         })
         .collect()
 }
@@ -505,6 +509,7 @@ pub fn resolve_permission(app: AppHandle, id: String, reply: ApprovalReply) {
         .ok()
         .and_then(|mut pending| pending.remove(&id));
     if let Some(entry) = entry {
+        let denied = matches!(reply, ApprovalReply::Deny { .. });
         let reply = match reply {
             ApprovalReply::AllowOnce => Reply::allow(),
             // No tool name to write a rule for degrades to a plain allow —
@@ -523,6 +528,18 @@ pub fn resolve_permission(app: AppHandle, id: String, reply: ApprovalReply) {
         // The receiver is gone only if the request already concluded; nothing
         // to do then, the agent has moved on.
         let _ = entry.reply.send(reply);
+
+        // A denial is a one-shot the row should flash — mark it and re-emit so
+        // the rejected cat shows now, not on the next 3s poll. `id` is the
+        // session id (pending is keyed by it), which is what the store wants.
+        if denied {
+            if let Ok(mut store) = state.store.lock() {
+                store.mark_denied(&id, std::time::SystemTime::now());
+                let rows = rows(&store);
+                drop(store);
+                emit(&app, rows);
+            }
+        }
     }
 }
 

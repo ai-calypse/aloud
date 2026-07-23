@@ -146,8 +146,24 @@ export const commands = {
 	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
 	/**  Records the panel's settled box, so the click region can be exactly it. */
 	setPanelBox: (width: number | null, height: number | null) => __TAURI_INVOKE<void>("set_panel_box", { width, height }),
-	/**  The webview declaring its interactive state; see [`INTERACTIVE`]. */
+	/**
+	 *  The webview declaring its interactive state; see [`INTERACTIVE`].
+	 * 
+	 *  This no longer toggles `ignore_cursor_events` for the whole window — the
+	 *  cursor poll ([`track_cursor`]) is the sole authority for that, keyed on the
+	 *  panel rect, so an open panel never turns the whole canvas into a click trap.
+	 *  It only takes focus (so text inputs can type) and does one immediate
+	 *  hit-test so a card takes its first click without waiting a poll tick.
+	 */
 	setPanelInteractive: (open: boolean) => __TAURI_INVOKE<void>("set_panel_interactive", { open }),
+	/**
+	 *  Closes a browse of the notch. Symmetric with `close_ask`/`close_agent`: a
+	 *  browse now sets `PANEL_OPEN` (via [`set_panel_interactive`]), so it needs an
+	 *  explicit close to clear it — the webview clearing `browsing` alone would
+	 *  leave `PANEL_OPEN` stuck true. Idempotent, so the several frontend paths
+	 *  that dismiss a browse (cross, Escape, click-away) can all call it.
+	 */
+	closeBrowse: () => __TAURI_INVOKE<void>("close_browse"),
 	agentHookStatus: () => typedError<HookStatus, string>(__TAURI_INVOKE("agent_hook_status")),
 	/**
 	 *  Installs our hooks, copying the sidecar out of the bundle first.
@@ -320,6 +336,11 @@ export type AgentSession = {
 	/**  Subagents spawned under this session. */
 	subagents: AgentSubagent[],
 	busy: boolean,
+	/**
+	 *  A recent one-shot stage — `"denied"` or `"session_ended"` — the webview
+	 *  shows over the tool-derived stage while it lasts, else `None`.
+	 */
+	transient: string | null,
 };
 
 /**  The live session list, pushed whenever it actually changes. */
