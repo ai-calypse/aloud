@@ -471,9 +471,9 @@
 
 /* All three fields share ONE look — the Settings feel (taller, softly rounded,
    blue ring on focus) in the overlay's own dark tokens. `.composer__input` (the
-   text fields) and `.composer__trigger` (the shadcn Select) are the same box, so
-   Repo, Branch and Task line up. Own classes, not `.ask__input`, so the shared
-   Ask follow-up field keeps its 28px pill. */
+   Task text field) and `.composer__trigger` (the Repo/Branch combobox buttons)
+   are the same box, so all three line up. Own classes, not `.ask__input`, so the
+   shared Ask follow-up field keeps its 28px pill. */
 .composer__input,
 .composer .composer__trigger {
   box-sizing: border-box;
@@ -512,11 +512,54 @@
   opacity: 0.5;
 }
 
+.composer .composer__trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The combobox trigger's parts: a muted placeholder when nothing is picked, and
+   the up/down chevron pinned right (space-between on the shared rule places it). */
+.composer__trigger-placeholder {
+  color: rgb(255 255 255 / 0.35);
+}
+
+.composer__trigger-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-left: 8px;
+  opacity: 0.5;
+}
+
+/* The search dropdown. Width tracks the trigger so it reads as the same control
+   opening; the dark surface and text come from the overlay's popover tokens
+   (the same ones the shadcn Select content uses). Padding 0 because the cmdk
+   input and list bring their own. */
+.composer__popover {
+  width: var(--radix-popover-trigger-width);
+  padding: 0;
+  overflow: hidden;
+}
+
+/* The "Use '<typed>'" affordance when a repo path matches nothing in the list —
+   the free-text escape hatch, as a row rather than a dead end. */
+.composer__use-typed {
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: var(--sys-blue);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: default;
+}
+
 /* The branch row is inserted after the repo resolves. The panel grows to fit
    it (useNotchPanel's spring), and this fades + rises its own content in step
    so it emerges rather than snapping. Reduced-motion collapses the travel via
-   motion.css's global switch. */
-.composer__field:has(.composer__trigger) {
+   motion.css's global switch. Only the branch field, not every trigger. */
+.composer__field--branch {
   animation: composer-reveal var(--spring-pop-dur) var(--spring-pop) both;
 }
 

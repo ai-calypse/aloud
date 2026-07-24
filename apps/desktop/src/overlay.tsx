@@ -30,12 +30,18 @@ import {
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { ChevronsUpDownIcon } from "lucide-react";
 import {
   groupSteps,
   pendingStep,
@@ -2903,6 +2909,84 @@ function AgentRun({
 const LAST_REPO_KEY = "aloud.codingAgent.lastRepo";
 
 /**
+ * A searchable dropdown for the composer — one Popover + cmdk list, shared by
+ * the Repo and Branch fields. The trigger wears the composer's field look
+ * (`composer__trigger`); the list dark-renders for free through the overlay's
+ * floating tokens. `allowCustom` lets Repo accept a typed path that isn't in
+ * the list (a repo outside the scanned roots); Branch leaves it off.
+ */
+function Combobox({
+  value,
+  onChange,
+  options,
+  placeholder,
+  empty,
+  disabled,
+  allowCustom,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder: string;
+  empty: string;
+  disabled?: boolean;
+  allowCustom?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const pick = (v: string) => {
+    onChange(v);
+    setOpen(false);
+    setQuery("");
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        className="composer__trigger"
+        disabled={disabled}
+        // A button, so it doesn't submit the composer's implicit form.
+        type="button"
+      >
+        <span className={value ? undefined : "composer__trigger-placeholder"}>
+          {value || placeholder}
+        </span>
+        <ChevronsUpDownIcon className="composer__trigger-icon" />
+      </PopoverTrigger>
+      <PopoverContent className="composer__popover" align="start">
+        <Command
+          // Let a typed path through even when it matches nothing in the list.
+          shouldFilter={!allowCustom || options.length > 0}
+        >
+          <CommandInput
+            placeholder={placeholder}
+            value={query}
+            onValueChange={setQuery}
+          />
+          <CommandList>
+            <CommandEmpty>
+              {allowCustom && query.trim() ? (
+                <button className="composer__use-typed" onClick={() => pick(query.trim())}>
+                  Use “{query.trim()}”
+                </button>
+              ) : (
+                empty
+              )}
+            </CommandEmpty>
+            {options.map((option) => (
+              <CommandItem key={option} value={option} onSelect={() => pick(option)}>
+                {option}
+              </CommandItem>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
  * What a blank tab holds: the composer for starting a coding agent. Pick a repo,
  * pick one of its branches, say what to do, and Rust checks that branch out into
  * a fresh worktree and opens the agent on the task in a Terminal tab there — the
@@ -3004,52 +3088,33 @@ function CodingAgentComposer({
         </p>
       ) : (
         <div className="composer">
-          <label className="composer__field">
+          <div className="composer__field">
             <span className="composer__label">Repo</span>
-            <input
-              className="composer__input"
-              list="coding-agent-repos"
-              placeholder={repos.length ? "Pick a repo" : "~/dev/my-app"}
+            <Combobox
               value={repo}
+              onChange={setRepo}
+              options={repos.map((r) => r.name)}
+              placeholder={repos.length ? "Pick a repo" : "~/dev/my-app"}
+              empty="No repos found"
               disabled={busy}
-              onChange={(e) => setRepo(e.target.value)}
+              // A repo outside the scanned roots can still be typed as a path.
+              allowCustom
             />
-            <datalist id="coding-agent-repos">
-              {repos.map((r) => (
-                <option key={r.path} value={r.name} />
-              ))}
-            </datalist>
-          </label>
+          </div>
 
           {/* The branch row appears once a repo is chosen; the panel grows to
-              fit it via useNotchPanel's spring — the reveal IS the motion. A
-              shadcn Select rather than a native <select>: the trigger is a real
-              element that honours the 36px height (a native select on WebKit
-              sizes to its font and reads shorter than the sibling inputs). Its
-              dark look comes for free — the overlay's floating scope resolves
-              bg-popover/foreground to dark tokens. A <div>, not a <label>, so
-              the label text doesn't forward clicks into the trigger. */}
+              fit it via useNotchPanel's spring — the reveal IS the motion. */}
           {repoPath ? (
-            <div className="composer__field">
+            <div className="composer__field composer__field--branch">
               <span className="composer__label">Branch</span>
-              <Select
+              <Combobox
                 value={branch}
-                onValueChange={setBranch}
+                onChange={setBranch}
+                options={branches}
+                placeholder={loadingBranches ? "Loading…" : "Pick a branch"}
+                empty={loadingBranches ? "Loading…" : "No branches found"}
                 disabled={busy || loadingBranches || branches.length === 0}
-              >
-                <SelectTrigger className="composer__trigger w-full">
-                  <SelectValue
-                    placeholder={loadingBranches ? "Loading…" : "No branches found"}
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((b) => (
-                    <SelectItem key={b} value={b}>
-                      {b}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
             </div>
           ) : null}
 
