@@ -1,14 +1,13 @@
 //! Real git + real Terminal, by hand — the OS-integration proof CLAUDE.md asks
 //! for. Unit tests cover the pure parts; this is the only thing that proves the
-//! worktree actually appears and Terminal actually opens.
+//! branch checks out and Terminal actually opens.
 //!
 //! ```sh
 //! cargo run -p aloud-agent-spawn --example spawn_agent -- <repo-path> <branch> "fix the thing"
 //! ```
 //!
-//! Checks `<branch>` out into `<repo>-<branch>` beside the repo and opens a
-//! Terminal tab running `claude "<task>"` there. Clean up after with
-//! `git worktree remove <path>` (the branch itself is left alone).
+//! Opens a Terminal tab that `cd`s into the repo, checks `<branch>` out there
+//! (no worktree — the agent edits the repo directly), and runs `claude "<task>"`.
 
 use std::path::Path;
 
@@ -32,10 +31,7 @@ fn main() -> anyhow::Result<()> {
         aloud_agent_spawn::Agent::Claude,
     )?;
 
-    let path = aloud_agent_spawn::worktree_path(Path::new(&repo), &branch.replace('/', "-"));
-    println!("worktree: {}", path.display());
     println!("branch:   {branch}");
-    println!("Terminal should now be running claude in that worktree.");
-    println!("clean up: git worktree remove {}", path.display());
+    println!("Terminal should now be on {branch} in {repo}, running claude.");
     Ok(())
 }

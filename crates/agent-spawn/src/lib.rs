@@ -147,26 +147,13 @@ fn push_repo(repos: &mut Vec<LocalRepo>, seen: &mut std::collections::HashSet<St
     }
 }
 
-/// Where the worktree lands: a sibling of the repo named `<repo>-<branch>`, so
-/// all of a repo's worktrees stay discoverable beside it. Matches the sibling
-/// convention in open-vibe-island's `docs/worktree-workflow.md`.
-///
-/// ponytail: one fixed convention, no config. If nesting-under-the-repo or a
-/// central worktree dir is ever wanted, this one function is where it changes.
-pub fn worktree_path(repo: &Path, branch: &str) -> PathBuf {
-    let name = repo
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "repo".to_string());
-    // Siblings share the parent; a repo at the filesystem root has none, so fall
-    // back to placing the worktree beside it under the same (empty) parent.
-    let parent = repo.parent().unwrap_or_else(|| Path::new("."));
-    parent.join(format!("{name}-{branch}"))
-}
-
 /// The local branches in `repo`, newest-committed-to first, for the composer's
 /// dropdown. Empty on any git error — a repo we can't read branches from just
-/// offers none, and the composer falls back to no selection.
+/// offers none.
+///
+/// All branches are offered: the agent checks one out directly in the repo, and
+/// `git checkout` switches to any local branch (the current one is a harmless
+/// no-op), so nothing needs filtering out.
 pub fn branches(repo: &Path) -> Vec<String> {
     let output = Command::new("git")
         .current_dir(repo)
@@ -182,39 +169,11 @@ pub fn branches(repo: &Path) -> Vec<String> {
     match output {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
             .lines()
-            .map(str::to_string)
             .filter(|b| !b.is_empty())
+            .map(str::to_string)
             .collect(),
         _ => Vec::new(),
     }
-}
-
-/// `git worktree add <path> <branch>`, run in `repo`, checking out an *existing*
-/// branch (not creating one). Fails with git's own stderr attached — this
-/// answers a button click, so a silent failure is worse than a loud one.
-/// Returns the worktree path on success.
-///
-/// The worktree dir name replaces `/` in the branch (`feat/login`) with `-`, so
-/// a slashed branch still yields a flat sibling directory.
-///
-/// # Errors
-/// If `git` cannot be run, or exits non-zero — most often because the branch is
-/// already checked out in another worktree (git refuses to check a branch out
-/// twice), which the message carries through verbatim.
-pub fn create_worktree(repo: &Path, branch: &str) -> Result<PathBuf> {
-    let path = worktree_path(repo, &branch.replace('/', "-"));
-    let output = Command::new("git")
-        .current_dir(repo)
-        .args(["worktree", "add"])
-        .arg(&path)
-        .arg(branch)
-        .output()
-        .with_context(|| format!("running git worktree add in {}", repo.display()))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git worktree add failed: {}", stderr.trim());
-    }
-    Ok(path)
 }
 
 /// Opens a new Terminal tab that `cd`s into `dir` and runs the agent on `task`.
@@ -238,8 +197,8 @@ pub fn create_worktree(repo: &Path, branch: &str) -> Result<PathBuf> {
 /// here. The upgrade path is a per-terminal `do script` dialect keyed on a
 /// preference; worth it once someone asks to spawn into their own terminal.
 #[cfg(target_os = "macos")]
-pub fn spawn(dir: &Path, agent: Agent, task: &str) -> Result<()> {
-    let script = terminal_script(dir, agent, task);
+pub fn spawn(repo: &Path, branch: &str, agent: Agent, task: &str) -> Result<()> {
+    let script = terminal_script(repo, branch, agent, task);
     let output = Command::new("osascript")
         .args(["-e", &script])
         .output()
@@ -263,25 +222,23 @@ pub fn spawn(dir: &Path, agent: Agent, task: &str) -> Result<()> {
 
 /// ponytail: Windows is a no-op, like `aloud_volume`'s. The real path would open
 /// Windows Terminal (`wt.exe`), worth writing only once a Windows user exists to
-/// test it — and [`start_coding_agent`] refuses to create a worktree there so
-/// this never silently leaves one stranded.
+/// test it.
 #[cfg(not(target_os = "macos"))]
-pub fn spawn(_dir: &Path, _agent: Agent, _task: &str) -> Result<()> {
+pub fn spawn(_repo: &Path, _branch: &str, _agent: Agent, _task: &str) -> Result<()> {
     Ok(())
 }
 
-/// The one entry point the Tauri command calls: worktree the chosen `branch` →
-/// open the agent on `task`. Returns the branch so the caller can show it at
-/// once, without waiting on discovery's next poll to name the new session.
+/// The one entry point the Tauri command calls: open the agent on `task` in
+/// `repo`, on `branch`. Returns the branch so the caller can show it at once.
 ///
-/// The `task` is the agent's instruction, verbatim — it no longer names the
-/// branch (the user picks that), so the two are fully decoupled.
+/// No worktree — the agent works in the repo directly: the Terminal tab `cd`s
+/// in, checks the branch out, and runs the agent (see [`terminal_script`]).
+/// Switching the repo's branch is the user's intent here; a dirty tree makes
+/// `git checkout` fail, and that shows in the Terminal.
 ///
 /// # Errors
-/// If `repo` is not a directory, `branch` is blank, the worktree cannot be
-/// created (most often the branch is already checked out elsewhere), or Terminal
-/// cannot be opened. On Windows it refuses up front rather than creating a
-/// worktree [`spawn`] cannot open.
+/// If `repo` is not a directory, `branch` is blank, or Terminal cannot be
+/// opened. On Windows it refuses up front.
 pub fn start_coding_agent(repo: &Path, branch: &str, task: &str, agent: Agent) -> Result<String> {
     #[cfg(not(target_os = "macos"))]
     {
@@ -292,20 +249,26 @@ pub fn start_coding_agent(repo: &Path, branch: &str, task: &str, agent: Agent) -
     {
         anyhow::ensure!(repo.is_dir(), "not a directory: {}", repo.display());
         anyhow::ensure!(!branch.trim().is_empty(), "pick a branch to work on");
-        let dir = create_worktree(repo, branch)?;
-        spawn(&dir, agent, task)?;
+        spawn(repo, branch, agent, task)?;
         Ok(branch.to_string())
     }
 }
 
-/// The AppleScript that opens a Terminal tab running the agent. Split out from
-/// [`spawn`] so the two layers of escaping — shell for the command, AppleScript
-/// for the `do script` literal — are testable without opening a real Terminal.
+/// The AppleScript that opens a Terminal tab, checks the branch out in `repo`,
+/// and runs the agent. Split out from [`spawn`] so the escaping — shell for the
+/// command, AppleScript for the `do script` literal — is testable without
+/// opening a real Terminal.
+///
+/// `&&` chains it: if `git checkout` fails (a dirty tree, an unknown branch),
+/// the agent never starts and git's error stays on screen. The branch and task
+/// are `shell_quote`d (untrusted user input), then the whole line is
+/// `applescript_escape`d for the literal.
 #[cfg(target_os = "macos")]
-fn terminal_script(dir: &Path, agent: Agent, task: &str) -> String {
+fn terminal_script(repo: &Path, branch: &str, agent: Agent, task: &str) -> String {
     let command = format!(
-        "cd {} && {} {}",
-        shell_quote(&dir.to_string_lossy()),
+        "cd {} && git checkout {} && {} {}",
+        shell_quote(&repo.to_string_lossy()),
+        shell_quote(branch),
         agent.binary(),
         shell_quote(task),
     );
@@ -335,20 +298,6 @@ fn applescript_escape(s: &str) -> String {
 mod tests {
     use super::*;
 
-    /// The worktree is a sibling `<repo>-<branch>`, whatever the repo's depth.
-    #[test]
-    fn worktree_path_is_a_named_sibling() {
-        assert_eq!(
-            worktree_path(Path::new("/Users/y/dev/aloud-tauri"), "add-login"),
-            Path::new("/Users/y/dev/aloud-tauri-add-login")
-        );
-        // A trailing slash must not swallow the repo name.
-        assert_eq!(
-            worktree_path(Path::new("/Users/y/dev/app/"), "fix"),
-            Path::new("/Users/y/dev/app-fix")
-        );
-    }
-
     #[cfg(target_os = "macos")]
     #[test]
     fn shell_quote_escapes_embedded_single_quotes() {
@@ -363,21 +312,21 @@ mod tests {
         assert_eq!(applescript_escape(r"a\b"), r"a\\b");
     }
 
-    /// The task the user typed must reach the command verbatim, not via a `$VAR`
-    /// the spawned shell wouldn't inherit — the bug where "hello" ran as a stale
-    /// "add a readme". And a task with shell metacharacters stays inert.
+    /// The command checks the chosen branch out and runs the agent on the task,
+    /// both verbatim (not via a `$VAR` the spawned shell wouldn't inherit — the
+    /// bug where "hello" ran as a stale "add a readme"). Branch and task with
+    /// shell metacharacters stay inert.
     #[cfg(target_os = "macos")]
     #[test]
-    fn terminal_script_embeds_the_task_and_neutralizes_it() {
-        let s = terminal_script(Path::new("/repo"), Agent::Claude, "hello");
-        // The literal task is in the script; no environment indirection.
-        assert!(s.contains("claude 'hello'"), "{s}");
+    fn terminal_script_checks_out_and_runs_verbatim() {
+        let s = terminal_script(Path::new("/repo"), "feat/login", Agent::Claude, "hello");
+        // cd, checkout the picked branch, then the agent on the literal task.
+        assert!(s.contains("cd '/repo' && git checkout 'feat/login' && claude 'hello'"), "{s}");
         assert!(!s.contains("ALOUD_AGENT_TASK") && !s.contains('$'), "{s}");
 
-        // Quotes, `$`, and backticks in the task cannot break out of the shell
-        // single-quote (they become inert text), and the `"` is then escaped
-        // again for the AppleScript literal.
-        let evil = terminal_script(Path::new("/repo"), Agent::Codex, r#"a"; rm -rf ~ #"#);
+        // Metacharacters in the task can't break out of the shell single-quote,
+        // and the `"` is then escaped again for the AppleScript literal.
+        let evil = terminal_script(Path::new("/repo"), "main", Agent::Codex, r#"a"; rm -rf ~ #"#);
         assert!(evil.contains(r#"'a\"; rm -rf ~ #'"#), "{evil}");
     }
 

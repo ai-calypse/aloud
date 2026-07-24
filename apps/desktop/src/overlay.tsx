@@ -2993,10 +2993,10 @@ function Combobox({
 
 /**
  * What a blank tab holds: the composer for starting a coding agent. Pick a repo,
- * pick one of its branches, say what to do, and Rust checks that branch out into
- * a fresh worktree and opens the agent on the task in a Terminal tab there — the
- * running session then shows up under the Agents tab through the same discovery
- * every other session uses.
+ * pick one of its branches, say what to do, and Rust opens a Terminal tab that
+ * checks that branch out in the repo and runs the agent on the task there (no
+ * worktree — it edits the repo directly). The running session then shows up
+ * under the Agents tab through the same discovery every other session uses.
  *
  * The three choices are independent: the task is the agent's instruction
  * verbatim, and the branch is picked, not derived from it. Branches are fetched
