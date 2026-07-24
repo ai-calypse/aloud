@@ -206,11 +206,18 @@ pub fn create_worktree(repo: &Path, branch: &str) -> Result<PathBuf> {
 
 /// Opens a new Terminal tab that `cd`s into `dir` and runs the agent on `task`.
 ///
-/// The task is passed through the environment (`ALOUD_AGENT_TASK`), never
-/// interpolated into the script string: a task the user dictated can contain
-/// quotes, `$`, or backticks, and building a shell/AppleScript command out of it
-/// by hand is an injection waiting to happen. `System Events` types the
-/// prompt-launching line; the env var carries the untrusted text verbatim.
+/// Both the path and the task are `shell_quote`d into the command, then the
+/// whole command is `applescript_escape`d for the `do script` string literal.
+/// The task is untrusted (the user typed it, quotes/`$`/backticks and all), so
+/// the shell quoting is what makes it inert — a bare `"…"` around it would let a
+/// `"` or `$(…)` break out. Two escapes, one per grammar the string passes
+/// through: shell, then AppleScript.
+///
+/// (An earlier version passed the task via an env var on the `osascript`
+/// process. That silently sent the *wrong* task: `do script` runs the new tab
+/// under the already-running Terminal.app, which does not inherit `osascript`'s
+/// environment, so `$VAR` expanded to whatever Terminal.app already had — a
+/// stale value from a previous run.)
 ///
 /// ponytail: hardcodes Terminal.app. Discovery (`aloud_sessions`) is
 /// terminal-agnostic — it finds a session under iTerm/Ghostty/Alacritty too —
@@ -219,27 +226,8 @@ pub fn create_worktree(repo: &Path, branch: &str) -> Result<PathBuf> {
 /// preference; worth it once someone asks to spawn into their own terminal.
 #[cfg(target_os = "macos")]
 pub fn spawn(dir: &Path, agent: Agent, task: &str) -> Result<()> {
-    // The command Terminal runs. `$ALOUD_AGENT_TASK` is expanded by the shell
-    // Terminal spawns, which inherits the env we set on `osascript` below — so
-    // the task never appears in the AppleScript source we build.
-    let command = format!(
-        r#"cd {} && {} "$ALOUD_AGENT_TASK""#,
-        shell_quote(&dir.to_string_lossy()),
-        agent.binary()
-    );
-    let script = format!(
-        r#"tell application "Terminal"
-    activate
-    do script "{}"
-end tell"#,
-        // Only the fixed command string is embedded; it has no user text in it,
-        // but the path is still quoted for `"` and `\` so a repo path with a
-        // quote in it cannot end the AppleScript literal early.
-        applescript_escape(&command)
-    );
-
+    let script = terminal_script(dir, agent, task);
     let output = Command::new("osascript")
-        .env("ALOUD_AGENT_TASK", task)
         .args(["-e", &script])
         .output()
         .context("running osascript to open Terminal")?;
@@ -299,6 +287,26 @@ pub fn start_coding_agent(repo: &Path, task: &str, agent: Agent) -> Result<Strin
         spawn(&dir, agent, task)?;
         Ok(branch)
     }
+}
+
+/// The AppleScript that opens a Terminal tab running the agent. Split out from
+/// [`spawn`] so the two layers of escaping — shell for the command, AppleScript
+/// for the `do script` literal — are testable without opening a real Terminal.
+#[cfg(target_os = "macos")]
+fn terminal_script(dir: &Path, agent: Agent, task: &str) -> String {
+    let command = format!(
+        "cd {} && {} {}",
+        shell_quote(&dir.to_string_lossy()),
+        agent.binary(),
+        shell_quote(task),
+    );
+    format!(
+        r#"tell application "Terminal"
+    activate
+    do script "{}"
+end tell"#,
+        applescript_escape(&command)
+    )
 }
 
 /// Wraps a string in single quotes for the shell, escaping any single quote the
@@ -366,6 +374,24 @@ mod tests {
     fn applescript_escape_closes_no_literal_early() {
         assert_eq!(applescript_escape(r#"say "hi""#), r#"say \"hi\""#);
         assert_eq!(applescript_escape(r"a\b"), r"a\\b");
+    }
+
+    /// The task the user typed must reach the command verbatim, not via a `$VAR`
+    /// the spawned shell wouldn't inherit — the bug where "hello" ran as a stale
+    /// "add a readme". And a task with shell metacharacters stays inert.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn terminal_script_embeds_the_task_and_neutralizes_it() {
+        let s = terminal_script(Path::new("/repo"), Agent::Claude, "hello");
+        // The literal task is in the script; no environment indirection.
+        assert!(s.contains("claude 'hello'"), "{s}");
+        assert!(!s.contains("ALOUD_AGENT_TASK") && !s.contains('$'), "{s}");
+
+        // Quotes, `$`, and backticks in the task cannot break out of the shell
+        // single-quote (they become inert text), and the `"` is then escaped
+        // again for the AppleScript literal.
+        let evil = terminal_script(Path::new("/repo"), Agent::Codex, r#"a"; rm -rf ~ #"#);
+        assert!(evil.contains(r#"'a\"; rm -rf ~ #'"#), "{evil}");
     }
 
     /// The walk finds repos one and two levels down, skips non-repo dirs, and
