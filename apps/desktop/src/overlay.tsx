@@ -67,6 +67,9 @@ import { notchPath } from "./lib/notch-shape";
 import { timeAgo } from "./lib/format";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import { createSpring } from "./lib/spring";
+import { CatSettingsProvider, useCatSettings } from "./lib/cat-settings";
+import { PetMascot } from "./features/overlay/PetMascot";
+import { listen } from "@tauri-apps/api/event";
 // Streamdown styles the streamed answer with Tailwind utilities — see the
 // `@source` note in index.css.
 import "./index.css";
@@ -502,6 +505,16 @@ function Overlay() {
   const [permissions, setPermissions] = useState<AgentPermission[]>([]);
   // The agent row the user drilled into, by session id, or null for the list.
   const [selected, setSelected] = useState<string | null>(null);
+  // The cat toggles from Settings. The overlay is its own window and does not
+  // otherwise read settings, so it fetches them on mount and re-reads on every
+  // style event (fired on each overlay show) and each new dictation — a toggle
+  // change lands by the next time a cat would appear, which is soon enough.
+  // Default on so the very first paint (before the fetch resolves) shows cats,
+  // matching the Settings default rather than flashing them off then on.
+  // Declared here (above `showPeek`) because that callback reads them.
+  const [catImages, setCatImages] = useState(true);
+  const [catImagesDictation, setCatImagesDictation] = useState(true);
+  const [catImagesAgents, setCatImagesAgents] = useState(true);
   // The enlarged cat preview: the stage + session it belongs to (from which the
   // image and caption derive) and the on-screen box to grow it from. Rendered
   // fixed at the root so it escapes the list's scroll clip; a 48px avatar hover
@@ -513,9 +526,12 @@ function Overlay() {
   } | null>(null);
   const showPeek = useCallback(
     (stage: AgentStage | null, seed: string, anchor: HTMLElement | null) => {
+      // No cat to enlarge when agent cats are off — the fallback disc has
+      // nothing to reveal, so the peek is suppressed entirely.
+      if (!catImages || !catImagesAgents) return;
       setPeek(stage && anchor ? { stage, seed, rect: anchor.getBoundingClientRect() } : null);
     },
-    [],
+    [catImages, catImagesAgents],
   );
   // Any of them owns the panel; almost everything below only cares that one
   // does. A pending permission counts: the card has to be on screen to answer.
@@ -681,6 +697,22 @@ function Overlay() {
     }
   }, []);
 
+  // Read the cat toggles from Settings. Called on mount and on each style event
+  // and new dictation; `invoke` throws synchronously in the browser preview
+  // (no Tauri), where the defaults stand.
+  const refreshCatSettings = useCallback(() => {
+    try {
+      void commands.getSettings().then((s) => {
+        setCatImages(s.catImages ?? true);
+        setCatImagesDictation(s.catImagesDictation ?? true);
+        setCatImagesAgents(s.catImagesAgents ?? true);
+      });
+    } catch {
+      /* browser preview: no Tauri, keep the defaults */
+    }
+  }, []);
+  useEffect(refreshCatSettings, [refreshCatSettings]);
+
   // Agents, hover and permission requests, all independent of any dictation.
   useEffect(() => {
     const sessionsOff = events.agentSessions.listen((e) => setSessions(e.payload));
@@ -767,6 +799,18 @@ function Overlay() {
   // Only during `recording`: a partial left over from the capture must not sit
   // under "Transcribing…", which is about the whole utterance being re-read.
   const transcript = !panelOpen && phase === "recording" && partial.trim().length > 0;
+
+  // The "I am listening" cat shows ONLY while the app is actively listening to
+  // you — the live dictation, `recording`/`transcribing`. The meme's caption is
+  // true then and only then; once the answer is on screen the app has stopped
+  // listening, so the cat comes down. Never at rest, never over a result, never
+  // in meetings (a separate window this component does not draw). Gated on the
+  // Settings > Cats toggles — the master and the per-place switch both apply.
+  const dictating =
+    catImages &&
+    catImagesDictation &&
+    !panelOpen &&
+    (phase === "recording" || phase === "transcribing");
 
   /**
    * The style actually drawn: a wing has nowhere to put a sentence, so the
@@ -940,6 +984,9 @@ function Overlay() {
     const unlistenError = events.overlayError.listen((e) => setError(e.payload));
     const unlistenStyle = events.overlayStyle.listen((e) => {
       setStyle(e.payload.style);
+      // Fired on every overlay show, so it doubles as the "settings may have
+      // changed" signal for the cat toggles — cheap, and the freshest point.
+      refreshCatSettings();
       // The measured cutout, as vars the CSS reads, so the wings weld to it
       // rather than straddle a guess. Zero for a pill.
       root.current?.style.setProperty("--notch-w", `${e.payload.notchWidth ?? 0}px`);
@@ -959,6 +1006,10 @@ function Overlay() {
       // One-way for the rest of the run: see `effectiveStyle`.
       if (e.payload.trim()) setDroppedDown(true);
     });
+    // The Settings window fires this on save; the overlay is a separate window
+    // with its own settings copy, so this is how a Cats toggle lands live
+    // instead of only on the next overlay show.
+    const unlistenSettings = listen("settings-changed", refreshCatSettings);
     return () => {
       unlistenPhase.then((off) => off());
       unlistenDismiss.then((off) => off());
@@ -966,6 +1017,7 @@ function Overlay() {
       unlistenStyle.then((off) => off());
       unlistenDownload.then((off) => off());
       unlistenPartial.then((off) => off());
+      unlistenSettings.then((off) => off());
     };
   }, []);
 
@@ -1328,7 +1380,17 @@ function Overlay() {
         : LABEL[phase];
 
   return (
-    // The exit is a state of the whole surface, not of one style.
+    // Every agent-cat site (strip, cards, list, detail, peek) reads its
+    // visibility from here rather than taking a prop each. `agents` folds in
+    // the master switch, so a consumer asks one question.
+    <CatSettingsProvider
+      value={{
+        all: catImages,
+        dictation: catImages && catImagesDictation,
+        agents: catImages && catImagesAgents,
+      }}
+    >
+    {/* The exit is a state of the whole surface, not of one style. */}
     <div
       className="overlay-root"
       ref={root}
@@ -1408,7 +1470,7 @@ function Overlay() {
                 : transcript
                   ? " drop-pill__body--transcript"
                   : ""
-          }`}
+          }${dictating ? " drop-pill__body--cat" : ""}`}
           ref={panel.content}
         >
           {resting ? (
@@ -1509,20 +1571,24 @@ function Overlay() {
               ) : null}
             </>
           ) : (
-            <PhaseSwap phase={phase}>
-              <Indicator phase={phase} />
-              {/* Inside PhaseSwap and beside the wave, not a layout of its
-                  own, so only the text changes and the wave stays put. */}
-              {transcript ? (
-                <p className="transcript" ref={transcriptRef}>
-                  {partial}
-                </p>
-              ) : (
-                <span className="label" title={error ?? undefined}>
-                  {label}
-                </span>
-              )}
-            </PhaseSwap>
+            <>
+              {/* The meme is listening while the app is. See ListeningCat. */}
+              {dictating && <ListeningCat />}
+              <PhaseSwap phase={phase}>
+                <Indicator phase={phase} />
+                {/* Inside PhaseSwap and beside the wave, not a layout of its
+                    own, so only the text changes and the wave stays put. */}
+                {transcript ? (
+                  <p className="transcript" ref={transcriptRef}>
+                    {partial}
+                  </p>
+                ) : (
+                  <span className="label" title={error ?? undefined}>
+                    {label}
+                  </span>
+                )}
+              </PhaseSwap>
+            </>
           )}
         </div>
       </div>
@@ -1546,6 +1612,52 @@ function Overlay() {
       />
     )}
     </div>
+    </CatSettingsProvider>
+  );
+}
+
+/**
+ * The "I am listening" cat. The meme captions itself, so it only has to appear
+ * while the app is genuinely listening for the joke to land — the caller gates
+ * that (dictating, or an ask/agent you spoke). A fixed asset, not a stage cat:
+ * the gag is this one specific caption, not "a cat for the current state".
+ */
+function ListeningCat() {
+  return (
+    <img
+      className="drop-pill__cat"
+      src="/cats/waiting_input/2.png"
+      alt="A smug cat, paws crossed, captioned “I am listening”"
+    />
+  );
+}
+
+/**
+ * An agent's avatar image, or a plain hue-tinted disc when the Cats setting is
+ * off for agents. Every agent-cat site routes through here so the toggle has
+ * one place to bite; `className` and `hue` let each caller keep its own size
+ * and identity colour. `hue` comes from the session id (see `agentHue`), so the
+ * fallback is still learnable identity even without the cat.
+ */
+function AgentAvatar({
+  stage,
+  seed,
+  className,
+  ...rest
+}: {
+  stage: AgentStage;
+  seed: string;
+  /** Kept for call-site symmetry with the ring; the mascot ignores it. */
+  hue?: number;
+  className: string;
+} & React.HTMLAttributes<HTMLElement>) {
+  const cats = useCatSettings();
+  if (!cats.agents) {
+    // Cats off → the Claude Code banner mascot walks in the avatar box instead.
+    return <PetMascot className={`${className} agent-avatar--off`} {...rest} />;
+  }
+  return (
+    <img className={className} src={stageCat(stage, seed)} alt="" aria-hidden {...rest} />
   );
 }
 
@@ -1661,12 +1773,12 @@ function AmbientSign({
         {cats.map((session) => {
           const stage = agentStage(session, askingIds.has(session.id));
           return (
-            <img
+            <AgentAvatar
               key={session.id}
               className="ambient__cat-img"
-              src={stageCat(stage, stageSeed(session.id, stage))}
-              alt=""
-              aria-hidden
+              stage={stage}
+              seed={stageSeed(session.id, stage)}
+              hue={agentHue(session.id)}
               data-asking={askingIds.has(session.id) || undefined}
             />
           );
@@ -1891,7 +2003,12 @@ function NotchCard({
       onClick={onOpen}
     >
       <span className="notch-card__disc">
-        <img className="notch-card__cat" src={stageCat(stage, seed)} alt="" aria-hidden />
+        <AgentAvatar
+          className="notch-card__cat"
+          stage={stage}
+          seed={seed}
+          hue={agentHue(session.id)}
+        />
         {/* The stage badge: what it is doing right now, colour-coded the same
             way the agent-list rows are (busy/live/done, orange when asking). */}
         <span
@@ -2379,14 +2496,18 @@ function StageAvatar({
   // One seed for both the avatar and its peek, so they never disagree — it is
   // fixed while the agent stays in this stage and changes on re-entry.
   const seed = stageSeed(session.id, stage);
-  const src = stageCat(stage, seed);
   return (
     <span
       className="agent-row__avatar"
       onMouseEnter={(e) => onPeek(stage, seed, e.currentTarget)}
       onMouseLeave={() => onPeek(null, "", null)}
     >
-      <img className="agent-row__cat" src={src} alt="" aria-hidden width={48} height={48} decoding="async" />
+      <AgentAvatar
+        className="agent-row__cat"
+        stage={stage}
+        seed={seed}
+        hue={agentHue(session.id)}
+      />
       <span className="agent-row__badge" data-state={state} aria-hidden />
     </span>
   );

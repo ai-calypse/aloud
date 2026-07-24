@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { emit } from "@tauri-apps/api/event";
 import {
   commands,
   type AudioDevice,
@@ -56,6 +57,7 @@ function displayValue(display: OverlayDisplay | undefined): string {
 /** One settings pane, selected from the app-level sidebar. */
 export type SettingsSection =
   | "general"
+  | "cats"
   | "hotkeys"
   | "dictionary"
   | "rules"
@@ -142,6 +144,9 @@ export function SettingsView({
       ? overlayDisplay.named
       : null;
   const sounds = settings.playSounds ?? true;
+  const catImages = settings.catImages ?? true;
+  const catImagesDictation = settings.catImagesDictation ?? true;
+  const catImagesAgents = settings.catImagesAgents ?? true;
 
   /** Applies one field and persists immediately — no Save button to forget. */
   async function update(patch: Partial<Settings>) {
@@ -156,6 +161,9 @@ export function SettingsView({
       console.error(`saving settings: ${result.error}`);
       return;
     }
+    // The overlay is a separate window that doesn't share this state; nudge it
+    // to re-read so a Memes toggle lands immediately, not on the next dictation.
+    void emit("settings-changed");
     setSaved(true);
     setTimeout(() => setSaved(false), 1200);
   }
@@ -692,6 +700,60 @@ export function SettingsView({
               </Row>
             </Group>
           )}
+        </>
+      )}
+
+      {section === "cats" && (
+        <>
+          <PaneTitle
+            title="Memes"
+            subtitle="Aloud shows a meme while it works. Turn them off everywhere, or just in the places you'd rather keep quiet."
+          />
+
+          <Group title="Memes">
+            <Row
+              label="Show memes"
+              hint="The master switch. Off hides every meme everywhere, whatever the per-place switches below say."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={catImages}
+                label="Show memes"
+                onChange={(c) => update({ catImages: c })}
+              />
+            </Row>
+          </Group>
+
+          {/* The per-place switches only bite while the master is on; dim them
+              when it is off so it reads as "these are governed by the switch
+              above" rather than as broken. */}
+          <Group title="Show memes in">
+            <Row
+              label="Dictation"
+              hint="The “I am listening” cat that drops out of the notch while you speak."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={catImages && catImagesDictation}
+                disabled={!catImages}
+                label="Dictation meme"
+                onChange={(c) => update({ catImagesDictation: c })}
+              />
+            </Row>
+
+            <Row
+              label="Agents"
+              hint="The stage memes for coding agents — the strip beside the notch, the cards it deals on hover, and the agent list. Off swaps in the Claude mascot instead."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={catImages && catImagesAgents}
+                disabled={!catImages}
+                label="Agent memes"
+                onChange={(c) => update({ catImagesAgents: c })}
+              />
+            </Row>
+          </Group>
         </>
       )}
 

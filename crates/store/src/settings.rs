@@ -150,6 +150,15 @@ pub struct Settings {
     /// Evict recordings older than this many days regardless of the size
     /// budget. 0 leaves size as the only limit.
     pub audio_retention_days: u32,
+    /// Master switch for the meme cats. Off hides every cat everywhere; the
+    /// per-place flags below only matter while this is on. On by default —
+    /// the cats are the personality, opting out is the exception.
+    pub cat_images: bool,
+    /// The "I am listening" cat that rides the notch during a live dictation.
+    pub cat_images_dictation: bool,
+    /// The stage cats on the agents surface — the ambient strip, the dealt
+    /// notch cards, the agent list and its hover peek.
+    pub cat_images_agents: bool,
 }
 
 impl Default for Settings {
@@ -198,6 +207,10 @@ impl Default for Settings {
             audio_retention_days: 30,
             onboarded: false,
             developer_tools: false,
+            // The cats ship on — they are the app's personality, not an add-on.
+            cat_images: true,
+            cat_images_dictation: true,
+            cat_images_agents: true,
         }
     }
 }
