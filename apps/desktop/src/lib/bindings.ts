@@ -865,6 +865,19 @@ export type Settings = {
 	 *  budget. 0 leaves size as the only limit.
 	 */
 	audioRetentionDays?: number,
+	/**
+	 *  Master switch for the meme cats. Off hides every cat everywhere; the
+	 *  per-place flags below only matter while this is on. On by default —
+	 *  the cats are the personality, opting out is the exception.
+	 */
+	catImages?: boolean,
+	/**  The "I am listening" cat that rides the notch during a live dictation. */
+	catImagesDictation?: boolean,
+	/**
+	 *  The stage cats on the agents surface — the ambient strip, the dealt
+	 *  notch cards, the agent list and its hover peek.
+	 */
+	catImagesAgents?: boolean,
 };
 
 /**  One closed span. */

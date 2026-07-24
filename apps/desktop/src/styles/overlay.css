@@ -1853,7 +1853,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 6px 10px 10px;
+  padding: 4px 10px 8px;
 }
 
 /* The deal table: the layer the cards are dealt across. Sized inline (absolute
@@ -1862,11 +1862,12 @@
    about the cutout. */
 .notch-deal {
   position: relative;
-  margin-top: 4px;
-  /* Fits a 56px disc + gap + label. The width is set inline (it depends on the
-     card count and the absolute cards do not measure); the height is constant,
-     so it lives here. */
-  height: 84px;
+  margin-top: 2px;
+  /* Fits a 56px disc + gap + one label line, snug. The width is set inline (it
+     depends on the card count and the absolute cards do not measure); the
+     height is constant, so it lives here. Was 84px — that left a dead band
+     under the label, tallest on a single-agent hover. */
+  height: 74px;
 }
 
 /* One dealt card: a button into that agent's detail, centred on the deal layer
@@ -2020,7 +2021,7 @@
   /* The quick-peek head: title, stage, meta, and the "Now" line, plus the
      hairline + padding. A ceiling for the fold; the real height is content. */
   max-height: 104px;
-  margin-top: 10px;
+  margin-top: 6px;
   opacity: 1;
 }
 
@@ -2364,6 +2365,66 @@
 
 .agent__action:disabled {
   opacity: 0.4;
+}
+
+/* --- The "I am listening" cat -------------------------------------------
+ *
+ * The meme (public/cats/waiting_input/2.png) literally captions itself "I am
+ * listening" — so it peeks out from under the notch whenever the app is
+ * *actually* listening to you: dictating, or reading back an ask/agent you
+ * spoke. The joke is the caption being true. Deliberately still — no wobble;
+ * a smug cat holds eye contact.
+ *
+ * It rides above whatever body is showing. On the status/transcript row (a
+ * flex row) the wrapping `--cat` modifier turns the body into a column so the
+ * cat sits on top of the wave; on the ask/agent bodies (already columns) it
+ * just becomes the first row.
+ */
+.drop-pill__cat {
+  display: block;
+  width: 124px;
+  flex: none;
+  /* The ask/agent bodies are `align-items: stretch`; without this the fixed
+     width is ignored and the meme stretches edge to edge. */
+  align-self: center;
+  margin: 2px 0 0px;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.5);
+  /* Drops in with the panel rather than snapping — same fade the answer uses. */
+  animation: cat-peek-in var(--dur-base) var(--ease-out) both;
+}
+
+@keyframes cat-peek-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+/* The status/transcript row is a centred flex row fixed at 40px; with the cat
+   stacked on top it must become a column and grow to fit — otherwise the 132px
+   meme overflows the 40px row and the panel spring (which measures the body)
+   only opens to the row height, clipping the cat. Only this variant; the
+   ask/agent bodies are already auto-height columns. */
+.drop-pill__body--cat {
+  flex-direction: column;
+  height: auto;
+  /* Base body has no vertical padding (fixed-height row); stacked, the wave row
+     would sit flush on the panel's bottom edge. Give it breathing room. */
+  padding-bottom: 16px;
+}
+
+/* Cats-off fallback: the Claude Code banner mascot walks on a bare transparent
+   canvas, exactly as it does beside the real notch in agent-notch — no profile
+   disc, no backing. It takes the avatar class only for sizing; the class's
+   `border-radius`/`box-shadow`/`background` are cancelled here so nothing
+   frames the critter. */
+.agent-avatar--off {
+  display: block;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  object-fit: contain;
 }
 
 /* The candidates for a choice question. A column, not a row: these are

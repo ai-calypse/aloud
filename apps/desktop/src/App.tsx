@@ -45,6 +45,9 @@ const NAV: {
   // meant no release build could reach a finished, registered view.
   { id: "timings", title: "Timings", group: "app", tint: "var(--sys-pink)", icon: "M12 8v4l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z" },
   { id: "general", title: "General", group: "settings", tint: "var(--sys-grey)", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" },
+  // A smiley — generic "fun", since this pane governs memes and the mascot.
+  // The `id` stays "cats" so the settings key/field plumbing is untouched.
+  { id: "cats", title: "Memes", group: "settings", tint: "var(--sys-yellow)", icon: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM9 10h.01M15 10h.01M8.5 14a4 4 0 0 0 7 0" },
   { id: "hotkeys", title: "Hotkeys", group: "settings", tint: "var(--sys-indigo)", icon: "M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1ZM7 10h.01M11 10h.01M15 10h.01M8 14h8" },
   { id: "dictionary", title: "Dictionary", group: "settings", tint: "var(--sys-green)", icon: "M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3ZM5 11a7 7 0 0 0 14 0M12 18v4" },
   { id: "rules", title: "App Rules", group: "settings", tint: "var(--sys-blue)", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM4 9h16M8 6h.01" },
@@ -58,6 +61,7 @@ const NAV: {
 
 const SETTINGS_IDS: SettingsSection[] = [
   "general",
+  "cats",
   "hotkeys",
   "dictionary",
   "rules",

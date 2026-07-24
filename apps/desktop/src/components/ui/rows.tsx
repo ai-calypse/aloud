@@ -171,10 +171,13 @@ export function Toggle({
   checked,
   onChange,
   label,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
+  /** Dimmed and unclickable — used when a master switch governs this one. */
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -182,10 +185,12 @@ export function Toggle({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
         "relative h-6 w-10 shrink-0 rounded-full transition-colors duration-[var(--dur-base)] ease-[var(--ease-out)] outline-none",
         "focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
+        disabled && "opacity-40",
         checked ? "bg-toggle-on" : "bg-toggle-off",
       )}
     >
