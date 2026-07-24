@@ -469,28 +469,47 @@
   letter-spacing: 0.02em;
 }
 
-/* The composer's fields borrow the Settings feel — taller, softly rounded, a
-   blue ring on focus — but in the overlay's own dark tokens rather than the
-   Settings surface. Overrides `.ask__input`'s 28px pill for this context only,
-   so the shared Ask follow-up field is untouched. */
-.composer .ask__input {
-  /* border-box so the height is the outer box for both <input> and <select>;
-     without it WebKit sizes a select from its font and it renders shorter than
-     the sibling inputs. */
+/* All three fields share ONE look — the Settings feel (taller, softly rounded,
+   blue ring on focus) in the overlay's own dark tokens. `.composer__input` (the
+   text fields) and `.composer__trigger` (the shadcn Select) are the same box, so
+   Repo, Branch and Task line up. Own classes, not `.ask__input`, so the shared
+   Ask follow-up field keeps its 28px pill. */
+.composer__input,
+.composer .composer__trigger {
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  /* Only the trigger holds two children (value + chevron); space-between keeps
+     the chevron pinned right. Harmless on the single-child inputs. */
+  justify-content: space-between;
+  width: 100%;
   height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgb(255 255 255 / 0.14);
   border-radius: 9px;
-  border-color: rgb(255 255 255 / 0.14);
   background: rgb(255 255 255 / 0.05);
+  color: var(--pill-ink);
+  font: inherit;
   font-size: 13px;
+  font-weight: 400;
+  outline: none;
   transition:
     border-color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
 }
 
-.composer .ask__input:focus {
+.composer__input::placeholder {
+  color: rgb(255 255 255 / 0.35);
+}
+
+.composer__input:focus,
+.composer .composer__trigger:focus-visible {
   border-color: var(--sys-blue);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--sys-blue) 30%, transparent);
+}
+
+.composer__input:disabled {
+  opacity: 0.5;
 }
 
 /* The branch row is inserted after the repo resolves. The panel grows to fit
@@ -506,29 +525,6 @@
     opacity: 0;
     transform: translateY(-4px);
   }
-}
-
-/* The shadcn Select trigger, matched to `.composer .ask__input`: same 36px,
-   rounding, dark surface and blue focus ring, so the branch control sits flush
-   with the text fields above and below it. The trigger is a real element (not a
-   native <select>), so unlike the old <select> it actually honours the height.
-   The dropdown panel it opens is shadcn's own, dark via the overlay's tokens. */
-/* Scoped `.composer .composer__trigger` (specificity 0,2,0) so it beats
-   shadcn's single-class Tailwind utilities (bg-transparent, border-input)
-   regardless of stylesheet order — the one ambiguity that would render the
-   trigger with the wrong surface. */
-.composer .composer__trigger {
-  height: 36px;
-  border-radius: 9px;
-  border: 1px solid rgb(255 255 255 / 0.14);
-  background: rgb(255 255 255 / 0.05);
-  color: var(--pill-ink);
-  font-size: 13px;
-}
-
-.composer .composer__trigger:focus-visible {
-  border-color: var(--sys-blue);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sys-blue) 30%, transparent);
 }
 
 .composer__row {

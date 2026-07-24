@@ -3007,7 +3007,7 @@ function CodingAgentComposer({
           <label className="composer__field">
             <span className="composer__label">Repo</span>
             <input
-              className="ask__input"
+              className="composer__input"
               list="coding-agent-repos"
               placeholder={repos.length ? "Pick a repo" : "~/dev/my-app"}
               value={repo}
@@ -3056,7 +3056,7 @@ function CodingAgentComposer({
           <label className="composer__field">
             <span className="composer__label">Task</span>
             <input
-              className="ask__input"
+              className="composer__input"
               placeholder="What should it do?"
               value={task}
               disabled={busy}
