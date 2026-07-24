@@ -196,7 +196,7 @@ export const commands = {
 	 *  until the prompt was answered. Off the main thread, the UI stays live while
 	 *  the user decides.
 	 */
-	spawnCodingAgent: (repo: string, task: string, agent: Agent) => typedError<string, string>(__TAURI_INVOKE("spawn_coding_agent", { repo, task, agent })),
+	spawnCodingAgent: (repo: string, branch: string, task: string, agent: Agent) => typedError<string, string>(__TAURI_INVOKE("spawn_coding_agent", { repo, branch, task, agent })),
 	/**
 	 *  The local git repos the composer offers, so the user picks instead of typing.
 	 * 
@@ -205,6 +205,11 @@ export const commands = {
 	 *  freeze the webview.
 	 */
 	listLocalRepos: () => typedError<LocalRepo[], string>(__TAURI_INVOKE("list_local_repos")),
+	/**
+	 *  The local branches in `repo`, for the composer's branch dropdown. `async` +
+	 *  `spawn_blocking` like the others: it shells out to `git`.
+	 */
+	listRepoBranches: (repo: string) => typedError<string[], string>(__TAURI_INVOKE("list_repo_branches", { repo })),
 	/**
 	 *  Resolves the pending confirmation. Called by the panel's Cancel/Confirm
 	 *  buttons; `edits` carries any field the user filled in or corrected before

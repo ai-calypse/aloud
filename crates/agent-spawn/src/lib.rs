@@ -1,5 +1,5 @@
-//! Starting a coding agent from Aloud: a fresh git worktree off `origin/main`,
-//! then `claude`/`codex` opened in it in a real Terminal tab.
+//! Starting a coding agent from Aloud: a git worktree checked out to a chosen
+//! branch, then `claude`/`codex` opened in it in a real Terminal tab.
 //!
 //! This app has only ever *discovered* agent processes someone else launched
 //! (`aloud_sessions`). This is the one place it starts one itself. The point of
@@ -137,33 +137,6 @@ fn push_repo(repos: &mut Vec<LocalRepo>, seen: &mut std::collections::HashSet<St
     }
 }
 
-/// Turns a spoken task into a branch-safe slug: lowercase, runs of anything
-/// outside `[a-z0-9]` collapsed to a single `-`, trimmed of leading/trailing
-/// `-`. This becomes the branch name, so a stray space or quote here is a git
-/// error the user meets with no context — worth getting right at the source.
-///
-/// Empty in means empty out; [`start_coding_agent`] rejects that rather than
-/// asking git to create a branch with no name.
-pub fn slugify(task: &str) -> String {
-    let mut out = String::with_capacity(task.len());
-    let mut pending_dash = false;
-    for ch in task.chars() {
-        let lower = ch.to_ascii_lowercase();
-        if lower.is_ascii_alphanumeric() {
-            if pending_dash && !out.is_empty() {
-                out.push('-');
-            }
-            pending_dash = false;
-            out.push(lower);
-        } else {
-            // Defer the dash: a run of punctuation/space becomes one `-`, and a
-            // trailing run becomes none (never appended because nothing follows).
-            pending_dash = true;
-        }
-    }
-    out
-}
-
 /// Where the worktree lands: a sibling of the repo named `<repo>-<branch>`, so
 /// all of a repo's worktrees stay discoverable beside it. Matches the sibling
 /// convention in open-vibe-island's `docs/worktree-workflow.md`.
@@ -181,20 +154,50 @@ pub fn worktree_path(repo: &Path, branch: &str) -> PathBuf {
     parent.join(format!("{name}-{branch}"))
 }
 
-/// `git worktree add <path> -b <branch> origin/main`, run in `repo`. Fails with
-/// git's own stderr attached — this answers a button click, so a silent failure
-/// is worse than a loud one. Returns the worktree path on success.
+/// The local branches in `repo`, newest-committed-to first, for the composer's
+/// dropdown. Empty on any git error — a repo we can't read branches from just
+/// offers none, and the composer falls back to no selection.
+pub fn branches(repo: &Path) -> Vec<String> {
+    let output = Command::new("git")
+        .current_dir(repo)
+        // `--sort=-committerdate` puts the branches you actually touch on top,
+        // so the one you want is rarely a scroll away.
+        .args([
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--format=%(refname:short)",
+            "refs/heads",
+        ])
+        .output();
+    match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .filter(|b| !b.is_empty())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// `git worktree add <path> <branch>`, run in `repo`, checking out an *existing*
+/// branch (not creating one). Fails with git's own stderr attached — this
+/// answers a button click, so a silent failure is worse than a loud one.
+/// Returns the worktree path on success.
+///
+/// The worktree dir name replaces `/` in the branch (`feat/login`) with `-`, so
+/// a slashed branch still yields a flat sibling directory.
 ///
 /// # Errors
-/// If `git` cannot be run, or exits non-zero (branch exists, not a repo,
-/// `origin/main` unknown) — the message carries git's stderr.
+/// If `git` cannot be run, or exits non-zero — most often because the branch is
+/// already checked out in another worktree (git refuses to check a branch out
+/// twice), which the message carries through verbatim.
 pub fn create_worktree(repo: &Path, branch: &str) -> Result<PathBuf> {
-    let path = worktree_path(repo, branch);
+    let path = worktree_path(repo, &branch.replace('/', "-"));
     let output = Command::new("git")
         .current_dir(repo)
         .args(["worktree", "add"])
         .arg(&path)
-        .args(["-b", branch, "origin/main"])
+        .arg(branch)
         .output()
         .with_context(|| format!("running git worktree add in {}", repo.display()))?;
     if !output.status.success() {
@@ -257,35 +260,31 @@ pub fn spawn(_dir: &Path, _agent: Agent, _task: &str) -> Result<()> {
     Ok(())
 }
 
-/// The one entry point the Tauri command calls: slugify → worktree → spawn.
-/// Returns the branch name so the caller can show it at once, without waiting on
-/// discovery's next poll to name the new session.
+/// The one entry point the Tauri command calls: worktree the chosen `branch` →
+/// open the agent on `task`. Returns the branch so the caller can show it at
+/// once, without waiting on discovery's next poll to name the new session.
+///
+/// The `task` is the agent's instruction, verbatim — it no longer names the
+/// branch (the user picks that), so the two are fully decoupled.
 ///
 /// # Errors
-/// If `task` is blank after slugifying, if `repo` is not a directory, if the
-/// worktree cannot be created, or if Terminal cannot be opened. On Windows it
-/// refuses up front rather than creating a worktree [`spawn`] cannot open.
-pub fn start_coding_agent(repo: &Path, task: &str, agent: Agent) -> Result<String> {
+/// If `repo` is not a directory, `branch` is blank, the worktree cannot be
+/// created (most often the branch is already checked out elsewhere), or Terminal
+/// cannot be opened. On Windows it refuses up front rather than creating a
+/// worktree [`spawn`] cannot open.
+pub fn start_coding_agent(repo: &Path, branch: &str, task: &str, agent: Agent) -> Result<String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (repo, agent);
+        let _ = (repo, branch, task, agent);
         anyhow::bail!("starting a coding agent is only supported on macOS");
     }
     #[cfg(target_os = "macos")]
     {
-        anyhow::ensure!(
-            repo.is_dir(),
-            "not a directory: {}",
-            repo.display()
-        );
-        let branch = slugify(task);
-        anyhow::ensure!(
-            !branch.is_empty(),
-            "the task must contain at least one letter or number to name the branch"
-        );
-        let dir = create_worktree(repo, &branch)?;
+        anyhow::ensure!(repo.is_dir(), "not a directory: {}", repo.display());
+        anyhow::ensure!(!branch.trim().is_empty(), "pick a branch to work on");
+        let dir = create_worktree(repo, branch)?;
         spawn(&dir, agent, task)?;
-        Ok(branch)
+        Ok(branch.to_string())
     }
 }
 
@@ -325,28 +324,6 @@ fn applescript_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The slug is the branch name, so the cases that would become a bad branch
-    /// are the ones worth pinning: spaces, punctuation, case, leading/trailing
-    /// junk, and a run of separators collapsing to one dash.
-    #[test]
-    fn slugify_makes_a_branch_safe_name() {
-        assert_eq!(slugify("Add a login page"), "add-a-login-page");
-        assert_eq!(slugify("Fix the bug!!!"), "fix-the-bug");
-        assert_eq!(slugify("  trailing / and  double  "), "trailing-and-double");
-        assert_eq!(slugify("Refactor auth (v2)"), "refactor-auth-v2");
-        // Unicode letters are dropped rather than transliterated — a branch of
-        // pure punctuation/accents is caught by the empty check upstream.
-        assert_eq!(slugify("café ☕ time"), "caf-time");
-    }
-
-    /// An all-punctuation task slugifies to empty; `start_coding_agent` turns
-    /// that into a clear error instead of `git … -b ""`.
-    #[test]
-    fn slugify_of_no_word_characters_is_empty() {
-        assert_eq!(slugify("!!! ??? ..."), "");
-        assert_eq!(slugify(""), "");
-    }
 
     /// The worktree is a sibling `<repo>-<branch>`, whatever the repo's depth.
     #[test]

@@ -450,13 +450,57 @@
 .composer {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+}
+
+/* One labelled control. The label sits above its field, quiet, so the three
+   choices (repo, branch, task) read as a stack rather than a wall of inputs. */
+.composer__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.composer__label {
+  padding-left: 2px;
+  color: rgb(255 255 255 / 0.45);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* The branch row is inserted after the repo resolves. The panel grows to fit
+   it (useNotchPanel's spring), and this fades + rises its own content in step
+   so it emerges rather than snapping. Reduced-motion collapses the travel via
+   motion.css's global switch. */
+.composer__field:has(.composer__select) {
+  animation: composer-reveal var(--spring-pop-dur) var(--spring-pop) both;
+}
+
+@keyframes composer-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* A native <select> styled to match .ask__input — the dropdown itself is
+   OS-rendered, only the closed control is ours. */
+.composer__select {
+  appearance: none;
+  padding-right: 26px;
+  /* A single chevron drawn in the field, since appearance:none removes the
+     native one. Encoded inline so no asset ships. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' stroke='rgba(255,255,255,0.5)' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
 }
 
 .composer__row {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding-top: 2px;
 }
 
 /* The claude/codex choice: a two-segment pill, matching the input's surface. */

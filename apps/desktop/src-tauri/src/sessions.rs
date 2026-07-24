@@ -783,15 +783,28 @@ pub fn uninstall_agent_hooks() -> Result<HookStatus, String> {
 #[specta::specta]
 pub async fn spawn_coding_agent(
     repo: String,
+    branch: String,
     task: String,
     agent: aloud_agent_spawn::Agent,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        aloud_agent_spawn::start_coding_agent(std::path::Path::new(&repo), &task, agent)
+        aloud_agent_spawn::start_coding_agent(std::path::Path::new(&repo), &branch, &task, agent)
     })
     .await
     .map_err(|e| format!("starting the coding agent: {e}"))?
     .map_err(|e| e.to_string())
+}
+
+/// The local branches in `repo`, for the composer's branch dropdown. `async` +
+/// `spawn_blocking` like the others: it shells out to `git`.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_repo_branches(repo: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        aloud_agent_spawn::branches(std::path::Path::new(&repo))
+    })
+    .await
+    .map_err(|e| format!("listing branches: {e}"))
 }
 
 /// The local git repos the composer offers, so the user picks instead of typing.

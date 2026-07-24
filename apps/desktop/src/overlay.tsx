@@ -2896,14 +2896,19 @@ function AgentRun({
 const LAST_REPO_KEY = "aloud.codingAgent.lastRepo";
 
 /**
- * What a blank tab holds: the composer for starting a coding agent. Give it a
- * repo, a task and an agent, and Rust cuts a worktree off `origin/main` and
- * opens the agent in a Terminal tab there — the running session then shows up
- * under the Agents tab through the same discovery every other session uses.
+ * What a blank tab holds: the composer for starting a coding agent. Pick a repo,
+ * pick one of its branches, say what to do, and Rust checks that branch out into
+ * a fresh worktree and opens the agent on the task in a Terminal tab there — the
+ * running session then shows up under the Agents tab through the same discovery
+ * every other session uses.
+ *
+ * The three choices are independent: the task is the agent's instruction
+ * verbatim, and the branch is picked, not derived from it. Branches are fetched
+ * when the repo settles, so the dropdown reflects the chosen repo.
  *
  * A `Panel` like `Answer`/`AgentRun` so it inherits the strip's `+`, close, and
- * the always-dark chrome. On success it does not track the session itself —
- * that is the Agents tab's job — it just reports the branch it started.
+ * the always-dark chrome; the panel's own spring settles around the fields, so
+ * revealing the branch row simply grows the notch — no animation of its own.
  */
 function CodingAgentComposer({
   bodyRef,
@@ -2915,26 +2920,21 @@ function CodingAgentComposer({
   onAddTab?: () => void;
 }) {
   const [repo, setRepo] = useState(() => localStorage.getItem(LAST_REPO_KEY) ?? "");
+  const [branch, setBranch] = useState("");
   const [task, setTask] = useState("");
   const [agent, setAgent] = useState<CodingAgent>("claude");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Started branch name on success — the one thing worth showing before the
-  // discovery poll surfaces the session itself under the Agents tab.
   const [started, setStarted] = useState<string | null>(null);
-  // null until the hook check returns; true/false after. Without hooks the
-  // session still shows up (ps/lsof finds it) but its permission requests will
-  // not route into Aloud's cards, so the composer says so rather than pretend.
   const [hooksInstalled, setHooksInstalled] = useState<boolean | null>(null);
-  // The scanned local repos, offered as a datalist so the field is a picker
-  // and a free-text escape hatch at once. `repo` holds either a picked name or
-  // a typed path; `resolveRepo` turns a name back into its path at submit.
   const [repos, setRepos] = useState<LocalRepo[]>([]);
+  // The chosen repo's branches, fetched when the repo settles. Empty until a
+  // repo resolves; `loadingBranches` distinguishes "not fetched" from "none".
+  const [branches, setBranches] = useState<string[]>([]);
+  const [loadingBranches, setLoadingBranches] = useState(false);
 
   useEffect(() => {
     void commands.agentHookStatus().then((res) => {
-      // A failed status read is not worth blocking on — treat it as "unknown,
-      // assume present" so the check never stands between the user and a spawn.
       setHooksInstalled(res.status === "ok" ? res.data.installed.length > 0 : true);
     });
     void commands.listLocalRepos().then((res) => {
@@ -2942,37 +2942,54 @@ function CodingAgentComposer({
     });
   }, []);
 
-  // A picked name maps back to its path; anything else is taken as a literal
-  // path (the free-text case, e.g. a repo outside the scanned roots).
-  // ponytail: two repos with the same folder name resolve to the first found;
-  // rare, and typing the full path in the same field disambiguates. Show the
-  // parent on collision if it bites.
-  const resolveRepo = (value: string) =>
-    repos.find((r) => r.name === value)?.path ?? value;
+  // A picked name maps back to its path; anything else is a literal path (the
+  // free-text escape hatch for a repo outside the scanned roots).
+  const resolveRepo = useCallback(
+    (value: string) => repos.find((r) => r.name === value)?.path ?? value,
+    [repos],
+  );
 
-  const canStart = !busy && repo.trim() !== "" && task.trim() !== "";
+  // Fetch the repo's branches once it resolves to a real path. Keyed on the
+  // resolved path so switching repos refetches; a stale response for a repo the
+  // user has since changed away from is dropped by the `active` guard.
+  const repoPath = repo.trim() ? resolveRepo(repo.trim()) : "";
+  useEffect(() => {
+    if (!repoPath) {
+      setBranches([]);
+      return;
+    }
+    let active = true;
+    setLoadingBranches(true);
+    void commands.listRepoBranches(repoPath).then((res) => {
+      if (!active) return;
+      setLoadingBranches(false);
+      const list = res.status === "ok" ? res.data : [];
+      setBranches(list);
+      // Default to the first branch (most-recently-committed) so the common
+      // case needs no branch click — but never clobber a choice already made.
+      setBranch((b) => (b && list.includes(b) ? b : list[0] ?? ""));
+    });
+    return () => {
+      active = false;
+    };
+  }, [repoPath]);
+
+  const canStart = !busy && repoPath !== "" && branch !== "" && task.trim() !== "";
 
   const go = useCallback(() => {
     if (!canStart) return;
     setBusy(true);
     setError(null);
-    const path = resolveRepo(repo.trim());
     localStorage.setItem(LAST_REPO_KEY, repo.trim());
-    void commands.spawnCodingAgent(path, task.trim(), agent).then((res) => {
+    void commands.spawnCodingAgent(repoPath, branch, task.trim(), agent).then((res) => {
       setBusy(false);
       if (res.status === "ok") setStarted(res.data);
       else setError(res.error);
     });
-    // resolveRepo closes over `repos`; include it so a late scan is reflected.
-  }, [canStart, repo, task, agent, repos]);
+  }, [canStart, repoPath, repo, branch, task, agent]);
 
   return (
-    <Panel
-      title="New coding agent"
-      bodyRef={bodyRef}
-      onClose={onClose}
-      onAddTab={onAddTab}
-    >
+    <Panel title="New coding agent" bodyRef={bodyRef} onClose={onClose} onAddTab={onAddTab}>
       {started ? (
         <p className="ask__done">
           Started on <span className="ask__branch">{started}</span>. It will
@@ -2980,27 +2997,61 @@ function CodingAgentComposer({
         </p>
       ) : (
         <div className="composer">
-          <input
-            className="ask__input"
-            list="coding-agent-repos"
-            placeholder={repos.length ? "Pick a repo, or type a path" : "Repo path (e.g. ~/dev/my-app)"}
-            value={repo}
-            disabled={busy}
-            onChange={(e) => setRepo(e.target.value)}
-          />
-          <datalist id="coding-agent-repos">
-            {repos.map((r) => (
-              <option key={r.path} value={r.name} />
-            ))}
-          </datalist>
-          <input
-            className="ask__input"
-            placeholder="What should it do?"
-            value={task}
-            disabled={busy}
-            onChange={(e) => setTask(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && go()}
-          />
+          <label className="composer__field">
+            <span className="composer__label">Repo</span>
+            <input
+              className="ask__input"
+              list="coding-agent-repos"
+              placeholder={repos.length ? "Pick a repo" : "~/dev/my-app"}
+              value={repo}
+              disabled={busy}
+              onChange={(e) => setRepo(e.target.value)}
+            />
+            <datalist id="coding-agent-repos">
+              {repos.map((r) => (
+                <option key={r.path} value={r.name} />
+              ))}
+            </datalist>
+          </label>
+
+          {/* The branch row appears once a repo is chosen; the panel grows to
+              fit it via useNotchPanel's spring — the reveal IS the motion. */}
+          {repoPath ? (
+            <label className="composer__field">
+              <span className="composer__label">Branch</span>
+              <select
+                className="ask__input composer__select"
+                value={branch}
+                disabled={busy || loadingBranches || branches.length === 0}
+                onChange={(e) => setBranch(e.target.value)}
+              >
+                {loadingBranches ? (
+                  <option value="">Loading…</option>
+                ) : branches.length === 0 ? (
+                  <option value="">No branches found</option>
+                ) : (
+                  branches.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+          ) : null}
+
+          <label className="composer__field">
+            <span className="composer__label">Task</span>
+            <input
+              className="ask__input"
+              placeholder="What should it do?"
+              value={task}
+              disabled={busy}
+              onChange={(e) => setTask(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && go()}
+            />
+          </label>
+
           <div className="composer__row">
             <div className="composer__agents" role="radiogroup" aria-label="Agent">
               {(["claude", "codex"] as const).map((option) => (
@@ -3021,6 +3072,7 @@ function CodingAgentComposer({
               {busy ? "Starting…" : "Start"}
             </button>
           </div>
+
           {error ? <p className="ask__error">{error}</p> : null}
           {hooksInstalled === false ? (
             <p className="composer__hint">
