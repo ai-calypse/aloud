@@ -474,6 +474,10 @@
    Settings surface. Overrides `.ask__input`'s 28px pill for this context only,
    so the shared Ask follow-up field is untouched. */
 .composer .ask__input {
+  /* border-box so the height is the outer box for both <input> and <select>;
+     without it WebKit sizes a select from its font and it renders shorter than
+     the sibling inputs. */
+  box-sizing: border-box;
   height: 36px;
   border-radius: 9px;
   border-color: rgb(255 255 255 / 0.14);
@@ -493,7 +497,7 @@
    it (useNotchPanel's spring), and this fades + rises its own content in step
    so it emerges rather than snapping. Reduced-motion collapses the travel via
    motion.css's global switch. */
-.composer__field:has(.composer__select) {
+.composer__field:has(.composer__trigger) {
   animation: composer-reveal var(--spring-pop-dur) var(--spring-pop) both;
 }
 
@@ -504,16 +508,27 @@
   }
 }
 
-/* A native <select> styled to match .ask__input — the dropdown itself is
-   OS-rendered, only the closed control is ours. */
-.composer__select {
-  appearance: none;
-  padding-right: 26px;
-  /* A single chevron drawn in the field, since appearance:none removes the
-     native one. Encoded inline so no asset ships. */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' stroke='rgba(255,255,255,0.5)' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
+/* The shadcn Select trigger, matched to `.composer .ask__input`: same 36px,
+   rounding, dark surface and blue focus ring, so the branch control sits flush
+   with the text fields above and below it. The trigger is a real element (not a
+   native <select>), so unlike the old <select> it actually honours the height.
+   The dropdown panel it opens is shadcn's own, dark via the overlay's tokens. */
+/* Scoped `.composer .composer__trigger` (specificity 0,2,0) so it beats
+   shadcn's single-class Tailwind utilities (bg-transparent, border-input)
+   regardless of stylesheet order — the one ambiguity that would render the
+   trigger with the wrong surface. */
+.composer .composer__trigger {
+  height: 36px;
+  border-radius: 9px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  background: rgb(255 255 255 / 0.05);
+  color: var(--pill-ink);
+  font-size: 13px;
+}
+
+.composer .composer__trigger:focus-visible {
+  border-color: var(--sys-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sys-blue) 30%, transparent);
 }
 
 .composer__row {

@@ -30,6 +30,13 @@ import {
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   groupSteps,
   pendingStep,
   withCall,
@@ -3015,29 +3022,35 @@ function CodingAgentComposer({
           </label>
 
           {/* The branch row appears once a repo is chosen; the panel grows to
-              fit it via useNotchPanel's spring — the reveal IS the motion. */}
+              fit it via useNotchPanel's spring — the reveal IS the motion. A
+              shadcn Select rather than a native <select>: the trigger is a real
+              element that honours the 36px height (a native select on WebKit
+              sizes to its font and reads shorter than the sibling inputs). Its
+              dark look comes for free — the overlay's floating scope resolves
+              bg-popover/foreground to dark tokens. A <div>, not a <label>, so
+              the label text doesn't forward clicks into the trigger. */}
           {repoPath ? (
-            <label className="composer__field">
+            <div className="composer__field">
               <span className="composer__label">Branch</span>
-              <select
-                className="ask__input composer__select"
+              <Select
                 value={branch}
+                onValueChange={setBranch}
                 disabled={busy || loadingBranches || branches.length === 0}
-                onChange={(e) => setBranch(e.target.value)}
               >
-                {loadingBranches ? (
-                  <option value="">Loading…</option>
-                ) : branches.length === 0 ? (
-                  <option value="">No branches found</option>
-                ) : (
-                  branches.map((b) => (
-                    <option key={b} value={b}>
+                <SelectTrigger className="composer__trigger w-full">
+                  <SelectValue
+                    placeholder={loadingBranches ? "Loading…" : "No branches found"}
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => (
+                    <SelectItem key={b} value={b}>
                       {b}
-                    </option>
-                  ))
-                )}
-              </select>
-            </label>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           ) : null}
 
           <label className="composer__field">
