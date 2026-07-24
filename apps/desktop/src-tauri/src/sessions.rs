@@ -784,6 +784,19 @@ pub fn spawn_coding_agent(
         .map_err(|e| e.to_string())
 }
 
+/// The local git repos the composer offers, so the user picks instead of typing.
+///
+/// `async` + `spawn_blocking` like `commands::installed_apps`: the scan is a
+/// `read_dir` walk, and a non-async command runs on the main thread and would
+/// freeze the webview.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_local_repos() -> Result<Vec<aloud_agent_spawn::LocalRepo>, String> {
+    tauri::async_runtime::spawn_blocking(aloud_agent_spawn::local_repos)
+        .await
+        .map_err(|e| format!("listing local repos: {e}"))
+}
+
 /// Writes the config, pretty-printed, via a temp file in the same directory.
 ///
 /// A partial write here is another tool's config destroyed, so the rename is

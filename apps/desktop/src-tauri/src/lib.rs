@@ -130,6 +130,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sessions::uninstall_agent_hooks,
             sessions::resolve_permission,
             sessions::spawn_coding_agent,
+            sessions::list_local_repos,
             agent::confirm_agent,
             agent::answer_agent,
             agent::close_agent,

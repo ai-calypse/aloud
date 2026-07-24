@@ -192,6 +192,14 @@ export const commands = {
 	 */
 	spawnCodingAgent: (repo: string, task: string, agent: Agent) => typedError<string, string>(__TAURI_INVOKE("spawn_coding_agent", { repo, task, agent })),
 	/**
+	 *  The local git repos the composer offers, so the user picks instead of typing.
+	 * 
+	 *  `async` + `spawn_blocking` like `commands::installed_apps`: the scan is a
+	 *  `read_dir` walk, and a non-async command runs on the main thread and would
+	 *  freeze the webview.
+	 */
+	listLocalRepos: () => typedError<LocalRepo[], string>(__TAURI_INVOKE("list_local_repos")),
+	/**
 	 *  Resolves the pending confirmation. Called by the panel's Cancel/Confirm
 	 *  buttons; `edits` carries any field the user filled in or corrected before
 	 *  approving, in the same flattened form the panel was given.
@@ -571,6 +579,15 @@ export type InstalledApp = {
 export type Key = "leftCommand" | "rightCommand" | "leftShift" | "rightShift" | "leftOption" | "rightOption" | "leftControl" | "rightControl" | 
 /**  macOS only; no Windows equivalent. */
 "fn" | "escape" | "space" | ({ char: string }) & { f?: never } | ({ f: number }) & { char?: never };
+
+/**
+ *  A local git repo the composer can offer, so the user picks instead of typing
+ *  a path. `name` is the folder; `path` is what `start_coding_agent` takes.
+ */
+export type LocalRepo = {
+	name: string,
+	path: string,
+};
 
 export type Macro = {
 	/**  The spoken phrase that triggers expansion, e.g. "my address". */

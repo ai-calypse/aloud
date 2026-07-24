@@ -37,6 +37,106 @@ impl Agent {
     }
 }
 
+/// A local git repo the composer can offer, so the user picks instead of typing
+/// a path. `name` is the folder; `path` is what `start_coding_agent` takes.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalRepo {
+    pub name: String,
+    pub path: String,
+}
+
+/// The default places to look for repos, under `$HOME`. Mirrors
+/// `selection::installed_apps`'s fixed-roots approach.
+///
+/// ponytail: a fixed list, not a setting. A configurable roots list is the
+/// upgrade path once someone keeps repos somewhere unusual; until then the
+/// composer's free-text field is the escape hatch for anything off this list.
+const REPO_ROOTS: &[&str] = &["Documents/Development", "dev", "Projects", "src", "code"];
+
+/// Every git repo found under [`REPO_ROOTS`], sorted by name, cached for the
+/// scan's lifetime. A repo is any directory holding a `.git` — the `origin/main`
+/// requirement is left to `create_worktree`, which surfaces git's own error
+/// rather than paying a `git` spawn per repo just to pre-filter the list.
+pub fn local_repos() -> Vec<LocalRepo> {
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, Vec<LocalRepo>)>> =
+        std::sync::Mutex::new(None);
+    const TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+    if let Ok(cache) = CACHE.lock() {
+        if let Some((at, repos)) = cache.as_ref() {
+            if at.elapsed() < TTL {
+                return repos.clone();
+            }
+        }
+    }
+    // Not holding the lock across the scan — two composers opening at once
+    // duplicate the walk rather than block each other, like `installed_apps`.
+    let repos = scan_repos();
+    if let Ok(mut cache) = CACHE.lock() {
+        *cache = Some((std::time::Instant::now(), repos.clone()));
+    }
+    repos
+}
+
+/// Resolves [`REPO_ROOTS`] against `$HOME` and walks them. Split from the walk
+/// so the walk is testable against a tempdir without touching the environment.
+fn scan_repos() -> Vec<LocalRepo> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    let home = PathBuf::from(home);
+    let roots: Vec<PathBuf> = REPO_ROOTS.iter().map(|r| home.join(r)).collect();
+    scan_roots(&roots)
+}
+
+/// Walks each root two levels deep (`<root>/<repo>` and `<root>/<group>/<repo>`,
+/// so `~/dev/foo` and `~/dev/work/foo` both land) collecting dirs with a `.git`.
+fn scan_roots(roots: &[PathBuf]) -> Vec<LocalRepo> {
+    let mut repos: Vec<LocalRepo> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue; // a root that does not exist is the normal case
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if path.join(".git").exists() {
+                push_repo(&mut repos, &mut seen, path);
+            } else {
+                // One more level: a group folder like `~/dev/work/`.
+                if let Ok(inner) = std::fs::read_dir(&path) {
+                    for child in inner.flatten() {
+                        let child = child.path();
+                        if child.is_dir() && child.join(".git").exists() {
+                            push_repo(&mut repos, &mut seen, child);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    repos.sort_by(|a, b| a.name.cmp(&b.name));
+    repos
+}
+
+/// Adds a repo once, keyed on its full path.
+fn push_repo(repos: &mut Vec<LocalRepo>, seen: &mut std::collections::HashSet<String>, path: PathBuf) {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+    let path_str = path.to_string_lossy().into_owned();
+    if seen.insert(path_str.clone()) {
+        repos.push(LocalRepo {
+            name: name.to_string(),
+            path: path_str,
+        });
+    }
+}
+
 /// Turns a spoken task into a branch-safe slug: lowercase, runs of anything
 /// outside `[a-z0-9]` collapsed to a single `-`, trimmed of leading/trailing
 /// `-`. This becomes the branch name, so a stray space or quote here is a git
@@ -266,5 +366,33 @@ mod tests {
     fn applescript_escape_closes_no_literal_early() {
         assert_eq!(applescript_escape(r#"say "hi""#), r#"say \"hi\""#);
         assert_eq!(applescript_escape(r"a\b"), r"a\\b");
+    }
+
+    /// The walk finds repos one and two levels down, skips non-repo dirs, and
+    /// de-dupes — the logic that would silently list the wrong thing.
+    #[test]
+    fn scan_roots_finds_repos_at_both_depths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let git = |p: &Path| std::fs::create_dir_all(p.join(".git")).unwrap();
+
+        git(&root.join("direct")); // <root>/direct        — depth 1
+        git(&root.join("work/nested")); // <root>/work/nested   — depth 2
+        std::fs::create_dir_all(root.join("plain/notes")).unwrap(); // no .git anywhere
+        // A repo that also contains a nested repo: only the outer one counts,
+        // the walk stops descending once it finds a `.git`.
+        git(&root.join("outer"));
+        git(&root.join("outer/inner"));
+
+        let mut names: Vec<String> = scan_roots(&[root]).into_iter().map(|r| r.name).collect();
+        names.sort();
+        assert_eq!(names, vec!["direct", "nested", "outer"]);
+    }
+
+    /// A root that does not exist is the normal case (most people have only one
+    /// of the default dev dirs), not an error.
+    #[test]
+    fn scan_roots_ignores_missing_roots() {
+        assert!(scan_roots(&[PathBuf::from("/nonexistent/xyz")]).is_empty());
     }
 }

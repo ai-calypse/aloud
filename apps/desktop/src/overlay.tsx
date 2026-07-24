@@ -23,6 +23,7 @@ import {
   type AgentSession,
   type Agent as CodingAgent,
   type ApprovalReply,
+  type LocalRepo,
   type OverlayStyle,
   type Phase,
 } from "./lib/bindings";
@@ -2925,6 +2926,10 @@ function CodingAgentComposer({
   // session still shows up (ps/lsof finds it) but its permission requests will
   // not route into Aloud's cards, so the composer says so rather than pretend.
   const [hooksInstalled, setHooksInstalled] = useState<boolean | null>(null);
+  // The scanned local repos, offered as a datalist so the field is a picker
+  // and a free-text escape hatch at once. `repo` holds either a picked name or
+  // a typed path; `resolveRepo` turns a name back into its path at submit.
+  const [repos, setRepos] = useState<LocalRepo[]>([]);
 
   useEffect(() => {
     void commands.agentHookStatus().then((res) => {
@@ -2932,7 +2937,18 @@ function CodingAgentComposer({
       // assume present" so the check never stands between the user and a spawn.
       setHooksInstalled(res.status === "ok" ? res.data.installed.length > 0 : true);
     });
+    void commands.listLocalRepos().then((res) => {
+      if (res.status === "ok") setRepos(res.data);
+    });
   }, []);
+
+  // A picked name maps back to its path; anything else is taken as a literal
+  // path (the free-text case, e.g. a repo outside the scanned roots).
+  // ponytail: two repos with the same folder name resolve to the first found;
+  // rare, and typing the full path in the same field disambiguates. Show the
+  // parent on collision if it bites.
+  const resolveRepo = (value: string) =>
+    repos.find((r) => r.name === value)?.path ?? value;
 
   const canStart = !busy && repo.trim() !== "" && task.trim() !== "";
 
@@ -2940,13 +2956,15 @@ function CodingAgentComposer({
     if (!canStart) return;
     setBusy(true);
     setError(null);
+    const path = resolveRepo(repo.trim());
     localStorage.setItem(LAST_REPO_KEY, repo.trim());
-    void commands.spawnCodingAgent(repo.trim(), task.trim(), agent).then((res) => {
+    void commands.spawnCodingAgent(path, task.trim(), agent).then((res) => {
       setBusy(false);
       if (res.status === "ok") setStarted(res.data);
       else setError(res.error);
     });
-  }, [canStart, repo, task, agent]);
+    // resolveRepo closes over `repos`; include it so a late scan is reflected.
+  }, [canStart, repo, task, agent, repos]);
 
   return (
     <Panel
@@ -2964,11 +2982,17 @@ function CodingAgentComposer({
         <div className="composer">
           <input
             className="ask__input"
-            placeholder="Repo path (e.g. ~/dev/my-app)"
+            list="coding-agent-repos"
+            placeholder={repos.length ? "Pick a repo, or type a path" : "Repo path (e.g. ~/dev/my-app)"}
             value={repo}
             disabled={busy}
             onChange={(e) => setRepo(e.target.value)}
           />
+          <datalist id="coding-agent-repos">
+            {repos.map((r) => (
+              <option key={r.path} value={r.name} />
+            ))}
+          </datalist>
           <input
             className="ask__input"
             placeholder="What should it do?"
