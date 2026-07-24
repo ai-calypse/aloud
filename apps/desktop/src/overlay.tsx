@@ -2917,23 +2917,23 @@ const LAST_REPO_KEY = "aloud.codingAgent.lastRepo";
  * list is part of the panel's measured content — `useNotchPanel` grows the box
  * to include it, so its clicks land inside and it stops closing the notch.
  */
-function Combobox({
-  value,
-  onChange,
-  options,
-  placeholder,
-  empty,
-  disabled,
-  allowCustom,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  options: string[];
-  placeholder: string;
-  empty: string;
-  disabled?: boolean;
-  allowCustom?: boolean;
-}) {
+const Combobox = React.forwardRef<
+  HTMLButtonElement,
+  {
+    value: string;
+    onChange: (value: string) => void;
+    options: string[];
+    placeholder: string;
+    empty: string;
+    disabled?: boolean;
+    allowCustom?: boolean;
+    /** Show a shimmer in the trigger instead of a value, while options load. */
+    loading?: boolean;
+  }
+>(function Combobox(
+  { value, onChange, options, placeholder, empty, disabled, allowCustom, loading },
+  triggerRef,
+) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -2946,15 +2946,20 @@ function Combobox({
   return (
     <div className="composer__combobox">
       <button
+        ref={triggerRef}
         className="composer__trigger"
         type="button"
         disabled={disabled}
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className={value ? undefined : "composer__trigger-placeholder"}>
-          {value || placeholder}
-        </span>
+        {loading ? (
+          <Shimmer as="span">Loading…</Shimmer>
+        ) : (
+          <span className={value ? undefined : "composer__trigger-placeholder"}>
+            {value || placeholder}
+          </span>
+        )}
         <ChevronsUpDownIcon className="composer__trigger-icon" />
       </button>
       {open ? (
@@ -2962,6 +2967,13 @@ function Combobox({
           className="composer__list"
           // Let a typed path through even when it matches nothing in the list.
           shouldFilter={!allowCustom || options.length > 0}
+          // Escape closes the list without closing the whole composer.
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setOpen(false);
+            }
+          }}
         >
           <CommandInput
             placeholder={placeholder}
@@ -2989,7 +3001,7 @@ function Combobox({
       ) : null}
     </div>
   );
-}
+});
 
 /**
  * What a blank tab holds: the composer for starting a coding agent. Pick a repo,
@@ -3028,6 +3040,8 @@ function CodingAgentComposer({
   // repo resolves; `loadingBranches` distinguishes "not fetched" from "none".
   const [branches, setBranches] = useState<string[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
+  // The repo trigger, focused on open so the flow starts on the keyboard.
+  const repoRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     void commands.agentHookStatus().then((res) => {
@@ -3036,6 +3050,8 @@ function CodingAgentComposer({
     void commands.listLocalRepos().then((res) => {
       if (res.status === "ok") setRepos(res.data);
     });
+    // DOM focus only — the overlay is already key (show_panel took focus).
+    repoRef.current?.focus();
   }, []);
 
   // A picked name maps back to its path; anything else is a literal path (the
@@ -3084,18 +3100,40 @@ function CodingAgentComposer({
     });
   }, [canStart, repoPath, repo, branch, task, agent]);
 
+  // "Start another" from the success state: keep the repo (you usually queue
+  // several in the same one), clear the task, land focus back on the task.
+  const startAnother = () => {
+    setStarted(null);
+    setTask("");
+    setError(null);
+  };
+
   return (
     <Panel title="New coding agent" bodyRef={bodyRef} onClose={onClose} onAddTab={onAddTab}>
       {started ? (
         <p className="ask__done">
           Started on <span className="ask__branch">{started}</span>. It will
-          appear under Agents in a moment.
+          appear under Agents in a moment.{" "}
+          <button className="composer__link" onClick={startAnother}>
+            Start another
+          </button>
         </p>
       ) : (
-        <div className="composer">
+        <div
+          className="composer"
+          // Cmd/Ctrl+Enter starts from anywhere in the composer, not just the
+          // Task field — the whole form is one submit.
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              go();
+            }
+          }}
+        >
           <div className="composer__field">
             <span className="composer__label">Repo</span>
             <Combobox
+              ref={repoRef}
               value={repo}
               onChange={setRepo}
               options={repos.map((r) => r.name)}
@@ -3116,8 +3154,9 @@ function CodingAgentComposer({
                 value={branch}
                 onChange={setBranch}
                 options={branches}
-                placeholder={loadingBranches ? "Loading…" : "Pick a branch"}
-                empty={loadingBranches ? "Loading…" : "No branches found"}
+                placeholder="Pick a branch"
+                empty="No branches found"
+                loading={loadingBranches}
                 disabled={busy || loadingBranches || branches.length === 0}
               />
             </div>
@@ -3136,7 +3175,17 @@ function CodingAgentComposer({
           </label>
 
           <div className="composer__row">
-            <div className="composer__agents" role="radiogroup" aria-label="Agent">
+            <div
+              className="composer__agents"
+              role="radiogroup"
+              aria-label="Agent"
+              // Arrow keys move between claude/codex, the radiogroup convention.
+              onKeyDown={(e) => {
+                if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                  setAgent((a) => (a === "claude" ? "codex" : "claude"));
+                }
+              }}
+            >
               {(["claude", "codex"] as const).map((option) => (
                 <button
                   key={option}
@@ -3144,6 +3193,8 @@ function CodingAgentComposer({
                   role="radio"
                   aria-checked={agent === option}
                   data-active={agent === option || undefined}
+                  // Only the selected radio is tab-focusable; arrows move within.
+                  tabIndex={agent === option ? 0 : -1}
                   disabled={busy}
                   onClick={() => setAgent(option)}
                 >
