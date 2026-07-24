@@ -189,6 +189,12 @@ export const commands = {
 	 *  The spawned process is a normal interactive session: the existing `ps`/`lsof`
 	 *  discovery finds it, and the globally-installed hooks fire for it, so no new
 	 *  tracking path is needed here — only the starting of it.
+	 * 
+	 *  `async` + `spawn_blocking` is load-bearing, not cosmetic: a sync command runs
+	 *  on Tauri's main thread, and the *first* spawn parks `osascript` on the macOS
+	 *  "allow Terminal control" dialog — which froze the whole webview (beachball)
+	 *  until the prompt was answered. Off the main thread, the UI stays live while
+	 *  the user decides.
 	 */
 	spawnCodingAgent: (repo: string, task: string, agent: Agent) => typedError<string, string>(__TAURI_INVOKE("spawn_coding_agent", { repo, task, agent })),
 	/**

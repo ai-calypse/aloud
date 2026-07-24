@@ -773,15 +773,25 @@ pub fn uninstall_agent_hooks() -> Result<HookStatus, String> {
 /// The spawned process is a normal interactive session: the existing `ps`/`lsof`
 /// discovery finds it, and the globally-installed hooks fire for it, so no new
 /// tracking path is needed here — only the starting of it.
+///
+/// `async` + `spawn_blocking` is load-bearing, not cosmetic: a sync command runs
+/// on Tauri's main thread, and the *first* spawn parks `osascript` on the macOS
+/// "allow Terminal control" dialog — which froze the whole webview (beachball)
+/// until the prompt was answered. Off the main thread, the UI stays live while
+/// the user decides.
 #[tauri::command]
 #[specta::specta]
-pub fn spawn_coding_agent(
+pub async fn spawn_coding_agent(
     repo: String,
     task: String,
     agent: aloud_agent_spawn::Agent,
 ) -> Result<String, String> {
-    aloud_agent_spawn::start_coding_agent(std::path::Path::new(&repo), &task, agent)
-        .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        aloud_agent_spawn::start_coding_agent(std::path::Path::new(&repo), &task, agent)
+    })
+    .await
+    .map_err(|e| format!("starting the coding agent: {e}"))?
+    .map_err(|e| e.to_string())
 }
 
 /// The local git repos the composer offers, so the user picks instead of typing.
