@@ -90,8 +90,18 @@ fn scan_repos() -> Vec<LocalRepo> {
     scan_roots(&roots)
 }
 
+/// Whether `dir` is a repo's main checkout — its `.git` is a *directory*.
+///
+/// A linked worktree's `.git` is a *file* (`gitdir: …`), and our own spawns
+/// create sibling worktrees like `<repo>-<branch>`. Requiring a `.git`
+/// directory drops those, so a worktree never shows up in the list as if it
+/// were a separate repo.
+fn is_repo_root(dir: &Path) -> bool {
+    dir.join(".git").is_dir()
+}
+
 /// Walks each root two levels deep (`<root>/<repo>` and `<root>/<group>/<repo>`,
-/// so `~/dev/foo` and `~/dev/work/foo` both land) collecting dirs with a `.git`.
+/// so `~/dev/foo` and `~/dev/work/foo` both land) collecting main checkouts.
 fn scan_roots(roots: &[PathBuf]) -> Vec<LocalRepo> {
     let mut repos: Vec<LocalRepo> = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -104,14 +114,14 @@ fn scan_roots(roots: &[PathBuf]) -> Vec<LocalRepo> {
             if !path.is_dir() {
                 continue;
             }
-            if path.join(".git").exists() {
+            if is_repo_root(&path) {
                 push_repo(&mut repos, &mut seen, path);
             } else {
                 // One more level: a group folder like `~/dev/work/`.
                 if let Ok(inner) = std::fs::read_dir(&path) {
                     for child in inner.flatten() {
                         let child = child.path();
-                        if child.is_dir() && child.join(".git").exists() {
+                        if child.is_dir() && is_repo_root(&child) {
                             push_repo(&mut repos, &mut seen, child);
                         }
                     }
@@ -386,6 +396,10 @@ mod tests {
         // the walk stops descending once it finds a `.git`.
         git(&root.join("outer"));
         git(&root.join("outer/inner"));
+        // A linked worktree: `.git` is a FILE, not a dir. It must NOT be listed
+        // as a repo — this is the `DynamicNotch-hello` pollution bug.
+        std::fs::create_dir_all(root.join("direct-wt")).unwrap();
+        std::fs::write(root.join("direct-wt/.git"), "gitdir: /somewhere\n").unwrap();
 
         let mut names: Vec<String> = scan_roots(&[root]).into_iter().map(|r| r.name).collect();
         names.sort();

@@ -469,6 +469,26 @@
   letter-spacing: 0.02em;
 }
 
+/* The composer's fields borrow the Settings feel — taller, softly rounded, a
+   blue ring on focus — but in the overlay's own dark tokens rather than the
+   Settings surface. Overrides `.ask__input`'s 28px pill for this context only,
+   so the shared Ask follow-up field is untouched. */
+.composer .ask__input {
+  height: 36px;
+  border-radius: 9px;
+  border-color: rgb(255 255 255 / 0.14);
+  background: rgb(255 255 255 / 0.05);
+  font-size: 13px;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.composer .ask__input:focus {
+  border-color: var(--sys-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sys-blue) 30%, transparent);
+}
+
 /* The branch row is inserted after the repo resolves. The panel grows to fit
    it (useNotchPanel's spring), and this fades + rises its own content in step
    so it emerges rather than snapping. Reduced-motion collapses the travel via
@@ -515,7 +535,7 @@
 
 .composer__agent {
   flex: 1;
-  height: 24px;
+  height: 30px;
   border: 0;
   border-radius: var(--radius-pill);
   background: transparent;
@@ -534,8 +554,8 @@
 
 .composer__go {
   flex: none;
-  height: 30px;
-  padding: 0 16px;
+  height: 36px;
+  padding: 0 18px;
   border: 0;
   border-radius: var(--radius-pill);
   background: var(--sys-blue);
@@ -544,7 +564,13 @@
   font-size: 13px;
   font-weight: 500;
   cursor: default;
-  transition: opacity var(--dur-fast) var(--ease-out);
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.composer__go:not(:disabled):hover {
+  background: color-mix(in srgb, var(--sys-blue) 88%, white);
 }
 
 .composer__go:disabled {
