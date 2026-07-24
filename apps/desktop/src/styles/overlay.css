@@ -444,14 +444,229 @@
   transform: scale(0.88);
 }
 
-/* What a new tab holds is undecided. The height is a floor, not a placeholder:
-   an empty body would collapse the panel back up through the cutout it grew
-   out of, which reads as the window closing rather than a tab opening. */
-.tab-blank {
-  height: 220px;
-  animation:
-    ask-rise var(--spring-pop-dur) var(--spring-pop) both,
-    ask-fade var(--dur-fast) var(--ease-out) both;
+/* A new tab holds the coding-agent composer, inside a `.ask` panel — so its
+   entrance, dark chrome and exit all come from `.ask`, and only the fields
+   below need their own layout. */
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* One labelled control. The label sits above its field, quiet, so the three
+   choices (repo, branch, task) read as a stack rather than a wall of inputs. */
+.composer__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.composer__label {
+  padding-left: 2px;
+  color: rgb(255 255 255 / 0.45);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* All three fields share ONE look — the Settings feel (taller, softly rounded,
+   blue ring on focus) in the overlay's own dark tokens. `.composer__input` (the
+   Task text field) and `.composer__trigger` (the Repo/Branch combobox buttons)
+   are the same box, so all three line up. Own classes, not `.ask__input`, so the
+   shared Ask follow-up field keeps its 28px pill. */
+.composer__input,
+.composer .composer__trigger {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  /* Only the trigger holds two children (value + chevron); space-between keeps
+     the chevron pinned right. Harmless on the single-child inputs. */
+  justify-content: space-between;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 9px;
+  background: rgb(255 255 255 / 0.05);
+  color: var(--pill-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  outline: none;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.composer__input::placeholder {
+  color: rgb(255 255 255 / 0.35);
+}
+
+.composer__input:focus,
+.composer .composer__trigger:focus-visible {
+  border-color: var(--sys-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sys-blue) 30%, transparent);
+}
+
+.composer__input:disabled {
+  opacity: 0.5;
+}
+
+.composer .composer__trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The combobox trigger's parts: a muted placeholder when nothing is picked, and
+   the up/down chevron pinned right (space-between on the shared rule places it). */
+.composer__trigger-placeholder {
+  color: rgb(255 255 255 / 0.35);
+}
+
+.composer__trigger-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-left: 8px;
+  opacity: 0.5;
+}
+
+/* The open search list, rendered inline (not a portal) so it lives inside the
+   panel's measured content and its clicks land in the notch's clickable box —
+   a body portal fell outside it and dismissed the notch. In flow, so opening it
+   grows the panel rather than floating over the fields below. */
+.composer__combobox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.composer__list {
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 9px;
+  background: var(--card-solid);
+  overflow: hidden;
+  animation: composer-reveal var(--dur-fast) var(--ease-out) both;
+}
+
+/* cmdk's input gets the field's own height and a divider under it. */
+.composer__list [data-slot="command-input-wrapper"] {
+  height: 34px;
+}
+
+/* The "Use '<typed>'" affordance when a repo path matches nothing in the list —
+   the free-text escape hatch, as a row rather than a dead end. */
+.composer__use-typed {
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: var(--sys-blue);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: default;
+}
+
+/* The branch row is inserted after the repo resolves. The panel grows to fit
+   it (useNotchPanel's spring), and this fades + rises its own content in step
+   so it emerges rather than snapping. Reduced-motion collapses the travel via
+   motion.css's global switch. Only the branch field, not every trigger. */
+.composer__field--branch {
+  animation: composer-reveal var(--spring-pop-dur) var(--spring-pop) both;
+}
+
+@keyframes composer-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.composer__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+/* The claude/codex choice: a two-segment pill, matching the input's surface. */
+.composer__agents {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 0.06);
+}
+
+.composer__agent {
+  flex: 1;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: rgb(255 255 255 / 0.55);
+  font: inherit;
+  font-size: 12px;
+  text-transform: capitalize;
+  cursor: default;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.composer__agent[data-active] {
+  background: rgb(255 255 255 / 0.14);
+  color: var(--pill-ink);
+}
+
+.composer__go {
+  flex: none;
+  height: 36px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--sys-blue);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: default;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.composer__go:not(:disabled):hover {
+  background: color-mix(in srgb, var(--sys-blue) 88%, white);
+}
+
+.composer__go:disabled {
+  opacity: 0.4;
+}
+
+.composer__hint {
+  margin: 0;
+  color: rgb(255 255 255 / 0.5);
+  font-size: 12px;
+}
+
+.composer__link {
+  border: 0;
+  background: none;
+  color: var(--sys-blue);
+  font: inherit;
+  font-size: 12px;
+  cursor: default;
+}
+
+.ask__done {
+  margin: 0;
+  color: var(--pill-ink);
+}
+
+.ask__branch {
+  font-family: ui-monospace, monospace;
+  color: var(--sys-blue);
 }
 
 .ask {
@@ -2069,7 +2284,7 @@
 /* The answer must be gone before the panel collapses over it — the collapse
    clips its contents, and a paragraph sliced off line by line reads as the
    window being killed. Faster than the collapse for that reason. */
-.overlay-root[data-exiting] :is(.ask > *, .tabs, .tab-blank) {
+.overlay-root[data-exiting] :is(.ask > *, .tabs) {
   animation: ask-out var(--dur-fast) var(--ease-in) both;
   animation-delay: 0ms;
 }

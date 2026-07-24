@@ -1,0 +1,15 @@
+[package]
+name = "aloud-agent-spawn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Creating a git worktree off main and opening a coding agent in it"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+specta.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

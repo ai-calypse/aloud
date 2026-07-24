@@ -766,6 +766,60 @@ pub fn uninstall_agent_hooks() -> Result<HookStatus, String> {
     agent_hook_status()
 }
 
+/// Cuts a worktree off `origin/main` in `repo` and opens `agent` on `task` in a
+/// Terminal tab there. Returns the new branch name so the panel can show it
+/// without waiting on the discovery poll that will surface the session itself.
+///
+/// The spawned process is a normal interactive session: the existing `ps`/`lsof`
+/// discovery finds it, and the globally-installed hooks fire for it, so no new
+/// tracking path is needed here — only the starting of it.
+///
+/// `async` + `spawn_blocking` is load-bearing, not cosmetic: a sync command runs
+/// on Tauri's main thread, and the *first* spawn parks `osascript` on the macOS
+/// "allow Terminal control" dialog — which froze the whole webview (beachball)
+/// until the prompt was answered. Off the main thread, the UI stays live while
+/// the user decides.
+#[tauri::command]
+#[specta::specta]
+pub async fn spawn_coding_agent(
+    repo: String,
+    branch: String,
+    task: String,
+    agent: aloud_agent_spawn::Agent,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        aloud_agent_spawn::start_coding_agent(std::path::Path::new(&repo), &branch, &task, agent)
+    })
+    .await
+    .map_err(|e| format!("starting the coding agent: {e}"))?
+    .map_err(|e| e.to_string())
+}
+
+/// The local branches in `repo`, for the composer's branch dropdown. `async` +
+/// `spawn_blocking` like the others: it shells out to `git`.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_repo_branches(repo: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        aloud_agent_spawn::branches(std::path::Path::new(&repo))
+    })
+    .await
+    .map_err(|e| format!("listing branches: {e}"))
+}
+
+/// The local git repos the composer offers, so the user picks instead of typing.
+///
+/// `async` + `spawn_blocking` like `commands::installed_apps`: the scan is a
+/// `read_dir` walk, and a non-async command runs on the main thread and would
+/// freeze the webview.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_local_repos() -> Result<Vec<aloud_agent_spawn::LocalRepo>, String> {
+    tauri::async_runtime::spawn_blocking(aloud_agent_spawn::local_repos)
+        .await
+        .map_err(|e| format!("listing local repos: {e}"))
+}
+
 /// Writes the config, pretty-printed, via a temp file in the same directory.
 ///
 /// A partial write here is another tool's config destroyed, so the rename is

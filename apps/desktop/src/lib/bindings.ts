@@ -182,6 +182,35 @@ export const commands = {
 	 */
 	resolvePermission: (id: string, reply: ApprovalReply) => __TAURI_INVOKE<void>("resolve_permission", { id, reply }),
 	/**
+	 *  Cuts a worktree off `origin/main` in `repo` and opens `agent` on `task` in a
+	 *  Terminal tab there. Returns the new branch name so the panel can show it
+	 *  without waiting on the discovery poll that will surface the session itself.
+	 * 
+	 *  The spawned process is a normal interactive session: the existing `ps`/`lsof`
+	 *  discovery finds it, and the globally-installed hooks fire for it, so no new
+	 *  tracking path is needed here — only the starting of it.
+	 * 
+	 *  `async` + `spawn_blocking` is load-bearing, not cosmetic: a sync command runs
+	 *  on Tauri's main thread, and the *first* spawn parks `osascript` on the macOS
+	 *  "allow Terminal control" dialog — which froze the whole webview (beachball)
+	 *  until the prompt was answered. Off the main thread, the UI stays live while
+	 *  the user decides.
+	 */
+	spawnCodingAgent: (repo: string, branch: string, task: string, agent: Agent) => typedError<string, string>(__TAURI_INVOKE("spawn_coding_agent", { repo, branch, task, agent })),
+	/**
+	 *  The local git repos the composer offers, so the user picks instead of typing.
+	 * 
+	 *  `async` + `spawn_blocking` like `commands::installed_apps`: the scan is a
+	 *  `read_dir` walk, and a non-async command runs on the main thread and would
+	 *  freeze the webview.
+	 */
+	listLocalRepos: () => typedError<LocalRepo[], string>(__TAURI_INVOKE("list_local_repos")),
+	/**
+	 *  The local branches in `repo`, for the composer's branch dropdown. `async` +
+	 *  `spawn_blocking` like the others: it shells out to `git`.
+	 */
+	listRepoBranches: (repo: string) => typedError<string[], string>(__TAURI_INVOKE("list_repo_branches", { repo })),
+	/**
 	 *  Resolves the pending confirmation. Called by the panel's Cancel/Confirm
 	 *  buttons; `edits` carries any field the user filled in or corrected before
 	 *  approving, in the same flattened form the panel was given.
@@ -217,6 +246,12 @@ export const events = {
 };
 
 /* Types */
+/**
+ *  Which CLI to open in the worktree. Serde/specta so this is the one type the
+ *  Tauri command and its TS binding use — no parallel enum to keep in sync.
+ */
+export type Agent = "claude" | "codex";
+
 /**
  *  Streamed to the agent panel. Names follow the AG-UI protocol's tool-call
  *  lifecycle (https://docs.ag-ui.com) so the shape maps onto AI Elements' tool
@@ -555,6 +590,15 @@ export type InstalledApp = {
 export type Key = "leftCommand" | "rightCommand" | "leftShift" | "rightShift" | "leftOption" | "rightOption" | "leftControl" | "rightControl" | 
 /**  macOS only; no Windows equivalent. */
 "fn" | "escape" | "space" | ({ char: string }) & { f?: never } | ({ f: number }) & { char?: never };
+
+/**
+ *  A local git repo the composer can offer, so the user picks instead of typing
+ *  a path. `name` is the folder; `path` is what `start_coding_agent` takes.
+ */
+export type LocalRepo = {
+	name: string,
+	path: string,
+};
 
 export type Macro = {
 	/**  The spoken phrase that triggers expansion, e.g. "my address". */
