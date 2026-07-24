@@ -36,11 +36,6 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { ChevronsUpDownIcon } from "lucide-react";
 import {
   groupSteps,
@@ -2909,11 +2904,18 @@ function AgentRun({
 const LAST_REPO_KEY = "aloud.codingAgent.lastRepo";
 
 /**
- * A searchable dropdown for the composer — one Popover + cmdk list, shared by
+ * A searchable dropdown for the composer — a trigger plus a cmdk list, shared by
  * the Repo and Branch fields. The trigger wears the composer's field look
  * (`composer__trigger`); the list dark-renders for free through the overlay's
  * floating tokens. `allowCustom` lets Repo accept a typed path that isn't in
  * the list (a repo outside the scanned roots); Branch leaves it off.
+ *
+ * The open list renders **inline**, not in a Radix Popover portal. The overlay
+ * is a click-through window whose clickable region is exactly the panel box the
+ * webview reports; a portal to `document.body` lands *outside* that box, so
+ * every click on it fell through and dismissed the notch. Rendered inline, the
+ * list is part of the panel's measured content — `useNotchPanel` grows the box
+ * to include it, so its clicks land inside and it stops closing the notch.
  */
 function Combobox({
   value,
@@ -2942,20 +2944,22 @@ function Combobox({
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
+    <div className="composer__combobox">
+      <button
         className="composer__trigger"
-        disabled={disabled}
-        // A button, so it doesn't submit the composer's implicit form.
         type="button"
+        disabled={disabled}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
       >
         <span className={value ? undefined : "composer__trigger-placeholder"}>
           {value || placeholder}
         </span>
         <ChevronsUpDownIcon className="composer__trigger-icon" />
-      </PopoverTrigger>
-      <PopoverContent className="composer__popover" align="start">
+      </button>
+      {open ? (
         <Command
+          className="composer__list"
           // Let a typed path through even when it matches nothing in the list.
           shouldFilter={!allowCustom || options.length > 0}
         >
@@ -2963,6 +2967,7 @@ function Combobox({
             placeholder={placeholder}
             value={query}
             onValueChange={setQuery}
+            autoFocus
           />
           <CommandList>
             <CommandEmpty>
@@ -2981,8 +2986,8 @@ function Combobox({
             ))}
           </CommandList>
         </Command>
-      </PopoverContent>
-    </Popover>
+      ) : null}
+    </div>
   );
 }
 

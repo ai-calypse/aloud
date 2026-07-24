@@ -531,14 +531,27 @@
   opacity: 0.5;
 }
 
-/* The search dropdown. Width tracks the trigger so it reads as the same control
-   opening; the dark surface and text come from the overlay's popover tokens
-   (the same ones the shadcn Select content uses). Padding 0 because the cmdk
-   input and list bring their own. */
-.composer__popover {
-  width: var(--radix-popover-trigger-width);
-  padding: 0;
+/* The open search list, rendered inline (not a portal) so it lives inside the
+   panel's measured content and its clicks land in the notch's clickable box —
+   a body portal fell outside it and dismissed the notch. In flow, so opening it
+   grows the panel rather than floating over the fields below. */
+.composer__combobox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.composer__list {
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 9px;
+  background: var(--card-solid);
   overflow: hidden;
+  animation: composer-reveal var(--dur-fast) var(--ease-out) both;
+}
+
+/* cmdk's input gets the field's own height and a divider under it. */
+.composer__list [data-slot="command-input-wrapper"] {
+  height: 34px;
 }
 
 /* The "Use '<typed>'" affordance when a repo path matches nothing in the list —
