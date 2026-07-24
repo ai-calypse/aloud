@@ -76,6 +76,13 @@ const LABEL: Record<Phase, string> = {
 const ERROR_CHARS = 90;
 
 /**
+ * The user's prompt can be a whole paragraph; capped so it never fills the
+ * notch. The full text is on the `<p>`'s title, and the detail view a click
+ * opens is where the rest lives.
+ */
+const PROMPT_CHARS = 140;
+
+/**
  * Bars in the listening wave. With the per-bar delay in overlay.css this sets
  * how much of a wave fits across the row — change one, move the other.
  */
@@ -2552,9 +2559,15 @@ function AgentDetailBody({
       </div>
       {session.cwd && <p className="agent-detail__cwd">{session.cwd}</p>}
       {session.prompt ? (
-        <p className="agent-detail__prompt">You: {session.prompt}</p>
+        <p className="agent-detail__prompt" title={session.prompt}>
+          You: {truncate(session.prompt, PROMPT_CHARS)}
+        </p>
       ) : (
-        session.title && <p className="agent-detail__prompt">{session.title}</p>
+        session.title && (
+          <p className="agent-detail__prompt" title={session.title}>
+            {truncate(session.title, PROMPT_CHARS)}
+          </p>
+        )
       )}
 
       {/* The card for this exact agent — the whole point of the detail view. */}
