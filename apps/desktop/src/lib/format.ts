@@ -28,6 +28,53 @@ export function timeAgo(iso: string, now = Date.now()): string {
   return `${Math.floor(seconds / 3600)}h`;
 }
 
+/** `$1.23` — a session cost estimate. Sub-cent rounds up to `$0.01`, so a real
+ *  (if tiny) cost never displays as free. */
+export function formatCost(usd: number): string {
+  return `$${Math.max(usd, 0.005).toFixed(2)}`;
+}
+
+/** A token count abbreviated with the right unit: `999`, `2k`, `308M`, `2.6B`.
+ *  The old `k`-only form rendered 308 million as an unreadable `308393k`. */
+export function abbreviateCount(n: number): string {
+  if (n >= 1e9) return `${round1(n / 1e9)}B`;
+  if (n >= 1e6) return `${round1(n / 1e6)}M`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)}k`;
+  return `${n}`;
+}
+
+/** Trim a trailing `.0` so `2.0M` reads as `2M`. */
+function round1(n: number): string {
+  return (Math.round(n * 10) / 10).toString();
+}
+
+/**
+ * `2k in · 308M cache · 542k out` — input, cache-read, output token totals,
+ * labelled in words instead of arrows so the line reads without a legend.
+ * Cache-read is kept separate (a distinct, cheaper cost) and dropped entirely
+ * when zero.
+ */
+export function tokenSummary(input: number, cacheRead: number, output: number): string {
+  const parts = [`${abbreviateCount(input)} in`];
+  if (cacheRead > 0) parts.push(`${abbreviateCount(cacheRead)} cache`);
+  parts.push(`${abbreviateCount(output)} out`);
+  return parts.join(" · ");
+}
+
+/**
+ * How long until a future ISO-8601 timestamp, for a "resets in …" label:
+ * `<1m`, then `5m`, then `2h`, then `3d`. The mirror of {@link timeAgo}, facing
+ * forward. `now` is a parameter so the maths is testable.
+ */
+export function resetsIn(iso: string, now = Date.now()): string {
+  const seconds = Math.floor((Date.parse(iso) - now) / 1000);
+  if (Number.isNaN(seconds)) return "";
+  if (seconds < 60) return "<1m";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86400)}d`;
+}
+
 /**
  * A meeting's running length: `mm:ss` under an hour, `h:mm:ss` over it.
  * Meetings routinely run past both, unlike a dictation.

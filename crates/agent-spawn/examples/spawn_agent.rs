@@ -22,7 +22,10 @@ fn main() -> anyhow::Result<()> {
     let task: String = args.collect::<Vec<_>>().join(" ");
     anyhow::ensure!(!task.is_empty(), "give a task to run");
 
-    println!("branches: {:?}", aloud_agent_spawn::branches(Path::new(&repo)));
+    println!(
+        "branches: {:?}",
+        aloud_agent_spawn::branches(Path::new(&repo))
+    );
 
     let branch = aloud_agent_spawn::start_coding_agent(
         Path::new(&repo),

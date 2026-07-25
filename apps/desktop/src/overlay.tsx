@@ -21,7 +21,11 @@ import {
   events,
   type AgentPermission,
   type AgentSession,
+  type AgentTranscript,
+  type AgentTranscriptEntry,
   type Agent as CodingAgent,
+  type Quota,
+  type QuotaWindow,
   type ApprovalReply,
   type LocalRepo,
   type OverlayStyle,
@@ -53,7 +57,7 @@ import {
   labelFor,
   type ToolArgs,
 } from "./lib/tool-views";
-import { diffLines, diffStat } from "./lib/diff";
+import { diffLines } from "./lib/diff";
 import {
   agentStage,
   agentHue,
@@ -64,7 +68,7 @@ import {
   type AgentStage,
 } from "./lib/agent-stage";
 import { notchPath } from "./lib/notch-shape";
-import { timeAgo } from "./lib/format";
+import { formatCost, resetsIn, timeAgo, tokenSummary } from "./lib/format";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import { createSpring } from "./lib/spring";
 import { CatSettingsProvider, useCatSettings } from "./lib/cat-settings";
@@ -630,6 +634,7 @@ function Overlay() {
           cwd: "/Users/y/dev/aloud-tauri",
           questions: [],
           open: true,
+          danger: true,
         })),
       );
       // Mirrors what a real arrival does — open and drill.
@@ -653,6 +658,7 @@ function Overlay() {
           },
           cwd: "/Users/y/dev/aloud-tauri",
           open: true,
+          danger: false,
           questions: [],
         },
       ]);
@@ -670,6 +676,7 @@ function Overlay() {
           input: {},
           cwd: "/Users/y/dev/aloud-tauri",
           open: true,
+          danger: false,
           questions: [
             {
               question: "Which auth method should the API use?",
@@ -2134,6 +2141,35 @@ const HEADLINE_ARG: Record<string, string> = {
   Grep: "pattern",
 };
 
+/** The file name from a path — a card wants the leaf, not the full path. */
+function baseName(path: string): string {
+  return path.split(/[/\\]/).pop() || path;
+}
+
+/**
+ * A plain-words verb phrase for the header: `run a command`, `edit overlay.tsx`.
+ * `object` is the file name where a tool acts on a file — shown after the bold
+ * action so the header reads as a sentence.
+ */
+function APPROVAL_VERB(
+  tool: string,
+  headline: string | undefined,
+): { action: string; object?: string } {
+  switch (tool) {
+    case "Bash":
+      return { action: "run a command" };
+    case "Edit":
+    case "NotebookEdit":
+      return { action: "edit", object: headline ? baseName(headline) : "a file" };
+    case "Write":
+      return { action: "write", object: headline ? baseName(headline) : "a file" };
+    case "Read":
+      return { action: "read", object: headline ? baseName(headline) : "a file" };
+    default:
+      return { action: `use ${tool}` };
+  }
+}
+
 /**
  * The Approve / Deny card. The agent is blocked on this — the socket thread in
  * `sessions.rs` is parked until `onResolve` sends the answer back.
@@ -2212,62 +2248,54 @@ function ApprovalCard({
     return () => window.removeEventListener("keydown", onKey, true);
   }, [request.id, onResolve, denying]);
 
+  // Danger is judged in Rust (where the command is parsed) and rides the wire.
+  const danger = request.danger;
+  // A verb phrase in plain words — "run a command", "edit overlay.tsx" — so the
+  // header reads at a glance instead of naming the raw tool.
+  const verb = APPROVAL_VERB(request.tool, headline);
+
   return (
-    <div className="perm">
-      <div className="perm__head">
-        <span className="perm__agent">{AGENT_NAME[request.agent] ?? request.agent}</span>
-        <span className="perm__wants">wants to run</span>
-        {queued > 0 && <span className="perm__queue">+{queued} more</span>}
-      </div>
-
-      <div className="perm__call">
-        <span className="perm__tool">{request.tool}</span>
-        {headline && <code className="perm__headline">{headline}</code>}
-        {change && <span className="perm__stat">{diffStat(change)}</span>}
-      </div>
-
-      {change && (
-        <div className="diff">
-          {change.map((line, i) => (
-            <div className="diff__line" data-kind={line.kind} key={i}>
-              <span className="diff__sign" aria-hidden>
-                {line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
-              </span>
-              {/* `|| " "` keeps an empty line at line height. */}
-              {line.text || " "}
-            </div>
-          ))}
+    <div className="perm" data-danger={danger || undefined}>
+      <span className="perm__rule" aria-hidden />
+      <div className="perm__inner">
+        <div className="perm__head">
+          <span className="perm__verb">
+            Wants to <b>{verb.action}</b>
+            {verb.object && <> {verb.object}</>}
+          </span>
+          {queued > 0 && <span className="perm__queue">+{queued}</span>}
+          <span className="perm__who">{AGENT_NAME[request.agent] ?? request.agent}</span>
         </div>
-      )}
 
-      {rest.length > 0 && (
-        <dl className="perm__args">
-          {rest.map(([key, value]) => (
-            <div className="perm__arg" key={key}>
-              <dt>{key}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-
-      {request.cwd && <p className="perm__cwd">{request.cwd}</p>}
-
-      <div className="perm__options">
-        <button
-          className="perm__option perm__option--yes"
-          onClick={() => onResolve(request.id, { kind: "allowOnce" })}
-        >
-          Yes
-        </button>
-        {request.tool && (
-          <button
-            className="perm__option"
-            onClick={() => onResolve(request.id, { kind: "allowAlways" })}
-          >
-            Yes, don't ask again for {request.tool} this session
-          </button>
+        {/* An edit shows its diff; anything else shows the exact target. */}
+        {change ? (
+          <div className="diff">
+            {change.map((line, i) => (
+              <div className="diff__line" data-kind={line.kind} key={i}>
+                <span className="diff__sign" aria-hidden>
+                  {line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
+                </span>
+                {line.text || " "}
+              </div>
+            ))}
+          </div>
+        ) : (
+          headline && <code className="perm__target">{headline}</code>
         )}
+
+        {rest.length > 0 && (
+          <dl className="perm__args">
+            {rest.map(([key, value]) => (
+              <div className="perm__arg" key={key}>
+                <dt>{key}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+
+        {request.cwd && !change && <p className="perm__path">{request.cwd}</p>}
+
         {denying ? (
           <form
             className="perm__deny-form"
@@ -2283,14 +2311,30 @@ function ApprovalCard({
               onChange={(e) => setMessage(e.target.value)}
               placeholder="Tell Claude what to do differently…"
             />
-            <button className="perm__option perm__option--no" type="submit">
+            <button className="btn btn--deny" type="submit">
               Send
             </button>
           </form>
         ) : (
-          <button className="perm__option perm__option--no" onClick={() => setDenying(true)}>
-            No, and tell Claude what to do differently (esc)
-          </button>
+          <div className="perm__acts">
+            <button
+              className="btn btn--allow"
+              onClick={() => onResolve(request.id, { kind: "allowOnce" })}
+            >
+              Allow <span className="btn__k">⏎</span>
+            </button>
+            {request.tool && (
+              <button
+                className="btn btn--always"
+                onClick={() => onResolve(request.id, { kind: "allowAlways" })}
+              >
+                Always allow {request.tool}
+              </button>
+            )}
+            <button className="btn btn--deny" onClick={() => setDenying(true)}>
+              Deny <span className="btn__k">esc</span>
+            </button>
+          </div>
         )}
       </div>
     </div>
@@ -2379,13 +2423,17 @@ function QuestionCard({
 
   return (
     <div className="perm">
-      <div className="perm__head">
-        <span className="perm__agent">{AGENT_NAME[request.agent] ?? request.agent}</span>
-        <span className="perm__wants">has a question</span>
-        {queued > 0 && <span className="perm__queue">+{queued} more</span>}
-      </div>
+      <span className="perm__rule" aria-hidden />
+      <div className="perm__inner">
+        <div className="perm__head">
+          <span className="perm__verb">
+            Claude has a <b>question</b>
+          </span>
+          {queued > 0 && <span className="perm__queue">+{queued}</span>}
+          <span className="perm__who">{AGENT_NAME[request.agent] ?? request.agent}</span>
+        </div>
 
-      {request.questions.map((question, index) => (
+        {request.questions.map((question, index) => (
         <div className="q" key={index}>
           <span className="q__header">{question.header}</span>
           <p className="q__text">{question.question}</p>
@@ -2435,15 +2483,16 @@ function QuestionCard({
         </div>
       ))}
 
-      {/* Tap-to-answer needs no button — except when "Other" is picked and
-          there is typed text to send. */}
-      {(!tapSubmits || (picked[0] ?? []).includes(OTHER)) && (
-        <div className="perm__options">
-          <button className="perm__option perm__option--yes" disabled={!complete} onClick={submit}>
-            Answer
-          </button>
-        </div>
-      )}
+        {/* Tap-to-answer needs no button — except when "Other" is picked and
+            there is typed text to send. */}
+        {(!tapSubmits || (picked[0] ?? []).includes(OTHER)) && (
+          <div className="perm__acts">
+            <button className="btn btn--allow" disabled={!complete} onClick={submit}>
+              Answer
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2573,6 +2622,111 @@ function AgentRow({
 
 /**
  * The agent sessions, once the notch has been clicked open. Each row drills
+ * The plan-quota dashboard: Claude's rolling usage limits as labeled bars.
+ * Reads the Keychain token + usage API through `agent_quota`, polling on an
+ * interval. Silent on error (not signed in / token expired) except for a quiet
+ * one-line note — a broken quota read must not shout over the agent list.
+ */
+const QUOTA_POLL_MS = 60_000;
+
+function QuotaDashboard() {
+  const [quota, setQuota] = useState<Quota | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Opt-in: reading the token prompts for Keychain access, so nothing fetches
+  // until the user asks. `on` also gates polling — an errored read must not loop
+  // the prompt, so a failure turns polling back off.
+  const [on, setOn] = useState(false);
+
+  useEffect(() => {
+    if (!on) return;
+    let live = true;
+    const load = () =>
+      void commands.agentQuota().then((res) => {
+        if (!live) return;
+        if (res.status === "ok") {
+          setQuota(res.data);
+          setError(null);
+        } else {
+          setError(res.error);
+          setOn(false); // stop polling so a rejected token can't re-prompt in a loop
+        }
+      });
+    load();
+    const timer = setInterval(load, QUOTA_POLL_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [on]);
+
+  // Idle: a quiet button, no fetch, no prompt until asked.
+  if (!on && !quota) {
+    return (
+      <div className="quota">
+        <button className="quota__toggle" onClick={() => setOn(true)}>
+          Show plan usage
+        </button>
+        {error && <p className="quota__note">{error}</p>}
+      </div>
+    );
+  }
+
+  const windows: [string, QuotaWindow | null][] = quota
+    ? [
+        ["5-hour", quota.fiveHour],
+        ["Week", quota.sevenDay],
+        ["Week · Opus", quota.sevenDayOpus],
+      ]
+    : [];
+  const shown = windows.filter(([, w]) => w != null);
+
+  return (
+    <div className="quota">
+      {shown.length > 0 ? (
+        <>
+          {shown.map(([label, w]) => (
+            <QuotaBar key={label} label={label} window={w!} />
+          ))}
+          {quota?.extraUsagePercent != null && quota.extraUsagePercent > 0 && (
+            <div className="quota__extra">
+              Extra usage · {Math.round(quota.extraUsagePercent)}%
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="quota__note">{error ?? "No usage data"}</p>
+      )}
+    </div>
+  );
+}
+
+/** One rolling limit: a label, a fill bar tinted by how full, % and reset. */
+function QuotaBar({ label, window: w }: { label: string; window: QuotaWindow }) {
+  const pct = Math.min(100, Math.max(0, w.percent ?? 0));
+  // Green under half, amber approaching, red near the cap — a shape a glance reads.
+  const level = pct >= 90 ? "high" : pct >= 70 ? "mid" : "low";
+  return (
+    <div className="quota__row">
+      <div className="quota__head">
+        <span className="quota__label">{label}</span>
+        <span className="quota__figures">
+          <span className="quota__pct" data-level={level}>
+            {Math.round(pct)}%
+          </span>
+          {w.resetsAt && (
+            <span className="quota__reset">· resets in {resetsIn(w.resetsAt)}</span>
+          )}
+        </span>
+      </div>
+      <div className="quota__track">
+        <div className="quota__fill" data-level={level} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The list of running agents. Each row summarises one agent; clicking it drills
  * into a live detail view; a row whose agent is asking permission is flagged.
  */
 function AgentList({
@@ -2593,6 +2747,7 @@ function AgentList({
   const askingIds = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
   return (
     <Panel title="Agents" onClose={onClose}>
+      <QuotaDashboard />
       {sessions.length === 0 ? (
         <p className="agents-empty">No agents running</p>
       ) : (
@@ -2681,6 +2836,26 @@ function AgentDetailBody({
 }) {
   const state = rowState(session);
   const stage = agentStage(session, permission !== null);
+
+  // The transcript backs both the usage line (in the meta) and the thread list.
+  // Only the clicked-in detail (onBack) reads it; the hover peek stays compact.
+  const [transcript, setTranscript] = useState<AgentTranscript | null>(null);
+  const [transcriptError, setTranscriptError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!onBack) return;
+    setTranscript(null);
+    setTranscriptError(null);
+    let live = true;
+    void commands.readAgentTranscript(session.id).then((res) => {
+      if (!live) return;
+      if (res.status === "ok") setTranscript(res.data);
+      else setTranscriptError(res.error);
+    });
+    return () => {
+      live = false;
+    };
+  }, [onBack, session.id]);
+
   return (
     <div className="agent-detail">
       {onBack && (
@@ -2688,14 +2863,45 @@ function AgentDetailBody({
           ‹ All agents
         </button>
       )}
-      {/* The same stage avatar as the list, so the detail view matches. */}
+      {/* The same stage avatar as the list, so the detail view matches. The
+          live state sits right here beside it — a small dot + word — instead of
+          taking its own row below. */}
       <div className="agent-detail__meta">
         <StageAvatar session={session} stage={stage} state={state} onPeek={onPeek} />
-        <span className="agent-detail__tag" data-state={state}>
-          {rowTag(session)}
-        </span>
+        <div className="agent-detail__id">
+          <span className="agent-detail__tag" data-state={state}>
+            {rowTag(session)}
+          </span>
+          <span className="agent-detail__state" data-state={state}>
+            <span className="agent-detail__state-dot" aria-hidden />
+            {session.tool ?? (session.busy ? "thinking…" : "idle")}
+          </span>
+        </div>
       </div>
-      {session.cwd && <p className="agent-detail__cwd">{session.cwd}</p>}
+      {/* Folder + usage share a line below the header, so big token counts
+          don't crowd the model tag. Just the folder name, not the full path —
+          the leaf is what identifies the session. */}
+      {(session.cwd || (transcript && transcript.entries.length > 0)) && (
+        <div className="agent-detail__subline">
+          {session.cwd && (
+            <span className="agent-detail__cwd" title={session.cwd}>
+              {baseName(session.cwd)}
+            </span>
+          )}
+          {transcript && transcript.entries.length > 0 && (
+            <span className="agent-detail__usage">
+              {transcript.costUsd != null && transcript.costUsd > 0 && (
+                <span className="agent-detail__cost">{formatCost(transcript.costUsd)}</span>
+              )}
+              {tokenSummary(
+                transcript.inputTokens,
+                transcript.cacheReadTokens,
+                transcript.outputTokens,
+              )}
+            </span>
+          )}
+        </div>
+      )}
       {session.prompt ? (
         <p className="agent-detail__prompt" title={session.prompt}>
           You: {truncate(session.prompt, PROMPT_CHARS)}
@@ -2713,13 +2919,9 @@ function AgentDetailBody({
         <PermissionCard request={permission} queued={0} onResolve={onResolve} />
       )}
 
-      {/* What it is doing right now, live. */}
-      <div className="agent-detail__now">
-        <span className="agent-detail__label">Now</span>
-        <span className="agent-detail__tool" data-idle={!session.tool || undefined}>
-          {session.tool ?? (session.busy ? "thinking…" : "idle")}
-        </span>
-      </div>
+      {/* The full thread — only in the clicked-in detail. Usage now lives up in
+          the meta line; this is just the collapsible conversation. */}
+      {onBack && <AgentTranscriptView data={transcript} error={transcriptError} />}
 
       {session.subagents.length > 0 && (
         <div className="agent-detail__subs">
@@ -2742,6 +2944,126 @@ function AgentDetailBody({
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The session's thread as one interleaved stream: your prompts, Claude's
+ * messages (markdown), and tool calls in the order they happened, newest at the
+ * bottom. Always shown — the `.jsonl` read is already lazy (on detail open), and
+ * the parser caps at the last 20 entries so this stays a recent-activity window.
+ */
+/**
+ * The activity view — deliberately spare. Not the whole thread: Claude's
+ * *latest* message, and a short list of the *recent* tool calls as ticks. The
+ * full transcript is one glance's worth of "what's it saying + what did it just
+ * do", not an archive to scroll.
+ */
+function AgentTranscriptView({
+  data,
+  error,
+}: {
+  data: AgentTranscript | null;
+  error: string | null;
+}) {
+  if (error) {
+    return <p className="agent-detail__transcript-empty">{error}</p>;
+  }
+  if (!data) {
+    return <p className="agent-detail__transcript-empty">Reading…</p>;
+  }
+  if (data.entries.length === 0) {
+    return <p className="agent-detail__transcript-empty">No activity yet.</p>;
+  }
+
+  // The last assistant message, without copying the array (findLast needs a
+  // newer TS lib target than the project uses).
+  let latest: AgentTranscriptEntry | undefined;
+  for (let i = data.entries.length - 1; i >= 0; i--) {
+    if (data.entries[i].kind === "assistant") {
+      latest = data.entries[i];
+      break;
+    }
+  }
+  const ticks = toolTicks(data.entries);
+
+  return (
+    <div
+      className="activity"
+      // Keep the newest content in view as it updates — the box scrolls
+      // internally, so the panel (and the notch) never resizes.
+      ref={(el) => {
+        if (!el) return;
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            el.scrollTop = el.scrollHeight;
+          }),
+        );
+      }}
+    >
+      {latest && <AssistantRow text={latest.text} />}
+      {ticks.length > 0 && (
+        <ul className="ticks">
+          {ticks.map((tick, i) => (
+            <li className="tick" data-error={tick.isError || undefined} key={i}>
+              <span className="tick__mark" aria-hidden>
+                {tick.isError ? "✗" : "✓"}
+              </span>
+              <span className="tick__text" title={tick.title}>
+                {tick.text}
+              </span>
+              {tick.count > 1 && <span className="tick__count">×{tick.count}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** One collapsed line of tool activity. */
+type Tick = { text: string; tool: string | null; count: number; isError: boolean; title: string };
+
+/** The recent tool calls, most-recent last, collapsed hierarchically: a run of
+ *  the same tool folds into one tick with a count, so a burst of reads reads as
+ *  "Read ×5", not five lines. Grouped on the structured `tool` field, not by
+ *  re-parsing the rendered prose. A single call keeps its full prose ("Reading
+ *  x.rs"); a folded run shows the tool name. Capped to the last few. */
+function toolTicks(entries: AgentTranscriptEntry[], max = 6): Tick[] {
+  const tools = entries.filter((e) => e.kind === "toolUse");
+  const ticks: Tick[] = [];
+  for (const t of tools) {
+    const last = ticks[ticks.length - 1];
+    if (last && !t.isError && !last.isError && t.tool != null && last.tool === t.tool) {
+      // Fold into the run: the tool name stands in for the individual targets,
+      // and the count (rendered separately) says how many.
+      last.count += 1;
+      last.text = t.tool;
+      last.title = `${last.title}\n${t.result ?? t.text}`;
+    } else {
+      ticks.push({
+        text: t.text,
+        tool: t.tool,
+        count: 1,
+        isError: t.isError,
+        title: t.result ?? t.text,
+      });
+    }
+  }
+  return ticks.slice(-max);
+}
+
+/**
+ * Claude's latest message, as markdown. No clamp or "Show more" — the activity
+ * box is a fixed-height scroll area, so a long message just scrolls in place
+ * rather than growing the panel (which would re-animate the notch). Plain: no
+ * per-message measuring, which was itself a source of height jitter.
+ */
+function AssistantRow({ text }: { text: string }) {
+  return (
+    <div className="msg">
+      <MessageResponse>{text}</MessageResponse>
     </div>
   );
 }

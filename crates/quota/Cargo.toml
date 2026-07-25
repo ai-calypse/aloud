@@ -1,0 +1,28 @@
+[package]
+name = "aloud-quota"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Claude plan-quota usage, read from the Keychain token and the OAuth usage API"
+
+[dependencies]
+anyhow.workspace = true
+# rustls (not native-tls) so TLS behaves identically on macOS and Windows —
+# matching aloud-llm.
+reqwest = { version = "0.13", default-features = false, features = [
+  "json",
+  "rustls",
+] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["time"] }
+tracing.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The Claude Code OAuth token lives in the login Keychain under the
+# "Claude Code-credentials" generic-password item — the same one notchi reads.
+security-framework = "3"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

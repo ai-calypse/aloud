@@ -5,6 +5,7 @@ mod meeting;
 mod notch;
 mod overlay;
 mod pipeline;
+mod quota;
 mod sessions;
 mod sound;
 mod tray;
@@ -132,6 +133,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sessions::spawn_coding_agent,
             sessions::list_local_repos,
             sessions::list_repo_branches,
+            sessions::read_agent_transcript,
+            quota::agent_quota,
             agent::confirm_agent,
             agent::answer_agent,
             agent::close_agent,

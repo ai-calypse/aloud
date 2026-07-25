@@ -52,6 +52,7 @@ dependencies = [
  "aloud-notes",
  "aloud-paste",
  "aloud-permissions",
+ "aloud-quota",
  "aloud-selection",
  "aloud-sessions",
  "aloud-store",
@@ -216,6 +217,20 @@ dependencies = [
  "anyhow",
  "serde",
  "specta",
+]
+
+[[package]]
+name = "aloud-quota"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "security-framework",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
