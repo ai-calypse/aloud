@@ -679,11 +679,27 @@ pub async fn read_agent_transcript(app: AppHandle, id: String) -> Result<AgentTr
         .map_err(|e| e.to_string())
 }
 
-/// One line describing a running tool, for a narrow row.
+/// One line of prose for the running tool — "Running: git status", "Editing
+/// x.rs" — not the raw `Bash: <full command>`. Matches the transcript's tick
+/// phrasing; paths show just their leaf.
 fn describe(tool: &aloud_sessions::Tool) -> String {
-    match &tool.detail {
-        Some(detail) => format!("{}: {detail}", tool.name),
-        None => tool.name.clone(),
+    let name = tool.name.as_str();
+    let Some(detail) = tool.detail.as_deref() else {
+        return name.to_string();
+    };
+    let leaf = || detail.rsplit(['/', '\\']).next().unwrap_or(detail);
+    match name {
+        "Read" => format!("Reading {}", leaf()),
+        "Write" => format!("Writing {}", leaf()),
+        "Edit" | "NotebookEdit" => format!("Editing {}", leaf()),
+        "Bash" | "BashOutput" => format!("Running: {detail}"),
+        "Grep" => format!("Searching: {detail}"),
+        "Glob" => format!("Finding: {detail}"),
+        "WebFetch" => format!("Fetching {detail}"),
+        "WebSearch" => format!("Searching the web: {detail}"),
+        "Task" | "Agent" => detail.to_string(),
+        "Skill" => format!("Skill: {detail}"),
+        _ => format!("{name}: {detail}"),
     }
 }
 
