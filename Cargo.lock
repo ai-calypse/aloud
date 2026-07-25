@@ -49,6 +49,7 @@ dependencies = [
  "aloud-hotkey",
  "aloud-llm",
  "aloud-meeting",
+ "aloud-native",
  "aloud-notes",
  "aloud-paste",
  "aloud-permissions",
@@ -86,6 +87,7 @@ name = "aloud-agent"
 version = "0.1.0"
 dependencies = [
  "aloud-llm",
+ "aloud-native",
  "aloud-store",
  "anyhow",
  "chrono",
@@ -183,6 +185,19 @@ dependencies = [
  "anyhow",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "aloud-native"
+version = "0.1.0"
+dependencies = [
+ "aloud-selection",
+ "anyhow",
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

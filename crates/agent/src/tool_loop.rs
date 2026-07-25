@@ -603,15 +603,21 @@ where
                 r#"{"error":"user declined this action"}"#.to_string()
             } else {
                 let span = tracing::info_span!(
-                    "composio_exec",
+                    "tool_exec",
                     tool = %name,
                     toolkit,
                     ok = tracing::field::Empty
                 );
-                let result = composio
-                    .execute(&name, &args)
-                    .instrument(span.clone())
-                    .await;
+                // Native macOS tools are ours; a Composio slug is not, so
+                // `aloud_native::execute` returns None and we fall through. This
+                // is the whole second execution path — one branch, because the
+                // gate, dedup, and budgets above all key off the tool name.
+                // osascript blocks, so it runs on a blocking thread rather than
+                // stalling the runtime.
+                let result = match run_native(&name, &args).instrument(span.clone()).await {
+                    Some(native) => native,
+                    None => composio.execute(&name, &args).instrument(span.clone()).await,
+                };
                 let success = tool_succeeded(&result);
                 span.record("ok", success);
                 any_failed |= !success;
@@ -630,6 +636,26 @@ where
     }
 
     anyhow::bail!("reached the tool-round limit without an answer")
+}
+
+/// Runs a native macOS tool, returning `Some(json_string)` in the same shape
+/// Composio's `execute` produces — or `None` when the name is not a native
+/// tool, the fall-through signal. osascript blocks, so it runs on a blocking
+/// thread; a permission denial comes back as a readable `{"error":…}` the model
+/// can relay rather than an `Err` that kills the run.
+async fn run_native(name: &str, args: &serde_json::Value) -> Option<String> {
+    let name = name.to_string();
+    let args = args.clone();
+    // spawn_blocking so the osascript subprocess wait does not stall the
+    // executor. The JoinError case (a panic in the closure) is reported as a
+    // native tool result, not a fall-through — the name *was* ours.
+    let outcome = tokio::task::spawn_blocking(move || aloud_native::execute(&name, &args))
+        .await
+        .unwrap_or_else(|e| Some(Err(aloud_native::ScriptError::Failed(e.to_string()))))?;
+    Some(match outcome {
+        Ok(value) => value.to_string(),
+        Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+    })
 }
 
 /// Whether a tool needs confirmation. Fail-safe: only an explicit

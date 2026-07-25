@@ -910,6 +910,68 @@
   background: color-mix(in srgb, var(--sys-blue) 85%, white);
 }
 
+/* The Finder search result grid — Option 1, a dense 4-up thumbnail wall. Sits
+   in a step body, so it inherits the panel's black ground; no card chrome, the
+   same rule the confirm gate follows. The panel measures its own new height
+   from useNotchPanel, so the grid only owns the fade of its own tiles. */
+.finder-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  margin-left: 22px; /* aligns under the step label, past the icon gutter */
+  margin-top: 2px;
+}
+
+.finder-tile {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 0.06);
+  cursor: default;
+  /* Staggered per tile from an inline --i, so the wall assembles rather than
+     flashing in as a block. Blur-in is the materialize keyframe: sells the
+     thumbnails as one thing arriving, and hides sub-pixel scaling of the PNG. */
+  animation: materialize var(--spring-dur) var(--spring) both;
+  animation-delay: calc(var(--i, 0) * 22ms);
+}
+
+.finder-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* A hit with no Quick Look preview (rare — a corrupt file, an odd type). The
+   name still tells the user what matched, so the tile is not dead. */
+.finder-tile__name {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  font-size: 9px;
+  line-height: 1.2;
+  text-align: center;
+  color: rgb(255 255 255 / 0.5);
+  overflow: hidden;
+}
+
+.finder-tile:hover {
+  outline: 2px solid var(--sys-blue);
+  outline-offset: -2px;
+}
+
+/* The count line above the grid — "12 images". Quiet, it is a caption. */
+.finder-grid__count {
+  margin: 4px 0 0 22px;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.4);
+  font-variant-numeric: tabular-nums;
+}
+
 /* The last tool that ran — a "where is it up to" that survives the step list
    being scrolled out of view. */
 .agent__trail {

@@ -41,7 +41,7 @@ export type Editable = {
 };
 
 /** A string field, or "" when absent or not a string. */
-function text(args: ToolArgs, key: string): string {
+export function text(args: ToolArgs, key: string): string {
   const value = args[key];
   return typeof value === "string" ? value : "";
 }
@@ -269,6 +269,110 @@ const VIEWS: Record<string, ToolView> = {
         }),
       },
     ],
+  },
+
+  // Native macOS actions (aloud-native). Registered for real labels; the
+  // fall-through would render "Aloud: music play" and hide what actually runs.
+  ALOUD_MUSIC_PLAY: {
+    label: (a) => {
+      const q = text(a, "query");
+      return q ? `Playing ${q}` : "Resuming Music";
+    },
+  },
+  ALOUD_MUSIC_PAUSE: { label: () => "Pausing Music" },
+  ALOUD_MUSIC_NEXT: { label: () => "Skipping to the next track" },
+  ALOUD_MUSIC_NOW_PLAYING: { label: () => "Checking what's playing" },
+  ALOUD_REMINDERS_ADD: {
+    label: (a) => {
+      const t = text(a, "text");
+      return t ? `Adding a reminder: ${t}` : "Adding a reminder";
+    },
+  },
+  ALOUD_NOTES_APPEND: {
+    label: (a) => {
+      const title = text(a, "title");
+      return title ? `Adding a line to "${title}"` : "Appending to a note";
+    },
+    body: (a) => {
+      const line = text(a, "text");
+      return line ? (
+        <ToolCard>
+          <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
+            {line}
+          </p>
+        </ToolCard>
+      ) : null;
+    },
+  },
+  // The one with real blast radius. Same treatment GMAIL_SEND_EMAIL got after
+  // the wrong-recipient bug: the gate shows the FULL handle, never abbreviated,
+  // and the recipient is editable so a name that resolved to nothing — or to the
+  // wrong person — is fixable before it sends.
+  ALOUD_MESSAGES_SEND: {
+    label: (a) => {
+      const to = text(a, "to");
+      return to ? `Messaging ${to}` : "Sending a message";
+    },
+    body: (a) => {
+      const to = text(a, "to");
+      const msg = text(a, "text");
+      return (
+        <ToolCard>
+          {to ? (
+            <p className="m-0 break-all text-ui text-muted-foreground">
+              To: <span className="text-ink">{to}</span>
+            </p>
+          ) : (
+            <p className="m-0 text-ui italic text-warning">
+              No recipient — cancel and ask again.
+            </p>
+          )}
+          {msg ? (
+            <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
+              {msg}
+            </p>
+          ) : (
+            <p className="m-0 text-ui italic text-warning">
+              No message — cancel and ask again.
+            </p>
+          )}
+        </ToolCard>
+      );
+    },
+    edits: [
+      {
+        key: "to",
+        label: "To",
+        placeholder: "+1 555 123 4567 or email",
+        get: (a) => text(a, "to"),
+        set: (args, value) => ({ ...args, to: value }),
+      },
+    ],
+  },
+  ALOUD_FINDER_SEARCH: {
+    // The grid renders the results; this is just the step label above it.
+    label: (a) => {
+      const q = text(a, "query");
+      return q ? `Searching your Mac for "${q}"` : "Searching your Mac";
+    },
+  },
+  ALOUD_FINDER_REVEAL: {
+    label: (a) => {
+      const path = text(a, "path");
+      return path ? `Revealing ${path.split("/").pop() || path}` : "Revealing in Finder";
+    },
+  },
+  ALOUD_SYSTEM_VOLUME: {
+    label: (a) => {
+      const level = a["level"];
+      return typeof level === "number" ? `Setting volume to ${level}` : "Setting the volume";
+    },
+  },
+  ALOUD_RUN_SHORTCUT: {
+    label: (a) => {
+      const name = text(a, "name");
+      return name ? `Running "${name}"` : "Running a shortcut";
+    },
   },
 };
 

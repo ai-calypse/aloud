@@ -30,6 +30,17 @@ export const commands = {
 	 */
 	installedApps: () => typedError<InstalledApp[], string>(__TAURI_INVOKE("installed_apps")),
 	/**
+	 *  Runs a Spotlight search and renders a thumbnail per hit. `kind` is "image",
+	 *  "document", or "any". Blocking (process spawns per thumbnail), so async +
+	 *  spawn_blocking like `installed_apps`.
+	 */
+	finderSearch: (query: string, kind: string) => typedError<FinderResults, string>(__TAURI_INVOKE("finder_search", { query, kind })),
+	/**
+	 *  Reveals a path in Finder — the grid's click target. Thin wrapper over the
+	 *  native tool so the panel does not re-implement the AppleScript.
+	 */
+	finderReveal: (path: string) => typedError<null, string>(__TAURI_INVOKE("finder_reveal", { path })),
+	/**
 	 *  Whether the OS lets us listen for keys. False on macOS until the user
 	 *  grants Accessibility permission.
 	 */
@@ -606,6 +617,30 @@ export type Entry = {
 	 *  The transcript outlives the WAV, so this is often null.
 	 */
 	audioPath: string | null,
+};
+
+/**
+ *  A Finder search's results for the panel grid. The model runs the search tool
+ *  itself (and speaks the count); this command is what the panel calls with the
+ *  same query to draw thumbnails — so the two views stay in step without
+ *  piping the tool payload back through the loop.
+ */
+export type FinderResults = {
+	query: string,
+	/**  Total matches found, which may exceed `files.len()` when truncated. */
+	count: number,
+	files: FoundFile[],
+};
+
+/**
+ *  One file the notch grid draws for a Finder search: its path, display name,
+ *  and a Quick Look thumbnail if one could be rendered.
+ */
+export type FoundFile = {
+	path: string,
+	name: string,
+	/**  A `data:image/png;base64,…` preview, or None when Quick Look has none. */
+	thumbnail: string | null,
 };
 
 /**

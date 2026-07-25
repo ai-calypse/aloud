@@ -98,6 +98,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::test_prompt,
             commands::input_devices,
             commands::installed_apps,
+            commands::finder_search,
+            commands::finder_reveal,
             commands::hotkeys_permitted,
             commands::permissions,
             commands::open_permission_settings,

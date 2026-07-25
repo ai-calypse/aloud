@@ -22,6 +22,7 @@ aloud-agent = { path = "../../../crates/agent" }
 aloud-agent-spawn = { path = "../../../crates/agent-spawn" }
 aloud-audio = { path = "../../../crates/audio" }
 aloud-meeting = { path = "../../../crates/meeting" }
+aloud-native = { path = "../../../crates/native" }
 aloud-hotkey = { path = "../../../crates/hotkey" }
 aloud-llm = { path = "../../../crates/llm" }
 aloud-notes = { path = "../../../crates/notes" }

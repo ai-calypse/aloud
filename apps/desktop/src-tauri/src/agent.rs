@@ -177,13 +177,29 @@ async fn execute(
 
     // A Composio round-trip on every command, before the model is even asked —
     // invisible in any per-tool timing, so it gets its own span.
-    let tools = composio
+    let mut tools = composio
         .available_tools(transcript)
         .instrument(tracing::info_span!(
             "tool_discovery",
             count = tracing::field::Empty
         ))
         .await?;
+
+    // The local half: native macOS actions for apps that are installed, the
+    // same ToolDef shape so the loop dispatches them with one branch. Composio
+    // may be unconnected and native tools still make the command runnable, so
+    // the "nothing to do" bail moves below the concat.
+    let installed = aloud_selection::installed_apps();
+    tools.extend(aloud_native::tools(&installed).into_iter().map(|t| {
+        aloud_agent::ToolDef {
+            name: t.name,
+            toolkit: "macOS".to_string(),
+            description: t.description,
+            parameters: t.parameters,
+            read_only: t.read_only,
+        }
+    }));
+
     tracing::Span::current().record("tool_count", tools.len());
     if tools.is_empty() {
         bail!("No app is connected in Composio yet");
