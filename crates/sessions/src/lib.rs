@@ -24,6 +24,7 @@
 pub mod discovery;
 pub mod install;
 pub mod scan;
+pub mod transcript;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -456,6 +457,24 @@ impl SessionStore {
     /// showing both would be showing the same conversation twice.
     pub fn sessions(&self) -> Vec<Session> {
         self.sessions_at(SystemTime::now())
+    }
+
+    /// The transcript path for one session id, resolved directly against the two
+    /// source maps. Cheaper than [`sessions`] for a single lookup: no row list
+    /// built, no sort, no dedup fold — the caller wants one field, not the table.
+    /// Matches an agent's own session id first, then the `pid:<n>` fallback the
+    /// row list would have assigned.
+    pub fn transcript_for(&self, id: &str) -> Option<PathBuf> {
+        if let Some(hooked) = self.hooked.get(id) {
+            if let Some(path) = &hooked.transcript {
+                return Some(path.clone());
+            }
+        }
+        self.live.values().find_map(|tracked| {
+            let s = &tracked.session;
+            let matches = s.session_id.as_deref() == Some(id) || format!("pid:{}", s.pid) == id;
+            matches.then(|| s.transcript.clone()).flatten()
+        })
     }
 
     /// The rows as of `now` — factored out so tests can drive the clock that

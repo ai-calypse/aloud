@@ -211,6 +211,24 @@ export const commands = {
 	 */
 	listRepoBranches: (repo: string) => typedError<string[], string>(__TAURI_INVOKE("list_repo_branches", { repo })),
 	/**
+	 *  Reads a session's full transcript on demand — the ordered thread, tool
+	 *  calls and results, and token totals the row never shows. Lazy by design: the
+	 *  poll holds no transcript in memory, so this reads the `.jsonl` fresh when the
+	 *  user opens the session.
+	 * 
+	 *  `async` + `spawn_blocking`: it is file I/O (a transcript reaches hundreds of
+	 *  MB), which has no business on the webview's main thread.
+	 */
+	readAgentTranscript: (id: string) => typedError<AgentTranscript, string>(__TAURI_INVOKE("read_agent_transcript", { id })),
+	/**
+	 *  Read the Claude Code token from the Keychain and fetch current usage.
+	 * 
+	 *  The webview polls this. The first Keychain read may raise a macOS access
+	 *  prompt — that's the OS's, and expected. An `Err` string is shown as-is in
+	 *  the dashboard's empty state (e.g. "not signed in", "token expired").
+	 */
+	agentQuota: () => typedError<Quota, string>(__TAURI_INVOKE("agent_quota")),
+	/**
 	 *  Resolves the pending confirmation. Called by the panel's Cancel/Confirm
 	 *  buttons; `edits` carries any field the user filled in or corrected before
 	 *  approving, in the same flattened form the panel was given.
@@ -312,6 +330,12 @@ export type AgentPermission = {
 	 *  cannot disagree. Off: the card queues quietly behind the hover.
 	 */
 	open: boolean,
+	/**
+	 *  The command is destructive (deletes data, forces state) and the card
+	 *  should warn in red. Judged here, where the command is already in hand —
+	 *  a heuristic nudge, not a security boundary; the full command still shows.
+	 */
+	danger: boolean,
 };
 
 /**  A request has been answered or the agent gave up on it; the card comes down. */
@@ -387,6 +411,40 @@ export type AgentSubagent = {
 	model: string | null,
 	tool: string | null,
 	busy: boolean,
+};
+
+/**
+ *  A session's full transcript, read on demand. The crate's plain
+ *  [`aloud_sessions::transcript::Transcript`] flattened for the webview — same
+ *  crate-logic / src-tauri-wire split as `AgentSession`.
+ */
+export type AgentTranscript = {
+	entries: AgentTranscriptEntry[],
+	/**
+	 *  Token totals across the session — only in the transcript, never a hook.
+	 *  `u32`: specta forbids 64-bit ints on the wire, and counts fit.
+	 */
+	inputTokens: number,
+	outputTokens: number,
+	cacheReadTokens: number,
+	/**  Estimated session cost in USD, `0.0` when no priced model was seen. */
+	costUsd: number | null,
+};
+
+/**
+ *  One transcript entry, flattened. `kind` is a string the webview switches on
+ *  ("user" | "assistant" | "toolUse"). A tool call carries its folded `result`.
+ */
+export type AgentTranscriptEntry = {
+	kind: string,
+	tool: string | null,
+	text: string,
+	/**
+	 *  A tool call's outcome, folded onto the same entry. `None` for messages
+	 *  or a still-running call.
+	 */
+	result: string | null,
+	isError: boolean,
 };
 
 /**  One per-app override. */
@@ -724,6 +782,25 @@ export type PlannedCall = {
 export type Question = {
 	question: string,
 	options: string[],
+};
+
+/**  The whole quota, as the dashboard shows it. */
+export type Quota = {
+	fiveHour: QuotaWindow | null,
+	sevenDay: QuotaWindow | null,
+	sevenDayOpus: QuotaWindow | null,
+	extraUsagePercent: number | null,
+};
+
+/**  One rolling limit window, flattened for the webview. */
+export type QuotaWindow = {
+	/**  0–100. */
+	percent: number | null,
+	/**
+	 *  ISO-8601 reset time; the webview renders the countdown so it ticks
+	 *  without a refetch.
+	 */
+	resetsAt: string | null,
 };
 
 export type SearchResult = {

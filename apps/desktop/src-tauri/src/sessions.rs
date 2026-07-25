@@ -68,6 +68,64 @@ pub struct AgentSubagent {
 #[tauri_specta(event_name = "agent-sessions")]
 pub struct AgentSessions(pub Vec<AgentSession>);
 
+/// A session's full transcript, read on demand. The crate's plain
+/// [`aloud_sessions::transcript::Transcript`] flattened for the webview — same
+/// crate-logic / src-tauri-wire split as `AgentSession`.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTranscript {
+    pub entries: Vec<AgentTranscriptEntry>,
+    /// Token totals across the session — only in the transcript, never a hook.
+    /// `u32`: specta forbids 64-bit ints on the wire, and counts fit.
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub cache_read_tokens: u32,
+    /// Estimated session cost in USD, `0.0` when no priced model was seen.
+    pub cost_usd: f64,
+}
+
+/// One transcript entry, flattened. `kind` is a string the webview switches on
+/// ("user" | "assistant" | "toolUse"). A tool call carries its folded `result`.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTranscriptEntry {
+    pub kind: String,
+    pub tool: Option<String>,
+    pub text: String,
+    /// A tool call's outcome, folded onto the same entry. `None` for messages
+    /// or a still-running call.
+    pub result: Option<String>,
+    pub is_error: bool,
+}
+
+impl From<aloud_sessions::transcript::Transcript> for AgentTranscript {
+    fn from(t: aloud_sessions::transcript::Transcript) -> Self {
+        use aloud_sessions::transcript::Kind;
+        AgentTranscript {
+            entries: t
+                .entries
+                .into_iter()
+                .map(|e| AgentTranscriptEntry {
+                    kind: match e.kind {
+                        Kind::User => "user",
+                        Kind::Assistant => "assistant",
+                        Kind::ToolUse => "toolUse",
+                    }
+                    .to_string(),
+                    tool: e.tool,
+                    text: e.text,
+                    result: e.result,
+                    is_error: e.is_error,
+                })
+                .collect(),
+            input_tokens: t.input_tokens,
+            output_tokens: t.output_tokens,
+            cache_read_tokens: t.cache_read_tokens,
+            cost_usd: t.cost_usd,
+        }
+    }
+}
+
 /// One request awaiting an Approve / Deny. The notch opens itself on this and
 /// draws a card. Keyed by **session id** — the `PermissionRequest` payload
 /// carries no `tool_use_id`, and the agent blocks its turn on the request, so
@@ -95,6 +153,10 @@ pub struct AgentPermission {
     /// permissions" setting, decided here so the webview and the window
     /// cannot disagree. Off: the card queues quietly behind the hover.
     pub open: bool,
+    /// The command is destructive (deletes data, forces state) and the card
+    /// should warn in red. Judged here, where the command is already in hand —
+    /// a heuristic nudge, not a security boundary; the full command still shows.
+    pub danger: bool,
 }
 
 /// One question on a card, mirroring the CLI's own prompt.
@@ -374,6 +436,8 @@ fn await_decision(
 
     // The card. `tool_input` is arbitrary JSON; flatten it to strings the way
     // the sessions do, keeping the real Value out of the binding.
+    let input = flatten_args(event.tool_input.as_ref());
+    let danger = input.get("command").is_some_and(|c| is_dangerous(c));
     let card = AgentPermission {
         id: id.clone(),
         session_id: Some(id.clone()),
@@ -383,7 +447,7 @@ fn await_decision(
         }
         .to_string(),
         tool: event.tool_name.clone().unwrap_or_default(),
-        input: flatten_args(event.tool_input.as_ref()),
+        input,
         cwd: event.cwd.clone(),
         questions: event
             .questions()
@@ -403,6 +467,7 @@ fn await_decision(
             })
             .collect(),
         open,
+        danger,
     };
     if let Err(e) = card.emit(app) {
         tracing::warn!(%e, "could not send permission card");
@@ -492,6 +557,34 @@ fn hook_gone(stream: &std::os::unix::net::UnixStream) -> bool {
     gone
 }
 
+/// Whether a shell command is destructive enough to warrant the card's red
+/// warning — deletes data or forces state. A small, readable set of shapes;
+/// anything else stays the calm amber so the colour keeps its meaning. A
+/// heuristic nudge, not a security boundary: the full command is shown either
+/// way, and this only decides whether the card pauses the eye.
+///
+/// Plain string matching, no `regex` dependency: the patterns are simple enough
+/// that a word/substring scan reads clearer than a crate.
+fn is_dangerous(command: &str) -> bool {
+    let c = command.to_ascii_lowercase();
+    // `rm` with a recursive/force flag.
+    let rm_forced = c.contains("rm ")
+        && c.split_whitespace()
+            .any(|w| w.starts_with('-') && (w.contains('r') || w.contains('f')));
+    rm_forced
+        || (c.contains("git push") && (c.contains("--force") || c.contains(" -f")))
+        || c.contains("git reset --hard")
+        || (c.contains("git clean") && c.contains("-f"))
+        || c.contains("drop table")
+        || c.contains("drop database")
+        || c.contains("truncate table")
+        || c.contains("mkfs")
+        || c.split_whitespace().next() == Some("dd")
+        || c.contains("chmod -r")
+        // Classic fork bomb `:(){ :|:& };:`
+        || c.replace(' ', "").contains(":(){")
+}
+
 /// Flattens `tool_input` to display strings — specta will not export a
 /// `serde_json::Value`, and the card only needs it readable, not round-tripped.
 fn flatten_args(input: Option<&serde_json::Value>) -> std::collections::BTreeMap<String, String> {
@@ -555,6 +648,35 @@ pub fn resolve_permission(app: AppHandle, id: String, reply: ApprovalReply) {
             }
         }
     }
+}
+
+/// Reads a session's full transcript on demand — the ordered thread, tool
+/// calls and results, and token totals the row never shows. Lazy by design: the
+/// poll holds no transcript in memory, so this reads the `.jsonl` fresh when the
+/// user opens the session.
+///
+/// `async` + `spawn_blocking`: it is file I/O (a transcript reaches hundreds of
+/// MB), which has no business on the webview's main thread.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_agent_transcript(app: AppHandle, id: String) -> Result<AgentTranscript, String> {
+    let state = app.state::<Arc<Agents>>();
+    // Resolve id → transcript path under the lock, then drop it before the read:
+    // the poll must not block on a big file. A direct lookup, not the full row
+    // list — we want one path, not the sorted/folded table.
+    let path = {
+        let store = state.store.lock().map_err(|_| "session store poisoned")?;
+        store.transcript_for(&id)
+    };
+    let Some(path) = path else {
+        return Err("no transcript for this session".to_string());
+    };
+
+    tauri::async_runtime::spawn_blocking(move || aloud_sessions::transcript::read(&path))
+        .await
+        .map_err(|e| format!("reading transcript: {e}"))?
+        .map(AgentTranscript::from)
+        .map_err(|e| e.to_string())
 }
 
 /// One line describing a running tool, for a narrow row.
@@ -833,4 +955,29 @@ fn write_settings(path: &std::path::Path, value: &serde_json::Value) -> anyhow::
     std::fs::write(&temp, format!("{}\n", serde_json::to_string_pretty(value)?))?;
     std::fs::rename(&temp, path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_dangerous;
+
+    #[test]
+    fn flags_destructive_commands() {
+        assert!(is_dangerous("rm -rf target/"));
+        assert!(is_dangerous("rm -f file"));
+        assert!(is_dangerous("git push --force"));
+        assert!(is_dangerous("git reset --hard HEAD~1"));
+        assert!(is_dangerous("DROP TABLE users"));
+        assert!(is_dangerous("dd if=/dev/zero of=/dev/sda"));
+        assert!(is_dangerous(":(){ :|:& };:"));
+    }
+
+    #[test]
+    fn leaves_safe_commands_alone() {
+        assert!(!is_dangerous("ls -la"));
+        assert!(!is_dangerous("git status"));
+        assert!(!is_dangerous("cargo test"));
+        assert!(!is_dangerous("rm file.txt")); // no -r/-f flag
+        assert!(!is_dangerous("git push origin main"));
+    }
 }

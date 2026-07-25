@@ -1155,63 +1155,90 @@
  * the body over everything else while one is pending. The agent is blocked on
  * the socket the whole time this is up.
  */
+/* ── Permission card ──
+   The one moment Claude is blocked on you. Restraint: no glow, no candy
+   buttons. A single 2px rule states the mood; red appears only when the command
+   is destructive. */
 .perm {
+  min-width: 380px;
+  max-width: 440px;
+  border-radius: 13px;
+  overflow: hidden;
+  background: var(--card-solid, #232325);
+  border: 1px solid var(--sep, rgb(255 255 255 / 0.1));
+  box-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.6);
+  animation: peek-in var(--dur-fast) var(--ease-out) both;
+}
+
+/* State as one hairline along the top — quiet, unmistakable. */
+.perm__rule {
+  display: block;
+  height: 2px;
+  background: var(--warning, #fbbf24);
+}
+
+.perm[data-danger] .perm__rule {
+  background: var(--sys-red, #ff453a);
+}
+
+.perm__inner {
+  padding: 13px 15px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-width: 400px;
-  max-width: 460px;
-  padding: 14px 16px 12px;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace;
-  animation: peek-in var(--dur-fast) var(--ease-out) both;
+  gap: 11px;
 }
 
 .perm__head {
   display: flex;
   align-items: baseline;
-  gap: 7px;
+  gap: 6px;
   font-size: 12px;
 }
 
-.perm__agent {
-  font-weight: 600;
-  font-size: 13px;
+.perm__verb {
+  color: var(--pill-ink);
 }
 
-.perm__wants {
-  opacity: 0.55;
+.perm__verb b {
+  font-weight: 600;
+  color: var(--warning, #fbbf24);
+}
+
+.perm[data-danger] .perm__verb b {
+  color: var(--sys-red, #ff453a);
 }
 
 .perm__queue {
+  flex: none;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 10.5px;
+  color: var(--warning, #fbbf24);
+}
+
+.perm__who {
   margin-left: auto;
   flex: none;
-  color: var(--sys-orange, #ff9f0a);
-  opacity: 0.85;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 10.5px;
+  color: rgb(255 255 255 / 0.36);
 }
 
-.perm__call {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.perm__tool {
-  flex: none;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--sys-blue, #0a84ff);
-}
-
-/* The command or path. This is the thing being approved, so it gets the
-   contrast — everything else is context around it. */
-.perm__headline {
-  flex: 1;
-  min-width: 0;
+/* The exact thing being judged, on a quiet field. */
+.perm__target {
+  font-family: ui-monospace, "SF Mono", monospace;
   font-size: 12.5px;
+  line-height: 1.45;
   color: var(--pill-ink);
+  background: var(--field, rgb(255 255 255 / 0.06));
+  border: 1px solid var(--sep, rgb(255 255 255 / 0.1));
+  border-radius: 8px;
+  padding: 8px 10px;
   word-break: break-all;
   white-space: pre-wrap;
+}
+
+.perm[data-danger] .perm__target {
+  color: rgb(255 180 174);
 }
 
 .perm__args {
@@ -1219,8 +1246,9 @@
   flex-direction: column;
   gap: 2px;
   margin: 0;
+  font-family: ui-monospace, "SF Mono", monospace;
   font-size: 11px;
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
 .perm__arg {
@@ -1241,76 +1269,97 @@
   white-space: nowrap;
 }
 
-.perm__cwd {
+.perm__path {
   margin: 0;
-  font-size: 11px;
-  opacity: 0.4;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 10.5px;
+  color: rgb(255 255 255 / 0.36);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.perm__actions {
+/* Actions — the affirmative is present, not loud. Weight, not colour, carries
+   it. Danger is the one place we go red. */
+.perm__acts {
   display: flex;
-  gap: 8px;
-  margin-top: 4px;
+  gap: 7px;
+  margin-top: 2px;
 }
 
-.perm__deny,
-.perm__approve {
-  flex: 1;
-  padding: 7px 0;
-  border: none;
-  border-radius: 8px;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
+.btn {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 8px 12px;
   cursor: pointer;
-}
-
-.perm__deny {
-  background: rgb(255 255 255 / 0.1);
-  color: var(--pill-ink);
-}
-
-.perm__approve {
-  background: var(--sys-blue, #0a84ff);
-  color: #fff;
-}
-
-/* The terminal's own options, stacked the way the CLI stacks them. */
-.perm__options {
-  display: flex;
-  flex-direction: column;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  margin-top: 4px;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 
-.perm__option {
-  padding: 7px 12px;
-  border: none;
-  border-radius: 8px;
+.btn__k {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 10px;
+  font-weight: 400;
+  color: rgb(255 255 255 / 0.36);
+}
+
+/* Allow — a quiet filled surface. Not a candy button. */
+.btn--allow {
+  flex: 1;
   background: rgb(255 255 255 / 0.1);
   color: var(--pill-ink);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
 }
 
-.perm__option:disabled {
+.btn--allow:hover {
+  background: rgb(255 255 255 / 0.15);
+}
+
+.btn:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
-.perm__option--yes {
-  background: var(--sys-blue, #0a84ff);
-  color: #fff;
+/* Danger's allow: red, so the eye catches before the finger commits. */
+.perm[data-danger] .btn--allow {
+  background: rgb(255 69 58 / 0.16);
+  border-color: rgb(255 69 58 / 0.4);
+  color: rgb(255 180 174);
 }
 
-.perm__option--no {
-  color: rgb(255 255 255 / 0.75);
+.perm[data-danger] .btn--allow:hover {
+  background: rgb(255 69 58 / 0.24);
+}
+
+/* Always — highest-commitment, so the quietest: a ghost outline, never the
+   easy default. */
+.btn--always {
+  background: transparent;
+  color: rgb(255 255 255 / 0.58);
+  border-color: var(--sep, rgb(255 255 255 / 0.1));
+}
+
+.btn--always:hover {
+  background: rgb(255 255 255 / 0.05);
+  color: var(--pill-ink);
+}
+
+/* Deny — ghost, pushed to the end. Escape does it; the button is discovery. */
+.btn--deny {
+  background: transparent;
+  color: rgb(255 255 255 / 0.36);
+  margin-left: auto;
+}
+
+.btn--deny:hover {
+  color: var(--pill-ink);
 }
 
 .perm__deny-form {
@@ -1318,34 +1367,27 @@
   gap: 6px;
 }
 
-.perm__deny-form .perm__option--no {
+.perm__deny-form .btn--deny {
+  margin-left: 0;
   flex: none;
+  color: rgb(255 255 255 / 0.75);
 }
 
 .perm__deny-input {
   flex: 1;
   min-width: 0;
-  padding: 7px 10px;
-  border: none;
-  border-radius: 8px;
-  background: rgb(255 255 255 / 0.08);
+  padding: 8px 10px;
+  border: 1px solid var(--sep, rgb(255 255 255 / 0.1));
+  border-radius: 9px;
+  background: var(--field, rgb(255 255 255 / 0.06));
   color: var(--pill-ink);
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   outline: none;
 }
 
 .perm__deny-input::placeholder {
   color: rgb(255 255 255 / 0.4);
-}
-
-/* --- The edit diff on a permission card ---------------------------------- */
-
-.perm__stat {
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 600;
-  color: rgb(255 255 255 / 0.55);
 }
 
 .diff {
@@ -1543,15 +1585,165 @@
   cursor: pointer;
 }
 
+/* Plan-quota dashboard — rolling usage limits above the agent list. */
+.quota {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 2px 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.06);
+}
+
+.quota__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quota__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.quota__label {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.quota__figures {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.quota__pct {
+  font-weight: 600;
+}
+
+.quota__pct[data-level="low"] {
+  color: var(--sys-green, #32d74b);
+}
+.quota__pct[data-level="mid"] {
+  color: var(--sys-orange, #ff9f0a);
+}
+.quota__pct[data-level="high"] {
+  color: var(--sys-red, #ff453a);
+}
+
+.quota__reset {
+  opacity: 0.45;
+}
+
+.quota__track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.08);
+  overflow: hidden;
+}
+
+.quota__fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width var(--dur-3, 0.3s) var(--ease-out, ease-out);
+}
+
+.quota__fill[data-level="low"] {
+  background: var(--sys-green, #32d74b);
+}
+.quota__fill[data-level="mid"] {
+  background: var(--sys-orange, #ff9f0a);
+}
+.quota__fill[data-level="high"] {
+  background: var(--sys-red, #ff453a);
+}
+
+.quota__extra {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--sys-red, #ff453a);
+  opacity: 0.85;
+}
+
+.quota__note {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.4;
+}
+
+/* Opt-in trigger — reading the token prompts for keychain access, so usage is
+   only fetched on an explicit click. */
+.quota__toggle {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sys-blue, #0a84ff);
+  cursor: pointer;
+}
+
+.quota__toggle:hover {
+  text-decoration: underline;
+}
+
 .agent-detail__meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
+}
+
+/* Model tag over the live state — the identity block beside the avatar. */
+.agent-detail__id {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
 
 .agent-detail__tag {
   font-size: 12px;
   opacity: 0.75;
+}
+
+/* State beside the photo — a coloured dot + word, no longer its own row. */
+.agent-detail__state {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-detail__state-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.3);
+}
+
+/* Busy = blue, breathing; done/idle = still. Mirrors the row dot vocabulary. */
+.agent-detail__state[data-state="busy"] {
+  color: color-mix(in srgb, var(--sys-blue) 85%, #fff);
+}
+
+.agent-detail__state[data-state="busy"] .agent-detail__state-dot {
+  background: var(--sys-blue, #0a84ff);
+  animation: breathe 1.6s var(--ease-in-out, ease-in-out) infinite;
+}
+
+.agent-detail__state[data-state="done"] .agent-detail__state-dot {
+  background: var(--sys-green, #32d74b);
 }
 
 .agent-detail__tag[data-state="busy"] {
@@ -1562,13 +1754,38 @@
   color: var(--sys-green, #32d74b);
 }
 
+/* Folder name (left) and usage (right) below the header. The labelled usage
+   line is long, so it wraps to its own line under the folder rather than
+   colliding on a narrow panel. */
+.agent-detail__subline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
 .agent-detail__cwd {
   margin: 0;
+  min-width: 0;
+  flex: 1;
   font-size: 11px;
   opacity: 0.4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Usage: dimmed token breakdown, brighter cost. Never shrinks — the folder
+   name gives way first. */
+.agent-detail__usage {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: rgb(255 255 255 / 0.4);
 }
 
 .agent-detail__prompt {
@@ -1577,7 +1794,6 @@
   opacity: 0.6;
 }
 
-.agent-detail__now,
 .agent-detail__subs {
   display: flex;
   flex-direction: column;
@@ -1593,13 +1809,93 @@
   opacity: 0.4;
 }
 
-.agent-detail__tool {
-  font-size: 12.5px;
-  color: var(--pill-ink);
+/* Cost is the headline number of the usage line — near-opaque, so it lifts
+   above the dimmed token breakdown beside it. */
+.agent-detail__cost {
+  font-weight: 600;
+  color: rgb(255 255 255 / 0.85);
 }
 
-.agent-detail__tool[data-idle] {
-  opacity: 0.45;
+.agent-detail__transcript-empty {
+  margin: 0;
+  font-size: 11px;
+  opacity: 0.4;
+}
+
+/* ── The stream ──
+   One interleaved feed: prompts, assistant messages, tool calls, in order,
+   newest at the bottom. No card chrome around it — it reads as a thread, and a
+   short left rail ties the turns together. */
+/* ── Activity ──
+   Deliberately spare: Claude's latest message, then a few tool ticks. Not the
+   whole thread.
+
+   Fixed height with internal scroll — the notch springs to the panel's outer
+   size on every content change, so a live message that grows and shrinks made
+   it re-animate constantly. A stable box absorbs those changes: the text
+   updates and scrolls INSIDE, the panel's height (and the notch) stays put. */
+.activity {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgb(255 255 255 / 0.06);
+  height: 180px;
+  overflow-y: auto;
+}
+
+/* The latest message — markdown, full height inside the scrolling box. */
+.msg {
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: rgb(255 255 255 / 0.88);
+}
+
+/* Tool ticks — a dense checklist of what it just did. Runs of the same verb
+   fold into one line with a count, so it stays a summary. */
+.ticks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tick {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  color: rgb(255 255 255 / 0.5);
+}
+
+.tick__mark {
+  flex: none;
+  color: var(--sys-green, #32d74b);
+}
+
+.tick[data-error] {
+  color: var(--danger);
+}
+
+.tick[data-error] .tick__mark {
+  color: var(--danger);
+}
+
+.tick__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tick__count {
+  flex: none;
+  opacity: 0.6;
 }
 
 .subagent-row__tool {

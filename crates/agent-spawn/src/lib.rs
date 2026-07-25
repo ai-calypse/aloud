@@ -134,7 +134,11 @@ fn scan_roots(roots: &[PathBuf]) -> Vec<LocalRepo> {
 }
 
 /// Adds a repo once, keyed on its full path.
-fn push_repo(repos: &mut Vec<LocalRepo>, seen: &mut std::collections::HashSet<String>, path: PathBuf) {
+fn push_repo(
+    repos: &mut Vec<LocalRepo>,
+    seen: &mut std::collections::HashSet<String>,
+    path: PathBuf,
+) {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return;
     };
@@ -321,12 +325,20 @@ mod tests {
     fn terminal_script_checks_out_and_runs_verbatim() {
         let s = terminal_script(Path::new("/repo"), "feat/login", Agent::Claude, "hello");
         // cd, checkout the picked branch, then the agent on the literal task.
-        assert!(s.contains("cd '/repo' && git checkout 'feat/login' && claude 'hello'"), "{s}");
+        assert!(
+            s.contains("cd '/repo' && git checkout 'feat/login' && claude 'hello'"),
+            "{s}"
+        );
         assert!(!s.contains("ALOUD_AGENT_TASK") && !s.contains('$'), "{s}");
 
         // Metacharacters in the task can't break out of the shell single-quote,
         // and the `"` is then escaped again for the AppleScript literal.
-        let evil = terminal_script(Path::new("/repo"), "main", Agent::Codex, r#"a"; rm -rf ~ #"#);
+        let evil = terminal_script(
+            Path::new("/repo"),
+            "main",
+            Agent::Codex,
+            r#"a"; rm -rf ~ #"#,
+        );
         assert!(evil.contains(r#"'a\"; rm -rf ~ #'"#), "{evil}");
     }
 
@@ -341,8 +353,8 @@ mod tests {
         git(&root.join("direct")); // <root>/direct        — depth 1
         git(&root.join("work/nested")); // <root>/work/nested   — depth 2
         std::fs::create_dir_all(root.join("plain/notes")).unwrap(); // no .git anywhere
-        // A repo that also contains a nested repo: only the outer one counts,
-        // the walk stops descending once it finds a `.git`.
+                                                                    // A repo that also contains a nested repo: only the outer one counts,
+                                                                    // the walk stops descending once it finds a `.git`.
         git(&root.join("outer"));
         git(&root.join("outer/inner"));
         // A linked worktree: `.git` is a FILE, not a dir. It must NOT be listed
