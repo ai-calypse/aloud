@@ -40,7 +40,16 @@ pub fn run(args: &Value) -> Result<Value, ScriptError> {
     let kind = args.get("kind").and_then(Value::as_str).unwrap_or("any");
 
     let predicate = build_predicate(query, kind);
-    let out = Command::new("mdfind")
+    let mut cmd = Command::new("mdfind");
+    // Scope to the user's home. Without this, a query that happens to be a
+    // dev-project or app name ("aloud") drowns in /System and bundle internals;
+    // home is where a person's own files — photos, screenshots, documents —
+    // actually live. ponytail: home only; an all-volumes toggle is the upgrade
+    // if someone keeps files outside it.
+    if let Some(home) = std::env::var_os("HOME") {
+        cmd.arg("-onlyin").arg(home);
+    }
+    let out = cmd
         .arg(&predicate)
         .output()
         .map_err(|e| ScriptError::Failed(format!("running mdfind: {e}")))?;
@@ -55,6 +64,11 @@ pub fn run(args: &Value) -> Result<Value, ScriptError> {
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty())
+        // Drop machine noise: build output, dependencies, VCS internals, caches,
+        // and app support. These match by name constantly (a repo named after
+        // the query fills `target/` with thousands of hits) and are never what
+        // "find my …" means.
+        .filter(|path| !is_noise(path))
         .collect();
 
     let total = paths.len();
@@ -75,6 +89,28 @@ pub fn run(args: &Value) -> Result<Value, ScriptError> {
     }))
 }
 
+/// A path inside a directory that is machine noise, not the user's content.
+/// Matched as `/segment/` so it never trips on a file merely named "build".
+fn is_noise(path: &str) -> bool {
+    // Substring match on the boundaried segment. Cheap and good enough — a real
+    // photo is not inside any of these.
+    const NOISE: &[&str] = &[
+        "/target/",
+        "/node_modules/",
+        "/.git/",
+        "/.build/",
+        "/DerivedData/",
+        "/Library/Caches/",
+        "/Library/Developer/",
+        "/.cargo/",
+        "/.rustup/",
+        "/.cache/",
+        "/dist/",
+        "/build/",
+    ];
+    NOISE.iter().any(|n| path.contains(n))
+}
+
 /// Builds the `mdfind` predicate. Escapes the query for the quoted literal,
 /// then ORs the match surfaces: display name (substring), OCR'd text content
 /// (word), and scene labels (word). `cd` = case- and diacritic-insensitive.
@@ -92,8 +128,17 @@ fn build_predicate(query: &str, kind: &str) -> String {
             "((kMDItemContentTypeTree == 'public.content' \
               || kMDItemContentTypeTree == 'com.adobe.pdf') && {matches})"
         ),
-        // "any" and anything unrecognised: no kind restriction.
-        _ => matches,
+        // "any" is NOT truly unrestricted: an unrestricted name match on a
+        // common word drags in tens of thousands of source and binary files
+        // (a repo named after the query alone fills `target/` with them), which
+        // is both slow and never what "find my …" means. Restrict to the kinds a
+        // person actually looks for — images, media, PDFs, and real documents.
+        _ => format!(
+            "((kMDItemContentTypeTree == 'public.image' \
+              || kMDItemContentTypeTree == 'public.audiovisual-content' \
+              || kMDItemContentTypeTree == 'public.content' \
+              || kMDItemContentTypeTree == 'com.adobe.pdf') && {matches})"
+        ),
     }
 }
 
@@ -119,10 +164,14 @@ mod tests {
     }
 
     #[test]
-    fn any_kind_has_no_type_restriction() {
+    fn any_kind_restricts_to_user_content_not_everything() {
+        // "any" must exclude source/binary files (the 145k-result, 48s
+        // pathological case) by restricting to content kinds — while still
+        // spanning more than images.
         let p = build_predicate("report", "any");
-        assert!(!p.contains("public.image"));
         assert!(p.contains("kMDItemTextContent == 'report'cd"));
+        assert!(p.contains("com.adobe.pdf"));
+        assert!(p.contains("public.content"));
     }
 
     #[test]
@@ -136,5 +185,21 @@ mod tests {
     fn empty_query_is_rejected() {
         assert!(run(&json!({ "query": "  " })).is_err());
         assert!(run(&json!({})).is_err());
+    }
+
+    #[test]
+    fn noise_dirs_are_dropped_but_real_files_kept() {
+        // The bug the user hit: a repo named after the query fills target/ with
+        // thousands of matches that bury real content.
+        assert!(is_noise(
+            "/Users/x/Development/aloud-tauri/target/debug/aloud.d"
+        ));
+        assert!(is_noise("/Users/x/proj/node_modules/aloud/index.js"));
+        assert!(is_noise("/Users/x/Library/Caches/aloud/thumb.png"));
+        // A real screenshot survives.
+        assert!(!is_noise("/Users/x/Desktop/Screenshot aloud.png"));
+        assert!(!is_noise("/Users/x/Pictures/buddha-temple.jpg"));
+        // A file merely named "build" is not in a build dir.
+        assert!(!is_noise("/Users/x/Documents/build-plan.pdf"));
     }
 }
