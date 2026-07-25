@@ -118,12 +118,20 @@ pub fn execute(name: &str, args: &Value) -> Option<Result<Value, ScriptError>> {
     Some((action.run)(args))
 }
 
-/// Case-insensitive match on the installed app's display name. Names here are
-/// the same ones `frontmost_app()` reports, so "Music" matches the app the user
-/// would name out loud.
+/// Sentinel `app` for tools backed by macOS itself, not a bundled app —
+/// Spotlight search, output volume, revealing in Finder. These are always
+/// present, so they are never gated. Using a real app name here would be wrong:
+/// Finder lives in CoreServices and never appears in `installed_apps()`, so
+/// gating on it silently dropped every Spotlight/volume/reveal tool.
+pub(crate) const ALWAYS: &str = "macOS";
+
+/// Whether a tool's backing app is available. The `ALWAYS` sentinel is
+/// unconditionally true; otherwise a case-insensitive match on an installed
+/// app's display name — the same names `frontmost_app()` reports, so "Music"
+/// matches the app the user would name out loud.
 #[cfg(target_os = "macos")]
 fn app_installed(app: &str, installed: &[aloud_selection::InstalledApp]) -> bool {
-    installed.iter().any(|a| a.name.eq_ignore_ascii_case(app))
+    app == ALWAYS || installed.iter().any(|a| a.name.eq_ignore_ascii_case(app))
 }
 
 #[cfg(test)]
@@ -141,15 +149,29 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
-    fn only_installed_apps_yield_tools() {
+    fn app_gated_tools_need_their_app() {
         // No Music installed → no Music tools.
-        assert!(tools(&[]).is_empty());
+        let names = |apps: &[InstalledApp]| {
+            tools(apps).into_iter().map(|t| t.name).collect::<Vec<_>>()
+        };
+        assert!(!names(&[]).iter().any(|n| n == "ALOUD_MUSIC_PLAY"));
         // Music installed → its tools appear.
-        let with_music = tools(&[app("Music")]);
-        assert!(with_music.iter().any(|t| t.name == "ALOUD_MUSIC_PLAY"));
-        assert!(with_music
+        assert!(names(&[app("Music")])
             .iter()
-            .any(|t| t.name == "ALOUD_MUSIC_NOW_PLAYING"));
+            .any(|n| n == "ALOUD_MUSIC_PLAY"));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn system_wide_tools_are_always_offered() {
+        // Spotlight/volume/reveal are built into macOS, so they must appear even
+        // with zero apps installed. Regression: they were gated on "Finder",
+        // which never appears in installed_apps(), so they silently vanished and
+        // "find images" fell through to Composio.
+        let names: Vec<_> = tools(&[]).into_iter().map(|t| t.name).collect();
+        assert!(names.iter().any(|n| n == "ALOUD_FINDER_SEARCH"));
+        assert!(names.iter().any(|n| n == "ALOUD_FINDER_REVEAL"));
+        assert!(names.iter().any(|n| n == "ALOUD_SYSTEM_VOLUME"));
     }
 
     #[test]

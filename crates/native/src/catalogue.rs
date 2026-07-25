@@ -47,8 +47,9 @@ pub const ACTIONS: &[Action] = &[
                       images (OCR), by objects/scenes in photos, and by kind. \
                       Use for 'find my …' requests. `kind` may be 'image', \
                       'document', or 'any' (default).",
-        // Spotlight is always present, and Finder is the app the results open in.
-        app: "Finder",
+        // Spotlight is built into macOS — always available, never gated on an
+        // app the scanner cannot see.
+        app: crate::ALWAYS,
         read_only: true,
         params: || {
             json!({
@@ -284,7 +285,8 @@ pub const ACTIONS: &[Action] = &[
     Action {
         name: "ALOUD_FINDER_REVEAL",
         description: "Reveal a file or folder in Finder by its absolute path.",
-        app: "Finder",
+        // Finder is always running on macOS but never appears in installed_apps.
+        app: crate::ALWAYS,
         read_only: false,
         params: || {
             json!({
@@ -310,9 +312,8 @@ pub const ACTIONS: &[Action] = &[
     Action {
         name: "ALOUD_SYSTEM_VOLUME",
         description: "Set the system output volume to a level from 0 to 100.",
-        // Finder is always present, so it gates a system-wide action that has no
-        // app of its own — cheaper than a special-case in the installed filter.
-        app: "Finder",
+        // A system-wide action with no app of its own.
+        app: crate::ALWAYS,
         read_only: false,
         params: || {
             json!({
