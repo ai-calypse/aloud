@@ -28,16 +28,30 @@ const MAX_RESULTS: usize = 60;
 /// the app layer turns paths into thumbnails where it has `sips` and an
 /// `AppHandle`. Read-only: it looks, it does not touch anything.
 pub fn run(args: &Value) -> Result<Value, ScriptError> {
+    // Query is OPTIONAL. "Show me the files on my desktop" is a location listing
+    // with no keyword — forcing a query made the model invent one ("any"), which
+    // then matched files literally containing that word. None here means "list,
+    // don't filter by keyword".
     let query = args
         .get("query")
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| ScriptError::Failed("search needs a query".into()))?;
+        .filter(|s| !s.is_empty());
 
-    // `kind` narrows the content-type tree. Default "any" keeps the "all files"
-    // promise; "image" is the highest-signal case and the one the grid renders.
     let kind = args.get("kind").and_then(Value::as_str).unwrap_or("any");
+    let location = args.get("location").and_then(Value::as_str);
+
+    // A request with neither a keyword, a specific kind, nor a location is not
+    // actionable — "find my files" everywhere would return the whole disk. Ask
+    // the model to narrow rather than dumping the home folder.
+    let has_kind = matches!(kind, "image" | "document" | "screenshot");
+    if query.is_none() && location.is_none() && !has_kind {
+        return Err(ScriptError::Failed(
+            "give a search term, a kind (image/document/screenshot), or a \
+             location (desktop/downloads/…) — 'find everything' is too broad"
+                .into(),
+        ));
+    }
 
     let predicate = build_predicate(query, kind);
     let mut cmd = Command::new("mdfind");
@@ -45,7 +59,6 @@ pub fn run(args: &Value) -> Result<Value, ScriptError> {
     // "on my desktop" must actually mean the Desktop, not everywhere. Otherwise
     // the whole home dir, so /System and app bundles never drown out real files.
     // ponytail: home only for the default; an all-volumes toggle is the upgrade.
-    let location = args.get("location").and_then(Value::as_str);
     if let Some(scope) = scope_dir(location) {
         cmd.arg("-onlyin").arg(scope);
     } else if let Some(home) = std::env::var_os("HOME") {
@@ -131,61 +144,56 @@ fn is_noise(path: &str) -> bool {
     NOISE.iter().any(|n| path.contains(n))
 }
 
-/// Builds the `mdfind` predicate for `query` at `kind`.
+/// Builds the `mdfind` predicate from an optional `query` and a `kind`.
 ///
-/// The match surfaces depend on the kind, and that is the whole fix for the
-/// "search screenshot → 40 .css files" bug: matching `kMDItemTextContent` (the
-/// words *inside* a file) is only meaningful for **images**, where it is OCR'd
-/// text. For a `.css` or `.log`, content-match means "this source file mentions
-/// the word", which is never what "find my screenshots" wants. So text/scene
-/// surfaces are gated to images; everything else matches on filename only.
-fn build_predicate(query: &str, kind: &str) -> String {
+/// Two orthogonal parts, ANDed: a **kind clause** (what type of file) and an
+/// optional **keyword clause** (matching the query). With no query it is the
+/// kind clause alone — "list the images / screenshots / files here", which is
+/// what "show me files on my desktop" means.
+///
+/// The keyword's match surfaces depend on kind: `kMDItemTextContent` (words
+/// *inside* a file) is only OCR-meaningful for **images**. For a `.css`/`.log`,
+/// content-match means "this source file mentions the word", never what a person
+/// wants — so non-image kinds match filename only.
+fn build_predicate(query: Option<&str>, kind: &str) -> String {
+    let kind_clause = match kind {
+        "image" => "kMDItemContentTypeTree == 'public.image'".to_string(),
+        "screenshot" => "kMDItemIsScreenCapture == 1".to_string(),
+        "document" => "(kMDItemContentTypeTree == 'public.content' \
+                        || kMDItemContentTypeTree == 'com.adobe.pdf')"
+            .to_string(),
+        // "any": the kinds a person looks for — excludes source/binary files so
+        // a common word does not drag in tens of thousands of them.
+        _ => "(kMDItemContentTypeTree == 'public.image' \
+               || kMDItemContentTypeTree == 'public.audiovisual-content' \
+               || kMDItemContentTypeTree == 'public.content' \
+               || kMDItemContentTypeTree == 'com.adobe.pdf')"
+            .to_string(),
+    };
+
+    // No keyword → the kind clause alone lists everything of that kind (in the
+    // scoped location). This is the "files on my desktop" case.
+    let Some(query) = query else {
+        return kind_clause;
+    };
+
     let q = escape_mdfind(query);
     let name = format!("kMDItemDisplayName == '*{q}*'cd");
-
-    match kind {
-        // Images match on filename OR OCR'd text OR scene labels — the three
-        // things a person means by "find images with X".
-        "image" => format!(
-            "(kMDItemContentTypeTree == 'public.image' && \
-             ({name} \
+    let keyword = if kind == "image" {
+        // Images also match OCR'd text and scene labels — the whole reason this
+        // beats a filename search.
+        format!(
+            "({name} \
               || kMDItemTextContent == '{q}'cd \
               || kMDItemPhotosSceneClassificationLabels == '{q}'cd \
-              || kMDItemPhotosSceneClassificationSynonyms == '{q}'cd))"
-        ),
-        // Screenshots are a kind, not a text query: macOS flags them with
-        // kMDItemIsScreenCapture, so "find my screenshots" is that flag, not
-        // "files containing the word screenshot". A substantive query ("my
-        // screenshots of the error") further filters by OCR/filename; the bare
-        // word "screenshot" is the kind itself, so it is not used as a filter.
-        "screenshot" => {
-            let bare = query.eq_ignore_ascii_case("screenshot")
-                || query.eq_ignore_ascii_case("screenshots");
-            if bare {
-                "kMDItemIsScreenCapture == 1".to_string()
-            } else {
-                format!(
-                    "(kMDItemIsScreenCapture == 1 && \
-                     ({name} || kMDItemTextContent == '{q}'cd))"
-                )
-            }
-        }
-        // Documents match on filename only — a PDF/doc whose *body* mentions the
-        // query is rarely what "find my tax pdf" means, and dropping content
-        // match is what keeps source files out.
-        "document" => format!(
-            "((kMDItemContentTypeTree == 'public.content' \
-              || kMDItemContentTypeTree == 'com.adobe.pdf') && {name})"
-        ),
-        // "any" — user content kinds, filename match only. No content match, so
-        // a .css mentioning the query never surfaces.
-        _ => format!(
-            "((kMDItemContentTypeTree == 'public.image' \
-              || kMDItemContentTypeTree == 'public.audiovisual-content' \
-              || kMDItemContentTypeTree == 'public.content' \
-              || kMDItemContentTypeTree == 'com.adobe.pdf') && {name})"
-        ),
-    }
+              || kMDItemPhotosSceneClassificationSynonyms == '{q}'cd)"
+        )
+    } else {
+        // Everything else: filename only.
+        name
+    };
+
+    format!("({kind_clause} && {keyword})")
 }
 
 /// Escapes a query for an `mdfind` single-quoted literal. Only `'` and `\` are
@@ -200,8 +208,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn predicate_matches_name_ocr_and_scene() {
-        let p = build_predicate("buddha", "image");
+    fn image_query_matches_name_ocr_and_scene() {
+        let p = build_predicate(Some("buddha"), "image");
         assert!(p.contains("kMDItemDisplayName == '*buddha*'cd"));
         // The OCR surface — the whole reason this beats a filename search.
         assert!(p.contains("kMDItemTextContent == 'buddha'cd"));
@@ -210,36 +218,49 @@ mod tests {
     }
 
     #[test]
+    fn no_query_lists_the_kind_without_a_keyword() {
+        // "files on my desktop" — a listing, not a search. No keyword clause, so
+        // nothing is matched against a query; the kind clause stands alone.
+        let p = build_predicate(None, "any");
+        assert!(!p.contains("kMDItemDisplayName"), "no keyword expected: {p}");
+        assert!(!p.contains("kMDItemTextContent"));
+        assert!(p.contains("public.content"));
+        // Screenshots with no query = just the capture flag.
+        assert_eq!(
+            build_predicate(None, "screenshot"),
+            "kMDItemIsScreenCapture == 1"
+        );
+    }
+
+    #[test]
     fn any_kind_matches_filename_only_not_file_content() {
         // The "search screenshot → 40 .css files" bug: a non-image kind must NOT
         // match kMDItemTextContent, or every source file mentioning the word
         // surfaces. Filename only.
-        let p = build_predicate("report", "any");
+        let p = build_predicate(Some("report"), "any");
         assert!(p.contains("kMDItemDisplayName == '*report*'cd"));
         assert!(
             !p.contains("kMDItemTextContent"),
             "any-kind must not content-match: {p}"
         );
         assert!(p.contains("com.adobe.pdf"));
-        assert!(p.contains("public.content"));
     }
 
     #[test]
-    fn screenshot_kind_uses_the_capture_flag_not_a_text_match() {
+    fn screenshot_kind_uses_the_capture_flag() {
         // "find my screenshots" is a kind (kMDItemIsScreenCapture), never a
         // search for the word "screenshot" inside files.
-        let bare = build_predicate("screenshot", "screenshot");
-        assert!(bare.contains("kMDItemIsScreenCapture == 1"));
-        assert!(!bare.contains("kMDItemDisplayName"), "bare: {bare}");
-        // A substantive query still filters within screenshots.
-        let filtered = build_predicate("error dialog", "screenshot");
-        assert!(filtered.contains("kMDItemIsScreenCapture == 1"));
-        assert!(filtered.contains("kMDItemTextContent == 'error dialog'cd"));
+        let p = build_predicate(Some("error"), "screenshot");
+        assert!(p.contains("kMDItemIsScreenCapture == 1"));
+        // A query filters by filename, not by content — a screenshot is not
+        // OCR-matched here (that path is image-kind).
+        assert!(p.contains("kMDItemDisplayName == '*error*'cd"));
+        assert!(!p.contains("kMDItemTextContent"), "screenshots: {p}");
     }
 
     #[test]
     fn document_kind_does_not_content_match() {
-        let p = build_predicate("invoice", "document");
+        let p = build_predicate(Some("invoice"), "document");
         assert!(p.contains("kMDItemDisplayName == '*invoice*'cd"));
         assert!(!p.contains("kMDItemTextContent"), "docs filename-only: {p}");
     }
@@ -275,14 +296,21 @@ mod tests {
     #[test]
     fn query_with_apostrophe_is_escaped() {
         // "st patrick's" must not truncate the predicate at the apostrophe.
-        let p = build_predicate("patrick's", "any");
+        let p = build_predicate(Some("patrick's"), "any");
         assert!(p.contains(r"patrick\'s"), "apostrophe must be escaped: {p}");
     }
 
     #[test]
-    fn empty_query_is_rejected() {
-        assert!(run(&json!({ "query": "  " })).is_err());
+    fn too_broad_a_request_is_rejected_but_a_location_alone_is_fine() {
+        // No keyword, no kind, no location → "find everything", rejected so the
+        // model narrows instead of dumping the disk.
         assert!(run(&json!({})).is_err());
+        assert!(run(&json!({ "query": "  " })).is_err());
+        // But a location alone IS actionable — "files on my desktop" lists it.
+        // (Runs a real mdfind; just assert it does not error.)
+        assert!(run(&json!({ "location": "desktop" })).is_ok());
+        // A kind alone is actionable too — "my screenshots".
+        assert!(run(&json!({ "kind": "screenshot" })).is_ok());
     }
 
     #[test]

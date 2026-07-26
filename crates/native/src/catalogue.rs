@@ -43,13 +43,18 @@ pub struct Action {
 pub const ACTIONS: &[Action] = &[
     Action {
         name: "ALOUD_FINDER_SEARCH",
-        description: "Search the Mac for files. Pick `kind` from the request: \
-                      'screenshot' for screenshots (NOT kind image + query \
-                      'screenshot'), 'image' for photos/pictures, 'document' \
-                      for docs/PDFs, 'any' otherwise. Set `location` when the \
-                      user names a folder ('on my desktop', 'in downloads'). \
-                      `query` is the thing to match — omit or set to the kind \
-                      word for a bare 'find my screenshots'.",
+        description: "Find or list files on the Mac. Set only the parameters the \
+                      request actually implies:\n\
+                      - `query`: a keyword to match ('buddha', 'invoice'). OMIT \
+                      it to just LIST — 'files on my desktop' has no keyword.\n\
+                      - `kind`: 'screenshot', 'image', 'document', or 'any'. Use \
+                      'screenshot' for screenshots — never query the word.\n\
+                      - `location`: a folder the user names ('on my desktop' → \
+                      desktop). Omit to look across the home folder.\n\
+                      Examples: 'files on my desktop' → {location: desktop}. \
+                      'my screenshots' → {kind: screenshot}. 'images with a \
+                      cat' → {kind: image, query: cat}. 'my invoice pdf' → \
+                      {kind: document, query: invoice}.",
         // Spotlight is built into macOS — always available, never gated on an
         // app the scanner cannot see.
         app: crate::ALWAYS,
@@ -57,27 +62,23 @@ pub const ACTIONS: &[Action] = &[
         params: || {
             json!({
                 "type": "object",
-                "required": ["query"],
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "What to match: 'buddha', 'invoice', \
-                                        'tax 2025'. For a bare 'find my \
-                                        screenshots', pass 'screenshot'."
+                        "description": "Keyword to match. OMIT to list without \
+                                        filtering (e.g. all files in a folder)."
                     },
                     "kind": {
                         "type": "string",
                         "enum": ["screenshot", "image", "document", "any"],
-                        "description": "The kind of file. Use 'screenshot' for \
-                                        screenshots — do not search image kind \
-                                        for the word 'screenshot'."
+                        "description": "The kind of file. 'screenshot' for \
+                                        screenshots — do not query the word."
                     },
                     "location": {
                         "type": "string",
                         "enum": ["desktop", "downloads", "documents",
                                  "pictures", "movies", "music"],
-                        "description": "Restrict to a folder when the user names \
-                                        one. Omit to search everywhere in home."
+                        "description": "A folder the user named. Omit for home."
                     }
                 }
             })
