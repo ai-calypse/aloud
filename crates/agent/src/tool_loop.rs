@@ -116,6 +116,13 @@ To find files, photos, screenshots, or documents ON THIS MAC, use the local \
 file search tool (ALOUD_FINDER_SEARCH) — not email, contacts, or calendar. \
 \"Find my images with X\", \"find that screenshot\", \"find my tax pdf\" are \
 local searches. \
+When no tool in the list does what was asked, you can drive the app the user is \
+looking at directly: ALOUD_SCREEN_READ lists its real on-screen controls with \
+their positions, and the screen click/type/key tools act on them. This is the \
+fallback, not the first choice — a named tool is faster and more reliable where \
+one exists, so reach for the screen tools only when nothing else fits. Always \
+read before you click, never invent coordinates, and read again after anything \
+that changes what is on screen, because the positions move. \
 The command is a transcription of speech and may contain minor errors; act on \
 the intent. After acting, confirm what you did in one short plain sentence. \
 Finish the whole command before you stop. A command that names two actions \
@@ -338,6 +345,9 @@ where
     let mut budget: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut asked = 0usize;
     let mut verifier_retries = 0;
+    // Whether the user has approved screen control for this run. See the gate
+    // below: screen actions confirm once, not per click.
+    let mut screen_approved = false;
 
     for round in 0..MAX_ROUNDS {
         if cancelled() {
@@ -583,8 +593,21 @@ where
             // Rebound, not just checked: the gate returns the arguments to run
             // with, so a field the user filled in at the gate is what executes.
             // A read tool never reaches the gate and keeps the model's.
+            // Screen control is gated once per run, not once per action: a
+            // computer-use sequence is click, read, click, type, and confirming
+            // each is unusable — the user would be answering prompts faster than
+            // the agent works. So the *first* screen action asks, and approval
+            // covers the rest of the run. Coarser than the per-action gate the
+            // structured tools get, and deliberately so; see COMPUTER_USE.md's
+            // open question, which this does not claim to settle.
+            let gate_needed = if is_screen_write(&name) {
+                !std::mem::replace(&mut screen_approved, true)
+            } else {
+                is_write(&name, tools)
+            };
+
             let mut args = args;
-            let declined = if is_write(&name, tools) {
+            let declined = if gate_needed {
                 match confirm(name.clone(), args.clone())
                     .instrument(tracing::info_span!("confirm", tool = %name, toolkit))
                     .await
@@ -593,7 +616,12 @@ where
                         args = approved;
                         false
                     }
-                    None => true,
+                    None => {
+                        // A refused screen run must not leave the run approved,
+                        // or the next click would proceed unasked.
+                        screen_approved = false;
+                        true
+                    }
                 }
             } else {
                 false
@@ -620,7 +648,15 @@ where
                 // stalling the runtime.
                 let result = match run_native(&name, &args).instrument(span.clone()).await {
                     Some(native) => native,
-                    None => composio.execute(&name, &args).instrument(span.clone()).await,
+                    None => match run_computer(&name, &args).instrument(span.clone()).await {
+                        Some(screen) => screen,
+                        None => {
+                            composio
+                                .execute(&name, &args)
+                                .instrument(span.clone())
+                                .await
+                        }
+                    },
                 };
                 let success = tool_succeeded(&result);
                 span.record("ok", success);
@@ -660,6 +696,35 @@ async fn run_native(name: &str, args: &serde_json::Value) -> Option<String> {
         Ok(value) => value.to_string(),
         Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
     })
+}
+
+/// Runs a screen-control tool, `None` when the name is not one of those — the
+/// same fall-through contract as [`run_native`], so the dispatch stays one
+/// chain of "is it mine?" rather than a prefix match.
+async fn run_computer(name: &str, args: &serde_json::Value) -> Option<String> {
+    let name = name.to_string();
+    let args = args.clone();
+    // The helpers are subprocesses and a traversal takes ~800ms, so this must
+    // not run on the async executor.
+    let outcome = tokio::task::spawn_blocking(move || aloud_computer::execute(&name, &args))
+        .await
+        .unwrap_or_else(|e| Some(Err(aloud_computer::HelperError::Failed(e.to_string()))))?;
+    Some(match outcome {
+        Ok(value) => value.to_string(),
+        Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+    })
+}
+
+/// Whether a tool drives the screen and so falls under the once-per-run gate
+/// rather than the per-action one.
+///
+/// Keyed off the crate's own constants rather than a name prefix, so renaming a
+/// tool cannot silently drop it out of the gate.
+fn is_screen_write(name: &str) -> bool {
+    matches!(
+        name,
+        aloud_computer::AX_CLICK | aloud_computer::AX_TYPE | aloud_computer::AX_KEY
+    )
 }
 
 /// Whether a tool needs confirmation. Fail-safe: only an explicit
@@ -742,6 +807,52 @@ mod tests {
         // A hallucinated name we never offered must not pass as a read.
         assert!(is_write("SLACK_DELETE_EVERYTHING", &tools));
         assert!(is_write("anything", &[]));
+    }
+
+    /// Screen control is gated once per run rather than per action, so the
+    /// three acting tools must be recognised — and the read must not be, or the
+    /// gate would fire on a tool that changes nothing.
+    #[test]
+    fn every_screen_tool_that_acts_is_gated_and_the_read_is_not() {
+        assert!(is_screen_write(aloud_computer::AX_CLICK));
+        assert!(is_screen_write(aloud_computer::AX_TYPE));
+        assert!(is_screen_write(aloud_computer::AX_KEY));
+        assert!(!is_screen_write(aloud_computer::AX_READ));
+        assert!(!is_screen_write("GMAIL_SEND_EMAIL"));
+    }
+
+    /// The gate's whole contract in one place: the first screen action asks,
+    /// later ones do not, and a refusal re-arms it rather than leaving the run
+    /// approved. Mirrors the `mem::replace` in the loop.
+    #[test]
+    fn screen_control_asks_once_then_stays_approved_unless_refused() {
+        let mut approved = false;
+        let mut gate = |refuse: bool| {
+            let needed = !std::mem::replace(&mut approved, true);
+            if needed && refuse {
+                approved = false;
+            }
+            needed
+        };
+
+        assert!(gate(false), "the first screen action must ask");
+        assert!(!gate(false), "a second must not ask again");
+        assert!(!gate(false));
+
+        // A run where the user says no: the next action asks again.
+        let mut approved = false;
+        let mut gate = |refuse: bool| {
+            let needed = !std::mem::replace(&mut approved, true);
+            if needed && refuse {
+                approved = false;
+            }
+            needed
+        };
+        assert!(gate(true), "the first asks");
+        assert!(
+            gate(false),
+            "after a refusal it must ask again, not proceed"
+        );
     }
 
     #[test]

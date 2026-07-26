@@ -3,13 +3,87 @@
 Notes toward letting the agent drive the screen — click, type, scroll — instead
 of only calling APIs.
 
-Nothing here is built. This exists so that when it is, the questions already
-answered elsewhere are not answered again from scratch.
+The screen-driving half is not built. What *is* built, on the
+`feat/native-agent-tools` branch, is **Layer 1** — the structured native-tool
+path this document positions computer-use against ([`crates/native`](crates/native/src/catalogue.rs):
+Music, Reminders, Notes, Messages, Finder search + reveal, volume, shortcuts).
+This exists so that when Layer 2 is built, the questions already answered
+elsewhere are not answered again from scratch.
 
 Two sources: **`../agent-notch`** (Swift, ~18k lines, ships a working
 Anthropic computer-use loop) and what this repo already has. Every constant
 below was read out of agent-notch's source with its justifying comment; where
 the comment reads like a guess rather than a finding, it says so.
+
+A third and fourth source were evaluated 2026-07-25 (external, not vendored) —
+see **[External SDKs](#external-sdks)** below. The short version: **MacosUseSDK**
+(mediar-ai, MIT, Swift) does Accessibility-tree element targeting — read any
+app's real buttons/fields and click *them*, not pixels — and reshapes the
+primary mechanism here from vision-first to **AX-first, vision as fallback**.
+The decision (from the user) is to **bundle MacosUseSDK as a signed Swift
+sidecar** rather than port its AXUIElement surface to `objc2` Rust. **altic-mcp**
+(Python, `osascript`) is *not* adopted — it is the same AppleScript mechanism we
+already have, kept only as a catalogue of actions worth adding to
+`crates/native`.
+
+---
+
+## Why this exists: the two-layer architecture
+
+The trigger for this work was a concrete failure of the structured-tool
+approach. `ALOUD_FINDER_SEARCH` works, but every phrasing needs the model to map
+words to parameters — "screenshots" → `kind:screenshot`, "pictures" →
+`kind:image`. When the mapping is wrong the search fails, and **you cannot
+hand-write a tool description for every phrasing of every workflow.** There are
+thousands, and hand-tuning is a treadmill.
+
+The fix is **not a bigger tool library.** A 90-tool catalogue (altic) hits the
+same wall — "pictures" vs "photos" vs "images" is a description-matching problem
+in *any* fixed-tool design. The fix is a **second, general capability layer**
+that needs no per-workflow code. Every serious voice-agent-for-Mac product has
+converged on the same two layers:
+
+```
+Voice → LLM
+         ├── Layer 1  structured tools (crates/native)      common · fast · safe · gate-able
+         └── Layer 2  AX-tree computer-use (MacosUseSDK)     the long tail · zero per-workflow code
+```
+
+**Layer 1 — structured tools** (already built). Deterministic, confirmable, and
+better than computer-use *where a named tool exists*: sending a message, playing
+music, a Finder search. These stay. Keep adding the high-frequency, high-safety
+ones (the altic catalogue is the backlog).
+
+**Layer 2 — Accessibility-tree computer-use** (this document). The agent reads
+the *actual on-screen elements* of whatever app is focused — real button titles,
+roles, and rects from the AX API — and acts on *them*. **No workflow is
+pre-defined.** "Rename that file", "reply to this in Slack", "toggle dark mode
+in Settings" all run through one mechanism, because the agent reads the UI
+instead of matching a hand-written description. This is what makes "we can't
+cover thousands of workflows" go away.
+
+### The evidence — everyone converges here
+
+| Product | Approach | Source |
+|---|---|---|
+| **HeyClicky** (YC S26, ~$10M) | AX API reads real buttons + Claude vision — *"reads the actual on-screen buttons rather than pixel-coordinate guessing"* | [hokai.io](https://hokai.io/hub/tools/heyclicky), [explainx.ai](https://explainx.ai/blog/heyclicky-voice-control-mac-gpt-realtime-2-demo-2026) |
+| **voice-os** (per-simmons, MIT) | `agent-desktop` *"drives Mac apps via the macOS accessibility tree (no screenshots)"* + AppleScript for scriptable apps | [github.com/per-simmons/voice-os](https://github.com/per-simmons/voice-os) |
+| **Fazm** | *"Controls your entire macOS desktop using the Accessibility API"*, local-first | [fazm.ai](https://fazm.ai/macos-ai-agent) |
+| **MacosUseSDK** (mediar-ai, MIT) | `traverseAccessibilityTree(pid:)` → elements with roles/rects, then `clickMouse(at:)` — the SDK we adopt as Layer 2 | [github.com/mediar-ai/MacosUseSDK](https://github.com/mediar-ai/MacosUseSDK) |
+
+The academic framing matches: the AX tree *"converts a human-facing visual
+interface plane into a machine-readable agent interface plane without requiring
+the application to be redesigned"* and *"removes the [hardcoded-intent]
+limitation by providing a more general interface"* — and the structured
+"blueprint" of elements is cheaper to send than a screenshot and easier to
+validate. See [LUMOS](https://arxiv.org/html/2606.30697v1) and
+[Rethinking OS Interfaces for LLM Agents](https://os-for-agent.github.io/papers/AgenticOS_2026_paper_9.pdf).
+
+**The catch nobody solves:** a structured tool has a clean "confirm before
+send"; a computer-use run is a hundred clicks with no such boundary. That gate
+is the genuinely unsolved problem — see [The open question](#the-open-question).
+It is the reason Layer 2 is built carefully and Layer 1 keeps every action where
+determinism and a real confirmation actually matter.
 
 ---
 
@@ -17,15 +91,23 @@ the comment reads like a guess rather than a finding, it says so.
 
 | Piece | Where | State |
 |---|---|---|
-| Screenshots | [`crates/screen`](crates/screen/src/lib.rs) | captures at 1024px JPEG data URI — **no consumer**, marked `ponytail:` |
+| Layer-1 native tools | [`crates/native`](crates/native/src/catalogue.rs) | **built** — Music/Reminders/Notes/Messages/Finder/volume/shortcuts, dispatched by `run_native` in the loop, behind the write gate |
+| Layer-2 AX control | [`crates/computer`](crates/computer/src/lib.rs) | **built** — read/click/type/key over the vendored MacosUseSDK helpers, gated once per run |
 | Input synthesis | [`crates/paste`](crates/paste/src/lib.rs) | `enigo` behind `on_main_thread`, keys only, no mouse |
-| Tool loop | [`crates/agent`](crates/agent/src/tool_loop.rs) | 5 rounds, fail-safe write gate, Composio-only tool source |
-| Permissions | [`crates/permissions`](crates/permissions/src/lib.rs) | Screen Recording + Accessibility already checked |
-| Panel | [`overlay.tsx`](apps/desktop/src/overlay.tsx) | renders planned calls, live calls, results, confirmation gates |
+| Tool loop | [`crates/agent`](crates/agent/src/tool_loop.rs) | 5 rounds, fail-safe write gate, **two tool sources** (Composio + native), completion verifier and between-tools cancel **already landed** |
+| Permissions | [`crates/permissions`](crates/permissions/src/lib.rs) | Accessibility + Microphone checked; **Screen Recording and Automation are NOT yet variants here** |
+| Panel | [`overlay.tsx`](apps/desktop/src/overlay.tsx) | renders planned calls, live calls, results, confirmation gates, and the Finder result grid |
 
-So the UI, the permission plumbing and the event vocabulary exist. What is
-missing is a mouse, a screenshot consumer, and a provider that speaks
-computer-use.
+So the UI, the permission plumbing, the event vocabulary, the loop hardening,
+**and a working structured-tool layer** exist. What is missing for computer-use
+is a screenshot capture, a mouse, the AX-tree sidecar (Layer 2), and a provider
+that speaks computer-use.
+
+⚠️ **No `crates/screen` exists** — screen capture for computer-use is unbuilt,
+not "captures at 1024px with no consumer" as an earlier draft claimed. Building
+step 1 below starts that crate from scratch. Likewise Screen Recording is *not*
+yet a `Permission` variant (only Accessibility + Microphone are), so the
+capture step adds it.
 
 ---
 
@@ -97,14 +179,17 @@ Taylor Swift."* Their grader prompt:
 > Reply with exactly one JSON object, no prose:
 > `{"complete": true|false, "missing": "..."}`
 
-This one is worth taking **now**, before any computer-use exists —
-[`tool_loop.rs:146`](crates/agent/src/tool_loop.rs#L146) has the same hole with
-a Composio surface ("drafted the email, never sent it").
+✅ **Already landed on this branch.** The completion verifier is built —
+[`tool_loop.rs`](crates/agent/src/tool_loop.rs) has `verify`, `MAX_VERIFIER_RETRIES = 2`,
+a fail-open grader, and the send-back loop. Kept here as the record of where it
+came from; a computer-use loop reuses the same grader, tightened for on-screen
+sub-goals.
 
 **Check the cancel flag between individual tool dispatches, not just between
 turns.** A six-tool round should abort after the current tool, not after all
-six. `ComputerUseHarness.swift:240-244` and `:388-407`. Also true of our loop
-today at [`tool_loop.rs:179`](crates/agent/src/tool_loop.rs#L179).
+six. `ComputerUseHarness.swift:240-244` and `:388-407`. ✅ **Already done** — the
+loop checks `cancelled()` between dispatches (not just per round), so Escape
+stops a multi-tool round part-way. A computer-use loop inherits this.
 
 **Loop caps:** `maxTurns = 100`, `maxOutputTokens = 4096` (raised to
 `thinking_budget + 2048` when extended thinking is on). Thinking budgets:
@@ -191,14 +276,96 @@ Cheaper and more precise than vision where it works, useless where it does not
 [`crates/selection`](crates/selection/). Worth having as the fast path with
 screenshots as the fallback, not as an alternative to them.
 
+→ This is exactly what **MacosUseSDK** provides pre-built (see
+[External SDKs](#external-sdks)); the decision is to adopt it as the Layer-2
+fast path rather than grow our own `AXFastPath` from the `crates/selection`
+slice.
+
+---
+
+## External SDKs
+
+Two off-the-shelf projects were evaluated as a way to not start from scratch.
+They sit at opposite ends of usefulness.
+
+### MacosUseSDK — the one worth taking
+
+`github.com/mediar-ai/MacosUseSDK` (**MIT**, Swift, standalone Swift package;
+`mcp-server-macos-use` is a thin MCP wrapper over it — we want the SDK, not the
+wrapper). It is **Accessibility-tree element targeting**, which is a different
+and better mechanism than everything above:
+
+- `traverseAccessibilityTree(pid:onlyVisibleElements:)` → every UI element with
+  its **role, title, and rect**, as structured data. The agent reads the actual
+  *Send* button, not a screenshot of one.
+- `clickMouse(at:)` / `clickMouseAndVisualize(at:duration:)`, plus keypress and
+  text-writing, act on those coordinates.
+- Public `AXUIElement`/`ApplicationServices` APIs — no private frameworks
+  (unlike agent-notch's SkyLight click path, which this doc already says not to
+  port).
+
+This is exactly the **"Accessibility tree is a second sense"** section above,
+already built and MIT-licensed. Where that section says *"worth having as the
+fast path with screenshots as the fallback"*, MacosUseSDK **is** that fast path.
+It flips the primary mechanism: **AX-first element targeting, vision only where
+AX is blind** (canvas, Electron, PDFs — the same limits noted above).
+
+**Decision (user, 2026-07-25): bundle it as a signed Swift sidecar**, not port
+its AXUIElement surface to `objc2` Rust. Rationale: the SDK *is* AppKit, a Rust
+port is a large `objc2` reimplementation, and the SDK is MIT so vendoring the
+binary is clean. The cost is the one CLAUDE.md flags — a second-language signed
+binary in the `.dmg` and a subprocess to manage — accepted here deliberately
+because the capability (control any app by its real elements) is worth it and
+there is no AppleScript equivalent.
+
+**What the sidecar shape has to solve** (the socket/lifecycle work is already
+scoped in [Or: run it on the user's Claude subscription](#or-run-it-on-the-users-claude-subscription)
+below — reuse that Unix-socket + child-process machinery; it is the same
+pattern):
+
+- Compile MacosUseSDK's CLI (`swift build -c release`) into a helper binary,
+  bundle under `Resources/`, sign + notarize with the app. Tauri strips the
+  target triple from sidecar names in the bundle — handle both names, per
+  [CLAUDE.md] and `tauri-wisdom/architecture/sidecar-pattern.mdx`.
+- Rust ↔ sidecar over stdio or a Unix socket; `traverse` returns JSON the loop
+  feeds the model, `click/type` take model-space coords converted at the
+  boundary (the coordinate-space rules above still apply).
+- The sidecar needs Accessibility permission — already checked by
+  [`crates/permissions`](crates/permissions/src/lib.rs). Screen Recording only
+  when we fall back to vision.
+- ⚠️ AX calls are main-thread-affine in-process, but a *separate* Swift process
+  sidesteps our `on_main_thread` marshalling entirely — the same reason
+  `osascript` is safe off our main thread. The subprocess boundary is a feature.
+
+`ponytail:` bundling the prebuilt SDK binary is the fast path; a Rust `objc2`
+port of just `traverse` + `click` + `type` is the upgrade if the sidecar's
+signing/lifecycle cost ever outweighs the port. Revisit only then.
+
+### altic-mcp — reference only, not adopted
+
+`github.com/altic-dev/altic-mcp` (Python 3.13, stdio MCP, 90+ tools). Its
+mechanism is **`osascript`/AppleScript** — the *same thing `crates/native`
+already does_. It is a bigger catalogue of the same approach, not a new
+capability, and adopting it as MCP re-buys exactly the Python-subprocess
+bundle+sign burden the [freeflow plan](freeflow-agent-mode-mvp-plan.md) rules
+out. **Not adopted.**
+
+Kept as a **to-do list**: its tool surface (window move/resize/tile/center,
+clipboard read/write, Safari/Chrome tab control, brightness/volume, app
+launch/focus/quit) is a ranked backlog for extending `crates/native` in Rust,
+and its AppleScript is worth reading before we write ours. These are native
+`crates/native` additions, *not* computer-use — they belong with the Music /
+Reminders / Finder catalogue, behind the same write gate.
+
 ---
 
 ## The provider question
 
 Anthropic's `computer_20250124` tool is Anthropic-specific. Agent mode is
-currently on Gemini ([`agent.rs:107-108`](apps/desktop/src-tauri/src/agent.rs#L107))
-because Groq's per-minute limit throttled a multi-round loop. Computer-use
-forces an Anthropic client, which drags in one more thing worth taking:
+currently on Gemini ([`agent.rs`](apps/desktop/src-tauri/src/agent.rs) —
+`GEMINI_MODEL = "gemini-3.1-flash-lite"`) because Groq's per-minute limit
+throttled a multi-round loop. Computer-use forces an Anthropic client, which
+drags in one more thing worth taking:
 
 **Prompt-cache breakpoint rotation.** Anthropic allows 4 `cache_control`
 breakpoints per request. Walk the history each turn, stamp the last
@@ -256,11 +423,12 @@ not the bytes.** What is worth carrying over:
 In dependency order. Each step is useful on its own; nothing below needs the
 step after it.
 
-**0 · Take the loop lessons first.** The completion verifier, the
-between-tools cancel check and the retry ladder all land in
-[`crates/agent/src/tool_loop.rs`](crates/agent/src/tool_loop.rs) and improve
-Composio agent mode today. No screenshots, no mouse, no new provider,
-`cargo test`-able. Do this whether or not computer-use ever ships.
+**0 · Loop lessons — mostly done.** The completion verifier and the
+between-tools cancel check **already landed** on this branch (see the ✅ marks
+above). What remains is the **retry ladder** (per-status backoff with jitter) in
+[`crates/agent/src/tool_loop.rs`](crates/agent/src/tool_loop.rs) / the LLM
+client — still worth doing, improves Composio + native agent mode today, no
+screenshots or mouse needed.
 
 **1 · Give `crates/screen` a real capture.** Bind
 `SCScreenshotManager.captureImage` via `objc2` behind the existing
@@ -272,26 +440,66 @@ list for 5s. Keep the CLI path as the fallback and for Windows.
 `crates/hotkey` and the notch measurement already hit. See the `objc2`
 `relax-sign-encoding` note in [CLAUDE.md](CLAUDE.md).
 
-**2 · New crate: `crates/computer`.** Mouse move, click, drag, scroll, key
-chords, type. Pure logic + one thin backend per OS, the way `crates/hotkey`
-splits. On macOS every synthetic input must go through the main thread — see
-the TIS/TSM abort in [CLAUDE.md](CLAUDE.md). `on_main_thread` currently lives
-private inside [`crates/paste`](crates/paste/src/lib.rs#L26); it needs to move
-somewhere shared or be duplicated deliberately.
+**2 · Bundle the MacosUseSDK sidecar (AX-first path).** ✅ **Built** —
+`crates/computer`, with the SDK vendored at `vendor/MacosUseSDK` (MIT) and
+compiled by `build.rs`. Four tools reach the model: `ALOUD_SCREEN_READ`,
+`_CLICK`, `_TYPE`, `_KEY`.
 
-An `examples/` binary that clicks a real button and types into a real app is
-mandatory here — this is exactly the category of code whose unit tests pass
-while the feature does not work.
+Three decisions differ from what this section originally proposed, each for a
+measured reason:
+
+- **One-shot subprocess, no socket.** The SDK's CLIs (`TraversalTool`,
+  `InputControllerTool`) exit after each command, so the Unix-socket lifecycle
+  scoped below buys nothing: there is no persistent state to hold. Spawn cost is
+  ~30ms against a traversal of ~450-800ms and a model round-trip far longer than
+  either. `helper.rs` is ~150 lines where the socket version was several hundred.
+- **The traversal must be summarised, not forwarded.** Measured on a real Finder
+  window: the full tree is 269 elements / ~26KB / **~8k tokens per turn**, and
+  **235 of those 269 are `AXMenuItem`s inside closed menus** — real elements that
+  do nothing when clicked, because the menu is not open. Filtering to labelled,
+  on-screen, actually-clickable elements gives 27 elements / 2.3KB, an **11.5x
+  reduction**. That filter is `tree.rs`, and it is what makes a traversal per
+  turn affordable. Coordinates are emitted as the element's *centre*; the origin
+  of a wide control is its left edge.
+- **`--visible-only` is not optional**, for the same reason.
+
+⚠️ **A pre-existing bug surfaced here.** `aloud_selection::debug::frontmost_pid()`
+reads `AXFocusedApplication` off the system-wide element, which requires the
+*calling process* to be AX-trusted and returns -25204 (`kAXErrorCannotComplete`)
+when it is not — which is every `cargo run` binary, since the grant belongs to
+the terminal and does not inherit. `crates/computer` falls back to System Events
+(`unix id of first application process whose frontmost is true`), which needs no
+such trust and was verified correct on this machine while the AX path failed.
+The AX path is kept first because it is right inside the signed app and costs no
+subprocess. **The `frontmost` example is still broken for the same reason** and
+was left alone; fixing it is not this change's job.
+
+**Verified on real hardware** via `cargo run -p aloud-computer --example screen`:
+traversed Finder, Safari and TextEdit; the read follows the focused app; typing
+landed in a real TextEdit document; clicking the Bold checkbox at its reported
+coordinates changed the document's font run to `Helvetica-Bold`. That last one
+is the load-bearing check — an earlier "success" was the helper exiting 0 with
+the text going nowhere, because TextEdit had no open document.
+
+**2b · Rust mouse crate as the vision fallback (later).** Only where AX is blind
+(canvas, Electron, PDFs): mouse move/click/drag/scroll via `objc2`/`CGEvent`,
+pure logic + thin OS backend like `crates/hotkey`. On macOS every synthetic
+input goes through the main thread — the TIS/TSM abort in [CLAUDE.md](CLAUDE.md);
+`on_main_thread` currently lives private inside
+[`crates/paste`](crates/paste/src/lib.rs#L26) and would need to move somewhere
+shared. Deferred behind step 2 — the sidecar covers the common case, and this is
+only the escape hatch.
 
 **3 · An Anthropic client in `crates/llm`.** Streaming, the retry ladder above,
 sorted-key encoding, cache-breakpoint rotation. Or skip it and do the
 Claude Code provider instead — cheaper for the user, more moving parts for us.
 
-**4 · A second loop, not a bigger one.** `tool_loop.rs` is Composio-shaped:
-Composio discovery, Composio execution, a `read_only` hint per tool. A
-computer-use loop has a fixed tool set, a screenshot after every action, and
-100 turns rather than 5. Two loops that share `LoopEvent` will stay legible;
-one loop with a mode flag will not.
+**4 · A second loop, not a bigger one.** `tool_loop.rs` is structured-tool
+shaped: tool discovery, per-tool `read_only` gate, native + Composio dispatch,
+5 rounds. A computer-use loop has a fixed tool set, a screenshot (or AX
+traversal) after every action, and 100 turns rather than 5. Two loops that share
+`LoopEvent` will stay legible; bolting a mode flag onto the structured loop will
+not.
 
 **5 · Panel rendering.** [`overlay.tsx`](apps/desktop/src/overlay.tsx) already
 renders planned calls, live calls and results. What it lacks is a *screen*:
@@ -309,11 +517,12 @@ downward.
 
 ## The open question
 
-**Our confirmation gate does not survive the translation.**
-[`tool_loop.rs:244`](crates/agent/src/tool_loop.rs#L244) is fail-safe: anything
-not explicitly `read_only` pauses for a yes. That works because a Composio tool
-is a discrete, nameable act — *send this email* — and there are two or three of
-them in a run.
+**Our confirmation gate does not survive the translation.** The gate
+([`is_write`](crates/agent/src/tool_loop.rs) + `confirm` in the dispatch loop)
+is fail-safe: anything not explicitly `read_only` pauses for a yes. That works —
+and now covers native tools too, since they carry the same `read_only` flag —
+because a structured tool is a discrete, nameable act (*send this email*, *play
+music*) and there are two or three of them in a run.
 
 A computer-use run is a hundred clicks. Confirming each is unusable;
 confirming none throws away the one safety property this app currently has and
@@ -336,6 +545,23 @@ Delete confirmation, a payment field), not per action. **That design is not
 solved here and should not be hand-waved at implementation time.** It is the
 reason to build steps 0-2 first and think while they land.
 
+**What step 2 actually shipped, and what it does not claim.** Screen control is
+gated **once per run**: the first click/type/key asks, approval covers the rest
+of that run, and a refusal re-arms the gate rather than leaving the run
+approved (`is_screen_write` + `screen_approved` in `tool_loop.rs`, with tests).
+The read is `read_only` and never gates, since it changes nothing.
+
+This is a deliberate interim, not an answer to the question above. It is
+strictly better than agent-notch's prompt-and-blocklist story, and strictly
+weaker than the per-action gate the structured tools get — one "yes" authorises
+every subsequent click in the run, including one the user did not picture when
+they approved. What makes that tolerable for now is that the click label shows
+the element's own text (`Clicking "Send"`, not `Clicking (420, 300)`), so the
+first confirmation is at least readable. **The target-aware gate is still the
+open problem** — a Send button, a Delete confirmation and a payment field should
+re-ask mid-run regardless of the run-level approval, and nothing here does that
+yet.
+
 ---
 
 ## Cross-platform
@@ -344,3 +570,24 @@ Every constant above is macOS. The Windows path would be `SendInput` for
 input and `Windows.Graphics.Capture` (or `BitBlt`) for capture, and — like
 every other Windows branch in this repo — would ship unexercised until CI is
 unblocked. See [PROGRESS.md](PROGRESS.md).
+
+---
+
+## Sources
+
+Evaluated 2026-07-25 while deciding the two-layer direction.
+
+**SDKs we can vendor / mine**
+- MacosUseSDK (Layer 2, MIT, Swift) — <https://github.com/mediar-ai/MacosUseSDK>
+- mcp-server-macos-use (MCP wrapper over the SDK) — <https://github.com/mediar-ai/mcp-server-macos-use>
+- altic-mcp (reference catalogue only, Python/osascript) — <https://github.com/altic-dev/altic-mcp>
+
+**Products that converged on AX-tree computer-use**
+- HeyClicky — <https://hokai.io/hub/tools/heyclicky>, <https://explainx.ai/blog/heyclicky-voice-control-mac-gpt-realtime-2-demo-2026>
+- voice-os (per-simmons, MIT) — <https://github.com/per-simmons/voice-os>
+- Fazm — <https://fazm.ai/macos-ai-agent>
+
+**Research: accessibility tree as a general agent interface (no hardcoded intents)**
+- LUMOS: A Semantic OS Layer for Accessibility-Grounded AI Agents — <https://arxiv.org/html/2606.30697v1>
+- Rethinking OS Interfaces for LLM Agents — <https://os-for-agent.github.io/papers/AgenticOS_2026_paper_9.pdf>
+- The voice AI stack for building agents (AssemblyAI) — <https://www.assemblyai.com/blog/the-voice-ai-stack-for-building-agents>

@@ -46,6 +46,7 @@ dependencies = [
  "aloud-agent-spawn",
  "aloud-audio",
  "aloud-bridge",
+ "aloud-computer",
  "aloud-drag",
  "aloud-hotkey",
  "aloud-llm",
@@ -87,6 +88,7 @@ dependencies = [
 name = "aloud-agent"
 version = "0.1.0"
 dependencies = [
+ "aloud-computer",
  "aloud-llm",
  "aloud-native",
  "aloud-store",
@@ -136,6 +138,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "aloud-computer"
+version = "0.1.0"
+dependencies = [
+ "aloud-selection",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

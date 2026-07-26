@@ -190,15 +190,33 @@ async fn execute(
     // may be unconnected and native tools still make the command runnable, so
     // the "nothing to do" bail moves below the concat.
     let installed = aloud_selection::installed_apps();
-    tools.extend(aloud_native::tools(&installed).into_iter().map(|t| {
-        aloud_agent::ToolDef {
-            name: t.name,
-            toolkit: "macOS".to_string(),
-            description: t.description,
-            parameters: t.parameters,
-            read_only: t.read_only,
-        }
-    }));
+    tools.extend(
+        aloud_native::tools(&installed)
+            .into_iter()
+            .map(|t| aloud_agent::ToolDef {
+                name: t.name,
+                toolkit: "macOS".to_string(),
+                description: t.description,
+                parameters: t.parameters,
+                read_only: t.read_only,
+            }),
+    );
+
+    // Layer 2: driving the focused app by its real accessibility elements, for
+    // everything no named tool covers. Empty when the helpers are not in this
+    // build, so the tool list simply lacks them rather than offering tools that
+    // can only fail.
+    tools.extend(
+        aloud_computer::tools()
+            .into_iter()
+            .map(|t| aloud_agent::ToolDef {
+                name: t.name,
+                toolkit: "Screen".to_string(),
+                description: t.description,
+                parameters: t.parameters,
+                read_only: t.read_only,
+            }),
+    );
 
     tracing::Span::current().record("tool_count", tools.len());
     if tools.is_empty() {
