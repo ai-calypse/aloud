@@ -928,7 +928,10 @@
   border-radius: 6px;
   overflow: hidden;
   background: rgb(255 255 255 / 0.06);
-  cursor: default;
+  /* Draggable out to other apps — grab signals it, and -webkit-user-drag lets
+     the whole tile (not just the img) initiate WebKit's drag. */
+  cursor: grab;
+  -webkit-user-drag: element;
   /* Staggered per tile from an inline --i, so the wall assembles rather than
      flashing in as a block. Blur-in is the materialize keyframe: sells the
      thumbnails as one thing arriving, and hides sub-pixel scaling of the PNG. */
