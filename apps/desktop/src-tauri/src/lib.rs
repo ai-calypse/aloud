@@ -100,6 +100,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::installed_apps,
             commands::finder_search,
             commands::finder_reveal,
+            commands::arm_file_drag,
+            commands::disarm_file_drag,
             commands::hotkeys_permitted,
             commands::permissions,
             commands::open_permission_settings,
@@ -233,6 +235,8 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             // Main thread required. A floating-level window is clamped below
             // the menu bar, which the wings style has to sit in.
             overlay::raise_over_menu_bar(app.handle());
+            // Drag-out for search results. Main thread, needs the overlay view.
+            overlay::install_drag(app.handle());
 
             // The notch is permanent: an agent can start at any time, and a
             // notch that only exists during a dictation cannot show one.

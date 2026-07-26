@@ -110,6 +110,24 @@ pub fn raise_over_menu_bar(app: &AppHandle) {
 #[cfg(not(target_os = "macos"))]
 pub fn raise_over_menu_bar(_app: &AppHandle) {}
 
+/// Installs the drag-out monitor on the overlay's webview, so a search result
+/// can be dragged into another app. Main thread — called from `setup`. See
+/// `crates/drag`.
+#[cfg(target_os = "macos")]
+pub fn install_drag(app: &AppHandle) {
+    let Some(window) = window(app) else { return };
+    let Ok(ptr) = window.ns_view() else {
+        tracing::warn!("no ns_view for drag install");
+        return;
+    };
+    // Safety: `ns_view` returns this webview's live content NSView, and this
+    // runs on the main thread from setup.
+    unsafe { aloud_drag::install(ptr) };
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn install_drag(_app: &AppHandle) {}
+
 /// The notch of the screen this overlay will land on, if that screen has one.
 /// Matched by logical size — Tauri and AppKit disagree on origin and axis, but
 /// not on a screen's point size.

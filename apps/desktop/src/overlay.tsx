@@ -3697,33 +3697,6 @@ function CodingAgentComposer({
  * nothing until results land — the panel's own height animation covers the gap,
  * and an empty grid flashing before the fill would fight it.
  */
-/**
- * Attempt to drag a real file OUT of the notch to another app, riding WebKit's
- * own HTML5→NSDraggingSession bridge (Option A in DRAG_OUT.md). Sets the file's
- * `file://` URL as `text/uri-list` — the type Finder and most AppKit receivers
- * read as a genuine file. If a receiver only accepts image bytes, this is where
- * the native NSFilePromiseProvider fallback (Option B) would take over.
- *
- * Not verified across drop targets yet — this is the cheap experiment.
- */
-function dragOutFile(
-  e: React.DragEvent,
-  path: string,
-  name: string,
-) {
-  // file:// with each path segment encoded, so spaces and unicode in a
-  // screenshot name ("Screenshot 2026…png") survive as a valid URL.
-  const url = "file://" + path.split("/").map(encodeURIComponent).join("/");
-  e.dataTransfer.setData("text/uri-list", url);
-  // A plain-text fallback: some targets paste the path as text if they cannot
-  // take the file.
-  e.dataTransfer.setData("text/plain", path);
-  // DownloadURL is the Safari/WebKit convention: "<mime>:<name>:<url>". Left
-  // mime blank — the receiver infers it from the extension.
-  e.dataTransfer.setData("DownloadURL", `:${name}:${url}`);
-  e.dataTransfer.effectAllowed = "copy";
-}
-
 function FinderGrid({ query, kind }: { query: string; kind: string }) {
   const [results, setResults] = useState<FinderResults | null>(null);
 
@@ -3756,8 +3729,12 @@ function FinderGrid({ query, kind }: { query: string; kind: string }) {
             role="listitem"
             title={file.name}
             style={{ ["--i" as string]: i }}
-            draggable
-            onDragStart={(e) => dragOutFile(e, file.path, file.name)}
+            // Arm the native drag on mousedown: a real system file drag can only
+            // start from the live mouse event, which a JS click cannot supply,
+            // so Rust stashes the path and the native monitor drags it. See
+            // crates/drag. Cleared on mouseup so a plain click stays a click.
+            onMouseDown={() => void commands.armFileDrag(file.path)}
+            onMouseUp={() => void commands.disarmFileDrag()}
             onClick={() => void commands.finderReveal(file.path)}
           >
             {file.thumbnail ? (

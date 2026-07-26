@@ -236,6 +236,24 @@ pub async fn finder_search(query: String, kind: String) -> CmdResult<FinderResul
     .map_err(|e| format!("finder search: {e}"))?
 }
 
+/// Arms a file path to be dragged out of the notch on the next mouse-drag. The
+/// frontend calls this on `mousedown` over a draggable result; the native
+/// event monitor (installed at setup) turns the following drag into a real
+/// system file drag. See `crates/drag`.
+#[tauri::command]
+#[specta::specta]
+pub fn arm_file_drag(path: String) {
+    aloud_drag::arm(path);
+}
+
+/// Clears an armed drag — called on mouseup, so a click that armed a path does
+/// not leave it primed to drag on some later, unrelated gesture.
+#[tauri::command]
+#[specta::specta]
+pub fn disarm_file_drag() {
+    aloud_drag::disarm();
+}
+
 /// Reveals a path in Finder — the grid's click target. Thin wrapper over the
 /// native tool so the panel does not re-implement the AppleScript.
 #[tauri::command]

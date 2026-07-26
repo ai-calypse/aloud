@@ -41,6 +41,18 @@ export const commands = {
 	 */
 	finderReveal: (path: string) => typedError<null, string>(__TAURI_INVOKE("finder_reveal", { path })),
 	/**
+	 *  Arms a file path to be dragged out of the notch on the next mouse-drag. The
+	 *  frontend calls this on `mousedown` over a draggable result; the native
+	 *  event monitor (installed at setup) turns the following drag into a real
+	 *  system file drag. See `crates/drag`.
+	 */
+	armFileDrag: (path: string) => __TAURI_INVOKE<void>("arm_file_drag", { path }),
+	/**
+	 *  Clears an armed drag — called on mouseup, so a click that armed a path does
+	 *  not leave it primed to drag on some later, unrelated gesture.
+	 */
+	disarmFileDrag: () => __TAURI_INVOKE<void>("disarm_file_drag"),
+	/**
 	 *  Whether the OS lets us listen for keys. False on macOS until the user
 	 *  grants Accessibility permission.
 	 */
