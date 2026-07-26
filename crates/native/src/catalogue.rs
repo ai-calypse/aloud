@@ -43,10 +43,13 @@ pub struct Action {
 pub const ACTIONS: &[Action] = &[
     Action {
         name: "ALOUD_FINDER_SEARCH",
-        description: "Search the Mac for files by name, by text seen INSIDE \
-                      images (OCR), by objects/scenes in photos, and by kind. \
-                      Use for 'find my …' requests. `kind` may be 'image', \
-                      'document', or 'any' (default).",
+        description: "Search the Mac for files. Pick `kind` from the request: \
+                      'screenshot' for screenshots (NOT kind image + query \
+                      'screenshot'), 'image' for photos/pictures, 'document' \
+                      for docs/PDFs, 'any' otherwise. Set `location` when the \
+                      user names a folder ('on my desktop', 'in downloads'). \
+                      `query` is the thing to match — omit or set to the kind \
+                      word for a bare 'find my screenshots'.",
         // Spotlight is built into macOS — always available, never gated on an
         // app the scanner cannot see.
         app: crate::ALWAYS,
@@ -58,13 +61,23 @@ pub const ACTIONS: &[Action] = &[
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "What to look for, e.g. 'buddha', 'invoice', \
-                                        'tax 2025'."
+                        "description": "What to match: 'buddha', 'invoice', \
+                                        'tax 2025'. For a bare 'find my \
+                                        screenshots', pass 'screenshot'."
                     },
                     "kind": {
                         "type": "string",
-                        "enum": ["image", "document", "any"],
-                        "description": "Restrict to a file kind; defaults to any."
+                        "enum": ["screenshot", "image", "document", "any"],
+                        "description": "The kind of file. Use 'screenshot' for \
+                                        screenshots — do not search image kind \
+                                        for the word 'screenshot'."
+                    },
+                    "location": {
+                        "type": "string",
+                        "enum": ["desktop", "downloads", "documents",
+                                 "pictures", "movies", "music"],
+                        "description": "Restrict to a folder when the user names \
+                                        one. Omit to search everywhere in home."
                     }
                 }
             })

@@ -41,12 +41,14 @@ pub fn run(args: &Value) -> Result<Value, ScriptError> {
 
     let predicate = build_predicate(query, kind);
     let mut cmd = Command::new("mdfind");
-    // Scope to the user's home. Without this, a query that happens to be a
-    // dev-project or app name ("aloud") drowns in /System and bundle internals;
-    // home is where a person's own files — photos, screenshots, documents —
-    // actually live. ponytail: home only; an all-volumes toggle is the upgrade
-    // if someone keeps files outside it.
-    if let Some(home) = std::env::var_os("HOME") {
+    // Scope: a named location ("desktop", "downloads") narrows to that folder —
+    // "on my desktop" must actually mean the Desktop, not everywhere. Otherwise
+    // the whole home dir, so /System and app bundles never drown out real files.
+    // ponytail: home only for the default; an all-volumes toggle is the upgrade.
+    let location = args.get("location").and_then(Value::as_str);
+    if let Some(scope) = scope_dir(location) {
+        cmd.arg("-onlyin").arg(scope);
+    } else if let Some(home) = std::env::var_os("HOME") {
         cmd.arg("-onlyin").arg(home);
     }
     let out = cmd
@@ -89,55 +91,99 @@ pub fn run(args: &Value) -> Result<Value, ScriptError> {
     }))
 }
 
+/// Resolves a named location to an absolute path under `$HOME`, or None for an
+/// unknown/absent location (caller then defaults to the whole home dir).
+fn scope_dir(location: Option<&str>) -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let sub = match location?.trim().to_ascii_lowercase().as_str() {
+        "desktop" => "Desktop",
+        "downloads" => "Downloads",
+        "documents" => "Documents",
+        "pictures" | "photos" => "Pictures",
+        "movies" | "videos" => "Movies",
+        "music" => "Music",
+        _ => return None,
+    };
+    Some(std::path::Path::new(&home).join(sub))
+}
+
 /// A path inside a directory that is machine noise, not the user's content.
 /// Matched as `/segment/` so it never trips on a file merely named "build".
 fn is_noise(path: &str) -> bool {
     // Substring match on the boundaried segment. Cheap and good enough — a real
-    // photo is not inside any of these.
+    // photo is not inside any of these. `Library/` is the big one: editor
+    // backups (Cursor/VSCode History), caches, and app support account for most
+    // of the junk a content search dragged in ("9f6U.css" was a Cursor backup).
     const NOISE: &[&str] = &[
+        "/Library/",
         "/target/",
         "/node_modules/",
         "/.git/",
         "/.build/",
         "/DerivedData/",
-        "/Library/Caches/",
-        "/Library/Developer/",
         "/.cargo/",
         "/.rustup/",
         "/.cache/",
+        "/.Trash/",
         "/dist/",
         "/build/",
     ];
     NOISE.iter().any(|n| path.contains(n))
 }
 
-/// Builds the `mdfind` predicate. Escapes the query for the quoted literal,
-/// then ORs the match surfaces: display name (substring), OCR'd text content
-/// (word), and scene labels (word). `cd` = case- and diacritic-insensitive.
+/// Builds the `mdfind` predicate for `query` at `kind`.
+///
+/// The match surfaces depend on the kind, and that is the whole fix for the
+/// "search screenshot → 40 .css files" bug: matching `kMDItemTextContent` (the
+/// words *inside* a file) is only meaningful for **images**, where it is OCR'd
+/// text. For a `.css` or `.log`, content-match means "this source file mentions
+/// the word", which is never what "find my screenshots" wants. So text/scene
+/// surfaces are gated to images; everything else matches on filename only.
 fn build_predicate(query: &str, kind: &str) -> String {
     let q = escape_mdfind(query);
-    let matches = format!(
-        "(kMDItemDisplayName == '*{q}*'cd \
-         || kMDItemTextContent == '{q}'cd \
-         || kMDItemPhotosSceneClassificationLabels == '{q}'cd \
-         || kMDItemPhotosSceneClassificationSynonyms == '{q}'cd)"
-    );
+    let name = format!("kMDItemDisplayName == '*{q}*'cd");
+
     match kind {
-        "image" => format!("(kMDItemContentTypeTree == 'public.image' && {matches})"),
+        // Images match on filename OR OCR'd text OR scene labels — the three
+        // things a person means by "find images with X".
+        "image" => format!(
+            "(kMDItemContentTypeTree == 'public.image' && \
+             ({name} \
+              || kMDItemTextContent == '{q}'cd \
+              || kMDItemPhotosSceneClassificationLabels == '{q}'cd \
+              || kMDItemPhotosSceneClassificationSynonyms == '{q}'cd))"
+        ),
+        // Screenshots are a kind, not a text query: macOS flags them with
+        // kMDItemIsScreenCapture, so "find my screenshots" is that flag, not
+        // "files containing the word screenshot". A substantive query ("my
+        // screenshots of the error") further filters by OCR/filename; the bare
+        // word "screenshot" is the kind itself, so it is not used as a filter.
+        "screenshot" => {
+            let bare = query.eq_ignore_ascii_case("screenshot")
+                || query.eq_ignore_ascii_case("screenshots");
+            if bare {
+                "kMDItemIsScreenCapture == 1".to_string()
+            } else {
+                format!(
+                    "(kMDItemIsScreenCapture == 1 && \
+                     ({name} || kMDItemTextContent == '{q}'cd))"
+                )
+            }
+        }
+        // Documents match on filename only — a PDF/doc whose *body* mentions the
+        // query is rarely what "find my tax pdf" means, and dropping content
+        // match is what keeps source files out.
         "document" => format!(
             "((kMDItemContentTypeTree == 'public.content' \
-              || kMDItemContentTypeTree == 'com.adobe.pdf') && {matches})"
+              || kMDItemContentTypeTree == 'com.adobe.pdf') && {name})"
         ),
-        // "any" is NOT truly unrestricted: an unrestricted name match on a
-        // common word drags in tens of thousands of source and binary files
-        // (a repo named after the query alone fills `target/` with them), which
-        // is both slow and never what "find my …" means. Restrict to the kinds a
-        // person actually looks for — images, media, PDFs, and real documents.
+        // "any" — user content kinds, filename match only. No content match, so
+        // a .css mentioning the query never surfaces.
         _ => format!(
             "((kMDItemContentTypeTree == 'public.image' \
               || kMDItemContentTypeTree == 'public.audiovisual-content' \
               || kMDItemContentTypeTree == 'public.content' \
-              || kMDItemContentTypeTree == 'com.adobe.pdf') && {matches})"
+              || kMDItemContentTypeTree == 'com.adobe.pdf') && {name})"
         ),
     }
 }
@@ -164,14 +210,66 @@ mod tests {
     }
 
     #[test]
-    fn any_kind_restricts_to_user_content_not_everything() {
-        // "any" must exclude source/binary files (the 145k-result, 48s
-        // pathological case) by restricting to content kinds — while still
-        // spanning more than images.
+    fn any_kind_matches_filename_only_not_file_content() {
+        // The "search screenshot → 40 .css files" bug: a non-image kind must NOT
+        // match kMDItemTextContent, or every source file mentioning the word
+        // surfaces. Filename only.
         let p = build_predicate("report", "any");
-        assert!(p.contains("kMDItemTextContent == 'report'cd"));
+        assert!(p.contains("kMDItemDisplayName == '*report*'cd"));
+        assert!(
+            !p.contains("kMDItemTextContent"),
+            "any-kind must not content-match: {p}"
+        );
         assert!(p.contains("com.adobe.pdf"));
         assert!(p.contains("public.content"));
+    }
+
+    #[test]
+    fn screenshot_kind_uses_the_capture_flag_not_a_text_match() {
+        // "find my screenshots" is a kind (kMDItemIsScreenCapture), never a
+        // search for the word "screenshot" inside files.
+        let bare = build_predicate("screenshot", "screenshot");
+        assert!(bare.contains("kMDItemIsScreenCapture == 1"));
+        assert!(!bare.contains("kMDItemDisplayName"), "bare: {bare}");
+        // A substantive query still filters within screenshots.
+        let filtered = build_predicate("error dialog", "screenshot");
+        assert!(filtered.contains("kMDItemIsScreenCapture == 1"));
+        assert!(filtered.contains("kMDItemTextContent == 'error dialog'cd"));
+    }
+
+    #[test]
+    fn document_kind_does_not_content_match() {
+        let p = build_predicate("invoice", "document");
+        assert!(p.contains("kMDItemDisplayName == '*invoice*'cd"));
+        assert!(!p.contains("kMDItemTextContent"), "docs filename-only: {p}");
+    }
+
+    #[test]
+    fn named_locations_resolve_under_home() {
+        // Guarded on HOME being set (it is, in any real run and in CI).
+        if std::env::var_os("HOME").is_some() {
+            assert!(scope_dir(Some("desktop"))
+                .unwrap()
+                .ends_with("Desktop"));
+            assert!(scope_dir(Some("Downloads"))
+                .unwrap()
+                .ends_with("Downloads"));
+        }
+        // Unknown / absent → None, so the caller falls back to whole-home.
+        assert!(scope_dir(Some("nonsense")).is_none());
+        assert!(scope_dir(None).is_none());
+    }
+
+    #[test]
+    fn library_backups_are_noise() {
+        // The exact junk the user saw: a Cursor editor backup in Library.
+        assert!(is_noise(
+            "/Users/x/Library/Application Support/Cursor/User/History/9f6U.css"
+        ));
+        // But the Photos library (a bundle, not /Library/) is real content.
+        assert!(!is_noise(
+            "/Users/x/Pictures/Photos Library.photoslibrary/originals/a.heic"
+        ));
     }
 
     #[test]
