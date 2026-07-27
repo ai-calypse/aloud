@@ -41,6 +41,25 @@ struct Pending {
 #[derive(Default)]
 pub struct PendingQuestion(Mutex<Option<oneshot::Sender<Option<String>>>>);
 
+/// Which run the panel is currently showing.
+///
+/// A run is only stopped *between* tools — the pipeline polls its cancel flag
+/// rather than dropping the future, so a superseded run keeps executing its
+/// current tool and then emits into a panel the next run has already reset.
+/// That is how a new command ended up showing the previous one's steps. Every
+/// run takes a ticket here and its events are dropped once it is no longer the
+/// holder, so a late event from an abandoned run cannot reach the panel.
+static CURRENT_RUN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Claims the panel for a new run, returning its ticket.
+fn claim_run() -> u64 {
+    CURRENT_RUN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+
+fn is_current(run: u64) -> bool {
+    CURRENT_RUN.load(std::sync::atomic::Ordering::SeqCst) == run
+}
+
 /// Streamed to the agent panel. Names follow the AG-UI protocol's tool-call
 /// lifecycle (https://docs.ag-ui.com) so the shape maps onto AI Elements' tool
 /// renderer — the vocabulary only, not the wire protocol.
@@ -113,6 +132,17 @@ fn emit(app: &AppHandle, event: AgentEvent) {
     }
 }
 
+/// Emits only while `run` still owns the panel. A superseded run keeps
+/// executing until its current tool returns, and without this its results land
+/// in the panel belonging to the command the user has since spoken.
+fn emit_for(app: &AppHandle, run: u64, event: AgentEvent) {
+    if !is_current(run) {
+        tracing::debug!(?event, run, "dropping an event from a superseded run");
+        return;
+    }
+    emit(app, event);
+}
+
 /// Runs the full agent flow for a transcript. Called by the pipeline, which
 /// owns `cancelled` — the loop polls it between tool calls so Escape stops a
 /// multi-tool round part-way instead of after all of it.
@@ -130,20 +160,29 @@ pub async fn run(
     // start of every run means no exit path can leak into the next command.
     clear_pending(app);
 
-    crate::overlay::show_panel(app);
-    emit(app, AgentEvent::RunStarted(transcript.clone()));
+    // Taking the ticket also invalidates any run still in flight: its events
+    // stop reaching the panel from here on, even though it keeps executing
+    // until its current tool returns.
+    let run = claim_run();
 
-    match execute(app, &transcript, settings, cancelled).await {
-        Ok(message) => emit(app, AgentEvent::RunFinished(message)),
+    crate::overlay::show_panel(app);
+    emit_for(app, run, AgentEvent::RunStarted(transcript.clone()));
+
+    match execute(app, run, &transcript, settings, cancelled).await {
+        Ok(message) => emit_for(app, run, AgentEvent::RunFinished(message)),
         // A cancel is the user's own doing: close the panel rather than
         // showing them an error for the thing they just asked to stop.
         Err(e) if is_cancelled(&e) => {
             tracing::info!("agent cancelled");
-            hide(app);
+            // Only if nothing has replaced us — hiding here would otherwise
+            // close the panel of the run the user just started.
+            if is_current(run) {
+                hide(app);
+            }
         }
         Err(e) => {
             tracing::error!(%e, "agent failed");
-            emit(app, AgentEvent::RunError(format!("{e:#}")));
+            emit_for(app, run, AgentEvent::RunError(format!("{e:#}")));
         }
     }
     Ok(())
@@ -181,6 +220,7 @@ const GEMINI_MODEL: &str = "gemini-3.1-flash-lite";
 )]
 async fn execute(
     app: &AppHandle,
+    run: u64,
     transcript: &str,
     settings: &Settings,
     cancelled: impl Fn() -> bool,
@@ -249,7 +289,7 @@ async fn execute(
         &composio,
         transcript,
         &tools,
-        |event| emit(app, event_of(event)),
+        |event| emit_for(app, run, event_of(event)),
         // The safety gate. The offered tools carry their toolkit, so it names
         // the real app rather than deriving one from the slug.
         |name, args| {
@@ -258,7 +298,7 @@ async fn execute(
                 .find(|t| t.name == name)
                 .map(|t| t.toolkit.clone())
                 .unwrap_or_else(|| tool_app(&name));
-            confirm_write(app, name, toolkit, args)
+            confirm_write(app, run, name, toolkit, args)
         },
         // The question itself already went out through `on_event`; this only
         // opens the reply channel and waits on it.
@@ -304,12 +344,21 @@ pub fn answer_agent(app: AppHandle, answer: Option<String>) {
 /// owned args so the returned future doesn't borrow the loop's transient data.
 async fn confirm_write(
     app: &AppHandle,
+    run: u64,
     name: String,
     toolkit: String,
     args: serde_json::Value,
 ) -> Option<serde_json::Value> {
-    emit(
+    // A superseded run must not open a gate: its prompt would appear over the
+    // new run's panel, and it would occupy the single confirmation slot the
+    // current run needs. Declining is right — the user has moved on.
+    if !is_current(run) {
+        tracing::info!(%name, run, "declining a write from a superseded run");
+        return None;
+    }
+    emit_for(
         app,
+        run,
         AgentEvent::ToolCall(ToolCall {
             app: toolkit,
             name,
@@ -479,6 +528,29 @@ pub fn close_agent(app: AppHandle) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A run is stopped only *between* tools, so a superseded one keeps
+    /// executing and then emits — into the panel the next command already
+    /// reset. That is how a new run showed the previous run's steps. Only the
+    /// latest ticket may write to the panel.
+    #[test]
+    fn only_the_newest_run_owns_the_panel() {
+        let first = claim_run();
+        assert!(is_current(first));
+
+        // The user speaks again while the first run is still mid-tool.
+        let second = claim_run();
+        assert!(is_current(second));
+        assert!(
+            !is_current(first),
+            "the superseded run must not still own the panel"
+        );
+
+        // Tickets are strictly increasing, so a late run can never look current
+        // again by coincidence.
+        assert!(second > first);
+        assert!(claim_run() > second);
+    }
 
     /// The panel only ever sees `display_args`' flat strings, so approving a
     /// gate has to rebuild the nested shape the tool expects. Getting this
