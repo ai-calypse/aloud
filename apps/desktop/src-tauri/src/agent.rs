@@ -122,6 +122,14 @@ pub async fn run(
     settings: &Settings,
     cancelled: impl Fn() -> bool,
 ) -> Result<()> {
+    // A previous run that ended without the panel being dismissed — it finished
+    // on its own, errored, or was cancelled — leaves its unanswered gate in the
+    // slot. The next command then finds it occupied and declines its own
+    // confirmation with no prompt on screen. Nothing else clears it: only
+    // `close_agent` does, and that needs an explicit dismissal. Clearing at the
+    // start of every run means no exit path can leak into the next command.
+    clear_pending(app);
+
     crate::overlay::show_panel(app);
     emit(app, AgentEvent::RunStarted(transcript.clone()));
 
@@ -146,6 +154,18 @@ pub async fn run(
 /// a typed error for one string is not worth the crate boundary.
 fn is_cancelled(error: &anyhow::Error) -> bool {
     error.to_string() == "cancelled"
+}
+
+/// Drops any unanswered gate or question. Dropping a sender resolves whoever is
+/// waiting on it — as a declined write or an unanswered question — so an
+/// abandoned run never leaves a live channel behind.
+fn clear_pending(app: &AppHandle) {
+    if let Some(state) = app.try_state::<PendingConfirmation>() {
+        state.0.lock().unwrap().take();
+    }
+    if let Some(state) = app.try_state::<PendingQuestion>() {
+        state.0.lock().unwrap().take();
+    }
 }
 
 // Gemini, not Groq: a multi-round tool loop makes several chat calls in a row
@@ -449,15 +469,9 @@ pub fn hide(app: &AppHandle) {
 #[specta::specta]
 pub fn close_agent(app: AppHandle) {
     // Abandoning a pending confirmation reads as a rejection; the write never
-    // fires.
-    if let Some(state) = app.try_state::<PendingConfirmation>() {
-        state.0.lock().unwrap().take();
-    }
-    // A dropped sender resolves the question as unanswered, so a closed panel
-    // never leaves the loop waiting out its full timeout.
-    if let Some(state) = app.try_state::<PendingQuestion>() {
-        state.0.lock().unwrap().take();
-    }
+    // fires. A dropped question sender resolves as unanswered, so a closed
+    // panel never leaves the loop waiting out its full timeout.
+    clear_pending(&app);
     hide(&app);
 }
 

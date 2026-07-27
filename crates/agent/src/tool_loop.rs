@@ -116,9 +116,16 @@ To find files, photos, screenshots, or documents ON THIS MAC, use the local \
 file search tool (ALOUD_FINDER_SEARCH) — not email, contacts, or calendar. \
 \"Find my images with X\", \"find that screenshot\", \"find my tax pdf\" are \
 local searches. \
-To open, launch or switch to an application, always use ALOUD_OPEN_APP. Never \
-drive Spotlight, the Dock or the Finder on screen to open something — clicking \
-a Spotlight result is not how you open an app here. \
+To open, launch or switch to applications, always use ALOUD_OPEN_APP, passing \
+every app the user named in one call. Never drive Spotlight, the Dock or the \
+Finder on screen to open something — clicking a Spotlight result is not how you \
+open an app here. \
+Tools that take a list — opening apps, gathering files — do the whole batch in \
+a single call. When the user asks for many things at once, put them all in one \
+call rather than calling the tool repeatedly: each tool may only run a few \
+times per command, so repeated calls will be cut off before the job is done. \
+To copy or move files somewhere, use ALOUD_COLLECT_FILES with the paths from a \
+search — it handles every file in one call. \
 To tidy or organise a folder, call ALOUD_ORGANIZE_FOLDER exactly once. It sorts \
 every file in the folder in that single call, so never call it repeatedly and \
 never move files one at a time. You choose the categories: pick ones that fit \

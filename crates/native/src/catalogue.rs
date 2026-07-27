@@ -61,6 +61,150 @@ fn frontmost_app_name() -> Result<String, ScriptError> {
     Ok(name)
 }
 
+/// Launches or activates one app by bundle path.
+///
+/// By path, never `open -b` or a URL scheme: Launch Services resolves a scheme
+/// like `discord://` to Discord *Canary* when both are installed. The first
+/// candidate that exists wins, so a user-installed app outranks a system one of
+/// the same name. `-a` activates a running instance rather than starting a
+/// second, which is what "switch to Safari" has to mean.
+fn open_one(name: &str) -> Result<(), ScriptError> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let bundle = [
+        format!("/Applications/{name}.app"),
+        format!("/System/Applications/{name}.app"),
+        format!("/System/Applications/Utilities/{name}.app"),
+        format!("{home}/Applications/{name}.app"),
+    ]
+    .into_iter()
+    .find(|p| std::path::Path::new(p).exists())
+    .ok_or_else(|| ScriptError::Failed(format!("no application named {name} is installed")))?;
+
+    let status = std::process::Command::new("/usr/bin/open")
+        .args(["-a", &bundle])
+        .status()
+        .map_err(|e| ScriptError::Failed(format!("launching {name}: {e}")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(ScriptError::Failed(format!("could not open {name}")))
+    }
+}
+
+/// Waits for `name` to actually reach the front.
+///
+/// `open` returns as soon as the launch is *requested*, not when the app is on
+/// screen, so without this the agent's next step — a screen read or a click —
+/// lands on the previous app. Polls rather than sleeping a flat second, so a
+/// warm app costs ~50ms.
+fn wait_until_frontmost(name: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        if frontmost_is(name) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// Gathers `paths` into `destination`, copying or moving.
+///
+/// One call for the whole batch, for the same reason the folder organiser is:
+/// the loop caps a tool at `MAX_CALLS_PER_TOOL` per run, so a one-file-per-call
+/// tool can never gather 354 search results. The destination is confined to the
+/// home folder — this writes real files, and a path escape would scatter them
+/// into a system directory.
+fn collect_files(paths: &[String], destination: &str, moving: bool) -> Result<Value, ScriptError> {
+    let home =
+        std::env::var("HOME").map_err(|_| ScriptError::Failed("no home directory".into()))?;
+    let home = std::path::PathBuf::from(home);
+
+    let wanted = destination.trim().trim_start_matches("~/");
+    let target = if wanted.starts_with('/') {
+        std::path::PathBuf::from(wanted)
+    } else {
+        home.join(wanted)
+    };
+    // Resolve `..` before the containment check, or `Documents/../../etc` slips
+    // through: the string starts inside home but does not stay there.
+    let mut resolved = std::path::PathBuf::new();
+    for part in target.components() {
+        match part {
+            std::path::Component::ParentDir => {
+                resolved.pop();
+            }
+            other => resolved.push(other),
+        }
+    }
+    if !resolved.starts_with(&home) {
+        return Err(ScriptError::Failed(format!(
+            "{destination:?} is outside your home folder"
+        )));
+    }
+    std::fs::create_dir_all(&resolved)
+        .map_err(|e| ScriptError::Failed(format!("creating {}: {e}", resolved.display())))?;
+
+    let mut done = 0usize;
+    let mut failed = Vec::new();
+    for path in paths {
+        let source = std::path::Path::new(path);
+        let Some(name) = source.file_name() else {
+            failed.push(path.clone());
+            continue;
+        };
+        // Already in the destination: gathering a folder into itself is a
+        // no-op, not an error.
+        if source.parent() == Some(resolved.as_path()) {
+            done += 1;
+            continue;
+        }
+        let dest = free_name(&resolved.join(name));
+        let outcome = if moving {
+            std::fs::rename(source, &dest).map(|_| ()).or_else(|_| {
+                // rename fails across filesystems; fall back to copy+remove.
+                std::fs::copy(source, &dest)
+                    .and_then(|_| std::fs::remove_file(source))
+                    .map(|_| ())
+            })
+        } else {
+            std::fs::copy(source, &dest).map(|_| ())
+        };
+        match outcome {
+            Ok(()) => done += 1,
+            Err(_) => failed.push(path.clone()),
+        }
+    }
+
+    Ok(json!({
+        "collected": done,
+        "destination": resolved.display().to_string(),
+        "moved": moving,
+        "failed": failed.len(),
+    }))
+}
+
+/// `path`, or `path` with a numeric suffix when the name is taken — two files
+/// called `photo.png` from different folders are two different photos.
+fn free_name(path: &std::path::Path) -> std::path::PathBuf {
+    if !path.exists() {
+        return path.to_path_buf();
+    }
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let ext = path.extension().map(|e| e.to_string_lossy().into_owned());
+    let parent = path.parent().unwrap_or(std::path::Path::new("."));
+    for n in 2..10_000 {
+        let name = match &ext {
+            Some(ext) => format!("{stem} {n}.{ext}"),
+            None => format!("{stem} {n}"),
+        };
+        let candidate = parent.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    path.to_path_buf()
+}
+
 /// One native action. `params` is the JSON-schema object handed to the model;
 /// `run` is called with the model's (already gate-approved, for writes)
 /// arguments.
@@ -352,64 +496,119 @@ pub const ACTIONS: &[Action] = &[
     },
     Action {
         name: "ALOUD_OPEN_APP",
-        description: "Open or switch to an application by name — \"TextEdit\", \"Safari\", \
-             \"System Settings\". Use this to launch or focus an app; never drive \
-             Spotlight or the Dock on screen to do it.",
+        description: "Open or switch to applications by name — \"TextEdit\", \"Safari\", \
+             \"System Settings\". Pass every app the user asked for in `names` and \
+             they all open in this ONE call; never call this repeatedly to open \
+             several. Use it to launch or focus an app; never drive Spotlight or \
+             the Dock on screen to do it.",
         app: crate::ALWAYS,
         read_only: false,
         params: || {
             json!({
                 "type": "object",
-                "required": ["name"],
+                "required": ["names"],
                 "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "The app's name as it appears in Applications.",
+                    "names": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Every app to open, as it appears in \
+                                        Applications. One entry is fine.",
                     }
                 }
             })
         },
         run: |args| {
-            let name = required_str(args, "name")?;
-            // By path, never `open -b` or a URL scheme: Launch Services resolves
-            // a scheme like `discord://` to Discord *Canary* when both are
-            // installed. The first candidate that exists wins, so a user-installed
-            // app outranks a system one of the same name.
-            let home = std::env::var("HOME").unwrap_or_default();
-            let bundle = [
-                format!("/Applications/{name}.app"),
-                format!("/System/Applications/{name}.app"),
-                format!("/System/Applications/Utilities/{name}.app"),
-                format!("{home}/Applications/{name}.app"),
-            ]
-            .into_iter()
-            .find(|p| std::path::Path::new(p).exists())
-            .ok_or_else(|| {
-                ScriptError::Failed(format!("no application named {name} is installed"))
-            })?;
-
-            // `-a` activates an already-running instance instead of starting a
-            // second one, which is what "switch to Safari" has to mean.
-            let status = std::process::Command::new("/usr/bin/open")
-                .args(["-a", &bundle])
-                .status()
-                .map_err(|e| ScriptError::Failed(format!("launching {name}: {e}")))?;
-            if !status.success() {
-                return Err(ScriptError::Failed(format!("could not open {name}")));
+            // `names` is the real argument, but a model told to open one app
+            // will reach for the singular anyway; accepting both costs a line
+            // and saves a failed call.
+            let names: Vec<String> = args
+                .get("names")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|n| n.as_str().map(str::to_string))
+                        .collect()
+                })
+                .or_else(|| {
+                    args.get("name")
+                        .and_then(Value::as_str)
+                        .map(|n| vec![n.to_string()])
+                })
+                .unwrap_or_default();
+            if names.is_empty() {
+                return Err(ScriptError::Failed("no app names given".into()));
             }
 
-            // `open` returns as soon as the launch is *requested*, not when the
-            // app is on screen. Without this the agent's next step — a screen
-            // read or a click — lands on the previous app. Polls rather than
-            // sleeping a flat second so a warm app costs ~50ms.
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while std::time::Instant::now() < deadline {
-                if frontmost_is(name) {
-                    break;
+            let mut opened = Vec::new();
+            let mut missing = Vec::new();
+            for name in &names {
+                match open_one(name) {
+                    Ok(()) => opened.push(name.clone()),
+                    Err(_) => missing.push(name.clone()),
                 }
-                std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            Ok(json!({ "opened": name, "path": bundle }))
+            if opened.is_empty() {
+                return Err(ScriptError::Failed(format!(
+                    "none of those apps are installed: {}",
+                    missing.join(", ")
+                )));
+            }
+            // The last one opened is the one left in front, so a follow-up
+            // screen read targets something predictable.
+            if let Some(last) = opened.last() {
+                wait_until_frontmost(last);
+            }
+            Ok(json!({ "opened": opened, "not_installed": missing }))
+        },
+    },
+    Action {
+        name: "ALOUD_COLLECT_FILES",
+        description: "Copy or move many files into one folder, in a single call. Use after a \
+             file search when the user wants the results gathered somewhere — \
+             \"put all my images in a folder\", \"collect these into Documents\". \
+             Pass the absolute paths from the search result. Copies by default; \
+             set move=true to move instead.",
+        app: crate::ALWAYS,
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["paths", "destination"],
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Absolute paths of the files to gather.",
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "Folder to gather them into, e.g. \
+                                        \"Documents/Images\". Created if missing, \
+                                        and must be inside your home folder.",
+                    },
+                    "move": {
+                        "type": "boolean",
+                        "description": "Move rather than copy. Defaults to false.",
+                    }
+                }
+            })
+        },
+        run: |args| {
+            let paths: Vec<String> = args
+                .get("paths")
+                .and_then(Value::as_array)
+                .map(|l| {
+                    l.iter()
+                        .filter_map(|p| p.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if paths.is_empty() {
+                return Err(ScriptError::Failed("no file paths given".into()));
+            }
+            let destination = required_str(args, "destination")?;
+            let moving = args.get("move").and_then(Value::as_bool).unwrap_or(false);
+            collect_files(&paths, destination, moving)
         },
     },
     Action {
@@ -792,6 +991,75 @@ mod tests {
                 || std::path::Path::new("/System/Applications/Safari.app").exists(),
             "expected Safari in one of the searched locations"
         );
+    }
+
+    /// Gathering must be confined to the home folder. This writes real files,
+    /// and a `..` escape would scatter them into a system directory — the
+    /// string starts inside home but does not stay there.
+    #[test]
+    fn collecting_outside_the_home_folder_is_refused() {
+        for escape in ["../../etc", "Documents/../../../tmp", "/etc"] {
+            let err = collect_files(&["/tmp/x".to_string()], escape, false);
+            assert!(
+                err.is_err(),
+                "{escape:?} should be refused, got {:?}",
+                err.map(|v| v.to_string())
+            );
+        }
+    }
+
+    /// The whole reason this tool exists: 354 search results cannot be 354 tool
+    /// calls, so one call has to gather the batch.
+    #[test]
+    fn one_call_collects_a_whole_batch_without_overwriting() {
+        let scratch = std::env::temp_dir().join(format!("aloud-collect-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        std::fs::create_dir_all(&scratch).unwrap();
+
+        // Two files sharing a name, from different folders — the collision case.
+        let mut paths = Vec::new();
+        for folder in ["a", "b"] {
+            let dir = scratch.join(folder);
+            std::fs::create_dir_all(&dir).unwrap();
+            let file = dir.join("photo.png");
+            std::fs::write(&file, folder.as_bytes()).unwrap();
+            paths.push(file.display().to_string());
+        }
+        for i in 0..50 {
+            let file = scratch.join(format!("f{i}.png"));
+            std::fs::write(&file, b"x").unwrap();
+            paths.push(file.display().to_string());
+        }
+
+        // Destination under $HOME, since that is the only place allowed.
+        let home = std::env::var("HOME").unwrap();
+        let rel = format!(".aloud-test-collect-{}", std::process::id());
+        let out = collect_files(&paths, &rel, false).unwrap();
+        assert_eq!(out["collected"], 52);
+        assert_eq!(out["failed"], 0);
+
+        let dest = std::path::PathBuf::from(&home).join(&rel);
+        assert!(dest.join("photo.png").exists());
+        assert!(
+            dest.join("photo 2.png").exists(),
+            "a name collision must suffix, not overwrite"
+        );
+
+        std::fs::remove_dir_all(&dest).unwrap();
+        std::fs::remove_dir_all(&scratch).unwrap();
+    }
+
+    /// "Open 15 apps" was opening one: the tool took a single name and the loop
+    /// caps a tool at MAX_CALLS_PER_TOOL per run, so it could never reach 15.
+    #[test]
+    fn open_app_takes_a_list_so_one_call_opens_many() {
+        let open = ACTIONS.iter().find(|a| a.name == "ALOUD_OPEN_APP").unwrap();
+        let params = (open.params)();
+        assert_eq!(
+            params["properties"]["names"]["type"], "array",
+            "must accept a list, or a 15-app request cannot be satisfied"
+        );
+        assert_eq!(params["required"][0], "names");
     }
 
     #[test]

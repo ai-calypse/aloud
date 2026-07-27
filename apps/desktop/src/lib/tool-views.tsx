@@ -376,8 +376,23 @@ const VIEWS: Record<string, ToolView> = {
   },
   ALOUD_OPEN_APP: {
     label: (a) => {
-      const name = text(a, "name");
-      return name ? `Opening ${name}` : "Opening an app";
+      // One call can open many, so the gate has to name them — "opening an
+      // app" while fifteen launch is not something anyone can approve.
+      const names = nested(a, "names");
+      const list = Array.isArray(names) ? names.map(String) : [];
+      if (list.length > 3) return `Opening ${list.length} apps`;
+      if (list.length) return `Opening ${list.join(", ")}`;
+      return text(a, "name") ? `Opening ${text(a, "name")}` : "Opening an app";
+    },
+  },
+  ALOUD_COLLECT_FILES: {
+    label: (a) => {
+      const paths = nested(a, "paths");
+      const count = Array.isArray(paths) ? paths.length : 0;
+      const verb = String(a["move"]) === "true" ? "Moving" : "Copying";
+      const where = text(a, "destination");
+      const what = count ? `${count} file${count === 1 ? "" : "s"}` : "files";
+      return where ? `${verb} ${what} to ${where}` : `${verb} ${what}`;
     },
   },
   ALOUD_ORGANIZE_FOLDER: {
