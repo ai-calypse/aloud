@@ -116,13 +116,18 @@ To find files, photos, screenshots, or documents ON THIS MAC, use the local \
 file search tool (ALOUD_FINDER_SEARCH) — not email, contacts, or calendar. \
 \"Find my images with X\", \"find that screenshot\", \"find my tax pdf\" are \
 local searches. \
+To open, launch or switch to an application, always use ALOUD_OPEN_APP. Never \
+drive Spotlight, the Dock or the Finder on screen to open something — clicking \
+a Spotlight result is not how you open an app here. \
 When no tool in the list does what was asked, you can drive the app the user is \
 looking at directly: ALOUD_SCREEN_READ lists its real on-screen controls with \
 their positions, and the screen click/type/key tools act on them. This is the \
 fallback, not the first choice — a named tool is faster and more reliable where \
 one exists, so reach for the screen tools only when nothing else fits. Always \
 read before you click, never invent coordinates, and read again after anything \
-that changes what is on screen, because the positions move. \
+that changes what is on screen, because the positions move. The screen tools \
+act on the app that is currently in front, so open or switch to the right app \
+before reading it. \
 The command is a transcription of speech and may contain minor errors; act on \
 the intent. After acting, confirm what you did in one short plain sentence. \
 Finish the whole command before you stop. A command that names two actions \
@@ -600,8 +605,9 @@ where
             // covers the rest of the run. Coarser than the per-action gate the
             // structured tools get, and deliberately so; see COMPUTER_USE.md's
             // open question, which this does not claim to settle.
-            let gate_needed = if is_screen_write(&name) {
-                !std::mem::replace(&mut screen_approved, true)
+            let is_screen = is_screen_write(&name);
+            let gate_needed = if is_screen {
+                !screen_approved
             } else {
                 is_write(&name, tools)
             };
@@ -614,14 +620,16 @@ where
                 {
                     Some(approved) => {
                         args = approved;
+                        // Only once the user has actually said yes. Set before
+                        // the await, a model that emits click+type in one round
+                        // let the second call skip the gate while the first was
+                        // still on screen — and opening a second confirmation
+                        // dropped the first one's reply channel, which resolves
+                        // as "declined" with no prompt ever shown.
+                        screen_approved = true;
                         false
                     }
-                    None => {
-                        // A refused screen run must not leave the run approved,
-                        // or the next click would proceed unasked.
-                        screen_approved = false;
-                        true
-                    }
+                    None => true,
                 }
             } else {
                 false

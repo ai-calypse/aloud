@@ -368,7 +368,17 @@ fn tool_app(slug: &str) -> String {
 async fn await_confirmation(app: &AppHandle, args: serde_json::Value) -> Option<serde_json::Value> {
     let (tx, rx) = oneshot::channel();
     if let Some(state) = app.try_state::<PendingConfirmation>() {
-        *state.0.lock().unwrap() = Some(Pending { reply: tx, args });
+        let mut slot = state.0.lock().unwrap();
+        // Replacing a live confirmation drops its sender, which resolves the
+        // waiting dispatch as "declined" without the user ever seeing a prompt.
+        // The panel renders one gate at a time, so a second one here means two
+        // writes are racing; refusing the newcomer is the honest answer, and it
+        // keeps the visible prompt the one that is actually answerable.
+        if slot.as_ref().is_some_and(|p| !p.reply.is_closed()) {
+            tracing::warn!("a confirmation is already open; declining the second");
+            return None;
+        }
+        *slot = Some(Pending { reply: tx, args });
     } else {
         tracing::error!("PendingConfirmation state missing");
         return None;

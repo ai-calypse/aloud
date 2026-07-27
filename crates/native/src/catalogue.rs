@@ -6,7 +6,7 @@
 //! gets a real label, a real body, and a `read_only` flag that means something.
 //!
 //! ponytail: a generic runner is the upgrade path if this table ever gets long
-//! enough to be the bottleneck. It is eight rows; it is not.
+//! enough to be the bottleneck. It is a dozen rows; it is not.
 
 use serde_json::{json, Value};
 
@@ -20,6 +20,26 @@ fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, ScriptError> 
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ScriptError::Failed(format!("missing required argument {key:?}")))
+}
+
+/// Whether `name` is the app now in front. Used to wait out a launch, since
+/// `open` returns before the app is on screen.
+///
+/// Asked of System Events rather than the AX API: the AX read of the focused
+/// application needs the calling process to be AX-trusted and fails outside the
+/// signed app, which would make this loop always time out in tests and examples.
+fn frontmost_is(name: &str) -> bool {
+    let Ok(out) = std::process::Command::new("osascript")
+        .args([
+            "-e",
+            "tell application \"System Events\" to name of first application process \
+             whose frontmost is true",
+        ])
+        .output()
+    else {
+        return false;
+    };
+    String::from_utf8_lossy(&out.stdout).trim() == name
 }
 
 /// One native action. `params` is the JSON-schema object handed to the model;
@@ -44,17 +64,23 @@ pub const ACTIONS: &[Action] = &[
     Action {
         name: "ALOUD_FINDER_SEARCH",
         description: "Find or list files on the Mac. Set only the parameters the \
-                      request actually implies:\n\
-                      - `query`: a keyword to match ('buddha', 'invoice'). OMIT \
-                      it to just LIST — 'files on my desktop' has no keyword.\n\
-                      - `kind`: 'screenshot', 'image', 'document', or 'any'. Use \
-                      'screenshot' for screenshots — never query the word.\n\
+                      request actually implies.\n\
+                      CRITICAL: words naming a file TYPE are `kind`, NOT `query`. \
+                      'pictures', 'photos', 'images' → kind=image. 'screenshots' \
+                      → kind=screenshot. 'documents', 'PDFs' → kind=document. \
+                      'files' → kind=any. Do NOT put these words in `query` — \
+                      that searches for the literal filename and finds nothing.\n\
+                      - `query`: ONLY a specific content term ('buddha', \
+                      'invoice', 'a cat'). OMIT it when the user just names a \
+                      type and/or place.\n\
+                      - `kind`: the file type per the mapping above.\n\
                       - `location`: a folder the user names ('on my desktop' → \
-                      desktop). Omit to look across the home folder.\n\
-                      Examples: 'files on my desktop' → {location: desktop}. \
-                      'my screenshots' → {kind: screenshot}. 'images with a \
-                      cat' → {kind: image, query: cat}. 'my invoice pdf' → \
-                      {kind: document, query: invoice}.",
+                      desktop). Omit for the whole home folder.\n\
+                      Examples: 'pictures on my desktop' → {kind: image, \
+                      location: desktop} (NO query). 'my screenshots' → {kind: \
+                      screenshot}. 'photos of a cat' → {kind: image, query: \
+                      cat}. 'files on my desktop' → {location: desktop}. 'my \
+                      invoice pdf' → {kind: document, query: invoice}.",
         // Spotlight is built into macOS — always available, never gated on an
         // app the scanner cannot see.
         app: crate::ALWAYS,
@@ -65,14 +91,17 @@ pub const ACTIONS: &[Action] = &[
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Keyword to match. OMIT to list without \
-                                        filtering (e.g. all files in a folder)."
+                        "description": "A specific content term only. OMIT when \
+                                        the user just names a type ('pictures') \
+                                        or place ('desktop') — a type word here \
+                                        matches the literal filename and fails."
                     },
                     "kind": {
                         "type": "string",
                         "enum": ["screenshot", "image", "document", "any"],
-                        "description": "The kind of file. 'screenshot' for \
-                                        screenshots — do not query the word."
+                        "description": "File type. pictures/photos/images→image, \
+                                        screenshots→screenshot, docs/PDFs→\
+                                        document, files→any."
                     },
                     "location": {
                         "type": "string",
@@ -146,7 +175,9 @@ pub const ACTIONS: &[Action] = &[
             );
             let out = script::run("Music", &source)?;
             if out == "none" {
-                Ok(json!({ "played": false, "reason": format!("nothing in the library matched {query:?}") }))
+                Ok(
+                    json!({ "played": false, "reason": format!("nothing in the library matched {query:?}") }),
+                )
             } else {
                 Ok(json!({ "played": true, "track": out }))
             }
@@ -202,7 +233,11 @@ pub const ACTIONS: &[Action] = &[
         run: |args| {
             let text = required_str(args, "text")?;
             let text = script::escape(text);
-            let source = match args.get("list").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            let source = match args
+                .get("list")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            {
                 Some(list) => {
                     let list = script::escape(list);
                     format!(
@@ -297,6 +332,68 @@ pub const ACTIONS: &[Action] = &[
         },
     },
     Action {
+        name: "ALOUD_OPEN_APP",
+        description: "Open or switch to an application by name — \"TextEdit\", \"Safari\", \
+             \"System Settings\". Use this to launch or focus an app; never drive \
+             Spotlight or the Dock on screen to do it.",
+        app: crate::ALWAYS,
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The app's name as it appears in Applications.",
+                    }
+                }
+            })
+        },
+        run: |args| {
+            let name = required_str(args, "name")?;
+            // By path, never `open -b` or a URL scheme: Launch Services resolves
+            // a scheme like `discord://` to Discord *Canary* when both are
+            // installed. The first candidate that exists wins, so a user-installed
+            // app outranks a system one of the same name.
+            let home = std::env::var("HOME").unwrap_or_default();
+            let bundle = [
+                format!("/Applications/{name}.app"),
+                format!("/System/Applications/{name}.app"),
+                format!("/System/Applications/Utilities/{name}.app"),
+                format!("{home}/Applications/{name}.app"),
+            ]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .ok_or_else(|| {
+                ScriptError::Failed(format!("no application named {name} is installed"))
+            })?;
+
+            // `-a` activates an already-running instance instead of starting a
+            // second one, which is what "switch to Safari" has to mean.
+            let status = std::process::Command::new("/usr/bin/open")
+                .args(["-a", &bundle])
+                .status()
+                .map_err(|e| ScriptError::Failed(format!("launching {name}: {e}")))?;
+            if !status.success() {
+                return Err(ScriptError::Failed(format!("could not open {name}")));
+            }
+
+            // `open` returns as soon as the launch is *requested*, not when the
+            // app is on screen. Without this the agent's next step — a screen
+            // read or a click — lands on the previous app. Polls rather than
+            // sleeping a flat second so a warm app costs ~50ms.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while std::time::Instant::now() < deadline {
+                if frontmost_is(name) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Ok(json!({ "opened": name, "path": bundle }))
+        },
+    },
+    Action {
         name: "ALOUD_FINDER_REVEAL",
         description: "Reveal a file or folder in Finder by its absolute path.",
         // Finder is always running on macOS but never appears in installed_apps.
@@ -376,6 +473,35 @@ mod tests {
             .find(|a| a.name == "ALOUD_MUSIC_PLAY")
             .unwrap();
         assert!(!play.read_only, "PLAY changes playback — must be a write");
+    }
+
+    /// "Open TextEdit" is the most common thing anyone says to this app, and
+    /// without a tool for it the agent drove Spotlight on screen instead —
+    /// clicking a search result and typing into the wrong window.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn a_real_app_opens_and_an_invented_one_is_refused() {
+        let open = ACTIONS
+            .iter()
+            .find(|a| a.name == "ALOUD_OPEN_APP")
+            .expect("the launcher must be offered");
+        assert!(!open.read_only, "launching an app is a write");
+
+        // Resolution is by path, so a name that exists nowhere must fail with a
+        // readable message rather than launching something adjacent.
+        let err = (open.run)(&json!({ "name": "NoSuchAppZZZ" })).unwrap_err();
+        assert!(
+            err.to_string().contains("NoSuchAppZZZ"),
+            "the error should name the app: {err}"
+        );
+
+        // Safari ships with macOS, so its bundle must resolve under
+        // /Applications. Resolution only — this does not launch it.
+        assert!(
+            std::path::Path::new("/Applications/Safari.app").exists()
+                || std::path::Path::new("/System/Applications/Safari.app").exists(),
+            "expected Safari in one of the searched locations"
+        );
     }
 
     #[test]

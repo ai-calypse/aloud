@@ -374,6 +374,12 @@ const VIEWS: Record<string, ToolView> = {
       return name ? `Running "${name}"` : "Running a shortcut";
     },
   },
+  ALOUD_OPEN_APP: {
+    label: (a) => {
+      const name = text(a, "name");
+      return name ? `Opening ${name}` : "Opening an app";
+    },
+  },
   // Screen control. The click gate is the one confirmation a computer-use run
   // gets, so its label has to say what will be clicked — the model passes the
   // element's own text for exactly this, and a bare coordinate pair is a gate
