@@ -115,32 +115,7 @@ fn wait_until_frontmost(name: &str) {
 /// home folder — this writes real files, and a path escape would scatter them
 /// into a system directory.
 fn collect_files(paths: &[String], destination: &str, moving: bool) -> Result<Value, ScriptError> {
-    let home =
-        std::env::var("HOME").map_err(|_| ScriptError::Failed("no home directory".into()))?;
-    let home = std::path::PathBuf::from(home);
-
-    let wanted = destination.trim().trim_start_matches("~/");
-    let target = if wanted.starts_with('/') {
-        std::path::PathBuf::from(wanted)
-    } else {
-        home.join(wanted)
-    };
-    // Resolve `..` before the containment check, or `Documents/../../etc` slips
-    // through: the string starts inside home but does not stay there.
-    let mut resolved = std::path::PathBuf::new();
-    for part in target.components() {
-        match part {
-            std::path::Component::ParentDir => {
-                resolved.pop();
-            }
-            other => resolved.push(other),
-        }
-    }
-    if !resolved.starts_with(&home) {
-        return Err(ScriptError::Failed(format!(
-            "{destination:?} is outside your home folder"
-        )));
-    }
+    let resolved = under_home(destination)?;
     std::fs::create_dir_all(&resolved)
         .map_err(|e| ScriptError::Failed(format!("creating {}: {e}", resolved.display())))?;
 
@@ -180,6 +155,81 @@ fn collect_files(paths: &[String], destination: &str, moving: bool) -> Result<Va
         "destination": resolved.display().to_string(),
         "moved": moving,
         "failed": failed.len(),
+    }))
+}
+
+fn home_dir() -> Result<std::path::PathBuf, ScriptError> {
+    std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .map_err(|_| ScriptError::Failed("no home directory".into()))
+}
+
+/// Resolves a user-supplied path against the home folder and refuses anything
+/// that escapes it.
+///
+/// `..` is resolved *before* the containment check: `Documents/../../etc` starts
+/// with the home prefix as a string but does not stay inside it, so a naive
+/// `starts_with` on the raw path would pass it. These tools write and move real
+/// files, so this is the boundary that matters.
+fn under_home(path: &str) -> Result<std::path::PathBuf, ScriptError> {
+    let home = home_dir()?;
+    let wanted = path.trim().trim_start_matches("~/");
+    let target = if wanted.starts_with('/') {
+        std::path::PathBuf::from(wanted)
+    } else {
+        home.join(wanted)
+    };
+
+    let mut resolved = std::path::PathBuf::new();
+    for part in target.components() {
+        match part {
+            std::path::Component::ParentDir => {
+                resolved.pop();
+            }
+            other => resolved.push(other),
+        }
+    }
+    if !resolved.starts_with(&home) {
+        return Err(ScriptError::Failed(format!(
+            "{path:?} is outside your home folder"
+        )));
+    }
+    Ok(resolved)
+}
+
+/// Writes `text` to a path under the home folder, creating parent folders.
+fn write_home_file(path: &str, text: &str, append: bool) -> Result<Value, ScriptError> {
+    let resolved = under_home(path)?;
+    // A path the user names as a folder would otherwise fail cryptically inside
+    // the write; saying so is more useful than an OS error.
+    if resolved.is_dir() {
+        return Err(ScriptError::Failed(format!(
+            "{path:?} is a folder, not a file — give it a filename"
+        )));
+    }
+    if let Some(parent) = resolved.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| ScriptError::Failed(format!("creating {}: {e}", parent.display())))?;
+    }
+
+    let existed = resolved.exists();
+    if append && existed {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&resolved)
+            .map_err(|e| ScriptError::Failed(format!("opening {}: {e}", resolved.display())))?;
+        file.write_all(text.as_bytes())
+            .map_err(|e| ScriptError::Failed(format!("writing {}: {e}", resolved.display())))?;
+    } else {
+        std::fs::write(&resolved, text)
+            .map_err(|e| ScriptError::Failed(format!("writing {}: {e}", resolved.display())))?;
+    }
+
+    Ok(json!({
+        "wrote": resolved.display().to_string(),
+        "bytes": text.len(),
+        "appended": append && existed,
     }))
 }
 
@@ -612,6 +662,40 @@ pub const ACTIONS: &[Action] = &[
         },
     },
     Action {
+        name: "ALOUD_WRITE_FILE",
+        description: "Write text to a file, creating it if it does not exist. Use when the \
+             user asks to save, write or note something down as a file — a summary, \
+             a list, notes. Give the whole text in one call; it replaces the file's \
+             contents unless append is set.",
+        app: crate::ALWAYS,
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["path", "text"],
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Where to write, relative to the home folder \
+                                        — \"Desktop/summary.md\", \"Documents/notes.txt\". \
+                                        Must be inside the home folder.",
+                    },
+                    "text": { "type": "string", "description": "The full contents to write." },
+                    "append": {
+                        "type": "boolean",
+                        "description": "Add to the end instead of replacing. Defaults to false.",
+                    }
+                }
+            })
+        },
+        run: |args| {
+            let path = required_str(args, "path")?;
+            let text = args.get("text").and_then(Value::as_str).unwrap_or("");
+            let append = args.get("append").and_then(Value::as_bool).unwrap_or(false);
+            write_home_file(path, text, append)
+        },
+    },
+    Action {
         name: "ALOUD_ORGANIZE_FOLDER",
         description: "Tidy a folder by sorting its loose files into subfolders, in ONE call — \
              it handles every file in the folder, so never call it per file. You \
@@ -991,6 +1075,38 @@ mod tests {
                 || std::path::Path::new("/System/Applications/Safari.app").exists(),
             "expected Safari in one of the searched locations"
         );
+    }
+
+    /// "Save it to my desktop" had no tool, so the agent could summarise and
+    /// then had nowhere to put the result.
+    #[test]
+    fn writing_a_file_lands_under_home_and_refuses_to_escape() {
+        let name = format!(".aloud-test-write-{}/summary.md", std::process::id());
+        let out = write_home_file(&name, "# Summary\n\nfirst line\n", false).unwrap();
+        let written = std::path::PathBuf::from(out["wrote"].as_str().unwrap());
+        assert!(written.exists(), "the file must actually be created");
+        assert!(written.starts_with(std::env::var("HOME").unwrap()));
+
+        // Append adds rather than replacing.
+        write_home_file(&name, "second line\n", true).unwrap();
+        let body = std::fs::read_to_string(&written).unwrap();
+        assert!(
+            body.contains("first line") && body.contains("second line"),
+            "{body}"
+        );
+
+        // Replacing is the default, so a second summary does not accumulate.
+        write_home_file(&name, "replaced\n", false).unwrap();
+        assert_eq!(std::fs::read_to_string(&written).unwrap(), "replaced\n");
+
+        std::fs::remove_dir_all(written.parent().unwrap()).unwrap();
+
+        for escape in ["../../etc/passwd", "/etc/passwd", "Desktop/../../../tmp/x"] {
+            assert!(
+                write_home_file(escape, "x", false).is_err(),
+                "{escape:?} must be refused"
+            );
+        }
     }
 
     /// Gathering must be confined to the home folder. This writes real files,

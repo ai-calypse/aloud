@@ -385,6 +385,13 @@ const VIEWS: Record<string, ToolView> = {
       return text(a, "name") ? `Opening ${text(a, "name")}` : "Opening an app";
     },
   },
+  ALOUD_WRITE_FILE: {
+    label: (a) => {
+      const path = text(a, "path");
+      const name = path.split("/").pop() || path;
+      return name ? `Saving ${name}` : "Saving a file";
+    },
+  },
   ALOUD_COLLECT_FILES: {
     label: (a) => {
       const paths = nested(a, "paths");

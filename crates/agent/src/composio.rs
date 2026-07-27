@@ -161,6 +161,10 @@ impl ToolDef {
 pub struct ComposioClient {
     client: reqwest::Client,
     api_key: String,
+    /// Connection id → its mailbox address, learned on demand. `None` marks an
+    /// account that could not tell us, so a second command does not ask again.
+    /// Only consulted when a toolkit has more than one active connection.
+    addresses: std::sync::Mutex<std::collections::HashMap<String, Option<String>>>,
 }
 
 impl ComposioClient {
@@ -171,6 +175,7 @@ impl ComposioClient {
                 .build()
                 .context("building composio http client")?,
             api_key: api_key.into(),
+            addresses: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
     }
 
@@ -200,12 +205,18 @@ impl ComposioClient {
     /// Selection is per command, not per build. Pass an empty `command` for the
     /// pins plus a stable head of the toolkit, which the settings pane wants.
     pub async fn available_tools(&self, command: &str) -> Result<Vec<ToolDef>> {
-        let active: Vec<String> = self
-            .connections()
-            .await?
+        let connections = self.connections().await?;
+        let active: Vec<String> = connections
+            .iter()
+            .filter(|c| c.is_active())
+            .map(|c| c.toolkit_slug.clone())
+            .collect();
+
+        // Toolkits the user has connected more than once — only those need to
+        // be told apart, and only their tools get the `account` argument.
+        let multi: Vec<String> = dedup(active.clone())
             .into_iter()
-            .filter(Connection::is_active)
-            .map(|c| c.toolkit_slug)
+            .filter(|slug| active.iter().filter(|s| *s == slug).count() > 1)
             .collect();
 
         let mut tools = Vec::new();
@@ -216,7 +227,32 @@ impl ComposioClient {
                 Err(e) => tracing::warn!(%e, %slug, "could not load toolkit tools"),
             }
         }
+
+        if !multi.is_empty() {
+            let addresses = self.addresses_for(&connections, &multi).await;
+            for tool in tools.iter_mut().filter(|t| multi.contains(&t.toolkit)) {
+                add_account_argument(&mut tool.parameters, &addresses);
+            }
+        }
         Ok(tools)
+    }
+
+    /// The known addresses across every connection of the given toolkits, for
+    /// the `account` argument's description. Best-effort: an account that
+    /// cannot say is simply absent from the list.
+    async fn addresses_for(&self, connections: &[Connection], toolkits: &[String]) -> Vec<String> {
+        let mut out = Vec::new();
+        for connection in connections
+            .iter()
+            .filter(|c| c.is_active() && toolkits.contains(&c.toolkit_slug))
+        {
+            if let Some(address) = self.address_of(connection).await {
+                if !out.contains(&address) {
+                    out.push(address);
+                }
+            }
+        }
+        out
     }
 
     /// The `limit` tools of one toolkit most likely to serve `command`: its
@@ -505,6 +541,84 @@ impl ComposioClient {
             .with_context(|| format!("Composio cannot manage auth for {toolkit} itself"))
     }
 
+    /// Picks the connection whose mailbox matches `wanted`.
+    ///
+    /// Composio's connection metadata does not carry the address, so it is
+    /// asked of the account itself — one `GMAIL_GET_PROFILE` per connection,
+    /// cached for the process. Matching is loose on purpose: the address
+    /// arrives from speech, so "yaksh dev" has to find `yakksh.dev@gmail.com`.
+    /// An unmatched name falls back to the first connection rather than
+    /// failing — reading the wrong inbox is recoverable, refusing to read at
+    /// all mid-demo is not.
+    async fn connection_for(&self, candidates: &[Connection], wanted: &str) -> Result<Connection> {
+        if candidates.len() == 1 {
+            return Ok(candidates[0].clone());
+        }
+        let wanted_key = fold_address(wanted);
+        let mut known = Vec::new();
+        for candidate in candidates {
+            if let Some(address) = self.address_of(candidate).await {
+                known.push((candidate, fold_address(&address), address));
+            }
+        }
+
+        // Exact, then substring, then closest — a transcript says "yaksh dev"
+        // for `yakksh.dev`, which shares no substring in either direction but
+        // is unmistakably nearer to it than to `kortexnotebooklm`. Without the
+        // third pass that command silently read the wrong mailbox.
+        let exact = known.iter().find(|(_, key, _)| *key == wanted_key);
+        let substring = known
+            .iter()
+            .find(|(_, key, _)| key.contains(&wanted_key) || wanted_key.contains(key));
+        let nearest = known
+            .iter()
+            .map(|entry| (similarity(&entry.1, &wanted_key), entry))
+            .filter(|(score, _)| *score >= 0.6)
+            .max_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, entry)| entry);
+
+        if let Some((connection, _, address)) = exact.or(substring).or(nearest) {
+            tracing::info!(%address, "routed to the requested account");
+            return Ok((*connection).clone());
+        }
+
+        tracing::warn!(%wanted, "no connected account matched; using the first");
+        candidates.first().cloned().context("no active connection")
+    }
+
+    /// The email address behind a connection, cached. `None` when the account
+    /// cannot say — the caller then treats it as "not a match" rather than
+    /// erroring, so one unreachable account cannot block the others.
+    async fn address_of(&self, connection: &Connection) -> Option<String> {
+        if let Some(hit) = self.addresses.lock().ok()?.get(&connection.id) {
+            return hit.clone();
+        }
+        let profile = self
+            .post(
+                "/tools/execute/GMAIL_GET_PROFILE",
+                &json!({
+                    "connected_account_id": connection.id,
+                    "user_id": connection.user_id,
+                    "arguments": {},
+                }),
+                Duration::from_secs(20),
+            )
+            .await
+            .ok();
+        let address = profile
+            .as_ref()
+            .and_then(|p| {
+                p.pointer("/data/emailAddress")
+                    .or(p.pointer("/data/response_data/emailAddress"))
+            })
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if let Ok(mut cache) = self.addresses.lock() {
+            cache.insert(connection.id.clone(), address.clone());
+        }
+        address
+    }
+
     /// Executes a tool against the ACTIVE connection for its toolkit, returning
     /// a compact JSON string for the model. Errors come back as `{"error": …}`
     /// (never `Err`) so the tool loop can hand them to the model to recover.
@@ -521,11 +635,39 @@ impl ComposioClient {
         // matches nothing while Teams sits connected. Longest match wins, so a
         // `google` connection cannot shadow `google_maps`.
         let connections = self.connections().await?;
-        let connection = connections
+        let candidates: Vec<Connection> = connections
             .into_iter()
             .filter(|c| c.is_active() && slug_belongs_to(slug, &c.toolkit_slug))
-            .max_by_key(|c| c.toolkit_slug.len())
+            .collect();
+        let best = candidates
+            .iter()
+            .map(|c| c.toolkit_slug.len())
+            .max()
             .with_context(|| format!("no active connection for {}", toolkit_of_slug(slug)))?;
+        let candidates: Vec<Connection> = candidates
+            .into_iter()
+            .filter(|c| c.toolkit_slug.len() == best)
+            .collect();
+
+        // `account` is ours, not Composio's: with three Gmail connections the
+        // longest-match rule ties and picks arbitrarily, so "summarise my work
+        // email" could read the wrong mailbox entirely. Stripped before the
+        // arguments go upstream, which would reject an unknown field.
+        let mut arguments = arguments.clone();
+        let wanted = arguments
+            .as_object_mut()
+            .and_then(|a| a.remove("account"))
+            .and_then(|a| a.as_str().map(str::to_string));
+
+        let connection = match &wanted {
+            Some(wanted) => self.connection_for(&candidates, wanted).await?,
+            // No preference: the first active one, which is what every
+            // single-account setup wants and what happened before.
+            None => candidates
+                .into_iter()
+                .next()
+                .context("no active connection")?,
+        };
 
         let json = self
             .post(
@@ -549,7 +691,16 @@ impl ComposioClient {
                 .unwrap_or(Value::Bool(false)),
         );
         if let Some(data) = json.get("data") {
-            compact.insert("data".into(), compact_value(data));
+            // A bulk mail fetch is slimmed per message before the byte cap.
+            // Capping it raw kept 11 of 100 messages and cut the JSON mid-object,
+            // so the model saw a malformed result and reported failure — the
+            // "summarise my last 100 emails" case failing for a formatting
+            // reason rather than a real one.
+            let data = match message_list(data) {
+                Some(slim) => slim,
+                None => compact_value(data),
+            };
+            compact.insert("data".into(), data);
         }
         if let Some(error) = json.get("error") {
             compact.insert("error".into(), error.clone());
@@ -655,6 +806,133 @@ fn slim_schema(schema: &Value) -> Value {
 
 /// Strips bulk from tool results: drops MIME payloads and URL-catalog fields,
 /// truncates strings to ~600 chars, plenty of an email body to summarize.
+/// Per-message fields worth a summary. Everything else a Gmail message carries
+/// — MIME parts, label ids, thread ids, attachment lists — is bulk that pushes
+/// the real content past the byte cap.
+const MESSAGE_FIELDS: &[&str] = &["sender", "to", "subject", "messageTimestamp"];
+
+/// How much of each preview to keep.
+///
+/// Measured against a real 100-message fetch: sender/subject/date alone is
+/// 19.4KB, and each 60 chars of preview adds ~12KB. 60 keeps the whole hundred
+/// inside the cap at ~31KB while still saying what each message is about; 120
+/// pushed it to 48KB and lost a third of them to truncation.
+const PREVIEW_CHARS: usize = 60;
+
+/// Slims a `{messages: [...]}` payload to the fields a summary needs, or `None`
+/// when this is not a message list and the generic compaction should run.
+///
+/// Only worth doing above a handful of messages: a single fetched mail should
+/// keep its body, which is what the reader actually asked for.
+fn message_list(data: &Value) -> Option<Value> {
+    let messages = data.get("messages")?.as_array()?;
+    if messages.len() < 5 {
+        return None;
+    }
+    let slim: Vec<Value> = messages
+        .iter()
+        .map(|message| {
+            let mut out = Map::new();
+            for field in MESSAGE_FIELDS {
+                if let Some(value) = message.get(*field) {
+                    out.insert((*field).to_string(), value.clone());
+                }
+            }
+            // The preview lives under a nested `body` for a metadata fetch and
+            // as `messageText` for a verbose one; either is a usable gist.
+            let preview = message
+                .pointer("/preview/body")
+                .or_else(|| message.get("messageText"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if !preview.is_empty() {
+                out.insert(
+                    "preview".into(),
+                    json!(preview
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .chars()
+                        .take(PREVIEW_CHARS)
+                        .collect::<String>()),
+                );
+            }
+            Value::Object(out)
+        })
+        .collect();
+
+    let mut out = Map::new();
+    out.insert("count".into(), json!(slim.len()));
+    out.insert("messages".into(), Value::Array(slim));
+    Some(Value::Object(out))
+}
+
+/// How alike two folded addresses are, 0.0 to 1.0, by shared character bigrams.
+///
+/// Dice coefficient rather than edit distance: it is a few lines, needs no
+/// dependency, and rewards a shared run of characters, which is exactly what
+/// survives a transcription. "yakkshdev" vs "yakshdev" scores high; either
+/// against "kortexnotebooklm" scores near zero.
+fn similarity(a: &str, b: &str) -> f64 {
+    if a == b {
+        return 1.0;
+    }
+    let bigrams = |s: &str| -> Vec<[char; 2]> {
+        let chars: Vec<char> = s.chars().collect();
+        chars.windows(2).map(|w| [w[0], w[1]]).collect()
+    };
+    let (first, mut second) = (bigrams(a), bigrams(b));
+    if first.is_empty() || second.is_empty() {
+        return 0.0;
+    }
+    let total = first.len() + second.len();
+    let mut shared = 0usize;
+    for gram in first {
+        if let Some(at) = second.iter().position(|g| *g == gram) {
+            second.remove(at);
+            shared += 1;
+        }
+    }
+    2.0 * shared as f64 / total as f64
+}
+
+/// Adds the `account` argument to a tool's schema, listing the addresses the
+/// user actually has connected. Only called for toolkits with more than one
+/// connection: a single-account setup should never be asked which one.
+fn add_account_argument(parameters: &mut Value, addresses: &[String]) {
+    let Some(properties) = parameters
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    let description = if addresses.is_empty() {
+        "Which connected account to use, when the user names one.".to_string()
+    } else {
+        format!(
+            "Which of the user's connected accounts to use: {}. Set it when the \
+             user names or implies an account; omit it otherwise.",
+            addresses.join(", ")
+        )
+    };
+    properties.insert(
+        "account".into(),
+        json!({ "type": "string", "description": description }),
+    );
+}
+
+/// Folds an address for loose comparison against something that came out of a
+/// microphone. "Yaksh dot dev at gmail" and `yakksh.dev@gmail.com` have to meet
+/// somewhere, so everything but the letters and digits goes, along with the
+/// domain — nobody says "at gmail dot com" to distinguish two Gmail accounts.
+fn fold_address(raw: &str) -> String {
+    let head = raw.split('@').next().unwrap_or(raw);
+    head.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 fn compact_value(value: &Value) -> Value {
     match value {
         Value::Object(dict) => {
@@ -680,13 +958,28 @@ fn compact_value(value: &Value) -> Value {
     }
 }
 
-/// Caps a result at ~8000 bytes, backing off to a char boundary — a raw
-/// `&out[..8000]` panics mid-UTF-8, and email bodies are full of multibyte text.
+/// The byte ceiling on a tool result.
+///
+/// 36000, raised from 8000 once bulk mail was slimmed structurally. Measured:
+/// 100 messages at sender/subject/date plus a 60-char preview is ~31.5KB, and
+/// at 8000 the result was cut mid-object — the model saw malformed JSON and
+/// called the fetch failed, which is how "summarise my last 100 emails" broke
+/// for a formatting reason rather than a real one. ~9k tokens is affordable
+/// once per run for a task that is explicitly about a hundred things; the
+/// generic path still strips MIME payloads first, so a verbose single fetch
+/// does not get to spend it.
+const MAX_RESULT_BYTES: usize = 36_000;
+
+/// Caps a result, backing off to a char boundary — a raw slice panics
+/// mid-UTF-8, and email bodies are full of multibyte text.
 fn cap(out: String) -> String {
-    if out.len() <= 8000 {
+    if out.len() <= MAX_RESULT_BYTES {
         return out;
     }
-    let cut = (0..=8000).rev().find(|&i| out.is_char_boundary(i)).unwrap();
+    let cut = (0..=MAX_RESULT_BYTES)
+        .rev()
+        .find(|&i| out.is_char_boundary(i))
+        .unwrap();
     format!("{}…(truncated)", &out[..cut])
 }
 
@@ -801,6 +1094,114 @@ fn error_json(message: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Three Gmail accounts tie on the longest-match rule, so the user has to
+    /// be able to name one — and the name arrives from a microphone, not a
+    /// keyboard.
+    #[test]
+    fn spoken_account_names_match_the_real_address() {
+        let mailbox = fold_address("yakksh.dev@gmail.com");
+        // The forms a transcript actually produces.
+        for spoken in [
+            "yakksh.dev@gmail.com",
+            "yakksh.dev",
+            "Yakksh Dev",
+            "yakksh dev",
+            "YAKKSH.DEV@GMAIL.COM",
+        ] {
+            assert_eq!(fold_address(spoken), mailbox, "{spoken:?} should match");
+        }
+
+        // A different mailbox must not collide with it.
+        assert_ne!(fold_address("kortexnotebooklm@gmail.com"), mailbox);
+
+        // A misheard spelling shares no substring either way, so folding alone
+        // routed it to the wrong inbox — verified live before this was added.
+        let misheard = fold_address("yaksh dev");
+        assert!(!mailbox.contains(&misheard) && !misheard.contains(&mailbox));
+        assert!(
+            similarity(&mailbox, &misheard) >= 0.6,
+            "a plausible transcription must still reach its own mailbox"
+        );
+        assert!(
+            similarity(&fold_address("kortexnotebooklm@gmail.com"), &misheard) < 0.6,
+            "and must not reach a different one"
+        );
+        // The domain is dropped, so two accounts differing only by domain are
+        // indistinguishable here — acceptable, since nobody says "at gmail dot
+        // com" to tell two Gmail accounts apart.
+        assert_eq!(fold_address("a@gmail.com"), fold_address("a@work.com"));
+    }
+
+    /// "Summarise my last 100 emails" returned 11 of them and reported failure:
+    /// the byte cap cut the JSON mid-object. A bulk fetch is slimmed to the
+    /// fields a summary needs so all hundred survive.
+    #[test]
+    fn a_hundred_emails_survive_the_cap_and_stay_parseable() {
+        let messages: Vec<Value> = (0..100)
+            .map(|i| {
+                json!({
+                    "sender": format!("Sender {i} <s{i}@example.com>"),
+                    "to": "me@example.com",
+                    "subject": format!("Subject line number {i}"),
+                    "messageTimestamp": "2026-07-27T05:08:20Z",
+                    "preview": { "body": "x".repeat(4000) },
+                    // The bulk a real message carries, none of it summarisable.
+                    "payload": { "parts": ["y".repeat(40_000)] },
+                    "labelIds": ["INBOX", "CATEGORY_PROMOTIONS"],
+                    "threadId": format!("thread-{i}"),
+                })
+            })
+            .collect();
+
+        let slim = message_list(&json!({ "messages": messages })).expect("a message list");
+        assert_eq!(slim["count"], 100, "every message must be kept");
+
+        let capped = cap(serde_json::to_string(&slim).unwrap());
+        assert!(
+            !capped.ends_with("…(truncated)"),
+            "100 slimmed messages must fit: got {} bytes",
+            capped.len()
+        );
+        // Malformed JSON is what made the model report the fetch as failed.
+        let parsed: Value = serde_json::from_str(&capped).expect("must stay parseable");
+        assert_eq!(parsed["messages"].as_array().unwrap().len(), 100);
+        assert_eq!(parsed["messages"][99]["subject"], "Subject line number 99");
+        assert!(
+            parsed["messages"][0].get("payload").is_none(),
+            "MIME bulk must not reach the model"
+        );
+    }
+
+    /// A single fetched mail should keep its body — the reader asked for that
+    /// one message, so slimming it to a 60-char preview would be the wrong
+    /// trade.
+    #[test]
+    fn a_small_fetch_keeps_its_bodies() {
+        let messages: Vec<Value> = (0..3)
+            .map(|i| json!({ "sender": "a@b.com", "messageText": format!("body {i}") }))
+            .collect();
+        assert!(
+            message_list(&json!({ "messages": messages })).is_none(),
+            "a handful of messages should take the generic path"
+        );
+    }
+
+    /// The `account` argument is ours and Composio would reject it upstream, so
+    /// it is only offered where there is genuinely a choice to make.
+    #[test]
+    fn the_account_argument_lists_the_connected_addresses() {
+        let mut schema =
+            json!({ "type": "object", "properties": { "query": { "type": "string" } } });
+        add_account_argument(&mut schema, &["a@gmail.com".into(), "b@gmail.com".into()]);
+        let account = &schema["properties"]["account"];
+        assert_eq!(account["type"], "string");
+        let description = account["description"].as_str().unwrap();
+        assert!(description.contains("a@gmail.com"), "{description}");
+        assert!(description.contains("b@gmail.com"), "{description}");
+        // The original arguments survive.
+        assert_eq!(schema["properties"]["query"]["type"], "string");
+    }
+
     /// Execution routes by slug prefix, so this must work for toolkits nobody
     /// hardcoded.
     #[test]
@@ -905,8 +1306,10 @@ mod tests {
 
     #[test]
     fn cap_never_slices_mid_utf8_char() {
-        // Byte 8000 lands inside the first crab — the old byte slice panicked.
-        let s = "x".repeat(7999) + "🦀🦀🦀";
+        // The cut lands inside the first crab — a raw byte slice panicked here.
+        // Sized off the constant so raising the cap cannot silently stop
+        // exercising the boundary.
+        let s = "x".repeat(MAX_RESULT_BYTES - 1) + "🦀🦀🦀";
         let capped = cap(s);
         assert!(capped.ends_with("…(truncated)"));
         assert!(capped.starts_with("xxx"));

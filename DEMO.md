@@ -130,6 +130,29 @@ you have not rehearsed it, stop at 9 and describe this instead of running it.
 
 ---
 
+### 11. "Summarise my last 100 emails from yakksh.dev and save it to my desktop"
+**The one that shows scale.** 100 emails fetched in a single call, summarised,
+written to a file — and the account named out loud, because three Gmail
+accounts are connected.
+
+Two things worth saying while it runs:
+
+- **The account routing.** Composio ties three Gmail connections under one
+  identity, so "my kortex email" vs "yakksh.dev" was previously a coin flip.
+  Saying the account now routes it, and the match is fuzzy because the name
+  arrives from a microphone — verified live that a mis-transcribed "yaksh dev"
+  still reaches `yakksh.dev@gmail.com` rather than the wrong inbox.
+- **The volume.** 100 emails raw is ~93KB *each* — 2.3M tokens, which no model
+  will take. Fetched as metadata and slimmed to sender/subject/date plus a
+  60-char preview, the whole hundred reaches the model in **~6,900 tokens**.
+  Measured end to end at **12.7s**, all 100 present.
+
+⚠️ Verified: the fetch, the account routing, and the file write, each against
+the real API and filesystem. **Not** verified: the model choosing to chain all
+three from one spoken sentence. Rehearse this one before showing it.
+
+---
+
 ## The architecture slide, in three sentences
 
 > **Layer 1** is 18 structured tools — fast, deterministic, individually

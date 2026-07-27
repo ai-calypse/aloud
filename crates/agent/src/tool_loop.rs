@@ -150,6 +150,15 @@ call rather than calling the tool repeatedly: each tool may only run a few \
 times per command, so repeated calls will be cut off before the job is done. \
 To copy or move files somewhere, use ALOUD_COLLECT_FILES with the paths from a \
 search — it handles every file in one call. \
+To save, write or note something down as a file, use ALOUD_WRITE_FILE with the \
+whole text in one call. \
+When fetching many emails to summarise them, ask for them in ONE call with a \
+large max_results and set verbose to false and include_payload to false — full \
+message bodies are enormous and only the first few would fit. Sender, subject, \
+date and preview are enough to summarise from. \
+When several accounts are connected and the user names one — \"my work email\", \
+an address, a nickname — pass it as the `account` argument. If they do not name \
+one, omit it rather than guessing. \
 To tidy or organise a folder, call ALOUD_ORGANIZE_FOLDER exactly once. It sorts \
 every file in the folder in that single call, so never call it repeatedly and \
 never move files one at a time. You choose the categories: pick ones that fit \
