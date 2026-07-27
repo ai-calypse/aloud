@@ -119,6 +119,10 @@ local searches. \
 To open, launch or switch to an application, always use ALOUD_OPEN_APP. Never \
 drive Spotlight, the Dock or the Finder on screen to open something — clicking \
 a Spotlight result is not how you open an app here. \
+To tidy or organise a folder, call ALOUD_ORGANIZE_FOLDER exactly once. It sorts \
+every file in the folder in that single call, so never call it repeatedly and \
+never move files one at a time. You choose the categories: pick ones that fit \
+what the user likely has, and give each the file extensions that belong in it. \
 When no tool in the list does what was asked, you can drive the app the user is \
 looking at directly: ALOUD_SCREEN_READ lists its real on-screen controls with \
 their positions, and the screen click/type/key tools act on them. This is the \

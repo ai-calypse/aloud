@@ -222,7 +222,10 @@ mod tests {
         // "files on my desktop" — a listing, not a search. No keyword clause, so
         // nothing is matched against a query; the kind clause stands alone.
         let p = build_predicate(None, "any");
-        assert!(!p.contains("kMDItemDisplayName"), "no keyword expected: {p}");
+        assert!(
+            !p.contains("kMDItemDisplayName"),
+            "no keyword expected: {p}"
+        );
         assert!(!p.contains("kMDItemTextContent"));
         assert!(p.contains("public.content"));
         // Screenshots with no query = just the capture flag.
@@ -269,12 +272,8 @@ mod tests {
     fn named_locations_resolve_under_home() {
         // Guarded on HOME being set (it is, in any real run and in CI).
         if std::env::var_os("HOME").is_some() {
-            assert!(scope_dir(Some("desktop"))
-                .unwrap()
-                .ends_with("Desktop"));
-            assert!(scope_dir(Some("Downloads"))
-                .unwrap()
-                .ends_with("Downloads"));
+            assert!(scope_dir(Some("desktop")).unwrap().ends_with("Desktop"));
+            assert!(scope_dir(Some("Downloads")).unwrap().ends_with("Downloads"));
         }
         // Unknown / absent → None, so the caller falls back to whole-home.
         assert!(scope_dir(Some("nonsense")).is_none());

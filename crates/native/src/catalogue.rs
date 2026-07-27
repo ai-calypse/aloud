@@ -10,6 +10,7 @@
 
 use serde_json::{json, Value};
 
+use crate::organize;
 use crate::script::{self, ScriptError};
 use crate::search;
 
@@ -40,6 +41,24 @@ fn frontmost_is(name: &str) -> bool {
         return false;
     };
     String::from_utf8_lossy(&out.stdout).trim() == name
+}
+
+/// The frontmost app's name, for tools that act on "this window" without being
+/// told which app.
+fn frontmost_app_name() -> Result<String, ScriptError> {
+    let out = std::process::Command::new("osascript")
+        .args([
+            "-e",
+            "tell application \"System Events\" to name of first application process \
+             whose frontmost is true",
+        ])
+        .output()
+        .map_err(|e| ScriptError::Failed(format!("reading the frontmost app: {e}")))?;
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if name.is_empty() {
+        return Err(ScriptError::Failed("no app is in front".into()));
+    }
+    Ok(name)
 }
 
 /// One native action. `params` is the JSON-schema object handed to the model;
@@ -391,6 +410,277 @@ pub const ACTIONS: &[Action] = &[
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             Ok(json!({ "opened": name, "path": bundle }))
+        },
+    },
+    Action {
+        name: "ALOUD_ORGANIZE_FOLDER",
+        description: "Tidy a folder by sorting its loose files into subfolders, in ONE call — \
+             it handles every file in the folder, so never call it per file. You \
+             choose the scheme: pass `rules` as a map of folder name to the file \
+             extensions that belong in it, picking categories that suit what the \
+             user has (e.g. {\"Images\": [\"png\",\"jpg\"], \"Installers\": [\"dmg\",\"pkg\"], \
+             \"Documents\": [\"pdf\",\"docx\"], \"Archives\": [\"zip\"]}). Files whose \
+             extension matches no rule are left alone, as are existing subfolders. \
+             Only Desktop, Downloads and Documents can be organised. Reversible \
+             with the undo tool.",
+        app: crate::ALWAYS,
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["rules"],
+                "properties": {
+                    "folder": {
+                        "type": "string",
+                        "enum": ["Desktop", "Downloads", "Documents"],
+                        "description": "Which folder to tidy. Defaults to Downloads.",
+                    },
+                    "rules": {
+                        "type": "object",
+                        "description": "Destination folder name → list of file \
+                                        extensions, e.g. {\"Images\": [\"png\",\"jpg\"]}.",
+                        "additionalProperties": {
+                            "type": "array",
+                            "items": { "type": "string" }
+                        }
+                    }
+                }
+            })
+        },
+        run: |args| {
+            let folder = organize::folder_from(args)?;
+            let rules = organize::rules_from(args);
+            if rules.is_empty() {
+                return Err(ScriptError::Failed(
+                    "no rules given — pass a map of folder name to extensions".into(),
+                ));
+            }
+            let moves = organize::plan(&folder, &rules);
+            if moves.is_empty() {
+                return Ok(json!({
+                    "organized": 0,
+                    "note": "nothing to sort — no loose files matched those rules",
+                }));
+            }
+            organize::apply(&folder, &moves)
+        },
+    },
+    Action {
+        name: "ALOUD_UNDO_ORGANIZE",
+        description: "Put every file back where it was before the last folder tidy-up. Use \
+             when the user says to undo it or put things back.",
+        app: crate::ALWAYS,
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "folder": {
+                        "type": "string",
+                        "enum": ["Desktop", "Downloads", "Documents"],
+                        "description": "The folder that was tidied. Defaults to Downloads.",
+                    }
+                }
+            })
+        },
+        run: |args| organize::undo(&organize::folder_from(args)?),
+    },
+    Action {
+        name: "ALOUD_WINDOW_ARRANGE",
+        description: "Arrange the frontmost window on screen: fill the screen, or take the \
+             left/right half or a quarter. Use for \"maximise this\", \"snap it \
+             left\", \"tile these side by side\".",
+        app: crate::ALWAYS,
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["position"],
+                "properties": {
+                    "position": {
+                        "type": "string",
+                        "enum": ["full", "left", "right", "top-left",
+                                 "top-right", "bottom-left", "bottom-right", "center"],
+                    },
+                    "app": {
+                        "type": "string",
+                        "description": "App whose window to move. Defaults to the \
+                                        frontmost one.",
+                    }
+                }
+            })
+        },
+        run: |args| {
+            let position = required_str(args, "position")?;
+            let app = args
+                .get("app")
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_string)
+                .map_or_else(frontmost_app_name, Ok)?;
+
+            // The desktop window's bounds are the usable screen — Finder reports
+            // it without needing Screen Recording permission, which reading
+            // NSScreen from here would.
+            let frame = script::run(
+                "Finder",
+                r#"tell application "Finder" to get bounds of window of desktop"#,
+            )?;
+            let nums: Vec<i64> = frame
+                .split(", ")
+                .filter_map(|n| n.trim().parse().ok())
+                .collect();
+            let (sw, sh) = match nums.as_slice() {
+                [_, _, w, h] => (*w, *h),
+                _ => return Err(ScriptError::Failed("could not read the screen size".into())),
+            };
+            // The menu bar is 25pt on every modern Mac; the Dock is left to the
+            // window server, which keeps a maximised window clear of it.
+            let top = 25;
+            let h = sh - top;
+            let (x, y, w, h) = match position {
+                "full" => (0, top, sw, h),
+                "left" => (0, top, sw / 2, h),
+                "right" => (sw / 2, top, sw / 2, h),
+                "top-left" => (0, top, sw / 2, h / 2),
+                "top-right" => (sw / 2, top, sw / 2, h / 2),
+                "bottom-left" => (0, top + h / 2, sw / 2, h / 2),
+                "bottom-right" => (sw / 2, top + h / 2, sw / 2, h / 2),
+                "center" => (sw / 4, top + h / 8, sw / 2, h * 3 / 4),
+                other => return Err(ScriptError::Failed(format!("unknown position {other:?}"))),
+            };
+
+            let app_esc = script::escape(&app);
+            // Position *then* size, and report the geometry actually achieved:
+            // a window with a minimum size, or a browser that clamps its own
+            // height, silently keeps its old bounds while AppleScript reports
+            // success. Observed on Brave — it accepted the width and ignored
+            // the height. Returning the real numbers means the model can say
+            // what happened instead of claiming a tidy screen that is not.
+            let source = format!(
+                r#"tell application "System Events" to tell process "{app_esc}"
+                    if (count of windows) is 0 then error "no open window"
+                    set position of window 1 to {{{x}, {y}}}
+                    set size of window 1 to {{{w}, {h}}}
+                    set b to {{position, size}} of window 1
+                    return (item 1 of item 1 of b as text) & "," & (item 2 of item 1 of b as text) & "," & (item 1 of item 2 of b as text) & "," & (item 2 of item 2 of b as text)
+                end tell"#
+            );
+            let got = script::run(&app, &source).map_err(|e| match e {
+                ScriptError::Failed(msg) if msg.contains("no open window") => {
+                    ScriptError::Failed(format!("{app} has no open window to arrange"))
+                }
+                // -1719 is AppleScript's own "invalid index" for the same case.
+                ScriptError::Failed(msg) if msg.contains("-1719") => {
+                    ScriptError::Failed(format!("{app} has no open window to arrange"))
+                }
+                other => other,
+            })?;
+            Ok(json!({ "arranged": app, "position": position, "bounds": got }))
+        },
+    },
+    Action {
+        name: "ALOUD_BROWSER_TAB",
+        description: "Open a URL in a new browser tab, or report the page the user is \
+             currently looking at. Works with Safari, Chrome, Arc and Brave.",
+        app: crate::ALWAYS,
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                    "action": { "type": "string", "enum": ["open", "current"] },
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to open, for action=open.",
+                    }
+                }
+            })
+        },
+        run: |args| {
+            let action = required_str(args, "action")?;
+            // Whichever browser the user actually uses — asking the frontmost
+            // one first means "open this" lands where they are looking.
+            let browser = ["Arc", "Google Chrome", "Brave Browser", "Safari"]
+                .into_iter()
+                .find(|b| std::path::Path::new(&format!("/Applications/{b}.app")).exists())
+                .unwrap_or("Safari");
+
+            if action == "current" {
+                let source = if browser == "Safari" {
+                    r#"tell application "Safari" to return (URL of current tab of window 1) & " — " & (name of current tab of window 1)"#.to_string()
+                } else {
+                    format!(
+                        r#"tell application "{browser}" to return (URL of active tab of window 1) & " — " & (title of active tab of window 1)"#
+                    )
+                };
+                let out = script::run(browser, &source)?;
+                return Ok(json!({ "page": out }));
+            }
+
+            let url = required_str(args, "url")?;
+            // Through `open -a`, not a tell: it launches the browser if it is
+            // closed, where AppleScript to a dead app errors.
+            let status = std::process::Command::new("/usr/bin/open")
+                .args(["-a", browser, url])
+                .status()
+                .map_err(|e| ScriptError::Failed(format!("opening {url}: {e}")))?;
+            if !status.success() {
+                return Err(ScriptError::Failed(format!("could not open {url}")));
+            }
+            Ok(json!({ "opened": url, "browser": browser }))
+        },
+    },
+    Action {
+        name: "ALOUD_CLIPBOARD",
+        description: "Read what is on the clipboard, or put text on it. Use for \"what did \
+             I copy\", \"copy this to my clipboard\".",
+        app: crate::ALWAYS,
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                    "action": { "type": "string", "enum": ["read", "write"] },
+                    "text": { "type": "string", "description": "Text to copy, for action=write." }
+                }
+            })
+        },
+        run: |args| match required_str(args, "action")? {
+            "read" => {
+                let out = script::run("System Events", "return (the clipboard as text)")?;
+                Ok(json!({ "clipboard": out }))
+            }
+            "write" => {
+                let text = script::escape(required_str(args, "text")?);
+                script::run(
+                    "System Events",
+                    &format!(r#"set the clipboard to "{text}""#),
+                )?;
+                Ok(json!({ "copied": true }))
+            }
+            other => Err(ScriptError::Failed(format!("unknown action {other:?}"))),
+        },
+    },
+    Action {
+        name: "ALOUD_QUIT_APP",
+        description: "Quit an application by name. Use for \"close Safari\", \"quit Music\".",
+        app: crate::ALWAYS,
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["name"],
+                "properties": { "name": { "type": "string" } }
+            })
+        },
+        run: |args| {
+            let name = required_str(args, "name")?;
+            let esc = script::escape(name);
+            script::run(name, &format!(r#"tell application "{esc}" to quit"#))?;
+            Ok(json!({ "quit": name }))
         },
     },
     Action {

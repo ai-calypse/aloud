@@ -380,6 +380,54 @@ const VIEWS: Record<string, ToolView> = {
       return name ? `Opening ${name}` : "Opening an app";
     },
   },
+  ALOUD_ORGANIZE_FOLDER: {
+    // The gate is approving a bulk move of real files, so the label names the
+    // folder and the scheme — "tidy up" with no detail is not a gate.
+    label: (a) => {
+      const folder = text(a, "folder") || "Downloads";
+      // `display_args` stringifies every non-string argument, so the rules map
+      // arrives as JSON text — `nested` is the existing undo for that.
+      const rules = nested(a, "rules");
+      const names =
+        rules && typeof rules === "object" ? Object.keys(rules as Record<string, unknown>) : [];
+      return names.length
+        ? `Sorting ${folder} into ${names.join(", ")}`
+        : `Sorting your ${folder}`;
+    },
+  },
+  ALOUD_UNDO_ORGANIZE: {
+    label: (a) => `Putting ${text(a, "folder") || "Downloads"} back as it was`,
+  },
+  ALOUD_WINDOW_ARRANGE: {
+    label: (a) => {
+      const position = text(a, "position");
+      const where: Record<string, string> = {
+        full: "filling the screen",
+        left: "to the left half",
+        right: "to the right half",
+        center: "to the centre",
+      };
+      return position
+        ? `Moving the window ${where[position] ?? `to ${position}`}`
+        : "Arranging the window";
+    },
+  },
+  ALOUD_BROWSER_TAB: {
+    label: (a) =>
+      text(a, "action") === "current"
+        ? "Checking the current page"
+        : `Opening ${text(a, "url") || "a page"}`,
+  },
+  ALOUD_CLIPBOARD: {
+    label: (a) =>
+      text(a, "action") === "read" ? "Reading the clipboard" : "Copying to the clipboard",
+  },
+  ALOUD_QUIT_APP: {
+    label: (a) => {
+      const name = text(a, "name");
+      return name ? `Quitting ${name}` : "Quitting an app";
+    },
+  },
   // Screen control. The click gate is the one confirmation a computer-use run
   // gets, so its label has to say what will be clicked — the model passes the
   // element's own text for exactly this, and a bare coordinate pair is a gate

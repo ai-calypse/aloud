@@ -9,6 +9,7 @@
 //! way `notch.rs` and `aloud_volume` do.
 
 mod catalogue;
+mod organize;
 mod script;
 mod search;
 mod shortcuts;
@@ -151,9 +152,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     fn app_gated_tools_need_their_app() {
         // No Music installed → no Music tools.
-        let names = |apps: &[InstalledApp]| {
-            tools(apps).into_iter().map(|t| t.name).collect::<Vec<_>>()
-        };
+        let names =
+            |apps: &[InstalledApp]| tools(apps).into_iter().map(|t| t.name).collect::<Vec<_>>();
         assert!(!names(&[]).iter().any(|n| n == "ALOUD_MUSIC_PLAY"));
         // Music installed → its tools appear.
         assert!(names(&[app("Music")])

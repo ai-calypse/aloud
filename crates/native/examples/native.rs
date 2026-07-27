@@ -35,7 +35,10 @@ fn main() {
         Some("search") => {
             let query = args.get(1).cloned().unwrap_or_else(|| "aloud".into());
             let kind = args.get(2).cloned().unwrap_or_else(|| "image".into());
-            ("ALOUD_FINDER_SEARCH", json!({ "query": query, "kind": kind }))
+            (
+                "ALOUD_FINDER_SEARCH",
+                json!({ "query": query, "kind": kind }),
+            )
         }
         _ => ("ALOUD_MUSIC_NOW_PLAYING", json!({})),
     };
