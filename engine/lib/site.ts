@@ -14,7 +14,7 @@ export const namedSite = (goal: string) => Object.entries(SITES).find(([name]) =
 /** OPEN_URL may only stay on the current site or go to a site the goal names, so page text can't redirect Voice Mac. */
 /** Where a web task begins: an address given or written in the goal, a site the goal names, else a
  *  web search for the goal itself. */
-export function startUrlFor(goal: string, url?: string) {
+export function startUrlFor(goal: string, url?: string, query?: string) {
   if (url) {
     const u = URL.parse(/^https?:\/\//.test(url) ? url : `https://${url}`);
     if (!u || !/^https?:$/.test(u.protocol)) throw new UserError("The start page must be a web address.");
@@ -23,7 +23,9 @@ export function startUrlFor(goal: string, url?: string) {
   const m = goal.match(/\b((?:https?:\/\/)?(?:[\w-]+\.)+(?:com|org|net|io|dev|ai|co|edu|gov|uk|de|in)(?:\/\S*)?)/i);
   if (m) return /^https?:/.test(m[1]) ? m[1] : `https://${m[1]}`;
   // Brave's homepage has an AI mode that traps the loop, so search results, not the homepage.
-  return namedSite(goal) ?? SEARCH + encodeURIComponent(goal);
+  // Only the search terms when the caller has them: searching the whole goal sentence put "Open a
+  // browser and search for cat memes, showing a page of results" in the search box.
+  return namedSite(goal) ?? SEARCH + encodeURIComponent(query?.trim() || goal);
 }
 
 export function allowedUrl(text: string | null, current: string, goal: string) {

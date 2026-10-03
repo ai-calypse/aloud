@@ -3267,8 +3267,10 @@ function AgentRun({
         </span>
       }
     >
-      {/* Before any tool call resolves, we're still parsing the transcript. */}
-      {run.steps.length === 0 && !run.error && !run.status && (
+      {/* Before any tool call resolves, we're still parsing the transcript. A
+          plain answer finishes with no steps at all, so `finished` ends it too —
+          without it the loader sat above the answer. */}
+      {run.steps.length === 0 && !run.error && !run.status && !run.finished && (
         <p className="agent__status">
           <LoaderCircleIcon className="size-4 animate-spin" />
           {/* `as="span"`: Shimmer renders a <p> by default, and a <p> inside a

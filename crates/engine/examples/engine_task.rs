@@ -1,6 +1,7 @@
 //! Run one browser task end to end against the real Mac, approving any risky step from stdin.
 //!
 //! cargo run -p aloud-engine --example engine_task -- browser "What does serendipity mean? Check Wiktionary"
+//! cargo run -p aloud-engine --example engine_task -- browser "search for cat memes" "cat memes"   # + query
 //!
 //! Uses the repo's `engine/` (run `npm install` there first, and build `engine/axd/axd`).
 
@@ -10,9 +11,13 @@ use serde_json::json;
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let [_, kind, goal] = args.as_slice() else {
-        eprintln!("usage: engine_task browser <goal>");
-        std::process::exit(2);
+    let (kind, goal, query) = match args.as_slice() {
+        [_, kind, goal] => (kind, goal, None),
+        [_, kind, goal, query] => (kind, goal, Some(query)),
+        _ => {
+            eprintln!("usage: engine_task browser <goal> [query]");
+            std::process::exit(2);
+        }
     };
     if kind != "browser" {
         eprintln!("only browser tasks run on the engine now; Mac apps use aloud_native");
@@ -27,7 +32,7 @@ async fn main() {
             .collect::<Vec<_>>()
     );
     let started = std::time::Instant::now();
-    let mut task = match aloud_engine::start(name, &json!({ "goal": goal })).await {
+    let mut task = match aloud_engine::start(name, &json!({ "goal": goal, "query": query })).await {
         Some(Ok(task)) => task,
         Some(Err(e)) => return eprintln!("couldn't start: {e}"),
         None => return eprintln!("not an engine tool"),

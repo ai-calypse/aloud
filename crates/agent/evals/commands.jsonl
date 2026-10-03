@@ -32,6 +32,7 @@
 {"input":"copy hello world to the clipboard","fast":false,"expected":[{"callsTool":{"name":"ALOUD_CLIPBOARD","arguments":{"text":"hello world"}}}]}
 {"input":"open Photo Booth and take a photo","fast":false,"expected":[{"callsTool":{"name":"ALOUD_PHOTO_BOOTH_TAKE_PHOTO"}}]}
 {"input":"message Sam on Discord saying I'll be late","fast":false,"expected":[{"callsTool":{"name":"ALOUD_DISCORD_MESSAGE","arguments":{"to":"sam","text":"late"}}}]}
+{"input":"search for cat memes","fast":false,"expected":[{"callsTool":{"name":"ALOUD_BROWSER_TASK","arguments":{"query":{"or":["cat memes","cat meme"]}}}}]}
 {"input":"search for restaurants near me","fast":false,"expected":[{"callsTool":{"name":"ALOUD_BROWSER_TASK"}}]}
 {"input":"what's the population of Tokyo on Wikipedia","fast":false,"expected":[{"callsTool":{"name":"ALOUD_BROWSER_TASK"}}]}
 {"input":"summarize my unread emails","fast":false,"expected":[{"callsTool":{"name":"GMAIL_"}}]}

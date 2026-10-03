@@ -15,8 +15,9 @@ use serde_json::{json, Value};
 #[derive(Debug, Clone, PartialEq)]
 pub enum Fast {
     /// A website task: hand the whole utterance to the browser engine, which
-    /// works out the start page itself (`startUrlFor` in `engine/`).
-    Web,
+    /// works out the start page itself (`startUrlFor` in `engine/`), with the
+    /// search terms when the command was a plain web search.
+    Web { query: Option<String> },
     /// One existing native tool with these arguments, and what to say once it
     /// has run.
     Tool {
@@ -38,7 +39,7 @@ pub fn route(text: &str, installed: &[aloud_selection::InstalledApp]) -> Option<
             .map_or_else(|| lower.to_string(), |a| a.name.clone())
     };
     Some(match classify(text, &names)? {
-        Intent::Web => Fast::Web,
+        Intent::Web(query) => Fast::Web { query },
         Intent::Open(apps) => {
             let apps: Vec<String> = apps.iter().map(|a| proper(a)).collect();
             Fast::Tool {
@@ -106,7 +107,8 @@ fn spotify_running() -> bool {
 /// What `classify` recognised, before it is mapped onto a tool.
 #[derive(Debug, PartialEq)]
 enum Intent {
-    Web,
+    /// With the search terms, for "google best pizza".
+    Web(Option<String>),
     /// Installed apps, lowercase.
     Open(Vec<String>),
     Quit(String),
@@ -313,11 +315,8 @@ fn classify(text: &str, apps: &[String]) -> Option<Intent> {
         }
     }
 
-    if WEB_SEARCH
-        .iter()
-        .any(|p| said.starts_with(p) && said.len() > p.len())
-    {
-        return Some(Intent::Web);
+    if let Some(query) = after_verb(&said, WEB_SEARCH).filter(|q| !q.trim().is_empty()) {
+        return Some(Intent::Web(Some(query.trim().to_string())));
     }
 
     if let Some(object) = after_verb(&said, NAVIGATE) {
@@ -326,14 +325,14 @@ fn classify(text: &str, apps: &[String]) -> Option<Intent> {
             return None;
         }
         if starts_with_site(object) {
-            return Some(Intent::Web);
+            return Some(Intent::Web(None));
         }
         return None;
     }
 
     if let Some(object) = after_verb(&said, SEARCH) {
         if names_a_site_with_on(object) {
-            return Some(Intent::Web);
+            return Some(Intent::Web(None));
         }
     }
     None
@@ -505,11 +504,18 @@ mod tests {
             "search lofi on youtube",
             "look up serendipity on wiktionary",
             "check the price of a raspberry pi on adafruit.com",
-            "google best pizza near me",
-            "search the web for tauri drag and drop",
         ] {
-            assert_eq!(route(text), Some(Intent::Web), "{text}");
+            assert_eq!(route(text), Some(Intent::Web(None)), "{text}");
         }
+        // A plain web search carries just its terms, not the "google" in front.
+        assert_eq!(
+            route("google best pizza near me"),
+            Some(Intent::Web(Some("best pizza near me".into())))
+        );
+        assert_eq!(
+            route("search the web for tauri drag and drop"),
+            Some(Intent::Web(Some("tauri drag and drop".into())))
+        );
     }
 
     /// Each of these once went somewhere it should not have, or would with a
@@ -536,7 +542,10 @@ mod tests {
     fn an_installed_app_outranks_a_site_of_the_same_name() {
         let apps = ["youtube".to_string()];
         assert_eq!(classify("open youtube", &apps), open(&["youtube"]));
-        assert_eq!(classify("search lofi on youtube", &apps), Some(Intent::Web));
+        assert_eq!(
+            classify("search lofi on youtube", &apps),
+            Some(Intent::Web(None))
+        );
     }
 
     #[test]
