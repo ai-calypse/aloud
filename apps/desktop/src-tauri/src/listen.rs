@@ -1,194 +1,189 @@
-//! Always-listening mode, after Jev Voice: a floating bar, a mic that stays
-//! open, and every spoken request run as an agent task. Requests said while one
-//! is running queue behind it — "open Calculator", then "what's 90 + 7", which
-//! runs in the Calculator now in front.
+//! Always-listening mode: the mic stays open, the menu-bar wings say so, and
+//! every spoken request runs as an agent task, queued behind the one running —
+//! "open Notes", then "add eggs to my shopping note".
 //!
 //! Turning the mode on is the activation; there is no per-request trigger.
 //! Room speech can therefore start a run, which is bounded the way every run
 //! is: each connected-account write and each risky click waits for a yes.
 //!
-//! Hearing is Deepgram's Flux when a key is set — live words in the bar, and
-//! a turn end that understands an unfinished sentence — else a pause detector
-//! feeding local whisper, so a bundled build without a `.env` still works.
+//! Hearing is two jobs. Deepgram's Flux, when a key is set, decides where a
+//! request ends (it understands an unfinished sentence, where a pause detector
+//! cuts it in two) and shows the words live under the wings. The request itself
+//! is then re-transcribed from its audio by the dictation transcriber, because
+//! Flux's streaming text misheard short commands — "ket means" for "cat memes".
+//! Without a Deepgram key a pause detector cuts the turns instead, so a bundled
+//! build without a `.env` still works.
 
+use crate::pipeline::{Phase, Pipeline};
 use aloud_store::Settings;
 use aloud_transcribe::deepgram::{self, Heard};
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, LogicalPosition, Manager, State, WebviewUrl, WebviewWindowBuilder};
-use tauri_specta::Event;
+use tauri::AppHandle;
 use tokio::sync::mpsc;
 
-use crate::AppState;
-
-/// The bar's window.
-pub const LABEL: &str = "listen";
-/// Jev Voice's command bar, point for point.
-const BAR_WIDTH: f64 = 488.0;
-const BAR_HEIGHT: f64 = 60.0;
-/// Centred under the menu bar, where Jev Voice puts it.
-const BAR_TOP_GAP: f64 = 12.0;
-/// Speech RMS a frame must reach in the whisper fallback. See `Segmenter`.
+/// Speech RMS a frame must reach in the pause-detector path. See `Segmenter`.
 const SPEECH_RMS: f32 = 0.02;
 /// Wait before reopening a dropped Deepgram stream.
 const RECONNECT: Duration = Duration::from_secs(2);
-
-/// What the bar draws, sent whole on every change: it is small, and a bar that
-/// loads late or misses one still ends up right.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, Event)]
-#[serde(rename_all = "camelCase")]
-#[tauri_specta(event_name = "listen-state")]
-pub struct ListenState {
-    pub mic: bool,
-    /// What is being said now, else the last request heard.
-    pub transcript: String,
-    pub busy: bool,
-    /// Requests waiting behind the running one.
-    pub queued: u32,
-    /// Why the mic is not hearing, e.g. a dropped stream being reopened.
-    pub problem: Option<String>,
-}
+/// Audio kept for the turn being said: what the transcriber gets when Flux
+/// says it ended. Far longer than anyone speaks a command; the cap is for a
+/// room that never goes quiet.
+const MAX_TURN_BYTES: usize = aloud_audio::REALTIME_RATE as usize * 2 * 30;
 
 /// What every part of a session shares. Holds no request sender, or the runner
 /// would keep its own channel open and never end.
 struct Shared {
     app: AppHandle,
     settings: Settings,
-    /// The pipeline's: while a hotkey dictation owns the mic, what is said is
-    /// a dictation, not a request.
-    dictating: Arc<AtomicBool>,
-    state: Mutex<ListenState>,
-    /// Bumped by a cancel: the running request stops between tools and the
-    /// queued ones, stamped with an older value, are skipped.
+    pipeline: Arc<Pipeline>,
+    /// Bumped by a cancel or by stopping: the running request stops between
+    /// tools and the queued ones, stamped with an older value, are skipped.
     generation: AtomicU64,
+    /// Requests being transcribed, waiting or running. The wings show work
+    /// until it is back to zero.
+    pending: AtomicUsize,
 }
 
 type Requests = mpsc::UnboundedSender<(u64, String)>;
+/// A finished turn: Flux's text (None from the pause detector) and its audio.
+type Turns = mpsc::UnboundedSender<(Option<String>, Vec<u8>)>;
 
 impl Shared {
-    fn update(&self, change: impl FnOnce(&mut ListenState)) {
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        let before = state.clone();
-        change(&mut state);
-        // Flux repeats an unchanged partial four times a second.
-        if *state != before {
-            let _ = state.emit_to(&self.app, LABEL);
-        }
+    fn busy(&self) -> bool {
+        self.pending.load(Ordering::SeqCst) > 0
     }
 
-    fn submit(&self, requests: &Requests, text: &str) {
-        let text = text.trim();
-        if text.is_empty() {
-            return;
+    fn dictating(&self) -> bool {
+        self.pipeline.busy_flag().load(Ordering::Relaxed)
+    }
+
+    /// Shows `phase` in the overlay, unless a dictation or an open panel owns
+    /// it: the user is mid-sentence, or reading an answer.
+    fn show(&self, phase: Phase) {
+        if !self.dictating() && !crate::overlay::panel_open() {
+            crate::overlay::show(&self.app, phase);
         }
-        self.update(|s| {
-            s.transcript = text.to_string();
-            s.queued += 1;
-        });
-        let _ = requests.send((self.generation.load(Ordering::SeqCst), text.to_string()));
     }
 
     fn cancel(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
-        self.update(|s| s.queued = 0);
+        self.pending.store(0, Ordering::SeqCst);
+        self.show(Phase::Listening);
     }
 }
 
 /// A running session. Dropping it closes the mic, stops the running request,
-/// skips the queue and closes the bar.
+/// skips the queue and takes the wings down.
 pub struct Listener {
     shared: Arc<Shared>,
-    requests: Requests,
-    /// Some while the mic is on. Dropping it ends the hearing task with it.
-    mic: Option<aloud_audio::Recorder>,
+    _mic: aloud_audio::Recorder,
 }
 
 impl Drop for Listener {
     fn drop(&mut self) {
         self.shared.generation.fetch_add(1, Ordering::SeqCst);
-        if let Some(bar) = self.shared.app.get_webview_window(LABEL) {
-            let _ = bar.destroy();
-        }
+        crate::overlay::LISTENING.store(false, Ordering::SeqCst);
+        crate::overlay::send_partial(&self.shared.app, "");
+        crate::overlay::rest(&self.shared.app);
     }
 }
 
 impl Listener {
-    pub fn start(app: AppHandle, settings: Settings, dictating: Arc<AtomicBool>) -> Result<Self> {
+    pub fn start(app: AppHandle, settings: Settings, pipeline: Arc<Pipeline>) -> Result<Self> {
         let (requests, queue) = mpsc::unbounded_channel();
+        let (turns, finished) = mpsc::unbounded_channel();
         let shared = Arc::new(Shared {
             app,
             settings,
-            dictating,
-            state: Mutex::default(),
+            pipeline,
             generation: AtomicU64::new(0),
+            pending: AtomicUsize::new(0),
         });
+        let mic = open_mic(&shared, turns).context("opening the always-listening mic")?;
         tauri::async_runtime::spawn(run_requests(shared.clone(), queue));
-        open_bar(&shared.app).context("opening the listening bar")?;
-        let mut listener = Self {
-            shared,
-            requests,
-            mic: None,
-        };
-        listener.set_mic(true);
-        Ok(listener)
+        tauri::async_runtime::spawn(take_turns(shared.clone(), requests, finished));
+        crate::overlay::LISTENING.store(true, Ordering::SeqCst);
+        shared.show(Phase::Listening);
+        Ok(Self { shared, _mic: mic })
     }
+}
 
-    pub fn set_mic(&mut self, on: bool) {
-        if on == self.mic.is_some() {
-            return;
+/// Turns finished turns into requests, one at a time so they keep the order
+/// they were said in.
+async fn take_turns(
+    shared: Arc<Shared>,
+    requests: Requests,
+    mut finished: mpsc::UnboundedReceiver<(Option<String>, Vec<u8>)>,
+) {
+    while let Some((heard, audio)) = finished.recv().await {
+        crate::overlay::send_partial(&shared.app, "");
+        // A cough or a door is a turn with no words; Flux says so for free.
+        if heard.as_deref().is_some_and(|h| h.trim().is_empty()) {
+            continue;
         }
-        self.mic = None;
-        if !on {
-            self.shared.update(|s| {
-                s.mic = false;
-                s.problem = None;
-            });
-            return;
+        if let Some(said) = heard.as_deref().and_then(control) {
+            act(&shared, said);
+            continue;
         }
-        match open_mic(&self.shared, &self.requests) {
-            Ok(recorder) => {
-                self.mic = Some(recorder);
-                self.shared.update(|s| {
-                    s.mic = true;
-                    s.problem = None;
-                });
-            }
+        shared.pending.fetch_add(1, Ordering::SeqCst);
+        shared.show(Phase::Transcribing);
+        let text = match shared.pipeline.transcribe_pcm16(&audio).await {
+            Ok(text) if !text.trim().is_empty() => text,
+            // The transcriber dropped it (silence, a hallucination) or failed:
+            // Flux's own words are the next best thing, if it heard any.
+            Ok(_) => heard.unwrap_or_default(),
             Err(e) => {
-                tracing::error!(error = %format!("{e:#}"), "always-listening mic failed");
-                self.shared.update(|s| {
-                    s.mic = false;
-                    s.problem = Some(format!("{e:#}"));
-                });
+                tracing::warn!(%e, "always-listening transcription failed; using the live text");
+                heard.unwrap_or_default()
             }
+        };
+        let text = text.trim();
+        if text.is_empty() || control(text).is_some() {
+            shared.pending.fetch_sub(1, Ordering::SeqCst);
+            match control(text) {
+                Some(said) => act(&shared, said),
+                None if !shared.busy() => shared.show(Phase::Listening),
+                None => {}
+            }
+            continue;
         }
+        tracing::info!(request = %text, "always-listening request");
+        let _ = requests.send((shared.generation.load(Ordering::SeqCst), text.to_string()));
     }
 }
 
 /// Runs requests one at a time, in the order they were said. Ends when the
-/// listener and every hearing task (the senders) are gone.
+/// listener and its turn taker (the senders) are gone.
 async fn run_requests(shared: Arc<Shared>, mut queue: mpsc::UnboundedReceiver<(u64, String)>) {
     while let Some((generation, request)) = queue.recv().await {
         if generation != shared.generation.load(Ordering::SeqCst) {
             continue;
         }
-        shared.update(|s| {
-            s.queued = s.queued.saturating_sub(1);
-            s.busy = true;
-            s.transcript = request.clone();
-        });
-        tracing::info!(%request, "always-listening request");
         let cancelled = || shared.generation.load(Ordering::SeqCst) != generation;
         if let Err(e) =
             crate::agent::run(&shared.app, request, &shared.settings, true, cancelled).await
         {
             tracing::error!(%e, "always-listening request failed");
         }
-        shared.update(|s| s.busy = false);
+        finish(&shared);
+    }
+}
+
+/// One request is over: once none are left, the wings go back to listening.
+/// Straight back, not via "done": that phase reads "Pasted", and an answer or
+/// a question has the panel anyway.
+fn finish(shared: &Shared) {
+    let left = shared
+        .pending
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+            Some(n.saturating_sub(1))
+        })
+        .map_or(0, |was| was.saturating_sub(1));
+    if left == 0 {
+        shared.show(Phase::Listening);
     }
 }
 
@@ -216,32 +211,27 @@ fn control(text: &str) -> Option<Control> {
     }
 }
 
-fn on_heard(shared: &Shared, requests: &Requests, heard: Heard) {
-    match heard {
-        // An empty partial is the gap between turns; the last request stays up.
-        Heard::Partial(text) => shared.update(|s| {
-            s.problem = None;
-            if !text.is_empty() {
-                s.transcript = text;
-            }
-        }),
-        Heard::Turn(text) => match control(&text) {
-            Some(Control::StopListening) => set_mic(&shared.app, false),
-            Some(Control::Cancel) => shared.cancel(),
-            None => shared.submit(requests, &text),
-        },
+fn act(shared: &Shared, said: Control) {
+    match said {
+        // With no bar, a mic that is off but a mode that is on would be
+        // invisible: stopping listening ends the mode. Spawned, because this
+        // runs inside the session it is about to drop.
+        Control::StopListening => {
+            let app = shared.app.clone();
+            tauri::async_runtime::spawn(async move { crate::stop_listening(&app) });
+        }
+        Control::Cancel => shared.cancel(),
     }
 }
 
-fn open_mic(shared: &Arc<Shared>, requests: &Requests) -> Result<aloud_audio::Recorder> {
+fn open_mic(shared: &Arc<Shared>, turns: Turns) -> Result<aloud_audio::Recorder> {
     let device = shared.settings.selected_microphone.as_deref();
-    let dictating = shared.dictating.clone();
+    let dictating = shared.pipeline.busy_flag();
     let key = shared.settings.deepgram_api_key.trim().to_string();
 
     if key.is_empty() {
-        let (utterances, heard) = mpsc::unbounded_channel();
         let mut segmenter = aloud_audio::Segmenter::new(SPEECH_RMS);
-        let recorder = aloud_audio::Recorder::tap_only(
+        return aloud_audio::Recorder::tap_only(
             device,
             Box::new(move |pcm: Vec<u8>| {
                 if dictating.load(Ordering::Relaxed) {
@@ -250,36 +240,46 @@ fn open_mic(shared: &Arc<Shared>, requests: &Requests) -> Result<aloud_audio::Re
                 }
                 // Send, never transcribe, on this thread: the tap must not block.
                 for utterance in segmenter.push(&pcm) {
-                    let _ = utterances.send(utterance);
+                    let _ = turns.send((None, utterance));
                 }
             }),
-        )?;
-        tauri::async_runtime::spawn(hear_whisper(shared.clone(), requests.clone(), heard));
-        return Ok(recorder);
+        );
     }
 
     let (audio, heard) = mpsc::unbounded_channel();
-    let recorder = aloud_audio::Recorder::tap_only(
-        device,
+    let turn = Arc::new(Mutex::new(Vec::new()));
+    let recorder = aloud_audio::Recorder::tap_only(device, {
+        let turn = turn.clone();
         Box::new(move |mut pcm: Vec<u8>| {
+            if let Ok(mut turn) = turn.lock() {
+                if dictating.load(Ordering::Relaxed) {
+                    // A dictation is not part of the next request.
+                    turn.clear();
+                } else {
+                    turn.extend_from_slice(&pcm);
+                    let over = turn.len().saturating_sub(MAX_TURN_BYTES);
+                    turn.drain(..over);
+                }
+            }
             // Silence rather than nothing while a dictation owns the mic:
             // Deepgram closes a stream that stops receiving audio.
             if dictating.load(Ordering::Relaxed) {
                 pcm.fill(0);
             }
             let _ = audio.send(pcm);
-        }),
-    )?;
-    tauri::async_runtime::spawn(hear_deepgram(shared.clone(), requests.clone(), key, heard));
+        })
+    })?;
+    tauri::async_runtime::spawn(hear_deepgram(shared.clone(), key, heard, turn, turns));
     Ok(recorder)
 }
 
 /// Streams to Deepgram until the mic closes, reopening a dropped stream.
 async fn hear_deepgram(
     shared: Arc<Shared>,
-    requests: Requests,
     key: String,
     mut audio: mpsc::UnboundedReceiver<Vec<u8>>,
+    turn: Arc<Mutex<Vec<u8>>>,
+    turns: Turns,
 ) {
     loop {
         let result = deepgram::stream(
@@ -287,139 +287,33 @@ async fn hear_deepgram(
             aloud_audio::REALTIME_RATE,
             &shared.settings.vocabulary,
             &mut audio,
-            |heard| on_heard(&shared, &requests, heard),
+            |heard| match heard {
+                // Live words only while nothing else is on screen: under
+                // "transcribing" they would be the next request, not this one.
+                Heard::Partial(text) => {
+                    if !shared.busy() && !shared.dictating() {
+                        crate::overlay::send_partial(&shared.app, &text);
+                    }
+                }
+                Heard::Turn(text) => {
+                    let said = turn
+                        .lock()
+                        .map(|mut t| std::mem::take(&mut *t))
+                        .unwrap_or_default();
+                    let _ = turns.send((Some(text), said));
+                }
+            },
         )
         .await;
         let Err(e) = result else {
             return; // the mic closed
         };
         tracing::warn!(error = %format!("{e:#}"), "deepgram stream dropped; reopening");
-        shared.update(|s| s.problem = Some(format!("Reconnecting \u{b7} {e}")));
         tokio::time::sleep(RECONNECT).await;
         if audio.is_closed() {
             return;
         }
     }
-}
-
-/// Transcribes each paused-at utterance with the app's transcriber.
-async fn hear_whisper(
-    shared: Arc<Shared>,
-    requests: Requests,
-    mut utterances: mpsc::UnboundedReceiver<Vec<u8>>,
-) {
-    // Built on the first utterance, as meetings do: a silent room never pays
-    // for loading the model.
-    let mut transcriber = None;
-    while let Some(utterance) = utterances.recv().await {
-        if transcriber.is_none() {
-            match crate::pipeline::build_transcriber(&shared.app, &shared.settings).await {
-                Ok(t) => transcriber = Some(t),
-                Err(e) => {
-                    tracing::error!(%e, "always-listening transcriber unavailable");
-                    continue;
-                }
-            }
-        }
-        let Some(t) = transcriber.as_deref() else {
-            continue;
-        };
-        match aloud_transcribe::preview::transcribe_pcm16(
-            t,
-            &utterance,
-            &shared.settings.vocabulary,
-        )
-        .await
-        {
-            Ok(text) => on_heard(&shared, &requests, Heard::Turn(text)),
-            Err(e) => tracing::warn!(%e, "always-listening transcription failed"),
-        }
-    }
-}
-
-fn open_bar(app: &AppHandle) -> Result<()> {
-    let bar = match app.get_webview_window(LABEL) {
-        Some(bar) => bar,
-        None => WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("listen.html".into()))
-            .title("Aloud")
-            .inner_size(BAR_WIDTH, BAR_HEIGHT)
-            .resizable(false)
-            .decorations(false)
-            .transparent(true)
-            .shadow(true)
-            .always_on_top(true)
-            .visible_on_all_workspaces(true)
-            .skip_taskbar(true)
-            .focused(false)
-            .accept_first_mouse(true)
-            .visible(false)
-            .build()?,
-    };
-    // ponytail: the primary display only; the overlay's notch targeting is the
-    // model if the bar should follow the pointer's screen.
-    if let Some(monitor) = bar.primary_monitor()? {
-        let scale = monitor.scale_factor();
-        let area = monitor.work_area();
-        let left = f64::from(area.position.x) / scale;
-        let width = f64::from(area.size.width) / scale;
-        let top = f64::from(area.position.y) / scale;
-        bar.set_position(LogicalPosition::new(
-            left + (width - BAR_WIDTH) / 2.0,
-            top + BAR_TOP_GAP,
-        ))?;
-    }
-    bar.show()?;
-    Ok(())
-}
-
-/// Runs `f` on the session, if one is on.
-fn with_listener(app: &AppHandle, f: impl FnOnce(&mut Listener)) {
-    let state = app.state::<AppState>();
-    let Ok(mut slot) = state.listener.lock() else {
-        return;
-    };
-    if let Some(listener) = slot.as_mut() {
-        f(listener);
-    }
-}
-
-fn set_mic(app: &AppHandle, on: bool) {
-    with_listener(app, |l| l.set_mic(on));
-}
-
-/// The bar's first paint: it may load after the session's first update.
-#[tauri::command]
-#[specta::specta]
-pub fn listen_state(state: State<'_, AppState>) -> ListenState {
-    state
-        .listener
-        .lock()
-        .ok()
-        .and_then(|slot| {
-            slot.as_ref()
-                .and_then(|l| l.shared.state.lock().ok().map(|s| s.clone()))
-        })
-        .unwrap_or_default()
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn listen_toggle_mic(app: AppHandle) {
-    with_listener(&app, |l| l.set_mic(l.mic.is_none()));
-}
-
-/// A typed request, queued like a spoken one.
-#[tauri::command]
-#[specta::specta]
-pub fn listen_submit(app: AppHandle, text: String) {
-    with_listener(&app, |l| l.shared.submit(&l.requests, &text));
-}
-
-/// Stops the running request and drops the queue; the mic stays on.
-#[tauri::command]
-#[specta::specta]
-pub fn listen_cancel(app: AppHandle) {
-    with_listener(&app, |l| l.shared.cancel());
 }
 
 #[cfg(test)]

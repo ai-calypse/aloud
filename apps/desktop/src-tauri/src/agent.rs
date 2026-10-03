@@ -63,9 +63,9 @@ fn is_current(run: u64) -> bool {
 /// One run's claim on the panel and where its events go.
 struct Run {
     ticket: u64,
-    /// Reporting to the listening bar alone. An always-listening "create a
-    /// note" needs no panel over the bar; a run that has to ask, or has
-    /// something to read, is [`Run::surface`]d.
+    /// Reporting nowhere but the wings. An always-listening "create a note"
+    /// needs no panel; a run that has to ask, or has something to read, is
+    /// [`Run::surface`]d.
     quiet: AtomicBool,
     /// Whether any tool ran. A quiet run that only answered still has to show
     /// the answer somewhere bigger than the bar's one line.
@@ -86,8 +86,6 @@ impl Run {
             );
             return;
         }
-        // The listening bar shows every run's progress; a no-op while it is closed.
-        let _ = event.emit_to(app, crate::listen::LABEL);
         if self.quiet.load(Ordering::SeqCst) {
             return;
         }
@@ -114,8 +112,8 @@ struct Context<'a> {
 }
 
 /// Whether a finished run's message needs the panel: an answer with no action
-/// behind it, or one too long for the listening bar's single line ("Created
-/// the note" fits; an email summary does not).
+/// behind it, or one longer than a line ("Created the note" can go unsaid;
+/// an email summary cannot).
 fn needs_reading(acted: bool, message: &str) -> bool {
     !acted || message.contains('\n') || message.chars().count() > 100
 }

@@ -83,6 +83,8 @@ import "./styles/overlay.css";
 
 const LABEL: Record<Phase, string> = {
   idle: "",
+  // Always-listening at rest: the wings' dot says it; there is no word to show.
+  listening: "",
   recording: "Listening…",
   transcribing: "Transcribing…",
   done: "Pasted",
@@ -805,9 +807,10 @@ function Overlay() {
     const timer = setTimeout(() => setAsk(ASK_PREVIEW), Number(askAfter) || 0);
     return () => clearTimeout(timer);
   }, [askAfter]);
-  // Only during `recording`: a partial left over from the capture must not sit
+  // Only while words are being said — a dictation, or always-listening — never
   // under "Transcribing…", which is about the whole utterance being re-read.
-  const transcript = !panelOpen && phase === "recording" && partial.trim().length > 0;
+  const transcript =
+    !panelOpen && (phase === "recording" || phase === "listening") && partial.trim().length > 0;
 
   // The "I am listening" cat shows ONLY while the app is actively listening to
   // you — the live dictation, `recording`/`transcribing`. The meme's caption is
@@ -964,6 +967,13 @@ function Overlay() {
       setPhase(e.payload);
       // A phase arriving means the window is staying up, cancelling an exit.
       setDismissing(false);
+      // Back to listening after a request: the last one's words and the drop
+      // they caused are over, so the wings come back up into the menu bar.
+      if (e.payload === "listening") {
+        setError(null);
+        setPartial("");
+        setDroppedDown(false);
+      }
       if (e.payload === "recording") {
         setError(null);
         // A dictation started over the top of an answer takes the panel back —

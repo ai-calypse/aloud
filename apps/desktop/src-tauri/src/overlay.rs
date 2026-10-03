@@ -154,6 +154,18 @@ fn target_notch(window: &WebviewWindow) -> Option<crate::notch::Notch> {
 /// to the drop pill on an error, where a 40pt wing would hide the message.
 fn style_for(window: &WebviewWindow, phase: Phase) -> (OverlayStyle, Option<crate::notch::Notch>) {
     let notch = target_notch(window);
+    // Always-listening sits in the menu bar all day; a drop pill would hang a
+    // panel over whatever the user is doing.
+    if matches!(phase, Phase::Listening) {
+        return (
+            if notch.is_some() {
+                OverlayStyle::Wings
+            } else {
+                OverlayStyle::DropPill
+            },
+            notch,
+        );
+    }
     match settings(window.app_handle()).overlay_style {
         OverlayStyle::DropPill => (OverlayStyle::DropPill, notch),
         OverlayStyle::Wings => match (matches!(phase, Phase::Error), notch) {
@@ -523,7 +535,31 @@ pub fn end_panel(app: &AppHandle) {
         return;
     }
     reset_to_resting(app);
-    hide(app);
+    rest(app);
+}
+
+/// Whether a panel (an answer, a question, a browse) is up, which nothing
+/// passive should take the window from.
+pub fn panel_open() -> bool {
+    PANEL_OPEN.load(Ordering::SeqCst)
+}
+
+/// Whether always-listening is on, so the overlay's resting state is the
+/// listening wings rather than the bare notch. Set by `crate::listen`.
+pub static LISTENING: AtomicBool = AtomicBool::new(false);
+
+/// Where the overlay goes when a dictation, a run or a panel is over: back to
+/// the listening wings while always-listening is on, else away. Leaves an open
+/// panel alone — the user is still reading it, and its own close comes back
+/// here.
+pub fn rest(app: &AppHandle) {
+    if !LISTENING.load(Ordering::SeqCst) {
+        return hide(app);
+    }
+    if PANEL_OPEN.load(Ordering::SeqCst) {
+        return;
+    }
+    show(app, Phase::Listening);
 }
 
 /// Closes a browse of the notch. Symmetric with `close_ask`/`close_agent`: a

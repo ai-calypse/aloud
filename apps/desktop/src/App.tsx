@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 
 const PHASE_LABEL: Record<Phase, string> = {
   idle: "Ready",
+  listening: "Always listening",
   recording: "Listening…",
   transcribing: "Transcribing…",
   done: "Pasted",
