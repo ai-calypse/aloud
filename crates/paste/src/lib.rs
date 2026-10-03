@@ -72,6 +72,9 @@ fn on_main_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 /// Time for the target app to service the paste. Restoring earlier pastes the
 /// *old* clipboard.
 const PASTE_SETTLE: Duration = Duration::from_millis(150);
+/// Between a paste and the spoken "press enter"'s Return. A calibration knob,
+/// not a derived number: raise it if a chat app submits before the paste lands.
+const SUBMIT_DELAY: Duration = Duration::from_millis(120);
 
 /// The modifier that pairs with V to paste on this platform.
 const PASTE_MODIFIER: Key = if cfg!(target_os = "macos") {
@@ -189,15 +192,22 @@ fn send_paste(press_enter: bool) -> Result<()> {
         let pressed = enigo.key(Key::Unicode('v'), Direction::Click);
         // Always release: a stuck Cmd wedges the user's keyboard.
         enigo.key(PASTE_MODIFIER, Direction::Release)?;
-        pressed.context("sending paste")?;
+        pressed.context("sending paste")
+    })??;
 
-        if press_enter {
+    if press_enter {
+        // Off the main thread: Electron apps (Slack, Discord) apply a paste
+        // asynchronously, and a Return on its heels submits before the text
+        // lands.
+        sleep(SUBMIT_DELAY);
+        on_main_thread(|| -> Result<()> {
+            let mut enigo = Enigo::new(&Settings::default()).context("creating input simulator")?;
             enigo
                 .key(Key::Return, Direction::Click)
-                .context("sending return")?;
-        }
-        Ok(())
-    })?
+                .context("sending return")
+        })??;
+    }
+    Ok(())
 }
 
 /// A modifier held for [`press_chord`].

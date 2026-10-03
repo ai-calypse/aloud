@@ -10,6 +10,22 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 
 /// Default model: ~150 MB, good accuracy-to-speed for dictation on CPU.
 pub const DEFAULT_MODEL: &str = "ggml-base.en.bin";
+/// The same size, for every language whisper knows.
+pub const MULTILINGUAL_MODEL: &str = "ggml-base.bin";
+
+/// The model for a spoken-language setting. The English-only model is the
+/// better one for English, but given any other language whisper.cpp ignores
+/// it and writes the speech out as English.
+///
+/// ponytail: auto-detect ("") stays on the English model, so it means English
+/// on-device — moving every default user to a second 150 MB download for a
+/// detector short utterances fool anyway was the worse trade.
+pub fn model_for(language: &str) -> &'static str {
+    match language.trim() {
+        "" | "en" => DEFAULT_MODEL,
+        _ => MULTILINGUAL_MODEL,
+    }
+}
 
 pub struct LocalTranscriber {
     /// Shared so inference can move onto a blocking thread without borrowing
@@ -168,12 +184,12 @@ fn read_wav_16k_mono(path: &Path) -> Result<Vec<f32>> {
         .context("reading samples")
 }
 
-/// Whether the default model is already on disk. The offline fallback checks
-/// this because `ensure_model` *downloads* a missing one, which would put 150MB
-/// inside the dictation the user is waiting on — over the network that just
-/// broke.
-pub fn model_is_present() -> bool {
-    model_dir().is_ok_and(|dir| dir.join(DEFAULT_MODEL).exists())
+/// Whether the model for `language` is already on disk. The offline fallback
+/// checks this because `ensure_model` *downloads* a missing one, which would
+/// put 150MB inside the dictation the user is waiting on — over the network
+/// that just broke.
+pub fn model_is_present(language: &str) -> bool {
+    model_dir().is_ok_and(|dir| dir.join(model_for(language)).exists())
 }
 
 /// Where models live: `<app-data>/Aloud/models`.
@@ -184,6 +200,14 @@ pub fn model_dir() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_non_english_language_gets_the_multilingual_model() {
+        assert_eq!(model_for(""), DEFAULT_MODEL);
+        assert_eq!(model_for("en"), DEFAULT_MODEL);
+        assert_eq!(model_for("es"), MULTILINGUAL_MODEL);
+        assert_eq!(model_for("hi"), MULTILINGUAL_MODEL);
+    }
 
     #[test]
     fn rejects_wrong_sample_rate() {

@@ -1,11 +1,13 @@
 //! Ambient meeting capture: records the mic continuously, transcribes rolling
 //! ~60s chunks in the background, and on stop turns the running transcript into
-//! markdown notes.
+//! markdown notes. The transcript so far is kept on disk as it grows, so a quit
+//! or a crash mid-meeting comes back as a note on the next launch.
 //!
 //! ponytail: mic-only, as in the Swift app — remote participants are heard
 //! only through the speakers the mic picks up. A system-audio tap is the
 //! upgrade path.
 
+use crate::pipeline::Pipeline;
 use aloud_store::Settings;
 use anyhow::{Context, Result};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -20,6 +22,24 @@ const BYTES_PER_SECOND: usize = aloud_audio::REALTIME_RATE as usize * 2; // i16
 const CHUNK_BYTES: usize = BYTES_PER_SECOND * aloud_meeting::CHUNK_SECONDS;
 /// Trailing audio shorter than this on stop is dropped, not transcribed.
 const MIN_FINAL_CHUNK_BYTES: usize = BYTES_PER_SECOND;
+/// How far before each minute a chunk may end early to land between words.
+const PAUSE_SEARCH_BYTES: usize = BYTES_PER_SECOND * 5;
+
+/// Where the running transcript lives until the note replaces it.
+fn draft_path() -> Result<std::path::PathBuf> {
+    Ok(aloud_notes::data_dir()?.join("meeting-draft.md"))
+}
+
+/// Saves a meeting the app quit or crashed in as a note. Runs at launch.
+pub fn recover_unsaved() {
+    let recovered = draft_path()
+        .and_then(|draft| aloud_meeting::recover_draft(&draft, &aloud_notes::directory()?));
+    match recovered {
+        Ok(Some(note)) => tracing::info!(note = %note.display(), "recovered an unsaved meeting"),
+        Ok(None) => {}
+        Err(e) => tracing::warn!(%e, "could not recover an unsaved meeting"),
+    }
+}
 
 /// A running meeting-notes session.
 pub struct Meeting {
@@ -66,15 +86,17 @@ impl Meeting {
     /// Starts capturing. Chunks transcribe in the background as they fill, so
     /// stopping a long meeting does not stall while an hour of audio is sent
     /// off one minute at a time.
-    pub fn start(app: AppHandle, settings: Settings) -> Result<Self> {
-        let chunker = Arc::new(Mutex::new(aloud_audio::Chunker::new(CHUNK_BYTES)));
+    pub fn start(app: AppHandle, settings: Settings, pipeline: Arc<Pipeline>) -> Result<Self> {
+        let chunker = Arc::new(Mutex::new(
+            aloud_audio::Chunker::new(CHUNK_BYTES).cutting_in_pauses(PAUSE_SEARCH_BYTES),
+        ));
         let (tx, rx) = mpsc::unbounded_channel();
         let started_at = Instant::now();
         let words = Arc::new(AtomicU32::new(0));
         let stopping = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker = tauri::async_runtime::spawn(transcribe_chunks(
             app.clone(),
-            settings.clone(),
+            pipeline,
             rx,
             started_at,
             words.clone(),
@@ -152,6 +174,10 @@ impl Meeting {
 
         let dir = aloud_notes::directory()?;
         let path = aloud_notes::write_note(&dir, &title, &markdown, chrono::Utc::now())?;
+        // Only now: until the note is written, the draft is the only copy.
+        if let Ok(draft) = draft_path() {
+            let _ = std::fs::remove_file(draft);
+        }
         emit(&app, MeetingPhase::Idle);
         Ok(path)
     }
@@ -171,49 +197,39 @@ fn model_of(settings: &Settings) -> aloud_meeting::Model<'_> {
 /// be visible, not silently closed up.
 async fn transcribe_chunks(
     app: AppHandle,
-    settings: Settings,
+    pipeline: Arc<Pipeline>,
     mut rx: mpsc::UnboundedReceiver<(usize, Vec<u8>)>,
     started_at: Instant,
     words: Arc<AtomicU32>,
     stopping: Arc<std::sync::atomic::AtomicBool>,
 ) -> Vec<(usize, String)> {
+    let draft = draft_path();
     let mut segments = Vec::new();
-    // Built on the first chunk, not at start: the local model costs ~200ms and
-    // a meeting with no audio should never pay for it.
-    let mut transcriber = None;
 
     while let Some((index, chunk)) = rx.recv().await {
-        if transcriber.is_none() {
-            match crate::pipeline::build_transcriber(&app, &settings).await {
-                Ok(t) => transcriber = Some(t),
-                Err(e) => {
-                    tracing::error!(%e, "meeting transcriber unavailable");
-                    continue;
-                }
-            }
-        }
-        let Some(t) = transcriber.as_deref() else {
-            continue;
-        };
-        match aloud_transcribe::preview::transcribe_pcm16(t, &chunk, &settings.vocabulary).await {
-            Ok(text) if !text.trim().is_empty() => segments.push((index, text)),
-            Ok(_) => segments.push((index, "[inaudible]".to_string())),
+        // The dictation transcriber, not one of our own: its already-loaded
+        // model, and its cloud-to-local fallback, so a network blip costs a
+        // minute of meeting nothing.
+        let text = match pipeline.transcribe_pcm16(&chunk).await {
+            Ok(text) if !text.trim().is_empty() => text,
+            Ok(_) => "[inaudible]".to_string(),
             Err(e) => {
                 tracing::warn!(%e, "meeting chunk transcription failed");
-                segments.push((index, "[inaudible]".to_string()));
+                "[inaudible]".to_string()
+            }
+        };
+        // Summed incrementally rather than recomputed off the assembled
+        // transcript on every chunk.
+        let added = text.split_whitespace().count() as u32;
+        let counted = words.fetch_add(added, Ordering::Relaxed) + added;
+        segments.push((index, text));
+
+        if let Ok(draft) = &draft {
+            let transcript = aloud_meeting::assemble(&aloud_meeting::in_order(segments.clone()));
+            if let Err(e) = aloud_meeting::save_draft(draft, &transcript) {
+                tracing::warn!(%e, "could not save the meeting draft");
             }
         }
-
-        // Summed incrementally rather than recomputed off the assembled
-        // transcript, which cloned every segment on every chunk.
-        let counted = words.fetch_add(
-            segments
-                .last()
-                .map_or(0, |(_, text)| text.split_whitespace().count() as u32),
-            Ordering::Relaxed,
-        ) + segments
-            .last()
-            .map_or(0, |(_, text)| text.split_whitespace().count() as u32);
 
         // `stop` emits `Saving` and *then* sends the tail chunk, so without
         // this the UI flips back to "recording" for the whole summarisation and

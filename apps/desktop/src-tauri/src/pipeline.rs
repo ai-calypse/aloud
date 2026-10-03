@@ -142,8 +142,10 @@ pub struct Pipeline {
     /// The last phase emitted, so the tray can show it without the frontend
     /// being awake.
     phase: Mutex<Phase>,
-    /// Loaded lazily: the model costs ~200ms and memory.
-    local: Mutex<Option<Arc<dyn Transcriber>>>,
+    /// Loaded lazily: the model costs ~200ms and memory. Keyed on the spoken
+    /// language the model was built for, so changing it in Settings takes
+    /// effect without a restart.
+    local: Mutex<Option<(String, Arc<dyn Transcriber>)>>,
     /// Read by the hotkey thread to decide whether Escape is ours to swallow.
     busy: Arc<std::sync::atomic::AtomicBool>,
     /// Racing this against the work drops the transcribe/LLM future, which
@@ -667,7 +669,15 @@ impl Pipeline {
             focused.as_ref().and_then(|f| f.bundle_id.as_deref()),
         );
 
-        let final_text = self.post_process(&raw, &effective).await;
+        // "…see you then, press enter" types what came before and submits it.
+        let spoken = settings
+            .press_enter_command
+            .then(|| aloud_llm::trigger::before_suffix(&raw, aloud_llm::trigger::PRESS_ENTER))
+            .flatten();
+        let press_enter = spoken.is_some();
+        let final_text = self
+            .post_process(spoken.as_deref().unwrap_or(&raw), &effective)
+            .await;
         if final_text.trim().is_empty() {
             return Ok(Outcome::NoSpeech);
         }
@@ -687,7 +697,7 @@ impl Pipeline {
                 chars = final_text.len(),
             )
             .entered();
-            aloud_paste::paste_text(&final_text, false, settings.preserve_clipboard)?;
+            aloud_paste::paste_text(&final_text, press_enter, settings.preserve_clipboard)?;
         }
         self.record(
             &raw,
@@ -759,20 +769,15 @@ impl Pipeline {
     /// Downloads the on-device model in the background so the *next* cloud
     /// failure has something to fall back to. Never awaited by the dictation
     /// that triggered it — the point is to keep a 150MB fetch out of it.
-    fn fetch_local_model_soon(&self) {
+    fn fetch_local_model_soon(&self, language: &str) {
+        let model = aloud_transcribe::local::model_for(language);
         tauri::async_runtime::spawn(async move {
             let Ok(dir) = aloud_transcribe::local::model_dir() else {
                 return;
             };
             tracing::info!("fetching the on-device model so the next fallback can use it");
             // No progress to the overlay: no dictation is waiting on this.
-            match aloud_transcribe::download::ensure_model(
-                &dir,
-                aloud_transcribe::local::DEFAULT_MODEL,
-                |_| {},
-            )
-            .await
-            {
+            match aloud_transcribe::download::ensure_model(&dir, model, |_| {}).await {
                 Ok(_) => tracing::info!("on-device model ready for the next fallback"),
                 Err(e) => tracing::warn!(%e, "could not fetch the on-device model"),
             }
@@ -820,8 +825,8 @@ impl Pipeline {
         // 150MB download inside the dictation the user is waiting on — over a
         // network that, on the transport-error path, is what just broke.
         // Fetching in the background covers the *next* failure instead.
-        if !aloud_transcribe::local::model_is_present() {
-            self.fetch_local_model_soon();
+        if !aloud_transcribe::local::model_is_present(&settings.language) {
+            self.fetch_local_model_soon(&settings.language);
             return Err(error
                 .context("cloud transcription failed and no on-device model is downloaded yet"));
         }
@@ -846,15 +851,22 @@ impl Pipeline {
     async fn transcriber(&self, settings: &Settings) -> Result<Arc<dyn Transcriber>> {
         let engine = effective_engine(settings);
         if engine == Engine::Local {
-            if let Some(local) = self.local.lock().unwrap().clone() {
+            if let Some(local) = self.cached_local(&settings.language) {
                 return Ok(local);
             }
         }
         let transcriber = build_transcriber(&self.app, settings).await?;
         if engine == Engine::Local {
-            *self.local.lock().unwrap() = Some(transcriber.clone());
+            *self.local.lock().unwrap() = Some((settings.language.clone(), transcriber.clone()));
         }
         Ok(transcriber)
+    }
+
+    fn cached_local(&self, language: &str) -> Option<Arc<dyn Transcriber>> {
+        match &*self.local.lock().unwrap() {
+            Some((built_for, local)) if built_for == language => Some(local.clone()),
+            _ => None,
+        }
     }
 
     /// The model the live preview runs on: always the local one, whatever
@@ -865,17 +877,17 @@ impl Pipeline {
     /// Never downloads: no model on disk means no preview, and the dictation is
     /// unaffected.
     async fn preview_transcriber(&self, settings: &Settings) -> Result<Arc<dyn Transcriber>> {
-        if let Some(local) = self.local.lock().unwrap().clone() {
+        if let Some(local) = self.cached_local(&settings.language) {
             return Ok(local);
         }
-        let model =
-            aloud_transcribe::local::model_dir()?.join(aloud_transcribe::local::DEFAULT_MODEL);
+        let model = aloud_transcribe::local::model_dir()?
+            .join(aloud_transcribe::local::model_for(&settings.language));
         if !model.exists() {
             bail!("no local model downloaded; skipping the live preview");
         }
         let language = Some(settings.language.as_str()).filter(|l| !l.is_empty());
         let transcriber: Arc<dyn Transcriber> = Arc::new(LocalTranscriber::new(&model, language)?);
-        *self.local.lock().unwrap() = Some(transcriber.clone());
+        *self.local.lock().unwrap() = Some((settings.language.clone(), transcriber.clone()));
         Ok(transcriber)
     }
 
@@ -1211,7 +1223,7 @@ pub async fn build_transcriber(
             let dir = aloud_transcribe::local::model_dir()?;
             let model = aloud_transcribe::download::ensure_model(
                 &dir,
-                aloud_transcribe::local::DEFAULT_MODEL,
+                aloud_transcribe::local::model_for(&settings.language),
                 |p| crate::overlay::send_download(app, p),
             )
             .await?;

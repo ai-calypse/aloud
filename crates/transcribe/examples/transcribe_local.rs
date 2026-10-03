@@ -2,6 +2,9 @@
 //!
 //! `cargo run -p aloud-transcribe --example transcribe_local -- <file.wav> [terms,…]`
 //!
+//! `ALOUD_LANGUAGE=es` decodes as that spoken language, on the model the app
+//! would pick for it (`local::model_for`).
+//!
 //! The optional second argument is the vocabulary. Only a real decode shows
 //! whether biasing does anything: run the same WAV twice, once with the term
 //! and once without, and diff the transcript. A unit test can only prove the
@@ -29,7 +32,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Every 10%, not every chunk: \r progress is unreadable off a terminal.
     let mut last_decile = 0;
-    let model = download::ensure_model(&dir, local::DEFAULT_MODEL, |p| {
+    let language = std::env::var("ALOUD_LANGUAGE").unwrap_or_default();
+    let model = download::ensure_model(&dir, local::model_for(&language), |p| {
         let decile = (p * 10.0) as u32;
         if decile > last_decile {
             last_decile = decile;
@@ -40,7 +44,8 @@ async fn main() -> anyhow::Result<()> {
     println!("Model ready: {}", model.display());
 
     let started = std::time::Instant::now();
-    let transcriber = local::LocalTranscriber::new(&model, None)?;
+    let transcriber =
+        local::LocalTranscriber::new(&model, Some(language.as_str()).filter(|l| !l.is_empty()))?;
     println!("Loaded in {:?}", started.elapsed());
 
     let started = std::time::Instant::now();
