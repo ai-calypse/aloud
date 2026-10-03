@@ -81,7 +81,7 @@ constraint means JS cannot trigger it directly, so we **bridge**:
 ## Where it plugs in
 
 - **The draggable surface** is the Finder grid tile
-  ([`overlay.tsx` `FinderGrid`](apps/desktop/src/overlay.tsx)) first, then any
+  ([`AgentRun.tsx` `FinderGrid`](apps/desktop/src/features/overlay/AgentRun.tsx)) first, then any
   agent-surfaced path. Generalise by carrying a `path` on the result model, not
   by special-casing the grid.
 - **A `crates/drag` crate** owns the AppKit code behind `#[cfg]`, Windows a
