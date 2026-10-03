@@ -10,6 +10,7 @@
 
 mod catalogue;
 pub mod fast;
+mod keys;
 mod media;
 mod notes;
 mod organize;
@@ -114,6 +115,41 @@ pub fn low_risk(name: &str, args: &Value) -> bool {
     if name == "ALOUD_WRITE_FILE" {
         return catalogue::creates_new_file(args);
     }
+    if name == "ALOUD_PRESS_KEYS" {
+        let keys = args.get("keys").and_then(Value::as_str).unwrap_or_default();
+        return keys::parse(keys).is_ok_and(|chord| !keys::destructive(&chord));
+    }
+    if name == "ALOUD_MENU" {
+        // Listing changes nothing; a click is as safe as the command it names.
+        let item = args
+            .get("item")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| {
+                args.get("path")
+                    .and_then(Value::as_array)
+                    .and_then(|p| p.last())
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .unwrap_or_default()
+            .to_lowercase();
+        const RISKY: &[&str] = &[
+            "quit",
+            "close",
+            "delete",
+            "trash",
+            "log out",
+            "shut down",
+            "restart",
+            "erase",
+            "remove",
+            "discard",
+            "revert",
+            "force",
+        ];
+        return !RISKY.iter().any(|word| item.contains(word));
+    }
     matches!(
         name,
         "ALOUD_OPEN_APP"
@@ -181,6 +217,8 @@ pub fn confirmation(name: &str, args: &Value, result: &Value) -> Option<String> 
         "ALOUD_PHOTO_BOOTH_TAKE_PHOTO" => "Taking a photo in Photo Booth.".into(),
         "ALOUD_BROWSER_TAB" if arg("action") == Some("open") => format!("Opened {}.", arg("url")?),
         "ALOUD_WRITE_FILE" => format!("Saved {}.", got("wrote")?),
+        "ALOUD_PRESS_KEYS" => format!("Pressed {}.", arg("keys")?),
+        "ALOUD_MENU" if result.get("clicked").is_some() => format!("Chose {}.", got("clicked")?),
         _ => return None,
     })
 }
@@ -220,6 +258,28 @@ fn app_installed(app: &str, installed: &[aloud_selection::InstalledApp]) -> bool
 
 #[cfg(test)]
 mod tests {
+
+    /// "Press ⌘⇧5" should just happen; "quit Safari" by its keys or its menu
+    /// must still ask.
+    #[test]
+    fn shortcuts_and_menu_commands_ask_only_when_they_destroy() {
+        assert!(low_risk(
+            "ALOUD_PRESS_KEYS",
+            &json!({ "keys": "cmd+shift+5" })
+        ));
+        assert!(!low_risk("ALOUD_PRESS_KEYS", &json!({ "keys": "cmd+q" })));
+        assert!(!low_risk(
+            "ALOUD_PRESS_KEYS",
+            &json!({ "keys": "nonsense+chord+x" })
+        ));
+        assert!(low_risk("ALOUD_MENU", &json!({ "item": "New Window" })));
+        assert!(low_risk("ALOUD_MENU", &json!({ "list": true })));
+        assert!(!low_risk("ALOUD_MENU", &json!({ "item": "Empty Trash…" })));
+        assert!(!low_risk(
+            "ALOUD_MENU",
+            &json!({ "path": ["Safari", "Quit Safari"] })
+        ));
+    }
 
     #[test]
     fn writes_confirm_themselves_and_reads_leave_it_to_the_model() {

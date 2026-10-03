@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use crate::organize;
 use crate::script::{self, ScriptError};
 use crate::search;
-use crate::{media, notes, reminders};
+use crate::{keys, media, notes, reminders};
 
 /// Pulls a required string argument, or a readable error the model can recover
 /// from — a missing field is the model's mistake, not a permission problem.
@@ -90,6 +90,8 @@ fn bundle_path(name: &str) -> Result<String, ScriptError> {
         format!("/System/Applications/{name}.app"),
         format!("/System/Applications/Utilities/{name}.app"),
         format!("{home}/Applications/{name}.app"),
+        // Finder lives here, not in /Applications.
+        format!("/System/Library/CoreServices/{name}.app"),
     ]
     .into_iter()
     .find(|p| std::path::Path::new(p).exists())
@@ -676,6 +678,116 @@ pub const ACTIONS: &[Action] = &[
             Ok(
                 json!({ "sent": !args.get("dry_run").and_then(Value::as_bool).unwrap_or(false), "to": out }),
             )
+        },
+    },
+    Action {
+        name: "ALOUD_PRESS_KEYS",
+        description: "Press a keyboard shortcut — anything the Mac or an app does from the \
+                      keyboard that no named tool covers: cmd+shift+5 opens the screenshot and \
+                      screen-recording toolbar (to record the screen, press it and tell the user to \
+                      click Record), cmd+shift+4 captures an area, ctrl+cmd+q locks the \
+                      screen, cmd+space opens Spotlight, cmd+t a new tab. `keys` is one chord like \
+                      \"cmd+shift+5\". `app` brings that app to the front first; omit it for a \
+                      system-wide shortcut or the app already in front. Never say you have no tool \
+                      for something the Mac does with keys.",
+        app: crate::ALWAYS,
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["keys"],
+                "properties": {
+                    "keys": { "type": "string", "description": "One chord, e.g. \"cmd+shift+5\", \"ctrl+cmd+q\", \"escape\"." },
+                    "app": { "type": "string", "description": "The app to press it in, if not the one in front." }
+                }
+            })
+        },
+        run: |args| {
+            let spec = required_str(args, "keys")?;
+            let chord = keys::parse(spec).map_err(ScriptError::Failed)?;
+            if let Some(app) = args.get("app").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                open_one(app)?;
+                wait_until_frontmost(app);
+            }
+            aloud_paste::press_chord(&chord.modifiers, chord.key)
+                .map_err(|e| ScriptError::Failed(format!("{e:#}")))?;
+            Ok(json!({ "pressed": spec }))
+        },
+    },
+    Action {
+        name: "ALOUD_MENU",
+        description: "Run a command from an app's menu bar by name — anything in its File, Edit, \
+                      View… menus that no named tool covers: \"New Window\", \"Export as PDF\", \
+                      \"Show Sidebar\", \"Zoom In\". Give `item` (its name) or `path` [\"File\", \
+                      \"Export as PDF…\"]. Unsure of the name? Call with `list: true` first to see \
+                      the app's menu items. `app` defaults to the app in front.",
+        app: crate::ALWAYS,
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "item": { "type": "string", "description": "The menu item's name." },
+                    "path": { "type": "array", "items": { "type": "string" }, "description": "Menu, then item (then submenu item)." },
+                    "list": { "type": "boolean", "description": "List the app's menu items instead of clicking one." },
+                    "app": { "type": "string", "description": "The app, if not the one in front." }
+                }
+            })
+        },
+        run: |args| {
+            let app = args.get("app").and_then(Value::as_str).filter(|s| !s.is_empty());
+            if let Some(app) = app {
+                open_one(app)?;
+                wait_until_frontmost(app);
+            }
+            // Names are fetched a menu at a time (one Apple Event per menu, not
+            // per item), and submenus only when the top level has no match: a
+            // full walk of a big app's menus took seconds.
+            let out = script::run_jxa(
+                "System Events",
+                r#"const se = Application("System Events");
+                const proc = ARG.app ? se.processes.byName(ARG.app) : se.processes.whose({ frontmost: true })[0];
+                const norm = (s) => String(s || "").toLowerCase().replace(/[….]+$/u, "").trim();
+                const tops = proc.menuBars[0].menuBarItems;
+                const topNames = tops.name().slice(1); // the Apple menu is the system's, not the app's
+                const entries = [];
+                topNames.forEach((top, t) => {
+                    const items = tops[t + 1].menus[0].menuItems;
+                    items.name().forEach((name, i) => { if (name) entries.push({ path: [top, name], item: items[i] }); });
+                });
+                const findIn = (list) => {
+                    if (ARG.path && ARG.path.length) {
+                        const want = ARG.path.map(norm);
+                        return list.find((e) => e.path.length === want.length && e.path.every((p, i) => norm(p) === want[i]));
+                    }
+                    const want = norm(ARG.item);
+                    return list.find((e) => norm(e.path[e.path.length - 1]) === want)
+                        || list.find((e) => norm(e.path[e.path.length - 1]).includes(want));
+                };
+                let hit = ARG.list ? null : findIn(entries);
+                if (!hit && (ARG.list || (ARG.path && ARG.path.length > 2) || ARG.item)) {
+                    const deeper = [];
+                    for (const e of entries) {
+                        try {
+                            const sub = e.item.menus[0].menuItems;
+                            sub.name().forEach((name, i) => { if (name) deeper.push({ path: [...e.path, name], item: sub[i] }); });
+                        } catch (x) {}
+                    }
+                    if (ARG.list) return JSON.stringify({ items: entries.concat(deeper).map((e) => e.path.join(" > ")).slice(0, 400) });
+                    hit = findIn(deeper);
+                }
+                if (!hit) throw new Error("no menu item " + JSON.stringify(ARG.path || ARG.item) + " in " + proc.name() + "; call with list to see them");
+                if (!hit.item.enabled()) throw new Error("“" + hit.path.join(" > ") + "” is greyed out right now");
+                hit.item.click();
+                return JSON.stringify({ clicked: hit.path.join(" > "), app: proc.name() });"#,
+                &json!({
+                    "app": app,
+                    "item": args.get("item").and_then(Value::as_str),
+                    "path": args.get("path"),
+                    "list": args.get("list").and_then(Value::as_bool).unwrap_or(false),
+                }),
+            )?;
+            Ok(serde_json::from_str(&out).unwrap_or_else(|_| json!({ "done": out })))
         },
     },
     Action {

@@ -40,6 +40,11 @@
 {"input":"schedule lunch with Priya on Friday at 1pm","fast":false,"expected":[{"callsTool":{"name":["GOOGLECALENDAR_CREATE_EVENT","GOOGLECONTACTS_SEARCH_CONTACTS","GMAIL_SEARCH_PEOPLE"]}}]}
 {"input":"what is my github username","fast":false,"expected":[{"callsTool":{"name":"GITHUB_GET_THE_AUTHENTICATED_USER"}}]}
 {"input":"post our standup update in the team slack channel","fast":false,"expected":[{"callsTool":{"name":"SLACK_"}}]}
+{"input":"start screen recording","fast":false,"expected":[{"callsTool":{"name":["ALOUD_PRESS_KEYS","ALOUD_OPEN_APP"]}}]}
+{"input":"lock my screen","fast":false,"expected":[{"callsTool":{"name":"ALOUD_PRESS_KEYS","arguments":{"keys":"q"}}}]}
+{"input":"take a screenshot of part of the screen","fast":false,"expected":[{"callsTool":{"name":"ALOUD_PRESS_KEYS","arguments":{"keys":"4"}}}]}
+{"input":"show the sidebar in Notes","fast":false,"expected":[{"callsTool":{"name":["ALOUD_MENU","ALOUD_PRESS_KEYS"]}}]}
+{"input":"export this page as a PDF in Safari","fast":false,"expected":[{"callsTool":{"name":["ALOUD_MENU","ALOUD_PRESS_KEYS"]}}]}
 {"input":"what's the capital of France","fast":false,"expected":[{"not":{"callsTool":{}}}]}
 {"input":"write a haiku about rain","fast":false,"expected":[{"not":{"callsTool":{}}}]}
 {"input":"what does this error mean","selection":"TypeError: undefined is not a function","fast":false,"expected":[{"not":{"callsTool":{}}}]}
