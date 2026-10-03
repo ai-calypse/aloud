@@ -34,9 +34,9 @@ import { describeBinding } from "./binding-label";
 const ROLES: { key: keyof Config; label: string; mode: string; hint: string }[] = [
   { key: "hold", label: "Dictate", mode: "hold", hint: "Hold to talk. With text selected, rewrites it instead" },
   { key: "toggle", label: "Dictate", mode: "tap", hint: "Tap to start, tap again to stop" },
-  { key: "ask", label: "Ask", mode: "hold", hint: "Hold, ask a question, read the answer" },
+  { key: "ask", label: "Command (second key)", mode: "hold", hint: "Same as Command — was Ask" },
   { key: "rewrite", label: "Rewrite", mode: "hold", hint: "Hold to change the selected text by voice" },
-  { key: "agent", label: "Agent", mode: "hold", hint: "Hold to run a command across apps" },
+  { key: "agent", label: "Command", mode: "hold", hint: "Hold, then ask anything or say what to do" },
   { key: "meeting_notes", label: "Meeting notes", mode: "tap", hint: "Tap to start/stop a session" },
   { key: "copy_again", label: "Paste again", mode: "tap", hint: "Re-paste the last transcript" },
 ];
