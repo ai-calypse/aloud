@@ -1,21 +1,6 @@
-// Offline checks for Pilot's action space and answer validation (ported from jev-ultrafast's tests).
+// Offline checks for answer validation, site naming and the URL guard (ported from jev-ultrafast's tests).
 import assert from "node:assert/strict";
-import { actionSpace, namedSite, validateChoice } from "./browser.ts";
-
-const actions = [
-  { id: "e1", kind: "fill", node: 1, role: "combobox", label: "Where from?", value: "" },
-  { id: "e2", kind: "click", node: 1, role: "combobox", label: "Open Where from?", value: "" },
-  { id: "e3", kind: "select", node: 2, role: "combobox", label: "Class → Business", value: "b", current_value: "Economy" },
-  { id: "e4", kind: "click", node: 3, role: "checkbox", label: "Nonstop", checked: "false" },
-  { id: "scroll_down", kind: "scroll", label: "Scroll down" },
-  { id: "wait", kind: "wait", label: "Wait for the page to update" },
-];
-const { elements, targets, controls } = actionSpace(actions);
-assert.equal(elements.length, 3, "one index per DOM node, even when it can be typed into and clicked");
-assert.deepEqual(elements[0].operations, ["TYPE_TEXT", "CLICK"]);
-assert.deepEqual(Object.keys(targets.SELECT), ["2:1"], "dropdown options carry an element:option index");
-assert.equal(targets.CLICK["3"].id, "e4");
-assert.deepEqual(Object.keys(controls), ["SCROLL_DOWN", "WAIT"]);
+import { namedSite, validateChoice } from "./lib/site.ts";
 
 const ok = { choice: "a", confidence: 0.8, probabilities: { a: 0.9, b: 0.1 } };
 assert.equal(validateChoice(ok, ["a", "b"]).choice, "a");
@@ -33,7 +18,7 @@ assert.equal(namedSite("What is the latest LTS version of Node.js?"), undefined)
 
 // OPEN_URL stays on the current site or a site the goal names.
 {
-  const { allowedUrl } = await import("./browser.ts");
+  const { allowedUrl } = await import("./lib/site.ts");
   const yt = "https://www.youtube.com/watch?v=abc";
   assert.equal(allowedUrl("https://www.youtube.com/watch?v=abc&t=600s", yt, "jump to 10:00"), true);
   assert.equal(allowedUrl("https://evil.example/phish", yt, "jump to 10:00"), false);

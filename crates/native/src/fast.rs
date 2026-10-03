@@ -24,7 +24,7 @@ pub fn route(text: &str, installed: &[aloud_selection::InstalledApp]) -> Option<
 }
 
 /// Sites the engine recognises by name. ponytail: mirrors `SITES` in
-/// `engine/browser.ts` by hand — the engine still picks the URL, this only
+/// `engine/lib/site.ts` by hand — the engine still picks the URL, this only
 /// decides the route — so a site added there and not here just takes the
 /// brain path.
 const SITES: &[&str] = &[

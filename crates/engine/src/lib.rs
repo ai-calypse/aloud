@@ -91,8 +91,6 @@ pub async fn start(name: &str, args: &Value) -> Option<Result<Task, String>> {
             "the task engine isn't in this build (engine/ wasn't staged)".to_string(),
         ));
     };
-    // Web tasks run in the user's default browser through accessibility, like any Mac app.
-    let params = json!({ "goal": goal, "web": true });
-    let method = "mac.start";
-    Some(engine::start_task(Path::new(&dir), method, params).await)
+    // Runs in the user's default browser through accessibility, not a separate automated one.
+    Some(engine::start_task(Path::new(&dir), "web.start", json!({ "goal": goal })).await)
 }

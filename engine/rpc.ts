@@ -5,21 +5,13 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { UserError } from "./lib/jev.ts";
-import * as browser from "./browser.ts";
-import * as mac from "./mac.ts";
-
-browser.useMac(mac);
-// Mac-app ("m-") and web ("w-") task ids belong to mac.ts; the same task.* methods serve both.
-const either = (b: (p: any) => Promise<unknown>, m: (p: any) => Promise<unknown>) => (p: any) => (/^[mw]-/.test(String(p?.id ?? "")) ? m(p) : b(p));
+import * as web from "./web.ts";
 
 const METHODS: Record<string, (p: any) => Promise<unknown>> = {
-  "task.start": browser.start,
-  "mac.start": mac.start,
-  "task.progress": either(browser.progress, mac.progress),
-  "task.approve": either(browser.approve, mac.approve),
-  "task.stop": either(browser.stop, mac.stop),
-  "task.history": browser.history,
-  utterance: browser.voice, // {audio: base64 16 kHz WAV, live?, pending?, mine?}
+  "web.start": web.start,
+  "task.progress": web.progress,
+  "task.approve": web.approve,
+  "task.stop": web.stop,
   ping: async () => ({ ok: true }),
 };
 
@@ -34,12 +26,12 @@ const log = (entry: Record<string, unknown>) =>
 async function watch(id: string) {
   let from = 0;
   for (;;) {
-    const p: any = await (/^[mw]-/.test(id) ? mac.progress : browser.progress)({ id, from }).catch(() => null);
+    const p: any = await web.progress({ id, from }).catch(() => null);
     if (!p) return;
     if (p.steps.length || ["done", "stuck", "stopped", "error", "waiting"].includes(p.status)) send({ event: "task", id, ...p, live: undefined, steps: p.steps.map(({ shot, ...s }: any) => s) }); // screenshots stay in task.progress
     from += p.steps.length;
     if (["done", "stuck", "stopped", "error"].includes(p.status)) {
-      const all: any = await (/^[mw]-/.test(id) ? mac.progress : browser.progress)({ id, from: 0 }).catch(() => null);
+      const all: any = await web.progress({ id, from: 0 }).catch(() => null);
       log({ kind: "task", id, goal: all?.goal, app: all?.app, status: all?.status, error: all?.error, answer: all?.answer, elapsed_ms: all?.elapsed_ms,
         steps: all?.steps?.map((s: any) => ({ op: s.op, target: s.target?.label, text: s.text, note: s.note, url: s.url })) });
       return;
@@ -60,11 +52,8 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
   try {
     const result: any = await fn(req.params ?? {});
     send({ id: req.id, result });
-    if (req.method === "utterance") {
-      const { said, by, ms_whisper, intent, confidence, addressed, surface, did, task } = result;
-      log({ kind: "utterance", said, by, ms_whisper, intent, confidence, addressed, surface, did, task: task?.id });
-    } else if (req.method !== "task.progress") log({ kind: "call", method: req.method, params: req.params, result });
-    const taskId = ["task.start", "mac.start"].includes(String(req.method)) ? result?.id : result?.task?.id;
+    if (req.method !== "task.progress") log({ kind: "call", method: req.method, params: req.params, result });
+    const taskId = req.method === "web.start" ? result?.id : undefined;
     if (taskId) watch(taskId);
   } catch (e) {
     const message = String((e as Error).message ?? e).split("\n")[0];
