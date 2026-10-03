@@ -9,10 +9,12 @@
 pub mod cache;
 pub mod composio;
 pub mod tool_loop;
+pub mod tools;
 
 pub use cache::ResponseCache;
 pub use composio::{toolkit_of_slug, ComposioClient, ToolDef, Toolkit, TOOLS_PER_TOOLKIT};
 pub use tool_loop::{run as run_tool_loop, LoopEvent};
+pub use tools::{command_tools, with_context};
 
 /// A model the command loop runs on, with the client that reaches it. The loop
 /// takes these best first and moves down on the first round when one is out of

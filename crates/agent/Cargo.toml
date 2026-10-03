@@ -9,6 +9,7 @@ description = "Agent mode: turn a spoken command into an executed action"
 aloud-llm = { path = "../llm" }
 aloud-engine = { path = "../engine" }
 aloud-native = { path = "../native" }
+aloud-selection = { path = "../selection" }
 anyhow.workspace = true
 chrono = "0.4"
 futures-util = "0.3"

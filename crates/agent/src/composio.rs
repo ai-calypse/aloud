@@ -158,6 +158,20 @@ impl ToolDef {
     }
 }
 
+/// How long a fetched page of the tool catalogue is reused. It changes with Composio releases, not
+/// between commands, and fetching it put a round trip in front of every command.
+const CATALOGUE_TTL: Duration = Duration::from_secs(600);
+
+/// Catalogue responses by hash of (credential, path), so a key change never serves another
+/// account's view. ponytail: never evicted — a handful of toolkits is a handful of entries.
+fn catalogue(
+) -> &'static std::sync::Mutex<std::collections::HashMap<u64, (std::time::Instant, Value)>> {
+    static CACHE: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<u64, (std::time::Instant, Value)>>,
+    > = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
 pub struct ComposioClient {
     client: reqwest::Client,
     api_key: String,
@@ -219,9 +233,17 @@ impl ComposioClient {
             .filter(|slug| active.iter().filter(|s| *s == slug).count() > 1)
             .collect();
 
+        // Concurrently: one at a time, five connected toolkits were five round trips before the
+        // model was even asked.
+        let loaded =
+            futures_util::future::join_all(dedup(active).into_iter().map(|slug| async move {
+                let found = self.toolkit_tools(&slug, command, TOOLS_PER_TOOLKIT).await;
+                (slug, found)
+            }))
+            .await;
         let mut tools = Vec::new();
-        for slug in dedup(active) {
-            match self.toolkit_tools(&slug, command, TOOLS_PER_TOOLKIT).await {
+        for (slug, found) in loaded {
+            match found {
                 Ok(mut found) => tools.append(&mut found),
                 // One broken toolkit must not cost the user the others.
                 Err(e) => tracing::warn!(%e, %slug, "could not load toolkit tools"),
@@ -712,8 +734,35 @@ impl ComposioClient {
     // MARK: transport
 
     async fn get(&self, path: &str) -> Result<Value> {
-        self.request(reqwest::Method::GET, path, None, Duration::from_secs(30))
-            .await
+        // Only the tool catalogue: connections stay live, so an account connected a moment ago
+        // shows up on the next command.
+        let cacheable = path.starts_with("/tools?");
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (&self.api_key, path).hash(&mut hasher);
+            hasher.finish()
+        };
+        if cacheable {
+            let hit = catalogue().lock().ok().and_then(|c| c.get(&key).cloned());
+            if let Some((at, value)) = hit.filter(|(at, _)| at.elapsed() < CATALOGUE_TTL) {
+                tracing::debug!(
+                    path,
+                    age_s = at.elapsed().as_secs(),
+                    "tool catalogue from cache"
+                );
+                return Ok(value);
+            }
+        }
+        let value = self
+            .request(reqwest::Method::GET, path, None, Duration::from_secs(30))
+            .await?;
+        if cacheable {
+            if let Ok(mut cache) = catalogue().lock() {
+                cache.insert(key, (std::time::Instant::now(), value.clone()));
+            }
+        }
+        Ok(value)
     }
 
     async fn post(&self, path: &str, body: &Value, timeout: Duration) -> Result<Value> {
