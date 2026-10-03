@@ -19,6 +19,8 @@ type Task = {
   steps: Step[]; answer?: { lines: string[]; app: string; url?: string }; error?: string; requirements?: string[];
   pending?: { label: string; risky: number }; approve?: (ok: boolean) => void;
   stop: boolean; started: number; calls: ReturnType<typeof traced>["calls"]; web?: boolean;
+  /** Where to begin, when the caller knows: an address, or just the search terms. */
+  url?: string; query?: string;
 };
 
 const MAX_WEB_ACTIONS = 15; // a page task that needs more is wandering; report where it got to
@@ -197,7 +199,7 @@ async function run(task: Task) {
   task.app = name;
   const history: Hist[] = [];
   const read = (before?: string) => settled(pid, name, before);
-  const start = startUrlFor(task.goal);
+  const start = startUrlFor(task.goal, task.url, task.query);
   // The page as it was, so the first read waits for the new one. Without it the old page counted as
   // settled the moment two reads matched, ~250 ms in, and Jev judged "go to github.com" done while
   // looking at the site it was leaving.
@@ -315,12 +317,12 @@ async function run(task: Task) {
 // ---------- actions (same shapes as the browser engine's, ids prefixed "m-") ----------
 const tasks = new Map<string, Task>();
 
-export async function start({ goal }: { goal?: string }) {
+export async function start({ goal, url, query }: { goal?: string; url?: string; query?: string }) {
   const g = String(goal ?? "").trim();
   if (g.length < 4) throw new UserError("Say what to do on the website, for example: search lofi on YouTube.");
   if ([...tasks.values()].some((t) => t.status === "running" || t.status === "waiting")) throw new UserError("A browser task is already running. Stop it first.");
   // "w-" marks a web task; the Rust side and the run log still key on it.
-  const task: Task = { id: "w-" + crypto.randomUUID().slice(0, 8), goal: g, status: "running", steps: [], stop: false, started: Date.now(), calls: [], web: true };
+  const task: Task = { id: "w-" + crypto.randomUUID().slice(0, 8), goal: g, status: "running", steps: [], stop: false, started: Date.now(), calls: [], web: true, url, query };
   tasks.set(task.id, task);
   const { calls, result } = traced(() => run(task));
   task.calls = calls;

@@ -311,8 +311,8 @@ async fn execute(
         Some(aloud_native::fast::Fast::Tool { name, args, done }) => {
             return run_fast(app, run, name, args, done).await;
         }
-        Some(aloud_native::fast::Fast::Web) => {
-            let goal = serde_json::json!({ "goal": transcript });
+        Some(aloud_native::fast::Fast::Web { query }) => {
+            let goal = serde_json::json!({ "goal": transcript, "query": query });
             match aloud_engine::start(aloud_engine::BROWSER_TASK, &goal).await {
                 Some(Ok(task)) => return run_direct(app, run, transcript, task, &cancelled).await,
                 Some(Err(e)) => tracing::warn!(%e, "browser engine unavailable; asking the brain"),

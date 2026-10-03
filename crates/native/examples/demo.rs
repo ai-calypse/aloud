@@ -65,7 +65,9 @@ fn main() {
                     call(name, args);
                     println!("  says: {done}");
                 }
-                Some(aloud_native::fast::Fast::Web) => println!("→ browser task (engine)"),
+                Some(aloud_native::fast::Fast::Web { query }) => {
+                    println!("→ browser task (engine), query {query:?}")
+                }
                 None => println!("→ the brain"),
             }
         }

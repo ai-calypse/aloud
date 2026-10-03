@@ -131,7 +131,7 @@ async fn judge(
     }
     let (called, routed): (Option<(String, Value)>, _) = match fast {
         Some(Fast::Tool { name, args, .. }) => (Some((name.to_string(), args)), "fast"),
-        Some(Fast::Web) => (
+        Some(Fast::Web { .. }) => (
             Some((
                 aloud_engine::BROWSER_TASK.to_string(),
                 json!({ "goal": case.input }),

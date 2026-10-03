@@ -58,7 +58,17 @@ pub fn tools() -> Vec<EngineTool> {
         json!({
             "type": "object",
             "required": ["goal"],
-            "properties": { "goal": { "type": "string", "description": what } }
+            "properties": {
+                "goal": { "type": "string", "description": what },
+                "query": {
+                    "type": "string",
+                    "description": "When the task starts with a web search: just the search terms, as the user would type them (\"cat memes\", not a sentence)."
+                },
+                "url": {
+                    "type": "string",
+                    "description": "When the user named a site or address to start at: that address."
+                }
+            }
         })
     };
     vec![
@@ -67,7 +77,9 @@ pub fn tools() -> Vec<EngineTool> {
             description: "Do a whole task on a website in the user's web browser, start to finish: \
                  open a site, search, play a video at a timestamp, read a value off a page, fill a form, \
                  open a dashboard section. Pass the user's request as one plain-language goal with every \
-                 detail they gave (names, dates, numbers, which site). Returns what was found or done and \
+                 detail they gave (names, dates, numbers, which site) — their words, not an embellished \
+                 sentence — plus `query` for a search or `url` for a named address. Returns what was \
+                 found or done and \
                  the steps taken. Anything that would buy, send, delete or sign in asks the user first."
                 .to_string(),
             parameters: goal("The complete task, e.g. \"Open YouTube, play the latest Reckless Ben video and jump to 10:00\""),
@@ -92,5 +104,7 @@ pub async fn start(name: &str, args: &Value) -> Option<Result<Task, String>> {
         ));
     };
     // Runs in the user's default browser through accessibility, not a separate automated one.
-    Some(engine::start_task(Path::new(&dir), "web.start", json!({ "goal": goal })).await)
+    let start = |key: &str| args[key].as_str().map(str::trim).filter(|s| !s.is_empty());
+    let params = json!({ "goal": goal, "url": start("url"), "query": start("query") });
+    Some(engine::start_task(Path::new(&dir), "web.start", params).await)
 }
