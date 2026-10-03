@@ -28,11 +28,12 @@ pub struct Brain {
 /// ~1.1s, and this key allows 450 requests a minute (gpt-oss on Cerebras was as
 /// fast but capped at 5). Measured 2026-10-03.
 const CEREBRAS: (&str, &str) = ("https://api.cerebras.ai/v1", "qwen-3.8-27b");
-/// Behind it: headroom when Cerebras's per-minute budget trips, and the vision
-/// model the screen-control tier will need.
+/// Behind it: headroom when Cerebras's per-minute budget trips. Flash-Lite, not
+/// Flash: on a free-tier key 3.5 Flash allows 20 requests a day, which one eval
+/// run exhausted for 14 hours; Flash-Lite answered in 0.58s on the same key.
 const GEMINI: (&str, &str) = (
     "https://generativelanguage.googleapis.com/v1beta/openai",
-    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
 );
 
 /// One named brain on its own, for the eval to compare them: "cerebras" or "gemini".
