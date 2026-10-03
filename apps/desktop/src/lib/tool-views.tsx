@@ -450,29 +450,6 @@ const VIEWS: Record<string, ToolView> = {
       return name ? `Quitting ${name}` : "Quitting an app";
     },
   },
-  // Screen control. The click gate is the one confirmation a computer-use run
-  // gets, so its label has to say what will be clicked — the model passes the
-  // element's own text for exactly this, and a bare coordinate pair is a gate
-  // nobody can judge.
-  ALOUD_SCREEN_READ: { label: () => "Reading the screen" },
-  ALOUD_SCREEN_CLICK: {
-    label: (a) => {
-      const what = text(a, "label");
-      return what ? `Clicking "${what}"` : "Clicking on screen";
-    },
-  },
-  ALOUD_SCREEN_TYPE: {
-    label: (a) => {
-      const typed = text(a, "text");
-      return typed ? `Typing "${typed}"` : "Typing on screen";
-    },
-  },
-  ALOUD_SCREEN_KEY: {
-    label: (a) => {
-      const keys = text(a, "keys");
-      return keys ? `Pressing ${keys}` : "Pressing a key";
-    },
-  },
 };
 
 /** The gate's editable fields for a tool; empty for the yes/no majority. */

@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 /// A task on a website, run in the user's browser.
 pub const BROWSER_TASK: &str = "ALOUD_BROWSER_TASK";
 
-/// A tool offered to the model; mirrors `aloud_computer::ComputerTool` (mapped at the concat site).
+/// A tool offered to the model (mapped to `aloud_agent::ToolDef` at the concat site).
 #[derive(Debug, Clone)]
 pub struct EngineTool {
     pub name: String,
@@ -77,7 +77,7 @@ pub fn tools() -> Vec<EngineTool> {
 }
 
 /// Start a task for `name` (one of [`tools`]). `None` when the name isn't an engine tool — the same
-/// fall-through contract as `aloud_computer::execute`.
+/// fall-through contract as `aloud_native::execute`.
 pub async fn start(name: &str, args: &Value) -> Option<Result<Task, String>> {
     if !is_engine_tool(name) {
         return None;

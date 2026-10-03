@@ -22,31 +22,10 @@ use tracing::Instrument;
 /// going after five is looping rather than working.
 const MAX_ROUNDS: usize = 5;
 
-/// Rounds allowed once a command starts driving the screen.
-///
-/// Computer-use has a different rhythm to a structured tool: read, click, read
-/// again because the screen moved, click again. "Open System Settings and turn
-/// on dark mode" is four rounds before the first useful click, and it hit the
-/// limit of 5 mid-navigation. Structured tools do not need this many and
-/// keeping their budget tight is what stops a confused model burning turns, so
-/// the budget is raised only for the runs that have earned it — the first
-/// screen call switches to this.
-///
-/// 30, not agent-notch's 100: at ~400ms a read and ~170ms a click plus a model
-/// round-trip each, 30 rounds is already the better part of a minute, and a
-/// spoken command that has not landed by then is not going to.
-const MAX_SCREEN_ROUNDS: usize = 30;
-
 /// How many times one read tool may run in a single command. Rounds are already
 /// capped, but a round can hold any number of calls, and a model that varies an
 /// argument slips past the identical-call cache indefinitely.
 const MAX_CALLS_PER_TOOL: usize = 3;
-
-/// The same, for screen tools. A screen read must be repeatable after every
-/// action that changes the display — capping it at 3 is what made the agent
-/// click blind on its fourth step, since the alternative offered to it was
-/// acting on a stale layout.
-const MAX_SCREEN_CALLS_PER_TOOL: usize = 40;
 
 /// How many questions one command may put to the user. See the ask tool below.
 const MAX_QUESTIONS: usize = 2;
@@ -171,19 +150,6 @@ For anything to do on a website — open a site, search it, play a video at a \
 time, read a value off a page, open a section of a dashboard — call \
 ALOUD_BROWSER_TASK once with the user's whole request as the goal; it runs every \
 step itself. \
-When no tool in the list does what was asked, you can drive the app the user is \
-looking at directly: ALOUD_SCREEN_READ lists its real on-screen controls with \
-their positions, and the screen click/type/key tools act on them. This is the \
-fallback, not the first choice — a named tool is faster and more reliable where \
-one exists, so reach for the screen tools only when nothing else fits. Always \
-read before you click, never invent coordinates, and read again after anything \
-that changes what is on screen, because the positions move. Never send two \
-clicks in a row without reading in between — the first click changes the \
-screen, so the second would use coordinates that no longer point at anything. \
-One click, then a fresh read, then the next click. The screen tools act on the \
-app that is currently in front, so open or switch to the right app before \
-reading it, and give it a moment by reading again if the app was just \
-launched. \
 The command is a transcription of speech and may contain minor errors; act on \
 the intent. After acting, confirm what you did in one short plain sentence. \
 Finish the whole command before you stop. A command that names two actions \
@@ -422,12 +388,6 @@ where
     let mut budget: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut asked = 0usize;
     let mut verifier_retries = 0;
-    // Whether the user has approved screen control for this run. See the gate
-    // below: screen actions confirm once, not per click.
-    let mut screen_approved = false;
-    // Raised to MAX_SCREEN_ROUNDS the first time the run drives the screen.
-    // A command that never touches it keeps the tight structured-tool budget.
-    let mut max_rounds = MAX_ROUNDS;
 
     if brains.is_empty() {
         anyhow::bail!("no model is configured for commands");
@@ -436,11 +396,11 @@ where
     let mut brain = 0usize;
 
     let mut round = 0usize;
-    while round < max_rounds {
+    while round < MAX_ROUNDS {
         if cancelled() {
             anyhow::bail!("cancelled");
         }
-        let is_last = round + 1 == max_rounds;
+        let is_last = round + 1 == MAX_ROUNDS;
         // By index: a `&Brain` parameter makes the returned future's borrow a
         // closure-local lifetime the compiler will not infer.
         let chat = |index: usize| {
@@ -655,12 +615,7 @@ where
             // the model has no memory of having asked. Writes are excluded: two
             // identical sends are two emails, and collapsing them would swallow
             // the second silently.
-            // A screen read is never the same twice: the whole reason to call it
-            // again is that something moved. Serving it from cache would hand
-            // the model the layout from before its own click and send the next
-            // click to a stale coordinate.
-            let repeatable = name == aloud_computer::AX_READ;
-            if !is_write(&name, tools) && !repeatable {
+            if !is_write(&name, tools) {
                 if let Some(previous) = seen.get(&(name.clone(), args.to_string())) {
                     tracing::debug!(tool = %name, "identical read already made; reusing");
                     messages.push(Message::tool_result(&call.id, previous.clone()));
@@ -671,11 +626,7 @@ where
                 // Independent of the dedup above: a model that varies one
                 // argument each time never hits the cache and would otherwise
                 // loop until the round limit.
-                let cap = if repeatable {
-                    MAX_SCREEN_CALLS_PER_TOOL
-                } else {
-                    MAX_CALLS_PER_TOOL
-                };
+                let cap = MAX_CALLS_PER_TOOL;
                 let calls = budget.entry(name.clone()).or_insert(0);
                 *calls += 1;
                 if *calls > cap {
@@ -713,33 +664,11 @@ where
             // Rebound, not just checked: the gate returns the arguments to run
             // with, so a field the user filled in at the gate is what executes.
             // A read tool never reaches the gate and keeps the model's.
-            // Screen control is gated once per run, not once per action: a
-            // computer-use sequence is click, read, click, type, and confirming
-            // each is unusable — the user would be answering prompts faster than
-            // the agent works. So the *first* screen action asks, and approval
-            // covers the rest of the run. Coarser than the per-action gate the
-            // structured tools get, and deliberately so; see COMPUTER_USE.md's
-            // open question, which this does not claim to settle.
-            // The moment a run starts driving the screen it needs the longer
-            // budget: read, click, read again, click again is four rounds
-            // before anything useful lands, and five was not enough to open
-            // System Settings and reach a control inside it.
-            if is_screen_tool(&name) && max_rounds == MAX_ROUNDS {
-                tracing::info!("screen control engaged; raising the round budget");
-                max_rounds = MAX_SCREEN_ROUNDS;
-            }
-
-            let is_screen = is_screen_write(&name);
             // Engine tasks gate inside themselves: each risky click (buy, send, delete, sign in)
             // pauses for a yes/no below, so a gate on the whole goal would ask twice for one action.
-            let gate_needed =
-                if aloud_engine::is_engine_tool(&name) || aloud_native::low_risk(&name) {
-                    false
-                } else if is_screen {
-                    !screen_approved
-                } else {
-                    is_write(&name, tools)
-                };
+            let gate_needed = !aloud_engine::is_engine_tool(&name)
+                && !aloud_native::low_risk(&name)
+                && is_write(&name, tools);
 
             let mut args = args;
             let declined = if gate_needed {
@@ -749,13 +678,6 @@ where
                 {
                     Some(approved) => {
                         args = approved;
-                        // Only once the user has actually said yes. Set before
-                        // the await, a model that emits click+type in one round
-                        // let the second call skip the gate while the first was
-                        // still on screen — and opening a second confirmation
-                        // dropped the first one's reply channel, which resolves
-                        // as "declined" with no prompt ever shown.
-                        screen_approved = true;
                         false
                     }
                     None => true,
@@ -788,17 +710,18 @@ where
                         .instrument(span.clone())
                         .await
                 } else {
+                    // ponytail: no screen control. Cua Driver (trycua/cua
+                    // libs/cua-driver, MIT) becomes one more fall-through here;
+                    // the once-per-run gate and 30-round budget it needs are in
+                    // git history (9de8723).
                     match run_native(&name, &args).instrument(span.clone()).await {
                         Some(native) => native,
-                        None => match run_computer(&name, &args).instrument(span.clone()).await {
-                            Some(screen) => screen,
-                            None => {
-                                composio
-                                    .execute(&name, &args)
-                                    .instrument(span.clone())
-                                    .await
-                            }
-                        },
+                        None => {
+                            composio
+                                .execute(&name, &args)
+                                .instrument(span.clone())
+                                .await
+                        }
                     }
                 };
                 let success = tool_succeeded(&result);
@@ -819,10 +742,8 @@ where
         round += 1;
     }
 
-    // Naming the mode matters: "5 rounds" and "30 rounds" are different
-    // failures, and the message is what the panel shows the user.
     anyhow::bail!(
-        "the command needed more than {max_rounds} rounds and was stopped before it finished"
+        "the command needed more than {MAX_ROUNDS} rounds and was stopped before it finished"
     )
 }
 
@@ -889,43 +810,6 @@ where
             Some(aloud_engine::Update::Finished(result)) => return result.to_string(),
         }
     }
-}
-
-/// Runs a screen-control tool, `None` when the name is not one of those — the
-/// same fall-through contract as [`run_native`], so the dispatch stays one
-/// chain of "is it mine?" rather than a prefix match.
-async fn run_computer(name: &str, args: &serde_json::Value) -> Option<String> {
-    let name = name.to_string();
-    let args = args.clone();
-    // The helpers are subprocesses and a traversal takes ~800ms, so this must
-    // not run on the async executor.
-    let outcome = tokio::task::spawn_blocking(move || aloud_computer::execute(&name, &args))
-        .await
-        .unwrap_or_else(|e| Some(Err(aloud_computer::HelperError::Failed(e.to_string()))))?;
-    Some(match outcome {
-        Ok(value) => value.to_string(),
-        Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
-    })
-}
-
-/// Whether a tool drives the screen and so falls under the once-per-run gate
-/// rather than the per-action one.
-///
-/// Keyed off the crate's own constants rather than a name prefix, so renaming a
-/// tool cannot silently drop it out of the gate.
-fn is_screen_write(name: &str) -> bool {
-    matches!(
-        name,
-        aloud_computer::AX_CLICK | aloud_computer::AX_TYPE | aloud_computer::AX_KEY
-    )
-}
-
-/// Whether a tool is part of screen control at all, reads included. The round
-/// budget keys off this rather than [`is_screen_write`]: a run that has started
-/// reading the screen is already committed to the read-act-read rhythm, and
-/// waiting for its first *write* to raise the budget spends rounds it needs.
-fn is_screen_tool(name: &str) -> bool {
-    is_screen_write(name) || name == aloud_computer::AX_READ
 }
 
 /// Whether a tool needs confirmation. Fail-safe: only an explicit
@@ -1008,112 +892,6 @@ mod tests {
         // A hallucinated name we never offered must not pass as a read.
         assert!(is_write("SLACK_DELETE_EVERYTHING", &tools));
         assert!(is_write("anything", &[]));
-    }
-
-    /// "Open System Settings and turn on dark mode" died at the round limit:
-    /// open, read, click, click is already four of five, before the agent has
-    /// reached the control it needs. Screen runs get a budget matched to the
-    /// read-act-read rhythm; structured runs keep the tight one.
-    #[test]
-    fn driving_the_screen_earns_a_longer_round_budget() {
-        // The budget switch as the loop performs it, so the test fails if the
-        // rule changes rather than only if the constants do.
-        let budget_after = |first_tool: &str| {
-            let mut max = MAX_ROUNDS;
-            if is_screen_tool(first_tool) && max == MAX_ROUNDS {
-                max = MAX_SCREEN_ROUNDS;
-            }
-            max
-        };
-        assert_eq!(budget_after("GMAIL_SEND_EMAIL"), MAX_ROUNDS);
-        assert_eq!(budget_after("ALOUD_ORGANIZE_FOLDER"), MAX_ROUNDS);
-        // The read counts, not just the writes: a run already reading the
-        // screen is committed to that rhythm, and waiting for its first click
-        // to raise the budget spends the rounds it needs.
-        assert_eq!(budget_after(aloud_computer::AX_READ), MAX_SCREEN_ROUNDS);
-        assert_eq!(budget_after(aloud_computer::AX_CLICK), MAX_SCREEN_ROUNDS);
-    }
-
-    /// Compile-time, because these are relationships between constants: a
-    /// runtime assert on two `const`s is just clippy noise, but the invariants
-    /// still have to hold. "open, read, click, click" is four rounds before the
-    /// first useful step, which is what exhausted the old limit mid-navigation;
-    /// and a screen read must survive one call per round or the agent is forced
-    /// to click on a layout it can no longer see.
-    const _: () = {
-        assert!(MAX_SCREEN_ROUNDS >= 20);
-        assert!(MAX_SCREEN_ROUNDS > MAX_ROUNDS);
-        assert!(MAX_SCREEN_CALLS_PER_TOOL >= MAX_SCREEN_ROUNDS);
-        assert!(MAX_SCREEN_CALLS_PER_TOOL > MAX_CALLS_PER_TOOL);
-    };
-
-    /// The screen read is the one tool whose whole purpose is returning
-    /// something different each time. Serving it from the dedup cache hands the
-    /// model the layout from before its own click, and the next click goes to a
-    /// coordinate that has moved.
-    #[test]
-    fn a_screen_read_is_never_answered_from_cache() {
-        // Mirrors the loop's own rule: a repeatable tool skips the dedup and
-        // takes the larger budget.
-        let repeatable = |name: &str| name == aloud_computer::AX_READ;
-        let cap_for = |name: &str| {
-            if repeatable(name) {
-                MAX_SCREEN_CALLS_PER_TOOL
-            } else {
-                MAX_CALLS_PER_TOOL
-            }
-        };
-
-        assert!(repeatable(aloud_computer::AX_READ));
-        assert!(!repeatable("ALOUD_FINDER_SEARCH"));
-        assert_eq!(cap_for(aloud_computer::AX_READ), MAX_SCREEN_CALLS_PER_TOOL);
-        assert_eq!(cap_for("ALOUD_FINDER_SEARCH"), MAX_CALLS_PER_TOOL);
-    }
-
-    /// Screen control is gated once per run rather than per action, so the
-    /// three acting tools must be recognised — and the read must not be, or the
-    /// gate would fire on a tool that changes nothing.
-    #[test]
-    fn every_screen_tool_that_acts_is_gated_and_the_read_is_not() {
-        assert!(is_screen_write(aloud_computer::AX_CLICK));
-        assert!(is_screen_write(aloud_computer::AX_TYPE));
-        assert!(is_screen_write(aloud_computer::AX_KEY));
-        assert!(!is_screen_write(aloud_computer::AX_READ));
-        assert!(!is_screen_write("GMAIL_SEND_EMAIL"));
-    }
-
-    /// The gate's whole contract in one place: the first screen action asks,
-    /// later ones do not, and a refusal re-arms it rather than leaving the run
-    /// approved. Mirrors the `mem::replace` in the loop.
-    #[test]
-    fn screen_control_asks_once_then_stays_approved_unless_refused() {
-        let mut approved = false;
-        let mut gate = |refuse: bool| {
-            let needed = !std::mem::replace(&mut approved, true);
-            if needed && refuse {
-                approved = false;
-            }
-            needed
-        };
-
-        assert!(gate(false), "the first screen action must ask");
-        assert!(!gate(false), "a second must not ask again");
-        assert!(!gate(false));
-
-        // A run where the user says no: the next action asks again.
-        let mut approved = false;
-        let mut gate = |refuse: bool| {
-            let needed = !std::mem::replace(&mut approved, true);
-            if needed && refuse {
-                approved = false;
-            }
-            needed
-        };
-        assert!(gate(true), "the first asks");
-        assert!(
-            gate(false),
-            "after a refusal it must ask again, not proceed"
-        );
     }
 
     #[test]

@@ -307,36 +307,19 @@ async fn execute(
             }),
     );
 
-    // Layer 2: driving the focused app by its real accessibility elements, for
-    // everything no named tool covers. Empty when the helpers are not in this
-    // build, so the tool list simply lacks them rather than offering tools that
-    // can only fail.
-    // With the engine present its Mac task does the same job far faster (in-process accessibility,
-    // Jev per step), so the per-call helper tools are only offered without it.
-    let engine_tools = aloud_engine::tools();
-    if engine_tools.is_empty() {
-        tools.extend(
-            aloud_computer::tools()
-                .into_iter()
-                .map(|t| aloud_agent::ToolDef {
-                    name: t.name,
-                    toolkit: "Screen".to_string(),
-                    description: t.description,
-                    parameters: t.parameters,
-                    read_only: t.read_only,
-                }),
-        );
-    }
-
-    // Layer 3: whole tasks on a website in the user's browser, run by the engine. Empty when the
-    // engine wasn't staged into this build.
-    tools.extend(engine_tools.into_iter().map(|t| aloud_agent::ToolDef {
-        toolkit: "Browser".to_string(),
-        name: t.name,
-        description: t.description,
-        parameters: t.parameters,
-        read_only: t.read_only,
-    }));
+    // Whole tasks on a website in the user's browser, run by the engine. Empty when the engine
+    // wasn't staged into this build.
+    tools.extend(
+        aloud_engine::tools()
+            .into_iter()
+            .map(|t| aloud_agent::ToolDef {
+                toolkit: "Browser".to_string(),
+                name: t.name,
+                description: t.description,
+                parameters: t.parameters,
+                read_only: t.read_only,
+            }),
+    );
 
     tracing::Span::current().record("tool_count", tools.len());
     if tools.is_empty() {
