@@ -9,6 +9,7 @@
 //! cargo run -p aloud-native --example demo -- window left
 //! cargo run -p aloud-native --example demo -- organize   # DRY RUN, prints the plan
 //! cargo run -p aloud-native --example demo -- call ALOUD_NOTES_CREATE '{"title":"Cake","body":"- flour"}'
+//! cargo run -p aloud-native --example demo -- fast "open calculator app"   # the no-model route
 //! ```
 
 use serde_json::json;
@@ -53,6 +54,20 @@ fn main() {
             // never be the thing that shuffles someone's Downloads by accident.
             println!("organize is covered by `cargo test -p aloud-native organize`.");
             println!("To try it live, use the app — the gate previews every move first.");
+        }
+        // What the fast path makes of an utterance, then running it (web tasks only print).
+        [cmd, said] if cmd == "fast" => {
+            let started = std::time::Instant::now();
+            let installed = aloud_selection::installed_apps();
+            match aloud_native::fast::route(said, &installed) {
+                Some(aloud_native::fast::Fast::Tool { name, args, done }) => {
+                    println!("→ {name} {args}  ({:?} to route)", started.elapsed());
+                    call(name, args);
+                    println!("  says: {done}");
+                }
+                Some(aloud_native::fast::Fast::Web) => println!("→ browser task (engine)"),
+                None => println!("→ the brain"),
+            }
         }
         // Any tool with literal arguments: what the model would send, minus the model.
         [cmd, name, json] if cmd == "call" => match serde_json::from_str(json) {

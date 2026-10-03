@@ -304,16 +304,22 @@ async fn execute(
 ) -> Result<String> {
     let installed = aloud_selection::installed_apps();
 
-    // The fast path, before any language model: "go to youtube", "search lofi on youtube" go
-    // straight to the browser engine, as quick as the router this replaced. Everything else, and a
-    // browser engine missing from this build, takes the brain below.
-    if aloud_native::fast::route(transcript, &installed) == Some(aloud_native::fast::Fast::Web) {
-        let goal = serde_json::json!({ "goal": transcript });
-        match aloud_engine::start(aloud_engine::BROWSER_TASK, &goal).await {
-            Some(Ok(task)) => return run_direct(app, run, transcript, task, &cancelled).await,
-            Some(Err(e)) => tracing::warn!(%e, "browser engine unavailable; asking the brain"),
-            None => {}
+    // The fast path, before any language model: "open Slack", "pause", "volume 30" run their tool
+    // directly, and "go to youtube", "search lofi on youtube" go straight to the browser engine.
+    // Everything else, and a browser engine missing from this build, takes the brain below.
+    match aloud_native::fast::route(transcript, &installed) {
+        Some(aloud_native::fast::Fast::Tool { name, args, done }) => {
+            return run_fast(app, run, name, args, done).await;
         }
+        Some(aloud_native::fast::Fast::Web) => {
+            let goal = serde_json::json!({ "goal": transcript });
+            match aloud_engine::start(aloud_engine::BROWSER_TASK, &goal).await {
+                Some(Ok(task)) => return run_direct(app, run, transcript, task, &cancelled).await,
+                Some(Err(e)) => tracing::warn!(%e, "browser engine unavailable; asking the brain"),
+                None => {}
+            }
+        }
+        None => {}
     }
 
     let brains = aloud_agent::brains(&settings.cerebras_api_key, &settings.gemini_api_key)?;
@@ -362,6 +368,51 @@ async fn execute(
         cancelled,
     )
     .await
+}
+
+/// Runs one native tool the fast path picked, with the same tool row, gate and result the brain's
+/// calls get, and `done` as the answer: no model, so nothing to wait for but the tool itself.
+async fn run_fast(
+    app: &AppHandle,
+    run: &Run,
+    name: &'static str,
+    args: serde_json::Value,
+    done: String,
+) -> Result<String> {
+    run.acted.store(true, Ordering::SeqCst);
+    let args = if aloud_native::low_risk(name, &args) {
+        run.emit(
+            app,
+            AgentEvent::ToolCall(ToolCall {
+                app: "macOS".to_string(),
+                name: name.to_string(),
+                args: display_args(&args),
+                requires_confirmation: false,
+            }),
+        );
+        args
+    } else {
+        match confirm_write(app, run, name.to_string(), "macOS".to_string(), args).await {
+            Some(approved) => approved,
+            None => return Ok("Cancelled.".to_string()),
+        }
+    };
+    let outcome = tauri::async_runtime::spawn_blocking(move || aloud_native::execute(name, &args))
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let result = match outcome {
+        Some(Ok(_)) => Ok(done),
+        Some(Err(e)) => Err(anyhow::anyhow!("{e}")),
+        None => Err(anyhow::anyhow!("{name} is not available on this Mac")),
+    };
+    run.emit(
+        app,
+        AgentEvent::ToolResult(ToolResult {
+            success: result.is_ok(),
+            message: format!("{name} {}", if result.is_ok() { "done" } else { "failed" }),
+        }),
+    );
+    result
 }
 
 /// Drives one browser task to the end on the panel: a tool row, each step as the status line, a
