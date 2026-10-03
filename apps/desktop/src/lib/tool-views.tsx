@@ -360,6 +360,48 @@ const VIEWS: Record<string, ToolView> = {
       },
     ],
   },
+  ALOUD_DISCORD_MESSAGE: {
+    label: (a) => {
+      const to = text(a, "to");
+      return to ? `Messaging ${to} on Discord` : "Sending a Discord message";
+    },
+    body: (a) => {
+      const to = text(a, "to");
+      const msg = text(a, "text");
+      return (
+        <ToolCard>
+          {to ? (
+            <p className="m-0 break-all text-ui text-muted-foreground">
+              To: <span className="text-ink">{to}</span>
+            </p>
+          ) : (
+            <p className="m-0 text-ui italic text-warning">
+              No recipient — cancel and ask again.
+            </p>
+          )}
+          {msg ? (
+            <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
+              {msg}
+            </p>
+          ) : (
+            <p className="m-0 text-ui italic text-warning">
+              No message — cancel and ask again.
+            </p>
+          )}
+        </ToolCard>
+      );
+    },
+    edits: [
+      {
+        key: "to",
+        label: "To",
+        placeholder: "Name as it appears in Discord",
+        get: (a) => text(a, "to"),
+        set: (args, value) => ({ ...args, to: value }),
+      },
+    ],
+  },
+  ALOUD_PHOTO_BOOTH_TAKE_PHOTO: { label: () => "Taking a photo in Photo Booth" },
   ALOUD_FINDER_SEARCH: {
     // The grid renders the results; this is just the step label above it.
     label: (a) => {

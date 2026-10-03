@@ -70,17 +70,7 @@ fn frontmost_app_name() -> Result<String, ScriptError> {
 /// the same name. `-a` activates a running instance rather than starting a
 /// second, which is what "switch to Safari" has to mean.
 fn open_one(name: &str) -> Result<(), ScriptError> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let bundle = [
-        format!("/Applications/{name}.app"),
-        format!("/System/Applications/{name}.app"),
-        format!("/System/Applications/Utilities/{name}.app"),
-        format!("{home}/Applications/{name}.app"),
-    ]
-    .into_iter()
-    .find(|p| std::path::Path::new(p).exists())
-    .ok_or_else(|| ScriptError::Failed(format!("no application named {name} is installed")))?;
-
+    let bundle = bundle_path(name)?;
     let status = std::process::Command::new("/usr/bin/open")
         .args(["-a", &bundle])
         .status()
@@ -90,6 +80,20 @@ fn open_one(name: &str) -> Result<(), ScriptError> {
     } else {
         Err(ScriptError::Failed(format!("could not open {name}")))
     }
+}
+
+/// Where an installed app's bundle is, user-installed first.
+fn bundle_path(name: &str) -> Result<String, ScriptError> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    [
+        format!("/Applications/{name}.app"),
+        format!("/System/Applications/{name}.app"),
+        format!("/System/Applications/Utilities/{name}.app"),
+        format!("{home}/Applications/{name}.app"),
+    ]
+    .into_iter()
+    .find(|p| std::path::Path::new(p).exists())
+    .ok_or_else(|| ScriptError::Failed(format!("no application named {name} is installed")))
 }
 
 /// Waits for `name` to actually reach the front.
@@ -232,6 +236,15 @@ fn write_home_file(path: &str, text: &str, append: bool) -> Result<Value, Script
         "bytes": text.len(),
         "appended": append && existed,
     }))
+}
+
+/// Whether a write would only create a file that does not exist yet — the one
+/// file write too small to confirm, since deleting it undoes it. Overwriting or
+/// appending to an existing file still asks.
+pub(crate) fn creates_new_file(args: &Value) -> bool {
+    let append = args.get("append").and_then(Value::as_bool).unwrap_or(false);
+    let path = args.get("path").and_then(Value::as_str).unwrap_or_default();
+    !append && !path.is_empty() && under_home(path).is_ok_and(|p| !p.exists())
 }
 
 /// `path`, or `path` with a numeric suffix when the name is taken — two files
@@ -587,6 +600,85 @@ pub const ACTIONS: &[Action] = &[
         },
     },
     Action {
+        name: "ALOUD_PHOTO_BOOTH_TAKE_PHOTO",
+        description: "Take a photo with Photo Booth: opens it and presses Take Photo (a short \
+                      countdown, then the shutter).",
+        app: "Photo Booth",
+        read_only: false,
+        params: || json!({ "type": "object", "properties": {} }),
+        run: |_args| {
+            open_one("Photo Booth")?;
+            wait_until_frontmost("Photo Booth");
+            // The camera takes a moment to come up; a press before it does is ignored.
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            // Photo Booth has no scripting dictionary, so its own control is pressed through
+            // System Events: the menu item first, the window button if the menu lacks it.
+            // The menu walk is macos-automator-mcp's jxa_ui_menu_actions fallback (MIT).
+            let how = script::run_jxa(
+                "System Events",
+                r#"const proc = Application("System Events").processes.byName("Photo Booth");
+                for (const bar of proc.menuBars[0].menuBarItems()) {
+                    const hits = bar.menus[0].menuItems.whose({ name: { _beginsWith: "Take" } })();
+                    if (hits.length && hits[0].enabled()) { hits[0].click(); return "menu " + hits[0].name(); }
+                }
+                const buttons = proc.windows[0].entireContents().filter((e) => {
+                    try { return e.role() === "AXButton" && /take/i.test(e.description() + e.name()); } catch (x) { return false; }
+                });
+                if (buttons.length) { buttons[0].click(); return "button"; }
+                throw new Error("Photo Booth showed no Take Photo control");"#,
+                &json!({}),
+            )?;
+            Ok(json!({ "took_photo": true, "via": how }))
+        },
+    },
+    Action {
+        name: "ALOUD_DISCORD_MESSAGE",
+        description: "Send a Discord message to a person or channel by name: opens Discord's \
+                      quick switcher, goes to `to`, and sends `text`. Write the message yourself.",
+        app: "Discord",
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["to", "text"],
+                "properties": {
+                    "to": { "type": "string", "description": "The person's or channel's name as it appears in Discord." },
+                    "text": { "type": "string", "description": "The message to send." }
+                }
+            })
+        },
+        run: |args| {
+            let to = required_str(args, "to")?;
+            let text = required_str(args, "text")?;
+            open_one("Discord")?;
+            wait_until_frontmost("Discord");
+            // Discord has no scripting dictionary; its ⌘K switcher is the reliable way in. The
+            // window title is checked before typing: a fuzzy switcher match on the wrong person
+            // would otherwise get the message. Newlines would press Return mid-message.
+            // ponytail: keystrokes can mistype non-ASCII; pasting through aloud_paste is the upgrade.
+            let out = script::run_jxa(
+                "System Events",
+                r#"const se = Application("System Events");
+                const proc = se.processes.byName("Discord");
+                se.keystroke("k", { using: "command down" }); delay(0.5);
+                se.keystroke(ARG.to); delay(0.8);
+                se.keyCode(36); delay(1.0);
+                const title = proc.windows[0].name();
+                if (!title.toLowerCase().includes(ARG.to.toLowerCase())) {
+                    se.keyCode(53);
+                    throw new Error("Discord opened “" + title + "”, not " + ARG.to + "; nothing was sent.");
+                }
+                se.keystroke(ARG.text.replace(/\s*\n\s*/g, " "));
+                if (!ARG.dry_run) se.keyCode(36);
+                return title;"#,
+                &json!({ "to": to, "text": text, "dry_run": args.get("dry_run").and_then(Value::as_bool).unwrap_or(false) }),
+            )?;
+            Ok(
+                json!({ "sent": !args.get("dry_run").and_then(Value::as_bool).unwrap_or(false), "to": out }),
+            )
+        },
+    },
+    Action {
         name: "ALOUD_MESSAGES_SEND",
         description: "Send an iMessage or SMS to a phone number or email handle. \
                       The `to` field must be a full handle, never a name — resolve \
@@ -746,8 +838,10 @@ pub const ACTIONS: &[Action] = &[
         name: "ALOUD_WRITE_FILE",
         description: "Write text to a file, creating it if it does not exist. Use when the \
              user asks to save, write or note something down as a file — a summary, \
-             a list, notes. Give the whole text in one call; it replaces the file's \
-             contents unless append is set.",
+             a list, notes, code. Give the whole text in one call; it replaces the file's \
+             contents unless append is set. To make a file in an editor (\"open Cursor and \
+             create todo.md\"), set open_with. When no folder is named, write to Desktop/ \
+             and say so.",
         app: crate::ALWAYS,
         read_only: false,
         params: || {
@@ -765,6 +859,11 @@ pub const ACTIONS: &[Action] = &[
                     "append": {
                         "type": "boolean",
                         "description": "Add to the end instead of replacing. Defaults to false.",
+                    },
+                    "open_with": {
+                        "type": "string",
+                        "enum": ["cursor", "vscode", "default"],
+                        "description": "Open the file afterwards in this editor, or the default app.",
                     }
                 }
             })
@@ -773,7 +872,20 @@ pub const ACTIONS: &[Action] = &[
             let path = required_str(args, "path")?;
             let text = args.get("text").and_then(Value::as_str).unwrap_or("");
             let append = args.get("append").and_then(Value::as_bool).unwrap_or(false);
-            write_home_file(path, text, append)
+            let mut wrote = write_home_file(path, text, append)?;
+            if let Some(with) = args.get("open_with").and_then(Value::as_str) {
+                let file = wrote["wrote"].as_str().unwrap_or_default().to_string();
+                // By bundle path, not the `cursor` CLI: a Finder-launched app has a PATH without it.
+                let mut open = std::process::Command::new("/usr/bin/open");
+                match with {
+                    "cursor" => open.args(["-a", &bundle_path("Cursor")?]),
+                    "vscode" => open.args(["-a", &bundle_path("Visual Studio Code")?]),
+                    _ => &mut open,
+                };
+                let opened = open.arg(&file).status().is_ok_and(|s| s.success());
+                wrote["opened"] = json!(opened);
+            }
+            Ok(wrote)
         },
     },
     Action {

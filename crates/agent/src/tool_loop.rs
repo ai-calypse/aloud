@@ -667,7 +667,7 @@ where
             // Engine tasks gate inside themselves: each risky click (buy, send, delete, sign in)
             // pauses for a yes/no below, so a gate on the whole goal would ask twice for one action.
             let gate_needed = !aloud_engine::is_engine_tool(&name)
-                && !aloud_native::low_risk(&name)
+                && !aloud_native::low_risk(&name, &args)
                 && is_write(&name, tools);
 
             let mut args = args;

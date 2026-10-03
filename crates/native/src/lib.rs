@@ -110,12 +110,16 @@ pub fn tools(installed: &[aloud_selection::InstalledApp]) -> Vec<NativeTool> {
 /// a window moved, a reminder or a note line added, the clipboard set). Asking "are you sure?" before
 /// opening Safari made every command a two-step chore. Sending, quitting, Shortcuts and file moves or
 /// writes are left out, so they still ask.
-pub fn low_risk(name: &str) -> bool {
+pub fn low_risk(name: &str, args: &Value) -> bool {
+    if name == "ALOUD_WRITE_FILE" {
+        return catalogue::creates_new_file(args);
+    }
     matches!(
         name,
         "ALOUD_OPEN_APP"
             | "ALOUD_MUSIC"
             | "ALOUD_SPOTIFY"
+            | "ALOUD_PHOTO_BOOTH_TAKE_PHOTO"
             | "ALOUD_REMINDERS_ADD"
             | "ALOUD_NOTES_APPEND"
             | "ALOUD_NOTES_CREATE"
@@ -167,14 +171,31 @@ mod tests {
     fn sending_quitting_and_file_moves_still_ask_first() {
         for name in [
             "ALOUD_MESSAGES_SEND",
+            "ALOUD_DISCORD_MESSAGE",
             "ALOUD_QUIT_APP",
             "ALOUD_COLLECT_FILES",
-            "ALOUD_WRITE_FILE",
             "ALOUD_ORGANIZE_FOLDER",
         ] {
-            assert!(!low_risk(name), "{name} must keep its confirmation");
+            assert!(
+                !low_risk(name, &json!({})),
+                "{name} must keep its confirmation"
+            );
         }
-        assert!(low_risk("ALOUD_OPEN_APP"));
+        assert!(low_risk("ALOUD_OPEN_APP", &json!({})));
+    }
+
+    /// Creating a new file is undone by deleting it; overwriting one is not
+    /// undone by anything, so that keeps its gate.
+    #[test]
+    fn only_a_brand_new_file_skips_the_write_gate() {
+        let fresh = json!({ "path": "Desktop/aloud-test-never-exists-7f3a.md", "text": "x" });
+        assert!(low_risk("ALOUD_WRITE_FILE", &fresh));
+        let existing = json!({ "path": "Desktop", "text": "x" });
+        assert!(!low_risk("ALOUD_WRITE_FILE", &existing));
+        let appending = json!({ "path": "Desktop/aloud-test-never-exists-7f3a.md", "text": "x", "append": true });
+        assert!(!low_risk("ALOUD_WRITE_FILE", &appending));
+        let outside = json!({ "path": "/etc/aloud-test", "text": "x" });
+        assert!(!low_risk("ALOUD_WRITE_FILE", &outside));
     }
     use super::*;
     use aloud_selection::InstalledApp;
