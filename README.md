@@ -1,7 +1,9 @@
 # Aloud
 
-Voice dictation for macOS and Windows. Hold a key, speak, and clean text lands
-in whatever app has focus.
+Voice dictation and voice control for macOS and Windows. Hold a key, speak, and
+clean text lands in whatever app has focus — or say what to do ("make a cake
+shopping list in Notes", "remind me to call Ana at 5", "summarise my unread
+email") and it is done.
 
 - **Local by default.** Transcription runs on-device via whisper.cpp. Audio
   never leaves your machine unless you choose a cloud model.
@@ -14,8 +16,9 @@ Built with Tauri v2: Rust for the work, React for the interface.
 ## Status
 
 A port of a macOS-only Swift app to run on both platforms. The macOS feature
-set has largely landed — dictation, rewrite, ask, agent and meeting modes, a
-Run Log, streaming transcription, and three overlay styles. Windows compiles
+set has largely landed — dictation and rewrite, one Command mode for asking
+and acting (with an always-listening bar), meeting notes, a Run Log,
+streaming transcription, and three overlay styles. Windows compiles
 but is unexercised, and release signing is still open. See
 [`PROGRESS.md`](PROGRESS.md) for the detail.
 
