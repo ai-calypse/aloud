@@ -163,10 +163,6 @@ export const commands = {
 	 */
 	connectConnector: (toolkit: string) => typedError<null, string>(__TAURI_INVOKE("connect_connector", { toolkit })),
 	disconnectConnector: (connectionId: string) => typedError<null, string>(__TAURI_INVOKE("disconnect_connector", { connectionId })),
-	/**  Answers a question the user typed into the panel. */
-	askText: (question: string) => typedError<null, string>(__TAURI_INVOKE("ask_text", { question })),
-	/**  Lets the panel dismiss itself on Escape or the close button. */
-	closeAsk: () => __TAURI_INVOKE<void>("close_ask"),
 	/**  Records the panel's settled box, so the click region can be exactly it. */
 	setPanelBox: (width: number | null, height: number | null) => __TAURI_INVOKE<void>("set_panel_box", { width, height }),
 	/**
@@ -180,7 +176,7 @@ export const commands = {
 	 */
 	setPanelInteractive: (open: boolean) => __TAURI_INVOKE<void>("set_panel_interactive", { open }),
 	/**
-	 *  Closes a browse of the notch. Symmetric with `close_ask`/`close_agent`: a
+	 *  Closes a browse of the notch. Symmetric with `close_agent`: a
 	 *  browse now sets `PANEL_OPEN` (via [`set_panel_interactive`]), so it needs an
 	 *  explicit close to clear it — the webview clearing `browsing` alone would
 	 *  leave `PANEL_OPEN` stuck true. Idempotent, so the several frontend paths
@@ -272,7 +268,6 @@ export const events = {
 	agentPermission: makeEvent<AgentPermission>("agent-permission"),
 	agentPermissionResolved: makeEvent<AgentPermissionResolved>("agent-permission-resolved"),
 	agentSessions: makeEvent<AgentSessions>("agent-sessions"),
-	ask: makeEvent<AskEvent>("ask"),
 	audioLevel: makeEvent<AudioLevel>("audio-level"),
 	connectorsUpdated: makeEvent<ConnectorsUpdated>("connectors-updated"),
 	dictationPartial: makeEvent<DictationPartial>("dictation-partial"),
@@ -507,11 +502,6 @@ export type ApprovalReply =
  *  multi-select answers pre-joined with `", "`.
  */
 { kind: "answer"; answers: { [key in string]: string } };
-
-/**  Streamed to the panel as the answer arrives. */
-export type AskEvent = 
-/**  The question, echoed so the panel can show what it heard. */
-{ kind: "question"; value: string } | { kind: "delta"; value: string } | { kind: "done" } | { kind: "failed"; value: string };
 
 export type AudioDevice = {
 	/**  Stable id, safe to persist in settings. */

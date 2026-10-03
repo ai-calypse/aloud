@@ -63,7 +63,6 @@ dependencies = [
  "aloud-volume",
  "anyhow",
  "chrono",
- "futures-util",
  "hound",
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
@@ -189,8 +188,6 @@ name = "aloud-llm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bytes",
- "futures-util",
  "http",
  "reqwest",
  "serde",

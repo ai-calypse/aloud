@@ -71,8 +71,8 @@ the single most common reason a correct-looking animation feels generic.
 **A size change *is* the animation.** A container whose contents change width or
 height must animate to the new size. Snapping between two sizes is the clearest
 tell of web UI in a native app. If the natural size is `auto` or `max-content`,
-measure it and drive the real value — see `useMorphWidth` and `useNotchPanel` in
-`overlay.tsx` for the two shapes this takes.
+measure it and drive the real value — see `useNotchPanel` in
+`features/overlay/useNotchPanel.ts`.
 
 **Squash anisotropically.** When content is replaced, compress it more on one
 axis than the other. Equal scale on both axes reads as a zoom; unequal reads as

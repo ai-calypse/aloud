@@ -86,3 +86,9 @@ export function formatElapsed(seconds: number): string {
   const s = Math.floor(seconds % 60);
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
+
+/** Cuts on a char boundary so a multi-byte character is never split. */
+export function truncate(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return [...flat].length <= max ? flat : `${[...flat].slice(0, max).join("")}…`;
+}

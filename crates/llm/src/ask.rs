@@ -1,4 +1,4 @@
-//! Ask mode: answering a spoken question instead of pasting it.
+//! The spoken trigger that turns a dictation into a command: "hey flow, …".
 
 /// Spoken prefixes that route a dictation into Ask mode.
 ///
@@ -12,16 +12,6 @@ pub const TRIGGER_PHRASES: &[&[&[&str]]] = &[
     &[&["hey"], &["flow", "flo", "floe"]],
     &[&["ask"], &["ai", "ay", "a"]],
 ];
-
-/// System prompt for a spoken question.
-pub const SYSTEM_PROMPT: &str =
-    "You are a concise assistant answering a spoken question. APP_CONTEXT describes \
-what is on the user's screen right now; use it when the question refers to it \
-(e.g. \"what does this error mean?\") and ignore it otherwise. Reply in simple \
-markdown — **bold**, `inline code`, short bullet lists, fenced code blocks — \
-only where it genuinely helps; no tables. Keep the answer under 150 \
-words unless the question truly demands more. The question is a transcription \
-of speech and may contain minor errors; answer the intent.";
 
 /// The question, if `transcript` opens with a spoken trigger phrase.
 pub fn question_from_trigger(transcript: &str) -> Option<String> {

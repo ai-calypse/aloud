@@ -10,7 +10,6 @@ pub mod trigger;
 
 use anyhow::{anyhow, Context, Result};
 use cooldown::CooldownTracker;
-use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 use tracing::Instrument;
@@ -157,7 +156,6 @@ struct ChatRequest<'a> {
     messages: &'a [Message],
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
-    stream: bool,
     /// Tool schemas (OpenAI function format). Omitted on the plain chat path.
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<&'a [serde_json::Value]>,
@@ -300,7 +298,6 @@ impl LlmClient {
                 model,
                 messages,
                 temperature,
-                stream: false,
                 tools: None,
                 tool_choice: None,
                 reasoning_effort,
@@ -395,7 +392,6 @@ impl LlmClient {
                 model,
                 messages,
                 temperature,
-                stream: false,
                 tools,
                 tool_choice: tools.map(|_| "auto"),
                 reasoning_effort,
@@ -424,41 +420,6 @@ impl LlmClient {
             tool_calls: message.tool_calls.unwrap_or_default(),
         })
     }
-
-    /// Streams a completion as text deltas, for Ask mode's incremental render.
-    pub async fn stream(
-        &self,
-        model: &str,
-        messages: &[Message],
-        temperature: Option<f32>,
-    ) -> Result<impl Stream<Item = Result<String>>> {
-        let (reasoning_effort, include_reasoning) = reasoning_for(model);
-        let response = self
-            .client
-            .post(format!("{}/chat/completions", self.base_url))
-            // Per request: the client is shared with the transcribe crate,
-            // which wants a different timeout.
-            .timeout(TIMEOUT)
-            .bearer_auth(&self.api_key)
-            .json(&ChatRequest {
-                model,
-                messages,
-                temperature,
-                stream: true,
-                tools: None,
-                tool_choice: None,
-                reasoning_effort,
-                include_reasoning,
-                max_tokens: None,
-            })
-            .send()
-            .await
-            .context("stream request failed")?;
-
-        let response = self.check(model, response).await?;
-
-        Ok(sse_deltas(response.bytes_stream()))
-    }
 }
 
 fn is_rate_limited(error: &anyhow::Error) -> bool {
@@ -466,41 +427,6 @@ fn is_rate_limited(error: &anyhow::Error) -> bool {
         error.downcast_ref::<LlmError>(),
         Some(LlmError::RateLimited { .. })
     )
-}
-
-/// Turns an OpenAI SSE body into content deltas. Chunks do not align with
-/// lines, so a partial `data:` line is buffered until the rest arrives.
-fn sse_deltas(
-    body: impl Stream<Item = reqwest::Result<bytes::Bytes>> + Unpin,
-) -> impl Stream<Item = Result<String>> {
-    let mut buffer = String::new();
-    body.flat_map(move |chunk| {
-        let mut deltas = Vec::new();
-        match chunk {
-            Ok(bytes) => {
-                buffer.push_str(&String::from_utf8_lossy(&bytes));
-                while let Some(newline) = buffer.find('\n') {
-                    let line: String = buffer.drain(..=newline).collect();
-                    if let Some(delta) = parse_sse_line(line.trim()) {
-                        deltas.push(Ok(delta));
-                    }
-                }
-            }
-            Err(e) => deltas.push(Err(anyhow!(e).context("reading stream"))),
-        }
-        futures_util::stream::iter(deltas)
-    })
-}
-
-/// Extracts the content delta from one SSE line, if it carries one.
-fn parse_sse_line(line: &str) -> Option<String> {
-    let data = line.strip_prefix("data:")?.trim();
-    if data == "[DONE]" || data.is_empty() {
-        return None;
-    }
-    let value: serde_json::Value = serde_json::from_str(data).ok()?;
-    let delta = value.pointer("/choices/0/delta/content")?.as_str()?;
-    (!delta.is_empty()).then(|| delta.to_string())
 }
 
 #[cfg(test)]
@@ -564,43 +490,6 @@ mod tests {
         let ok = client.check("m-ok", response(200, None)).await.unwrap();
         assert_eq!(ok.status(), 200);
         assert!(!client.cooldowns.is_limited(&client.cooldown_key("m-ok")));
-    }
-
-    #[test]
-    fn parses_content_deltas() {
-        let line = r#"data: {"choices":[{"delta":{"content":"Hello"}}]}"#;
-        assert_eq!(parse_sse_line(line), Some("Hello".into()));
-    }
-
-    #[test]
-    fn ignores_terminator_and_non_content_lines() {
-        assert_eq!(parse_sse_line("data: [DONE]"), None);
-        assert_eq!(parse_sse_line(""), None);
-        assert_eq!(parse_sse_line(": keep-alive"), None);
-        // The role-only opening chunk carries no text.
-        assert_eq!(
-            parse_sse_line(r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#),
-            None
-        );
-    }
-
-    #[tokio::test]
-    async fn stream_reassembles_lines_split_across_chunks() {
-        // A chunk boundary landing mid-JSON is the realistic case.
-        let chunks = vec![
-            Ok(bytes::Bytes::from(r#"data: {"choices":[{"delta":{"cont"#)),
-            Ok(bytes::Bytes::from(
-                "ent\":\"Hel\"}}]}\ndata: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n",
-            )),
-            Ok(bytes::Bytes::from("data: [DONE]\n")),
-        ];
-        let stream = sse_deltas(futures_util::stream::iter(chunks));
-        let text: String = stream
-            .filter_map(|d| async { d.ok() })
-            .collect::<Vec<_>>()
-            .await
-            .concat();
-        assert_eq!(text, "Hello");
     }
 
     /// Regression: a per-client tracker was born empty on every request, so the

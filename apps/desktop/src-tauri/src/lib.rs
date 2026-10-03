@@ -1,5 +1,4 @@
 mod agent;
-mod ask;
 mod commands;
 mod listen;
 mod meeting;
@@ -134,8 +133,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::search_connectors,
             commands::connect_connector,
             commands::disconnect_connector,
-            ask::ask_text,
-            ask::close_ask,
             overlay::set_panel_box,
             overlay::set_panel_interactive,
             overlay::close_browse,
@@ -155,7 +152,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
         .events(collect_events![
             pipeline::Phase,
             meeting::MeetingPhase,
-            ask::AskEvent,
             agent::AgentEvent,
             overlay::AudioLevel,
             overlay::OverlayError,

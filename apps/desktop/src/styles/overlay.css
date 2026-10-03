@@ -8,8 +8,8 @@
  * (Rust anchors the window at margin 0) and animates its own size, so the
  * canvas can be enlarged without moving anything drawn in it.
  *
- * Tailwind is loaded (see overlay.tsx) only because Streamdown styles the Ask
- * answer's markdown in utilities; everything below is hand-written CSS.
+ * Tailwind is loaded (see overlay.tsx) only because Streamdown styles the agent's
+ * answer markdown in utilities; everything below is hand-written CSS.
  */
 /* On :root rather than `.ask` so tune.html can override them from an inline
    style on the document element, which a rule here would outrank. */
@@ -105,7 +105,7 @@
 }
 
 /* The drop-down panel, welded to the notch. Its size and silhouette are both
- * written per frame from JS (useNotchPanel in overlay.tsx), so barely any
+ * written per frame from JS (useNotchPanel in features/overlay), so barely any
  * geometry is declared here.
  *
  * Deliberately absent: background and border-radius (the `<svg>` below paints
@@ -2249,8 +2249,8 @@
   position: absolute;
   top: 0;
   left: 50%;
-  /* ponytail: width must equal `DEAL_CARD_W` in overlay.tsx (it sizes the deal
-     layer, which the panel measures); keep the two in sync. */
+  /* ponytail: width must equal `DEAL_CARD_W` in NotchAgents.tsx (it sizes the
+     deal layer, which the panel measures); keep the two in sync. */
   width: 86px;
   margin-left: -43px; /* centre the card on its --tx (half of width) */
   /* Where a card deals FROM: the resting stack, a hair left of the cutout —
