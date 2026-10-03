@@ -10,7 +10,8 @@
 //! graded against the original command before it is accepted — see [`verify`].
 
 use crate::composio::{ComposioClient, ToolDef};
-use aloud_llm::{LlmClient, LlmError, Message};
+use crate::Brain;
+use aloud_llm::{LlmError, Message};
 use anyhow::Result;
 use std::future::Future;
 use std::time::Duration;
@@ -21,31 +22,10 @@ use tracing::Instrument;
 /// going after five is looping rather than working.
 const MAX_ROUNDS: usize = 5;
 
-/// Rounds allowed once a command starts driving the screen.
-///
-/// Computer-use has a different rhythm to a structured tool: read, click, read
-/// again because the screen moved, click again. "Open System Settings and turn
-/// on dark mode" is four rounds before the first useful click, and it hit the
-/// limit of 5 mid-navigation. Structured tools do not need this many and
-/// keeping their budget tight is what stops a confused model burning turns, so
-/// the budget is raised only for the runs that have earned it — the first
-/// screen call switches to this.
-///
-/// 30, not agent-notch's 100: at ~400ms a read and ~170ms a click plus a model
-/// round-trip each, 30 rounds is already the better part of a minute, and a
-/// spoken command that has not landed by then is not going to.
-const MAX_SCREEN_ROUNDS: usize = 30;
-
 /// How many times one read tool may run in a single command. Rounds are already
 /// capped, but a round can hold any number of calls, and a model that varies an
 /// argument slips past the identical-call cache indefinitely.
 const MAX_CALLS_PER_TOOL: usize = 3;
-
-/// The same, for screen tools. A screen read must be repeatable after every
-/// action that changes the display — capping it at 3 is what made the agent
-/// click blind on its fourth step, since the alternative offered to it was
-/// acting on a stale layout.
-const MAX_SCREEN_CALLS_PER_TOOL: usize = 40;
 
 /// How many questions one command may put to the user. See the ask tool below.
 const MAX_QUESTIONS: usize = 2;
@@ -62,6 +42,31 @@ const MAX_QUESTIONS: usize = 2;
 /// The prefix is ours: every Composio slug is `TOOLKIT_VERB` for a real
 /// toolkit, so nothing can collide with it.
 pub const ASK_USER: &str = "ALOUD_ASK_USER";
+
+/// Loads a connected service's tools mid-run. The command's tools leave out
+/// services it doesn't mention (see `composio::concerns`); this is how the model
+/// gets one back when the command needs it after all — Anthropic's tool-search
+/// pattern, a round trip on a miss instead of every schema on every command.
+pub const MORE_TOOLS: &str = "ALOUD_MORE_TOOLS";
+
+fn more_tools_schema(services: &[String]) -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": MORE_TOOLS,
+            "description": format!(
+                "Load the tools for a connected service that is not in your list yet, when the \
+                 command needs it: {}. Its tools are available on your next step.",
+                services.join(", ")
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["service"],
+                "properties": { "service": { "type": "string", "enum": services } }
+            }
+        }
+    })
+}
 
 fn ask_user_schema() -> serde_json::Value {
     serde_json::json!({
@@ -135,10 +140,31 @@ pub enum LoopEvent {
 }
 
 const TOOL_SYSTEM_PROMPT: &str = "\
-You are a concise assistant acting on a spoken command. You can call tools to \
-act on the user's connected apps (email, calendar, GitHub, and whatever else \
-the tool list offers). Only call a tool when the command asks for such an \
-action or needs that data; otherwise just answer. \
+You are Aloud, a voice assistant on the user's Mac. Each command is one spoken \
+sentence, transcribed, so it may contain small errors; act on the intent. Either \
+do it with tools or just answer. \
+Choose tools in this order. \
+First, the ALOUD_ tools act on this Mac's own apps: Notes, Reminders, Music, \
+Spotify, Messages, files, windows, apps, Photo Booth, Discord. Each one opens its \
+own app, so never call ALOUD_OPEN_APP before it. When the command asks you to \
+make or add content — a list, a note, a reminder, a file, a message — write that \
+content yourself, in full, inside the tool's arguments: for \"make a shopping \
+list for a cake and put it in a note\", call ALOUD_NOTES_CREATE with the actual \
+list as its body. Plain text, no emoji. When the user names a note (\"my \
+shopping note\"), pass that name as its title. \
+Second, the tools for the user's connected services — email, calendar, GitHub \
+and whatever else the list offers. If the command needs a connected service \
+whose tools you do not have, load them with ALOUD_MORE_TOOLS. \
+Third, ALOUD_BROWSER_TASK for anything to do on a website — open a site, search \
+it, play a video at a time, read a value off a page, open a section of a \
+dashboard. Call it once with the user's whole request as the goal; it runs every \
+step itself. \
+Otherwise answer: a few sentences of simple markdown, under 150 words. If \
+nothing here can do what was asked inside that app, say so plainly rather than \
+improvising. \
+Lines in parentheses after the command — (The app on screen: …), (Selected \
+text: «…») — are what the user was looking at when they spoke; \"this\", \
+\"here\" and \"it\" usually mean them. \
 To find files, photos, screenshots, or documents ON THIS MAC, use the local \
 file search tool (ALOUD_FINDER_SEARCH) — not email, contacts, or calendar. \
 \"Find my images with X\", \"find that screenshot\", \"find my tax pdf\" are \
@@ -166,26 +192,8 @@ To tidy or organise a folder, call ALOUD_ORGANIZE_FOLDER exactly once. It sorts 
 every file in the folder in that single call, so never call it repeatedly and \
 never move files one at a time. You choose the categories: pick ones that fit \
 what the user likely has, and give each the file extensions that belong in it. \
-For anything to do on a website — open a site, search it, play a video at a \
-time, read a value off a page, open a section of a dashboard — call \
-ALOUD_BROWSER_TASK once with the user's whole request as the goal; it runs every \
-step itself. For a multi-step job inside a Mac app that no named tool covers, \
-prefer ALOUD_MAC_TASK with the whole request over driving the screen yourself. \
-When no tool in the list does what was asked, you can drive the app the user is \
-looking at directly: ALOUD_SCREEN_READ lists its real on-screen controls with \
-their positions, and the screen click/type/key tools act on them. This is the \
-fallback, not the first choice — a named tool is faster and more reliable where \
-one exists, so reach for the screen tools only when nothing else fits. Always \
-read before you click, never invent coordinates, and read again after anything \
-that changes what is on screen, because the positions move. Never send two \
-clicks in a row without reading in between — the first click changes the \
-screen, so the second would use coordinates that no longer point at anything. \
-One click, then a fresh read, then the next click. The screen tools act on the \
-app that is currently in front, so open or switch to the right app before \
-reading it, and give it a moment by reading again if the app was just \
-launched. \
-The command is a transcription of speech and may contain minor errors; act on \
-the intent. After acting, confirm what you did in one short plain sentence. \
+After acting, confirm what you did in one short plain sentence. When one tool \
+call does the whole command, write that sentence in the same reply as the call. \
 Finish the whole command before you stop. A command that names two actions \
 (\"draft it and send it\", \"file the issue and assign it to me\") is not done \
 when the first one is — carry out every part, and only stop once each has \
@@ -268,6 +276,21 @@ fn backoff(error: &LlmError) -> Option<&'static [f64]> {
     }
 }
 
+/// Whether a failure on the first round should move to the next brain rather
+/// than wait: everything [`backoff`] would retry, plus the errors waiting cannot
+/// fix — a key with no billing (Cerebras answers 402), a revoked key, a model id
+/// the provider no longer serves.
+fn fails_over(error: &LlmError) -> bool {
+    backoff(error).is_some()
+        || matches!(
+            error,
+            LlmError::Failed {
+                status: 401..=404,
+                ..
+            }
+        )
+}
+
 /// How long to wait before retry attempt `attempt`. A server-sent `retry-after`
 /// outranks the schedule — it knows the real budget — but is capped so a
 /// "come back in an hour" cannot strand a spoken command; past the cap we would
@@ -326,12 +349,14 @@ if UNFINISHED — a colon and a short phrase naming what is still undone.";
 /// broken grader must be an unverified answer, never a command trapped in a
 /// loop it cannot leave. This is why the check is "does it start with
 /// UNFINISHED" rather than "is it FINISHED": every unexpected output accepts.
-async fn verify(llm: &LlmClient, model: &str, command: &str, answer: &str) -> Option<String> {
+async fn verify(brain: &Brain, command: &str, answer: &str) -> Option<String> {
     let messages = [
         Message::system(VERIFIER_PROMPT),
         Message::user(format!("COMMAND: {command}\n\nFINAL ANSWER: {answer}")),
     ];
-    let turn = llm
+    let model = brain.model;
+    let turn = brain
+        .client
         .chat_with_tools(model, &messages, None, Some(0.0))
         .instrument(tracing::info_span!("verify", model))
         .await
@@ -354,6 +379,42 @@ fn unfinished_reason(verdict: &str) -> Option<String> {
     )
 }
 
+/// The schemas and messages every run starts from.
+fn opening(
+    command: &str,
+    tools: &[ToolDef],
+    more: &[String],
+) -> (Vec<serde_json::Value>, Vec<Message>) {
+    // The synthetic tools ride alongside Composio's; the model cannot tell them
+    // apart, and `execute` never sees them.
+    let mut schemas: Vec<serde_json::Value> = tools.iter().map(ToolDef::to_openai).collect();
+    schemas.push(ask_user_schema());
+    if !more.is_empty() {
+        schemas.push(more_tools_schema(more));
+    }
+    let messages = vec![
+        Message::system(format!("{TOOL_SYSTEM_PROMPT} {}", now_line())),
+        Message::user(command),
+    ];
+    (schemas, messages)
+}
+
+/// The brain's first move on `command` — what it would call, or answer — with
+/// nothing executed. For the command eval: the choice made here is what
+/// decides whether a command goes to the right place.
+pub async fn first_turn(
+    brain: &Brain,
+    command: &str,
+    tools: &[ToolDef],
+    more: &[String],
+) -> Result<aloud_llm::ToolTurn> {
+    let (schemas, messages) = opening(command, tools, more);
+    brain
+        .client
+        .chat_with_tools(brain.model, &messages, Some(&schemas), Some(0.3))
+        .await
+}
+
 /// Runs the loop for `command`. Returns the model's final answer.
 ///
 /// `on_event` fires for each tool call so the panel can show progress.
@@ -373,11 +434,11 @@ fn unfinished_reason(verdict: &str) -> Option<String> {
 // Worth doing the moment a second caller has to assemble this list.
 #[allow(clippy::too_many_arguments)]
 pub async fn run<F, A>(
-    llm: &LlmClient,
-    model: &str,
+    brains: &[Brain],
     composio: &ComposioClient,
     command: &str,
     tools: &[ToolDef],
+    more: &[String],
     mut on_event: impl FnMut(LoopEvent),
     confirm: impl Fn(String, serde_json::Value) -> F,
     ask: impl Fn(String) -> A,
@@ -387,14 +448,9 @@ where
     F: Future<Output = Option<serde_json::Value>>,
     A: Future<Output = Option<String>>,
 {
-    // The synthetic tool rides alongside Composio's; the model cannot tell them
-    // apart, and `execute` never sees it.
-    let mut schemas: Vec<serde_json::Value> = tools.iter().map(ToolDef::to_openai).collect();
-    schemas.push(ask_user_schema());
-    let mut messages = vec![
-        Message::system(format!("{TOOL_SYSTEM_PROMPT} {}", now_line())),
-        Message::user(command),
-    ];
+    let (mut schemas, mut messages) = opening(command, tools, more);
+    // Owned: a service loaded mid-run adds to it.
+    let mut tools = tools.to_vec();
 
     // The empty-answer fallback must not say "Done." over a failure.
     let mut any_failed = false;
@@ -406,34 +462,43 @@ where
     let mut budget: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut asked = 0usize;
     let mut verifier_retries = 0;
-    // Whether the user has approved screen control for this run. See the gate
-    // below: screen actions confirm once, not per click.
-    let mut screen_approved = false;
-    // Raised to MAX_SCREEN_ROUNDS the first time the run drives the screen.
-    // A command that never touches it keeps the tight structured-tool budget.
-    let mut max_rounds = MAX_ROUNDS;
+    // Whether every tool call so far was a native write that worked; None
+    // before the first. See `native_write`.
+    let mut only_native_writes: Option<bool> = None;
+
+    if brains.is_empty() {
+        anyhow::bail!("no model is configured for commands");
+    }
+    // Which of `brains` this run is on; only ever moves forward.
+    let mut brain = 0usize;
 
     let mut round = 0usize;
-    while round < max_rounds {
+    while round < MAX_ROUNDS {
         if cancelled() {
             anyhow::bail!("cancelled");
         }
-        let is_last = round + 1 == max_rounds;
-        let chat = || {
-            llm.chat_with_tools(
-                model,
-                &messages,
-                (!is_last).then_some(schemas.as_slice()),
-                Some(0.3),
-            )
-            // Per round, not per run: "the model was slow" and "the model went
-            // round twice" are different problems with different fixes.
-            .instrument(tracing::info_span!(
-                "tool_select",
-                model,
-                round,
-                usage = tracing::field::Empty
-            ))
+        let is_last = round + 1 == MAX_ROUNDS;
+        // By index: a `&Brain` parameter makes the returned future's borrow a
+        // closure-local lifetime the compiler will not infer.
+        let chat = |index: usize| {
+            let current = &brains[index];
+            let model = current.model;
+            current
+                .client
+                .chat_with_tools(
+                    model,
+                    &messages,
+                    (!is_last).then_some(schemas.as_slice()),
+                    Some(0.3),
+                )
+                // Per round, not per run: "the model was slow" and "the model went
+                // round twice" are different problems with different fixes.
+                .instrument(tracing::info_span!(
+                    "tool_select",
+                    model,
+                    round,
+                    usage = tracing::field::Empty
+                ))
         };
 
         // Per round, not per run: a run that survived a 429 in round one still
@@ -446,10 +511,21 @@ where
         // otherwise going fine. Here rather than in the llm crate so the panel
         // can show the wait instead of looking hung.
         let turn = loop {
-            let error = match chat().await {
+            let error = match chat(brain).await {
                 Ok(turn) => break turn,
                 Err(e) => e,
             };
+            // Another brain beats waiting out this one's budget. Only before
+            // anything has run: Gemini 3 rejects a history holding another
+            // model's tool calls, which lack its thought signatures.
+            if round == 0
+                && brain + 1 < brains.len()
+                && error.downcast_ref::<LlmError>().is_some_and(fails_over)
+            {
+                tracing::warn!(%error, from = brains[brain].model, to = brains[brain + 1].model, "failing over");
+                brain += 1;
+                continue;
+            }
             let Some(schedule) = error.downcast_ref::<LlmError>().and_then(backoff) else {
                 return Err(error);
             };
@@ -499,8 +575,15 @@ where
             // that back to the model rather than telling the user it is done.
             // Skipped once the budget is spent and on the last round, where
             // tools are forbidden and a nudge could not be acted on anyway.
-            if verifier_retries < MAX_VERIFIER_RETRIES && !is_last && !cancelled() {
-                if let Some(missing) = verify(llm, model, command, &answer).await {
+            // Not for a run of native writes that all worked: the grader sees
+            // only the command and the answer, and its real target is a
+            // connected service drafting without sending.
+            if verifier_retries < MAX_VERIFIER_RETRIES
+                && !is_last
+                && !cancelled()
+                && only_native_writes != Some(true)
+            {
+                if let Some(missing) = verify(&brains[brain], command, &answer).await {
                     verifier_retries += 1;
                     tracing::info!(%missing, verifier_retries, "answer graded unfinished");
                     messages.push(Message {
@@ -545,6 +628,10 @@ where
             });
         }
 
+        // Cleared by any call that is not a native write that worked.
+        let mut round_native_ok = true;
+        // What each of those writes did, in its own words; see `finishes_early`.
+        let mut confirmations: Vec<Option<String>> = Vec::new();
         for call in &turn.tool_calls {
             // Between dispatches, not just at the top of the round: a round
             // holding six calls otherwise runs all six after Escape, and the
@@ -556,6 +643,31 @@ where
             let name = call.function.name.clone();
             let args: serde_json::Value = serde_json::from_str(&call.function.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
+            round_native_ok &= native_write(&name, &args, &tools);
+
+            if name == MORE_TOOLS {
+                let service = args["service"].as_str().unwrap_or_default().to_string();
+                let result = if !more.contains(&service) {
+                    format!("{{\"error\":\"{service} is not a connected service\"}}")
+                } else if tools.iter().any(|t| t.toolkit == service) {
+                    format!("{{\"loaded\":\"{service}\",\"note\":\"already loaded\"}}")
+                } else {
+                    match composio
+                        .toolkit_tools(&service, command, crate::composio::TOOLS_PER_TOOLKIT)
+                        .await
+                    {
+                        Ok(found) => {
+                            schemas.extend(found.iter().map(ToolDef::to_openai));
+                            let names: Vec<String> = found.iter().map(|t| t.name.clone()).collect();
+                            tools.extend(found);
+                            serde_json::json!({ "loaded": service, "tools": names }).to_string()
+                        }
+                        Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+                    }
+                };
+                messages.push(Message::tool_result(&call.id, result));
+                continue;
+            }
 
             // Answered by the user, not by Composio. Before the dedup below,
             // which would hand back a previous answer to a new question.
@@ -616,27 +728,18 @@ where
             // the model has no memory of having asked. Writes are excluded: two
             // identical sends are two emails, and collapsing them would swallow
             // the second silently.
-            // A screen read is never the same twice: the whole reason to call it
-            // again is that something moved. Serving it from cache would hand
-            // the model the layout from before its own click and send the next
-            // click to a stale coordinate.
-            let repeatable = name == aloud_computer::AX_READ;
-            if !is_write(&name, tools) && !repeatable {
+            if !is_write(&name, &tools) {
                 if let Some(previous) = seen.get(&(name.clone(), args.to_string())) {
                     tracing::debug!(tool = %name, "identical read already made; reusing");
                     messages.push(Message::tool_result(&call.id, previous.clone()));
                     continue;
                 }
             }
-            if !is_write(&name, tools) {
+            if !is_write(&name, &tools) {
                 // Independent of the dedup above: a model that varies one
                 // argument each time never hits the cache and would otherwise
                 // loop until the round limit.
-                let cap = if repeatable {
-                    MAX_SCREEN_CALLS_PER_TOOL
-                } else {
-                    MAX_CALLS_PER_TOOL
-                };
+                let cap = MAX_CALLS_PER_TOOL;
                 let calls = budget.entry(name.clone()).or_insert(0);
                 *calls += 1;
                 if *calls > cap {
@@ -674,33 +777,11 @@ where
             // Rebound, not just checked: the gate returns the arguments to run
             // with, so a field the user filled in at the gate is what executes.
             // A read tool never reaches the gate and keeps the model's.
-            // Screen control is gated once per run, not once per action: a
-            // computer-use sequence is click, read, click, type, and confirming
-            // each is unusable — the user would be answering prompts faster than
-            // the agent works. So the *first* screen action asks, and approval
-            // covers the rest of the run. Coarser than the per-action gate the
-            // structured tools get, and deliberately so; see COMPUTER_USE.md's
-            // open question, which this does not claim to settle.
-            // The moment a run starts driving the screen it needs the longer
-            // budget: read, click, read again, click again is four rounds
-            // before anything useful lands, and five was not enough to open
-            // System Settings and reach a control inside it.
-            if is_screen_tool(&name) && max_rounds == MAX_ROUNDS {
-                tracing::info!("screen control engaged; raising the round budget");
-                max_rounds = MAX_SCREEN_ROUNDS;
-            }
-
-            let is_screen = is_screen_write(&name);
             // Engine tasks gate inside themselves: each risky click (buy, send, delete, sign in)
             // pauses for a yes/no below, so a gate on the whole goal would ask twice for one action.
-            let gate_needed =
-                if aloud_engine::is_engine_tool(&name) || aloud_native::low_risk(&name) {
-                    false
-                } else if is_screen {
-                    !screen_approved
-                } else {
-                    is_write(&name, tools)
-                };
+            let gate_needed = !aloud_engine::is_engine_tool(&name)
+                && !aloud_native::low_risk(&name, &args)
+                && is_write(&name, &tools);
 
             let mut args = args;
             let declined = if gate_needed {
@@ -710,13 +791,6 @@ where
                 {
                     Some(approved) => {
                         args = approved;
-                        // Only once the user has actually said yes. Set before
-                        // the await, a model that emits click+type in one round
-                        // let the second call skip the gate while the first was
-                        // still on screen — and opening a second confirmation
-                        // dropped the first one's reply channel, which resolves
-                        // as "declined" with no prompt ever shown.
-                        screen_approved = true;
                         false
                     }
                     None => true,
@@ -725,6 +799,7 @@ where
                 false
             };
 
+            round_native_ok &= !declined;
             let result = if declined {
                 on_event(LoopEvent::ToolCallResult {
                     name: name.clone(),
@@ -749,22 +824,28 @@ where
                         .instrument(span.clone())
                         .await
                 } else {
+                    // ponytail: no screen control. Cua Driver (trycua/cua
+                    // libs/cua-driver, MIT) becomes one more fall-through here;
+                    // the once-per-run gate and 30-round budget it needs are in
+                    // git history (9de8723).
                     match run_native(&name, &args).instrument(span.clone()).await {
                         Some(native) => native,
-                        None => match run_computer(&name, &args).instrument(span.clone()).await {
-                            Some(screen) => screen,
-                            None => {
-                                composio
-                                    .execute(&name, &args)
-                                    .instrument(span.clone())
-                                    .await
-                            }
-                        },
+                        None => {
+                            composio
+                                .execute(&name, &args)
+                                .instrument(span.clone())
+                                .await
+                        }
                     }
                 };
                 let success = tool_succeeded(&result);
                 span.record("ok", success);
                 any_failed |= !success;
+                round_native_ok &= success;
+                if success {
+                    let parsed = serde_json::from_str(&result).unwrap_or_default();
+                    confirmations.push(aloud_native::confirmation(&name, &args, &parsed));
+                }
                 on_event(LoopEvent::ToolCallResult {
                     name: name.clone(),
                     success,
@@ -772,18 +853,24 @@ where
                 result
             };
 
-            if !declined && !is_write(&name, tools) && !aloud_engine::is_engine_tool(&name) {
+            if !declined && !is_write(&name, &tools) && !aloud_engine::is_engine_tool(&name) {
                 seen.insert((name.clone(), args.to_string()), result.clone());
             }
             messages.push(Message::tool_result(&call.id, result));
         }
+        only_native_writes = Some(only_native_writes.unwrap_or(true) && round_native_ok);
+        // The model already said what it did, and what it did was ours and
+        // worked: asking it again to say so, then grading that, was two more
+        // model calls (~0.8s) on every "create a note".
+        if let Some(said) = finishes_early(turn.content.as_deref(), round_native_ok, &confirmations)
+        {
+            return Ok(said);
+        }
         round += 1;
     }
 
-    // Naming the mode matters: "5 rounds" and "30 rounds" are different
-    // failures, and the message is what the panel shows the user.
     anyhow::bail!(
-        "the command needed more than {max_rounds} rounds and was stopped before it finished"
+        "the command needed more than {MAX_ROUNDS} rounds and was stopped before it finished"
     )
 }
 
@@ -852,41 +939,36 @@ where
     }
 }
 
-/// Runs a screen-control tool, `None` when the name is not one of those — the
-/// same fall-through contract as [`run_native`], so the dispatch stays one
-/// chain of "is it mine?" rather than a prefix match.
-async fn run_computer(name: &str, args: &serde_json::Value) -> Option<String> {
-    let name = name.to_string();
-    let args = args.clone();
-    // The helpers are subprocesses and a traversal takes ~800ms, so this must
-    // not run on the async executor.
-    let outcome = tokio::task::spawn_blocking(move || aloud_computer::execute(&name, &args))
-        .await
-        .unwrap_or_else(|e| Some(Err(aloud_computer::HelperError::Failed(e.to_string()))))?;
-    Some(match outcome {
-        Ok(value) => value.to_string(),
-        Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
-    })
+/// Whether a call is one the run may finish on without asking the model again:
+/// one of our own Mac actions that changes something and reports nothing the
+/// model has yet to read. A search or "what's playing" returns what the answer
+/// is about, so text written before it ran cannot be the answer.
+fn native_write(name: &str, args: &serde_json::Value, tools: &[ToolDef]) -> bool {
+    name.starts_with("ALOUD_")
+        && name != ASK_USER
+        && name != MORE_TOOLS
+        && !aloud_engine::is_engine_tool(name)
+        && is_write(name, tools)
+        && args["action"] != "now_playing"
 }
 
-/// Whether a tool drives the screen and so falls under the once-per-run gate
-/// rather than the per-action one.
-///
-/// Keyed off the crate's own constants rather than a name prefix, so renaming a
-/// tool cannot silently drop it out of the gate.
-fn is_screen_write(name: &str) -> bool {
-    matches!(
-        name,
-        aloud_computer::AX_CLICK | aloud_computer::AX_TYPE | aloud_computer::AX_KEY
-    )
-}
-
-/// Whether a tool is part of screen control at all, reads included. The round
-/// budget keys off this rather than [`is_screen_write`]: a run that has started
-/// reading the screen is already committed to the read-act-read rhythm, and
-/// waiting for its first *write* to raise the budget spends rounds it needs.
-fn is_screen_tool(name: &str) -> bool {
-    is_screen_write(name) || name == aloud_computer::AX_READ
+/// The run's answer, if this round can be the last: every call was a native
+/// write that worked, and either the model already said what it did or each
+/// write says so itself (`aloud_native::confirmation`). Most models put no text
+/// beside a tool call — qwen did in 0 of 26 — so the second is the usual way.
+fn finishes_early(
+    content: Option<&str>,
+    round_native_ok: bool,
+    confirmations: &[Option<String>],
+) -> Option<String> {
+    if !round_native_ok {
+        return None;
+    }
+    if let Some(said) = content.map(str::trim).filter(|c| !c.is_empty()) {
+        return Some(said.to_string());
+    }
+    let own: Option<Vec<String>> = confirmations.iter().cloned().collect();
+    own.filter(|o| !o.is_empty()).map(|o| o.join(" "))
 }
 
 /// Whether a tool needs confirmation. Fail-safe: only an explicit
@@ -971,110 +1053,56 @@ mod tests {
         assert!(is_write("anything", &[]));
     }
 
-    /// "Open System Settings and turn on dark mode" died at the round limit:
-    /// open, read, click, click is already four of five, before the agent has
-    /// reached the control it needs. Screen runs get a budget matched to the
-    /// read-act-read rhythm; structured runs keep the tight one.
     #[test]
-    fn driving_the_screen_earns_a_longer_round_budget() {
-        // The budget switch as the loop performs it, so the test fails if the
-        // rule changes rather than only if the constants do.
-        let budget_after = |first_tool: &str| {
-            let mut max = MAX_ROUNDS;
-            if is_screen_tool(first_tool) && max == MAX_ROUNDS {
-                max = MAX_SCREEN_ROUNDS;
-            }
-            max
-        };
-        assert_eq!(budget_after("GMAIL_SEND_EMAIL"), MAX_ROUNDS);
-        assert_eq!(budget_after("ALOUD_ORGANIZE_FOLDER"), MAX_ROUNDS);
-        // The read counts, not just the writes: a run already reading the
-        // screen is committed to that rhythm, and waiting for its first click
-        // to raise the budget spends the rounds it needs.
-        assert_eq!(budget_after(aloud_computer::AX_READ), MAX_SCREEN_ROUNDS);
-        assert_eq!(budget_after(aloud_computer::AX_CLICK), MAX_SCREEN_ROUNDS);
+    fn only_our_own_writes_can_end_a_run_early() {
+        let tools = [
+            tool("ALOUD_NOTES_CREATE", false),
+            tool("ALOUD_FINDER_SEARCH", true),
+            tool("ALOUD_SPOTIFY", false),
+            tool("GMAIL_SEND_EMAIL", false),
+        ];
+        let none = serde_json::json!({});
+        assert!(native_write("ALOUD_NOTES_CREATE", &none, &tools));
+        assert!(!native_write("ALOUD_FINDER_SEARCH", &none, &tools));
+        assert!(!native_write(
+            "ALOUD_SPOTIFY",
+            &serde_json::json!({ "action": "now_playing" }),
+            &tools
+        ));
+        assert!(native_write(
+            "ALOUD_SPOTIFY",
+            &serde_json::json!({ "action": "pause" }),
+            &tools
+        ));
+        assert!(!native_write("GMAIL_SEND_EMAIL", &none, &tools));
+        assert!(!native_write(ASK_USER, &none, &tools));
+        assert!(!native_write("ALOUD_BROWSER_TASK", &none, &tools));
     }
 
-    /// Compile-time, because these are relationships between constants: a
-    /// runtime assert on two `const`s is just clippy noise, but the invariants
-    /// still have to hold. "open, read, click, click" is four rounds before the
-    /// first useful step, which is what exhausted the old limit mid-navigation;
-    /// and a screen read must survive one call per round or the agent is forced
-    /// to click on a layout it can no longer see.
-    const _: () = {
-        assert!(MAX_SCREEN_ROUNDS >= 20);
-        assert!(MAX_SCREEN_ROUNDS > MAX_ROUNDS);
-        assert!(MAX_SCREEN_CALLS_PER_TOOL >= MAX_SCREEN_ROUNDS);
-        assert!(MAX_SCREEN_CALLS_PER_TOOL > MAX_CALLS_PER_TOOL);
-    };
-
-    /// The screen read is the one tool whose whole purpose is returning
-    /// something different each time. Serving it from the dedup cache hands the
-    /// model the layout from before its own click, and the next click goes to a
-    /// coordinate that has moved.
+    /// A round with no text, or with a failed or foreign call, goes back to the
+    /// model as before.
     #[test]
-    fn a_screen_read_is_never_answered_from_cache() {
-        // Mirrors the loop's own rule: a repeatable tool skips the dedup and
-        // takes the larger budget.
-        let repeatable = |name: &str| name == aloud_computer::AX_READ;
-        let cap_for = |name: &str| {
-            if repeatable(name) {
-                MAX_SCREEN_CALLS_PER_TOOL
-            } else {
-                MAX_CALLS_PER_TOOL
-            }
-        };
-
-        assert!(repeatable(aloud_computer::AX_READ));
-        assert!(!repeatable("ALOUD_FINDER_SEARCH"));
-        assert_eq!(cap_for(aloud_computer::AX_READ), MAX_SCREEN_CALLS_PER_TOOL);
-        assert_eq!(cap_for("ALOUD_FINDER_SEARCH"), MAX_CALLS_PER_TOOL);
-    }
-
-    /// Screen control is gated once per run rather than per action, so the
-    /// three acting tools must be recognised — and the read must not be, or the
-    /// gate would fire on a tool that changes nothing.
-    #[test]
-    fn every_screen_tool_that_acts_is_gated_and_the_read_is_not() {
-        assert!(is_screen_write(aloud_computer::AX_CLICK));
-        assert!(is_screen_write(aloud_computer::AX_TYPE));
-        assert!(is_screen_write(aloud_computer::AX_KEY));
-        assert!(!is_screen_write(aloud_computer::AX_READ));
-        assert!(!is_screen_write("GMAIL_SEND_EMAIL"));
-    }
-
-    /// The gate's whole contract in one place: the first screen action asks,
-    /// later ones do not, and a refusal re-arms it rather than leaving the run
-    /// approved. Mirrors the `mem::replace` in the loop.
-    #[test]
-    fn screen_control_asks_once_then_stays_approved_unless_refused() {
-        let mut approved = false;
-        let mut gate = |refuse: bool| {
-            let needed = !std::mem::replace(&mut approved, true);
-            if needed && refuse {
-                approved = false;
-            }
-            needed
-        };
-
-        assert!(gate(false), "the first screen action must ask");
-        assert!(!gate(false), "a second must not ask again");
-        assert!(!gate(false));
-
-        // A run where the user says no: the next action asks again.
-        let mut approved = false;
-        let mut gate = |refuse: bool| {
-            let needed = !std::mem::replace(&mut approved, true);
-            if needed && refuse {
-                approved = false;
-            }
-            needed
-        };
-        assert!(gate(true), "the first asks");
-        assert!(
-            gate(false),
-            "after a refusal it must ask again, not proceed"
+    fn an_early_finish_needs_the_models_own_words_and_a_clean_round() {
+        let none: [Option<String>; 0] = [];
+        assert_eq!(
+            finishes_early(Some(" Created the note. "), true, &none).as_deref(),
+            Some("Created the note.")
         );
+        assert_eq!(
+            finishes_early(Some("Created the note."), false, &none),
+            None
+        );
+        assert_eq!(finishes_early(Some("  "), true, &none), None);
+        assert_eq!(finishes_early(None, true, &none), None);
+        // No words from the model, but every write said what it did.
+        let own = [Some("Created the note “Cake”.".to_string())];
+        assert_eq!(
+            finishes_early(None, true, &own).as_deref(),
+            Some("Created the note “Cake”.")
+        );
+        // One write that can't phrase itself sends the round back to the model.
+        let partly = [Some("Paused Spotify.".to_string()), None];
+        assert_eq!(finishes_early(None, true, &partly), None);
     }
 
     #[test]
@@ -1111,6 +1139,24 @@ mod tests {
         assert_eq!(unfinished_reason("I think it looks unfinished?"), None);
         assert_eq!(unfinished_reason("unfinished: lowercase"), None);
         assert_eq!(unfinished_reason("The answer is UNFINISHED"), None);
+    }
+
+    /// An unpaid Cerebras key answers 402 instantly and forever: waiting cannot
+    /// fix it, the next brain can. A malformed request is the same everywhere.
+    #[test]
+    fn unpaid_and_throttled_brains_fail_over_but_bad_requests_do_not() {
+        let failed = |status| LlmError::Failed {
+            status,
+            body: String::new(),
+        };
+        assert!(fails_over(&failed(402)));
+        assert!(fails_over(&failed(503)));
+        assert!(fails_over(&LlmError::RateLimited {
+            model: "qwen-3.8-27b".into(),
+            retry_after: Duration::from_secs(60),
+        }));
+        assert!(!fails_over(&failed(400)));
+        assert!(!fails_over(&LlmError::EmptyOutput));
     }
 
     #[test]

@@ -52,6 +52,9 @@ pub struct Settings {
     /// Gemini key. Agent tool-call parsing runs here — Groq's tokens-per-minute
     /// limit is too low for the agent's heavier calls.
     pub gemini_api_key: String,
+    /// Cerebras key. Commands run here first — see `aloud_agent::brains` —
+    /// and fall back to Gemini when it is unset or out of budget.
+    pub cerebras_api_key: String,
     /// Deepgram key. Always-listening streams the mic to Deepgram's Flux, which
     /// decides where a spoken request ends; without it the mode falls back to a
     /// pause detector and local whisper.
@@ -171,6 +174,7 @@ impl Default for Settings {
             groq_api_key: String::new(),
             composio_api_key: String::new(),
             gemini_api_key: String::new(),
+            cerebras_api_key: String::new(),
             deepgram_api_key: String::new(),
             // Local by default: works with no key and no network.
             engine: aloud_transcribe::Engine::Local,
@@ -305,6 +309,7 @@ impl Settings {
             ("GROQ_API_KEY", &mut self.groq_api_key),
             ("COMPOSIO_API_KEY", &mut self.composio_api_key),
             ("GEMINI_API_KEY", &mut self.gemini_api_key),
+            ("CEREBRAS_API_KEY", &mut self.cerebras_api_key),
             ("DEEPGRAM_API_KEY", &mut self.deepgram_api_key),
         ] {
             if !field.trim().is_empty() {

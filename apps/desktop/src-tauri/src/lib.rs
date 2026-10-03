@@ -480,9 +480,12 @@ fn handle_hotkey(
                 return;
             }
             let pipeline = pipeline.clone();
+            // ponytail: Ask is a second Command key since the merge. The role is
+            // kept so existing bindings fire; fold it into Agent with a settings
+            // migration the next time the hotkey schema changes.
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = pipeline.stop_and_ask().await {
-                    tracing::error!(%e, "ask failed");
+                if let Err(e) = pipeline.stop_and_agent().await {
+                    tracing::error!(%e, "command failed");
                 }
             });
         }

@@ -9,7 +9,11 @@
 //! way `notch.rs` and `aloud_volume` do.
 
 mod catalogue;
+pub mod fast;
+mod media;
+mod notes;
 mod organize;
+mod reminders;
 mod script;
 mod search;
 mod shortcuts;
@@ -106,21 +110,79 @@ pub fn tools(installed: &[aloud_selection::InstalledApp]) -> Vec<NativeTool> {
 /// a window moved, a reminder or a note line added, the clipboard set). Asking "are you sure?" before
 /// opening Safari made every command a two-step chore. Sending, quitting, Shortcuts and file moves or
 /// writes are left out, so they still ask.
-pub fn low_risk(name: &str) -> bool {
+pub fn low_risk(name: &str, args: &Value) -> bool {
+    if name == "ALOUD_WRITE_FILE" {
+        return catalogue::creates_new_file(args);
+    }
     matches!(
         name,
         "ALOUD_OPEN_APP"
-            | "ALOUD_MUSIC_PLAY"
-            | "ALOUD_MUSIC_PAUSE"
-            | "ALOUD_MUSIC_NEXT"
+            | "ALOUD_MUSIC"
+            | "ALOUD_SPOTIFY"
+            | "ALOUD_PHOTO_BOOTH_TAKE_PHOTO"
             | "ALOUD_REMINDERS_ADD"
             | "ALOUD_NOTES_APPEND"
+            | "ALOUD_NOTES_CREATE"
             | "ALOUD_WINDOW_ARRANGE"
             | "ALOUD_BROWSER_TAB"
             | "ALOUD_CLIPBOARD"
             | "ALOUD_FINDER_REVEAL"
             | "ALOUD_SYSTEM_VOLUME"
     )
+}
+
+/// One sentence saying what a native write did, built from its arguments and
+/// result — so a run that only did this needs no second model call to say so.
+/// None for tools whose outcome the model should phrase (reads, searches, file
+/// moves) or when the result lacks what the sentence needs.
+pub fn confirmation(name: &str, args: &Value, result: &Value) -> Option<String> {
+    let arg = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    let got = |key: &str| {
+        result
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    let player = |app: &str| match arg("action")? {
+        "play" => Some(match got("track") {
+            Some(track) => format!("Playing {track}."),
+            None => format!("Opened {app}'s search for {}.", arg("query")?),
+        }),
+        "pause" => Some(format!("Paused {app}.")),
+        "next" | "previous" => Some(match got("track") {
+            Some(track) => format!("Now playing {track}."),
+            None => format!("Changed track in {app}."),
+        }),
+        _ => None,
+    };
+    Some(match name {
+        "ALOUD_NOTES_CREATE" => format!("Created the note “{}”.", got("title").or(arg("title"))?),
+        "ALOUD_NOTES_APPEND" if result.get("created").is_some() => {
+            format!("Created the note “{}”.", got("title")?)
+        }
+        "ALOUD_NOTES_APPEND" => format!("Added to “{}”.", got("title")?),
+        "ALOUD_REMINDERS_ADD" => match arg("due") {
+            Some(due) => format!(
+                "Added a reminder: {}, due {}.",
+                arg("text")?,
+                due.replace('T', " ")
+            ),
+            None => format!("Added a reminder: {}.", arg("text")?),
+        },
+        "ALOUD_MUSIC" => player("Music")?,
+        "ALOUD_SPOTIFY" => player("Spotify")?,
+        "ALOUD_SYSTEM_VOLUME" => format!("Volume at {}%.", result.get("volume")?),
+        "ALOUD_WINDOW_ARRANGE" => format!("Moved the window {}.", arg("position")?),
+        "ALOUD_CLIPBOARD" if arg("action") == Some("write") => "Copied to the clipboard.".into(),
+        "ALOUD_PHOTO_BOOTH_TAKE_PHOTO" => "Taking a photo in Photo Booth.".into(),
+        "ALOUD_BROWSER_TAB" if arg("action") == Some("open") => format!("Opened {}.", arg("url")?),
+        "ALOUD_WRITE_FILE" => format!("Saved {}.", got("wrote")?),
+        _ => return None,
+    })
 }
 
 pub fn execute(name: &str, args: &Value) -> Option<Result<Value, ScriptError>> {
@@ -160,17 +222,72 @@ fn app_installed(app: &str, installed: &[aloud_selection::InstalledApp]) -> bool
 mod tests {
 
     #[test]
+    fn writes_confirm_themselves_and_reads_leave_it_to_the_model() {
+        assert_eq!(
+            confirmation(
+                "ALOUD_NOTES_CREATE",
+                &json!({ "title": "Cake" }),
+                &json!({ "created": true, "title": "Cake shopping list" })
+            )
+            .as_deref(),
+            Some("Created the note “Cake shopping list”.")
+        );
+        assert_eq!(
+            confirmation(
+                "ALOUD_REMINDERS_ADD",
+                &json!({ "text": "Call Ana", "due": "2026-10-03T17:00" }),
+                &json!({ "added": true })
+            )
+            .as_deref(),
+            Some("Added a reminder: Call Ana, due 2026-10-03 17:00.")
+        );
+        assert_eq!(
+            confirmation("ALOUD_SPOTIFY", &json!({ "action": "pause" }), &json!({})).as_deref(),
+            Some("Paused Spotify.")
+        );
+        assert_eq!(
+            confirmation("ALOUD_FINDER_SEARCH", &json!({}), &json!({})),
+            None
+        );
+        assert_eq!(
+            confirmation(
+                "ALOUD_SPOTIFY",
+                &json!({ "action": "now_playing" }),
+                &json!({})
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn sending_quitting_and_file_moves_still_ask_first() {
         for name in [
             "ALOUD_MESSAGES_SEND",
+            "ALOUD_DISCORD_MESSAGE",
             "ALOUD_QUIT_APP",
             "ALOUD_COLLECT_FILES",
-            "ALOUD_WRITE_FILE",
             "ALOUD_ORGANIZE_FOLDER",
         ] {
-            assert!(!low_risk(name), "{name} must keep its confirmation");
+            assert!(
+                !low_risk(name, &json!({})),
+                "{name} must keep its confirmation"
+            );
         }
-        assert!(low_risk("ALOUD_OPEN_APP"));
+        assert!(low_risk("ALOUD_OPEN_APP", &json!({})));
+    }
+
+    /// Creating a new file is undone by deleting it; overwriting one is not
+    /// undone by anything, so that keeps its gate.
+    #[test]
+    fn only_a_brand_new_file_skips_the_write_gate() {
+        let fresh = json!({ "path": "Desktop/aloud-test-never-exists-7f3a.md", "text": "x" });
+        assert!(low_risk("ALOUD_WRITE_FILE", &fresh));
+        let existing = json!({ "path": "Desktop", "text": "x" });
+        assert!(!low_risk("ALOUD_WRITE_FILE", &existing));
+        let appending = json!({ "path": "Desktop/aloud-test-never-exists-7f3a.md", "text": "x", "append": true });
+        assert!(!low_risk("ALOUD_WRITE_FILE", &appending));
+        let outside = json!({ "path": "/etc/aloud-test", "text": "x" });
+        assert!(!low_risk("ALOUD_WRITE_FILE", &outside));
     }
     use super::*;
     use aloud_selection::InstalledApp;
@@ -189,11 +306,9 @@ mod tests {
         // No Music installed → no Music tools.
         let names =
             |apps: &[InstalledApp]| tools(apps).into_iter().map(|t| t.name).collect::<Vec<_>>();
-        assert!(!names(&[]).iter().any(|n| n == "ALOUD_MUSIC_PLAY"));
+        assert!(!names(&[]).iter().any(|n| n == "ALOUD_MUSIC"));
         // Music installed → its tools appear.
-        assert!(names(&[app("Music")])
-            .iter()
-            .any(|n| n == "ALOUD_MUSIC_PLAY"));
+        assert!(names(&[app("Music")]).iter().any(|n| n == "ALOUD_MUSIC"));
     }
 
     #[test]

@@ -8,7 +8,15 @@ use std::process::Command;
 /// The names in the user's Shortcuts library, one per line from `shortcuts
 /// list`. Empty on any machine without Shortcuts set up — which is most — and an
 /// empty list must yield zero tools, never one broken one.
+///
+/// Read once: it is a process spawn, and it used to run on every command.
+/// ponytail: a shortcut added while the app runs appears after a restart.
 pub fn list() -> Vec<String> {
+    static LIBRARY: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    LIBRARY.get_or_init(read).clone()
+}
+
+fn read() -> Vec<String> {
     #[cfg(not(target_os = "macos"))]
     {
         return Vec::new();

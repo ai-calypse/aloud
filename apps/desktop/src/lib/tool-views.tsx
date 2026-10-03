@@ -273,28 +273,39 @@ const VIEWS: Record<string, ToolView> = {
 
   // Native macOS actions (aloud-native). Registered for real labels; the
   // fall-through would render "Aloud: music play" and hide what actually runs.
-  ALOUD_MUSIC_PLAY: {
-    label: (a) => {
-      const q = text(a, "query");
-      return q ? `Playing ${q}` : "Resuming Music";
-    },
-  },
-  ALOUD_MUSIC_PAUSE: { label: () => "Pausing Music" },
-  ALOUD_MUSIC_NEXT: { label: () => "Skipping to the next track" },
-  ALOUD_MUSIC_NOW_PLAYING: { label: () => "Checking what's playing" },
+  ALOUD_MUSIC: { label: (a) => mediaLabel("Music", a) },
+  ALOUD_SPOTIFY: { label: (a) => mediaLabel("Spotify", a) },
   ALOUD_REMINDERS_ADD: {
     label: (a) => {
       const t = text(a, "text");
-      return t ? `Adding a reminder: ${t}` : "Adding a reminder";
+      const due = text(a, "due");
+      if (!t) return "Adding a reminder";
+      return due ? `Adding a reminder: ${t} (${due.replace("T", " ")})` : `Adding a reminder: ${t}`;
+    },
+  },
+  ALOUD_NOTES_CREATE: {
+    label: (a) => {
+      const title = text(a, "title");
+      return title ? `Creating the note "${title}"` : "Creating a note";
+    },
+    body: (a) => {
+      const line = text(a, "body");
+      return line ? (
+        <ToolCard>
+          <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
+            {line}
+          </p>
+        </ToolCard>
+      ) : null;
     },
   },
   ALOUD_NOTES_APPEND: {
     label: (a) => {
       const title = text(a, "title");
-      return title ? `Adding a line to "${title}"` : "Appending to a note";
+      return title ? `Adding to "${title}"` : "Adding to the open note";
     },
     body: (a) => {
-      const line = text(a, "text");
+      const line = text(a, "body");
       return line ? (
         <ToolCard>
           <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
@@ -349,6 +360,48 @@ const VIEWS: Record<string, ToolView> = {
       },
     ],
   },
+  ALOUD_DISCORD_MESSAGE: {
+    label: (a) => {
+      const to = text(a, "to");
+      return to ? `Messaging ${to} on Discord` : "Sending a Discord message";
+    },
+    body: (a) => {
+      const to = text(a, "to");
+      const msg = text(a, "text");
+      return (
+        <ToolCard>
+          {to ? (
+            <p className="m-0 break-all text-ui text-muted-foreground">
+              To: <span className="text-ink">{to}</span>
+            </p>
+          ) : (
+            <p className="m-0 text-ui italic text-warning">
+              No recipient — cancel and ask again.
+            </p>
+          )}
+          {msg ? (
+            <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
+              {msg}
+            </p>
+          ) : (
+            <p className="m-0 text-ui italic text-warning">
+              No message — cancel and ask again.
+            </p>
+          )}
+        </ToolCard>
+      );
+    },
+    edits: [
+      {
+        key: "to",
+        label: "To",
+        placeholder: "Name as it appears in Discord",
+        get: (a) => text(a, "to"),
+        set: (args, value) => ({ ...args, to: value }),
+      },
+    ],
+  },
+  ALOUD_PHOTO_BOOTH_TAKE_PHOTO: { label: () => "Taking a photo in Photo Booth" },
   ALOUD_FINDER_SEARCH: {
     // The grid renders the results; this is just the step label above it.
     label: (a) => {
@@ -450,30 +503,24 @@ const VIEWS: Record<string, ToolView> = {
       return name ? `Quitting ${name}` : "Quitting an app";
     },
   },
-  // Screen control. The click gate is the one confirmation a computer-use run
-  // gets, so its label has to say what will be clicked — the model passes the
-  // element's own text for exactly this, and a bare coordinate pair is a gate
-  // nobody can judge.
-  ALOUD_SCREEN_READ: { label: () => "Reading the screen" },
-  ALOUD_SCREEN_CLICK: {
-    label: (a) => {
-      const what = text(a, "label");
-      return what ? `Clicking "${what}"` : "Clicking on screen";
-    },
-  },
-  ALOUD_SCREEN_TYPE: {
-    label: (a) => {
-      const typed = text(a, "text");
-      return typed ? `Typing "${typed}"` : "Typing on screen";
-    },
-  },
-  ALOUD_SCREEN_KEY: {
-    label: (a) => {
-      const keys = text(a, "keys");
-      return keys ? `Pressing ${keys}` : "Pressing a key";
-    },
-  },
 };
+
+/** "Playing lofi in Spotify", "Pausing Music": one label for every media action. */
+function mediaLabel(app: string, a: Record<string, unknown>): string {
+  const what = text(a, "query") || text(a, "uri");
+  switch (text(a, "action")) {
+    case "play":
+      return what ? `Playing ${what} in ${app}` : `Resuming ${app}`;
+    case "pause":
+      return `Pausing ${app}`;
+    case "next":
+      return `Skipping to the next track in ${app}`;
+    case "previous":
+      return `Going back a track in ${app}`;
+    default:
+      return `Checking what's playing in ${app}`;
+  }
+}
 
 /** The gate's editable fields for a tool; empty for the yes/no majority. */
 export function editsFor(name: string): Editable[] {

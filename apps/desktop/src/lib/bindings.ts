@@ -894,6 +894,11 @@ export type Settings = {
 	 */
 	geminiApiKey?: string,
 	/**
+	 *  Cerebras key. Commands run here first — see `aloud_agent::brains` —
+	 *  and fall back to Gemini when it is unset or out of budget.
+	 */
+	cerebrasApiKey?: string,
+	/**
 	 *  Deepgram key. Always-listening streams the mic to Deepgram's Flux, which
 	 *  decides where a spoken request ends; without it the mode falls back to a
 	 *  pause detector and local whisper.

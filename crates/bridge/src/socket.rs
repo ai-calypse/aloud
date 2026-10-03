@@ -150,6 +150,8 @@ mod tests {
 
     #[test]
     fn the_socket_path_is_stable_and_not_keyed_by_pid() {
+        // Reads HOME twice; a test swapping it in between failed this at random.
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let Ok(path) = socket_path() else { return };
         assert!(path.ends_with("bridge.sock"));
         assert_eq!(path, socket_path().unwrap(), "the path must not vary");
@@ -249,13 +251,14 @@ mod tests {
         });
     }
 
+    /// Held by every test that reads or swaps `HOME`.
+    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// `HOME` is process-wide, so these tests must not run beside each other.
     /// A mutex is cheaper than threading a base path through the real API for
     /// the sake of the tests.
     fn temp_env_home(home: &std::path::Path, body: impl FnOnce()) {
-        use std::sync::Mutex;
-        static LOCK: Mutex<()> = Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let previous = std::env::var_os("HOME");
         // SAFETY: single-threaded within the lock, and restored below.

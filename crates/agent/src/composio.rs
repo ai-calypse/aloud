@@ -90,6 +90,94 @@ const STOP_WORDS: &[&str] = &[
     "please", "about", "have", "what", "your", "there",
 ];
 
+/// Words that mark a command as being about a toolkit. Offering every connected
+/// toolkit cost 23–35k tokens a request (Google Contacts alone was up to 18k),
+/// which tripped Cerebras's tokens-per-minute budget after a handful of
+/// commands and made "create a note" pay for Gmail and GitHub. ponytail:
+/// hand-kept for the common toolkits — one not listed is always offered, and a
+/// gated one is still loadable by the model (`ALOUD_MORE_TOOLS`) on a miss.
+const TOOLKIT_WORDS: &[(&str, &[&str])] = &[
+    (
+        "gmail",
+        &[
+            "email",
+            "emails",
+            "mail",
+            "mails",
+            "inbox",
+            "gmail",
+            "unread",
+            "reply",
+            "draft",
+            "drafts",
+            "newsletter",
+            "sender",
+        ],
+    ),
+    (
+        "googlecalendar",
+        &[
+            "calendar",
+            "meeting",
+            "meetings",
+            "event",
+            "events",
+            "schedule",
+            "appointment",
+            "invite",
+            "agenda",
+            "availability",
+            "busy",
+            "free",
+        ],
+    ),
+    (
+        "googlecontacts",
+        &["contact", "contacts", "phone", "address"],
+    ),
+    (
+        "github",
+        &[
+            "github",
+            "issue",
+            "issues",
+            "pull",
+            "pr",
+            "prs",
+            "repo",
+            "repos",
+            "repository",
+            "commit",
+            "commits",
+            "branch",
+            "gist",
+            "star",
+        ],
+    ),
+    ("slack", &["slack", "channel", "dm", "workspace", "thread"]),
+    ("notion", &["notion", "wiki"]),
+    ("linear", &["linear", "ticket", "tickets"]),
+    ("googledrive", &["drive", "file", "files", "folder"]),
+    ("googledocs", &["doc", "docs", "document", "documents"]),
+    (
+        "googlesheets",
+        &["sheet", "sheets", "spreadsheet", "spreadsheets"],
+    ),
+];
+
+/// Whether `command` is plausibly about `toolkit`, by [`TOOLKIT_WORDS`]. A
+/// toolkit with no entry is assumed relevant: offering it costs tokens, hiding
+/// it costs the command.
+pub fn concerns(toolkit: &str, command: &str) -> bool {
+    let Some((_, words)) = TOOLKIT_WORDS.iter().find(|(slug, _)| *slug == toolkit) else {
+        return true;
+    };
+    command
+        .split(|c: char| !c.is_alphanumeric())
+        .map(str::to_lowercase)
+        .any(|said| words.contains(&said.as_str()))
+}
+
 /// Context budget per connected toolkit for one command. Uncapped, three
 /// toolkits measured ~77k tokens of schema, re-sent every round of the loop.
 pub const TOOLS_PER_TOOLKIT: usize = 8;
@@ -158,6 +246,20 @@ impl ToolDef {
     }
 }
 
+/// How long a fetched page of the tool catalogue is reused. It changes with Composio releases, not
+/// between commands, and fetching it put a round trip in front of every command.
+const CATALOGUE_TTL: Duration = Duration::from_secs(600);
+
+/// Catalogue responses by hash of (credential, path), so a key change never serves another
+/// account's view. ponytail: never evicted — a handful of toolkits is a handful of entries.
+fn catalogue(
+) -> &'static std::sync::Mutex<std::collections::HashMap<u64, (std::time::Instant, Value)>> {
+    static CACHE: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<u64, (std::time::Instant, Value)>>,
+    > = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
 pub struct ComposioClient {
     client: reqwest::Client,
     api_key: String,
@@ -205,11 +307,30 @@ impl ComposioClient {
     /// Selection is per command, not per build. Pass an empty `command` for the
     /// pins plus a stable head of the toolkit, which the settings pane wants.
     pub async fn available_tools(&self, command: &str) -> Result<Vec<ToolDef>> {
+        Ok(self.tools_for(command, |_| true).await?.0)
+    }
+
+    /// Like [`Self::available_tools`], but only for the toolkits `offer`
+    /// accepts; the rest come back by name so the model can load one if the
+    /// command needs it after all.
+    pub async fn tools_for(
+        &self,
+        command: &str,
+        offer: impl Fn(&str) -> bool,
+    ) -> Result<(Vec<ToolDef>, Vec<String>)> {
         let connections = self.connections().await?;
-        let active: Vec<String> = connections
+        let connected: Vec<String> = connections
             .iter()
             .filter(|c| c.is_active())
             .map(|c| c.toolkit_slug.clone())
+            .collect();
+        let (active, skipped): (Vec<String>, Vec<String>) =
+            connected.iter().cloned().partition(|slug| offer(slug));
+        let skipped = dedup(skipped);
+        let active: Vec<String> = connected
+            .iter()
+            .filter(|slug| active.contains(slug))
+            .cloned()
             .collect();
 
         // Toolkits the user has connected more than once — only those need to
@@ -219,9 +340,17 @@ impl ComposioClient {
             .filter(|slug| active.iter().filter(|s| *s == slug).count() > 1)
             .collect();
 
+        // Concurrently: one at a time, five connected toolkits were five round trips before the
+        // model was even asked.
+        let loaded =
+            futures_util::future::join_all(dedup(active).into_iter().map(|slug| async move {
+                let found = self.toolkit_tools(&slug, command, TOOLS_PER_TOOLKIT).await;
+                (slug, found)
+            }))
+            .await;
         let mut tools = Vec::new();
-        for slug in dedup(active) {
-            match self.toolkit_tools(&slug, command, TOOLS_PER_TOOLKIT).await {
+        for (slug, found) in loaded {
+            match found {
                 Ok(mut found) => tools.append(&mut found),
                 // One broken toolkit must not cost the user the others.
                 Err(e) => tracing::warn!(%e, %slug, "could not load toolkit tools"),
@@ -234,7 +363,7 @@ impl ComposioClient {
                 add_account_argument(&mut tool.parameters, &addresses);
             }
         }
-        Ok(tools)
+        Ok((tools, skipped))
     }
 
     /// The known addresses across every connection of the given toolkits, for
@@ -712,8 +841,35 @@ impl ComposioClient {
     // MARK: transport
 
     async fn get(&self, path: &str) -> Result<Value> {
-        self.request(reqwest::Method::GET, path, None, Duration::from_secs(30))
-            .await
+        // Only the tool catalogue: connections stay live, so an account connected a moment ago
+        // shows up on the next command.
+        let cacheable = path.starts_with("/tools?");
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (&self.api_key, path).hash(&mut hasher);
+            hasher.finish()
+        };
+        if cacheable {
+            let hit = catalogue().lock().ok().and_then(|c| c.get(&key).cloned());
+            if let Some((at, value)) = hit.filter(|(at, _)| at.elapsed() < CATALOGUE_TTL) {
+                tracing::debug!(
+                    path,
+                    age_s = at.elapsed().as_secs(),
+                    "tool catalogue from cache"
+                );
+                return Ok(value);
+            }
+        }
+        let value = self
+            .request(reqwest::Method::GET, path, None, Duration::from_secs(30))
+            .await?;
+        if cacheable {
+            if let Ok(mut cache) = catalogue().lock() {
+                cache.insert(key, (std::time::Instant::now(), value.clone()));
+            }
+        }
+        Ok(value)
     }
 
     async fn post(&self, path: &str, body: &Value, timeout: Duration) -> Result<Value> {
@@ -1093,6 +1249,18 @@ fn error_json(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_toolkits_the_command_is_about_are_offered() {
+        assert!(concerns("gmail", "summarize my unread emails"));
+        assert!(concerns("googlecalendar", "what's on my calendar tomorrow"));
+        assert!(concerns("github", "list my open PRs"));
+        assert!(!concerns("gmail", "make a cake list and add it to a note"));
+        assert!(!concerns("googlecontacts", "create a new note"));
+        assert!(!concerns("github", "remind me to call Ana at 5"));
+        // An unlisted toolkit is offered rather than silently hidden.
+        assert!(concerns("hubspot", "create a new note"));
+    }
 
     /// Three Gmail accounts tie on the longest-match rule, so the user has to
     /// be able to name one — and the name arrives from a microphone, not a

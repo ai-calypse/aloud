@@ -219,30 +219,6 @@ pub struct Task {
     asked: bool,
 }
 
-/// The fast path: the engine routes a spoken command with one Jev request and starts it when it is a
-/// Mac or web task. `Ok(None)` hands it back to the caller (email, calendar, answers, unsure routing).
-pub(crate) async fn command(
-    dir: &Path,
-    text: &str,
-    front: Option<&str>,
-) -> Result<Option<Task>, String> {
-    let engine = engine(dir).await?;
-    let events = engine.events.subscribe();
-    let result = engine
-        .call("command", json!({ "text": text, "front": front }))
-        .await?;
-    let Some(id) = result["id"].as_str() else {
-        return Ok(None);
-    };
-    Ok(Some(Task {
-        engine,
-        id: id.to_string(),
-        events,
-        started: tokio::time::Instant::now(),
-        asked: false,
-    }))
-}
-
 pub(crate) async fn start_task(dir: &Path, method: &str, params: Value) -> Result<Task, String> {
     let engine = engine(dir).await?;
     // Subscribe before starting so the first step can't be missed.
@@ -262,15 +238,6 @@ pub(crate) async fn start_task(dir: &Path, method: &str, params: Value) -> Resul
 }
 
 impl Task {
-    /// Which tool this task belongs to: Mac task ids start with "m-".
-    pub fn tool(&self) -> &'static str {
-        if self.id.starts_with("m-") {
-            crate::MAC_TASK
-        } else {
-            crate::BROWSER_TASK
-        }
-    }
-
     /// The next update. Returns within ~250 ms even when nothing happened (`None`), so the caller can
     /// check for cancellation between waits.
     pub async fn next(&mut self) -> Option<Update> {
@@ -369,12 +336,10 @@ fn describe(step: &Value) -> String {
         "TYPE_TEXT" => format!("Typed “{text}” into “{target}”"),
         "SELECT" => format!("Chose “{target}”"),
         "OPEN_URL" => format!("Opened {text}"),
-        "MENU" => format!("Chose menu {target}"),
         "PRESS_ENTER" | "PRESS_RETURN" => "Pressed Return".to_string(),
         "SCROLL_DOWN" => "Scrolled down".to_string(),
         "SCROLL_UP" => "Scrolled up".to_string(),
         "WAIT" => "Waited for the page".to_string(),
-        "QUICK" => target.to_string(),
         "done" => "Done".to_string(),
         "stuck" => "Stopped".to_string(),
         other => other.to_string(),

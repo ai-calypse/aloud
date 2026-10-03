@@ -3,6 +3,10 @@
 //! There is no Ask window — the answer grows into the same panel that said
 //! "Listening…". `overlay::show_answer` owns the hand-off; this module only
 //! produces the text.
+//!
+//! ponytail: unreachable since Ask merged into Command mode — nothing calls
+//! `answer` any more, and the panel's typed follow-up needs it open. Deleted,
+//! with its overlay.tsx half, in the overlay split.
 
 use aloud_store::Settings;
 use anyhow::{bail, Result};

@@ -5,11 +5,10 @@
   "description": "Browser and Mac-app task engine for Aloud's agent (from voice-mac): Jev picks each step.",
   "scripts": {
     "typecheck": "tsc",
-    "check": "node browser.check.ts"
+    "check": "node web.check.ts"
   },
   "dependencies": {
-    "@typesafe-ai/sdk": "^0.6.0",
-    "playwright": "^1.63.0"
+    "@typesafe-ai/sdk": "^0.6.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

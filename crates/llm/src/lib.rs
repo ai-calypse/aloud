@@ -17,6 +17,11 @@ use tracing::Instrument;
 
 pub const DEFAULT_BASE_URL: &str = "https://api.groq.com/openai/v1";
 const TIMEOUT: Duration = Duration::from_secs(30);
+/// Output cap on a tool turn. Cerebras charges the *requested* maximum against
+/// its tokens-per-minute budget, and gpt-oss's 40k default 429'd the second call
+/// of a command; a tool call is ~150–400 tokens and a spoken answer well under
+/// this.
+const TOOL_MAX_TOKENS: u32 = 2048;
 
 /// The transcript was empty or pure filler. The cleanup prompt is specified to
 /// return exactly this sentinel, which callers treat as "paste nothing".
@@ -164,6 +169,8 @@ struct ChatRequest<'a> {
     reasoning_effort: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     include_reasoning: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
 }
 
 /// How much a given model should think. Worth real time: cleanup is a
@@ -177,6 +184,13 @@ fn reasoning_for(model: &str) -> (Option<&'static str>, Option<bool>) {
     match model {
         "openai/gpt-oss-20b" | "openai/gpt-oss-120b" => (Some("low"), Some(false)),
         "qwen/qwen3.6-27b" | "qwen/qwen3-32b" => (Some("none"), Some(false)),
+        // Cerebras: picking a tool needs no thinking — 0.13s server time with
+        // it off against 0.3–0.4s on, same choice. `include_reasoning` is
+        // Groq's field, not theirs.
+        "qwen-3.8-27b" => (Some("none"), None),
+        // Gemini 3 Flash thinks at "medium" unless told, which is most of a
+        // second before the first token of a voice command.
+        m if m.starts_with("gemini-3") => (Some("minimal"), None),
         _ => (None, None),
     }
 }
@@ -291,6 +305,7 @@ impl LlmClient {
                 tool_choice: None,
                 reasoning_effort,
                 include_reasoning,
+                max_tokens: None,
             })
             .send()
             .await
@@ -385,6 +400,7 @@ impl LlmClient {
                 tool_choice: tools.map(|_| "auto"),
                 reasoning_effort,
                 include_reasoning,
+                max_tokens: Some(TOOL_MAX_TOKENS),
             })
             .send()
             .await
@@ -433,6 +449,7 @@ impl LlmClient {
                 tool_choice: None,
                 reasoning_effort,
                 include_reasoning,
+                max_tokens: None,
             })
             .send()
             .await
@@ -628,6 +645,8 @@ mod tests {
             reasoning_for("qwen/qwen3.6-27b"),
             (Some("none"), Some(false))
         );
+        assert_eq!(reasoning_for("qwen-3.8-27b"), (Some("none"), None));
+        assert_eq!(reasoning_for("gemini-3.5-flash"), (Some("minimal"), None));
         assert_eq!(reasoning_for("llama-3.3-70b-versatile"), (None, None));
         assert_eq!(reasoning_for("whatever-the-user-typed"), (None, None));
     }

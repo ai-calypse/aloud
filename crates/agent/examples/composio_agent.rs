@@ -1,6 +1,6 @@
-//! Exercises the real Composio + Gemini tool loop against live APIs, without
-//! launching the app. Keys come from settings/.env exactly as the app loads
-//! them (Groq/Gemini/Composio).
+//! Exercises the real Composio tool loop against live APIs, without launching
+//! the app, on the same brains the app uses (Cerebras, then Gemini). Keys come
+//! from settings/.env exactly as the app loads them.
 //!
 //! Run from the repo root so the `.env` walk finds the root file:
 //!
@@ -13,9 +13,6 @@
 use aloud_agent::{run_tool_loop, ComposioClient, LoopEvent};
 use aloud_store::Settings;
 
-const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
-const GEMINI_MODEL: &str = "gemini-3.1-flash-lite";
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let command = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
@@ -25,21 +22,22 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let settings = Settings::load();
-    if settings.gemini_api_key.trim().is_empty() {
-        anyhow::bail!("no GEMINI_API_KEY (settings or .env)");
+    let brains = aloud_agent::brains(&settings.cerebras_api_key, &settings.gemini_api_key)?;
+    if brains.is_empty() {
+        anyhow::bail!("no CEREBRAS_API_KEY or GEMINI_API_KEY (settings or .env)");
     }
     if settings.composio_api_key.trim().is_empty() {
         anyhow::bail!("no COMPOSIO_API_KEY (settings or .env)");
     }
 
-    let llm = aloud_llm::LlmClient::new(&settings.gemini_api_key, Some(GEMINI_BASE_URL))?;
     let composio = ComposioClient::new(&settings.composio_api_key)?;
 
-    println!("→ selecting connected tools for this command…");
-    let tools = composio.available_tools(&command).await?;
-    if tools.is_empty() {
-        anyhow::bail!("no account connected in Composio");
-    }
+    // The same tools the app offers: the Mac's own, the browser task, and the
+    // connected services the command is about.
+    println!("→ selecting tools for this command…");
+    let installed = aloud_selection::installed_apps();
+    let aloud_agent::CommandTools { tools, more } =
+        aloud_agent::command_tools(&command, &installed, Some(&composio)).await;
     println!(
         "  tools available: {}",
         tools
@@ -50,12 +48,13 @@ async fn main() -> anyhow::Result<()> {
     );
 
     println!("→ command: {command}\n");
+    let started = std::time::Instant::now();
     let answer = run_tool_loop(
-        &llm,
-        GEMINI_MODEL,
+        &brains,
         &composio,
         &command,
         &tools,
+        &more,
         |event| match event {
             LoopEvent::Planned { names } => {
                 println!("  [plan] {}", names.join(" → "));
@@ -91,6 +90,9 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
-    println!("\n=== answer ===\n{answer}");
+    println!(
+        "\n=== answer ({:.2}s) ===\n{answer}",
+        started.elapsed().as_secs_f32()
+    );
     Ok(())
 }

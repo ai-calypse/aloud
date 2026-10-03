@@ -48,11 +48,11 @@ pub enum Phase {
 }
 
 /// Whether a dictation actually produced text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Outcome {
     Pasted,
-    /// Answered in the Ask panel rather than pasted.
-    Asked,
+    /// "Hey flow, …" — a command for the agent, not text to paste.
+    Command(String),
     /// Silence or filler only — a normal result, not a failure.
     NoSpeech,
     /// Escape landed while the work was in flight.
@@ -479,7 +479,14 @@ impl Pipeline {
 
         match &result {
             Ok(outcome) => {
-                span.record("outcome", format!("{outcome:?}").to_lowercase());
+                // The variant only: a command's words do not belong in the timings DB.
+                let name = match outcome {
+                    Outcome::Pasted => "pasted",
+                    Outcome::Command(_) => "command",
+                    Outcome::NoSpeech => "nospeech",
+                    Outcome::Cancelled => "cancelled",
+                };
+                span.record("outcome", name);
             }
             Err(_) => {
                 span.record("outcome", "error");
@@ -490,15 +497,26 @@ impl Pipeline {
         match &result {
             Ok(Outcome::Pasted) => self.emit(Phase::Done),
             Ok(Outcome::NoSpeech) => self.emit(Phase::NoSpeech),
-            // The Ask panel is the feedback; the pill would just cover it. A
+            // The agent's panel is the feedback; the pill would just cover it. A
             // cancel is the user's own doing and needs no report.
-            Ok(Outcome::Asked) | Ok(Outcome::Cancelled) => self.emit(Phase::Idle),
+            Ok(Outcome::Command(_)) | Ok(Outcome::Cancelled) => self.emit(Phase::Idle),
             Err(e) => {
                 tracing::error!(%e, "dictation failed");
                 self.emit_error(e);
             }
         }
-        result.map(|_| ())
+        // After the select!, not inside it: Escape there drops the future, which
+        // would abandon the agent mid-tool with a gate still open. The
+        // generation gate stops it between tools instead, as the Command key does.
+        match result? {
+            Outcome::Command(command) => {
+                crate::agent::run(&self.app, command, &self.settings(), false, || {
+                    self.generation() != generation
+                })
+                .await
+            }
+            _ => Ok(()),
+        }
     }
 
     /// The shared shape of a stop: take the recorder, show Transcribing, run
@@ -630,11 +648,10 @@ impl Pipeline {
             return Ok(Outcome::NoSpeech);
         }
 
-        // "Hey flow, what does this mean?" is a question, not dictation.
-        if let Some(question) = aloud_llm::ask::question_from_trigger(&raw) {
-            tracing::info!(%question, "spoken ask trigger");
-            crate::ask::answer(&self.app, question, &settings).await?;
-            return Ok(Outcome::Asked);
+        // "Hey flow, what does this mean?" is a command, not dictation.
+        if let Some(command) = aloud_llm::ask::question_from_trigger(&raw) {
+            tracing::info!(%command, "spoken command trigger");
+            return Ok(Outcome::Command(command));
         }
 
         // Applied to a working copy: history still records against the real
@@ -1016,41 +1033,10 @@ impl Pipeline {
             .await
     }
 
-    /// Stops capturing and answers the question, rather than pasting it.
-    ///
-    /// The Ask hotkey means the whole utterance is a question, so no spoken
-    /// trigger phrase is needed.
-    #[tracing::instrument(
-        name = "utterance",
-        skip_all,
-        fields(
-            utterance_id = next_utterance_id(),
-            mode = "ask",
-            ok = tracing::field::Empty,
-        )
-    )]
-    pub async fn stop_and_ask(&self) -> Result<()> {
-        // The panel is the feedback; the pill only stays for an error.
-        self.run_stage(Phase::Idle, |r| self.transcribe_and_ask(r))
-            .await
-    }
-
-    async fn transcribe_and_ask(&self, captured: Captured) -> Result<()> {
-        let (question, settings, _) = self.capture(captured, false).await?;
-
-        if question.trim().is_empty() {
-            return Ok(());
-        }
-        // Tolerate a trigger phrase said out of habit while holding the key.
-        let question = aloud_llm::ask::question_from_trigger(&question).unwrap_or(question);
-        crate::ask::answer(&self.app, question, &settings)
-            .instrument(tracing::info_span!("ask_answer"))
-            .await
-    }
-
     /// Stops capturing and runs the spoken command as an agent action,
-    /// rather than pasting it. Like ask, the whole utterance is the command,
-    /// so no spoken trigger phrase is needed.
+    /// rather than pasting it. The whole utterance is the command, so no spoken
+    /// trigger phrase is needed. Both the Command key and the old Ask key land
+    /// here: the agent answers questions as well as acting.
     #[tracing::instrument(
         name = "utterance",
         skip_all,
@@ -1072,8 +1058,11 @@ impl Pipeline {
         if command.trim().is_empty() {
             return Ok(());
         }
-        // Tolerate a trigger phrase said out of habit while holding the key.
-        let command = aloud_agent::command_from_trigger(&command).unwrap_or(command);
+        // Tolerate a trigger phrase said out of habit while holding the key —
+        // "hey agent" or, since Ask became Command, "hey flow".
+        let command = aloud_agent::command_from_trigger(&command)
+            .or_else(|| aloud_llm::ask::question_from_trigger(&command))
+            .unwrap_or(command);
         // The same generation gate the paste path uses: an Escape bumps the
         // counter, so a run holding a stale one knows to stop. Polled rather
         // than raced against a `select!` because a dropped agent future would

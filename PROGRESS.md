@@ -38,6 +38,7 @@ untestable; check the claim before repeating it.
 | `crates/paste` — clipboard + paste | ✅ verified at system level |
 | `crates/transcribe` — local + cloud | ✅ local verified end-to-end |
 | `crates/llm` — chat, prompts, limits | ✅ unit-tested; no live API |
+| Command mode overhaul — fast path, one brain, Mac intent tools | ✅ eval 44/44 on both brains; Notes/Reminders/Spotify/Cursor verified on hardware |
 | `crates/notes` — markdown + search | ✅ verified on real notes |
 | `crates/store` — settings, history, stats | ✅ |
 | `crates/agent` — tool loop, Composio, cache | ✅ unit-tested; no live API |

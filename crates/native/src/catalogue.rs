@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use crate::organize;
 use crate::script::{self, ScriptError};
 use crate::search;
+use crate::{media, notes, reminders};
 
 /// Pulls a required string argument, or a readable error the model can recover
 /// from — a missing field is the model's mistake, not a permission problem.
@@ -69,17 +70,7 @@ fn frontmost_app_name() -> Result<String, ScriptError> {
 /// the same name. `-a` activates a running instance rather than starting a
 /// second, which is what "switch to Safari" has to mean.
 fn open_one(name: &str) -> Result<(), ScriptError> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let bundle = [
-        format!("/Applications/{name}.app"),
-        format!("/System/Applications/{name}.app"),
-        format!("/System/Applications/Utilities/{name}.app"),
-        format!("{home}/Applications/{name}.app"),
-    ]
-    .into_iter()
-    .find(|p| std::path::Path::new(p).exists())
-    .ok_or_else(|| ScriptError::Failed(format!("no application named {name} is installed")))?;
-
+    let bundle = bundle_path(name)?;
     let status = std::process::Command::new("/usr/bin/open")
         .args(["-a", &bundle])
         .status()
@@ -89,6 +80,20 @@ fn open_one(name: &str) -> Result<(), ScriptError> {
     } else {
         Err(ScriptError::Failed(format!("could not open {name}")))
     }
+}
+
+/// Where an installed app's bundle is, user-installed first.
+fn bundle_path(name: &str) -> Result<String, ScriptError> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    [
+        format!("/Applications/{name}.app"),
+        format!("/System/Applications/{name}.app"),
+        format!("/System/Applications/Utilities/{name}.app"),
+        format!("{home}/Applications/{name}.app"),
+    ]
+    .into_iter()
+    .find(|p| std::path::Path::new(p).exists())
+    .ok_or_else(|| ScriptError::Failed(format!("no application named {name} is installed")))
 }
 
 /// Waits for `name` to actually reach the front.
@@ -233,6 +238,15 @@ fn write_home_file(path: &str, text: &str, append: bool) -> Result<Value, Script
     }))
 }
 
+/// Whether a write would only create a file that does not exist yet — the one
+/// file write too small to confirm, since deleting it undoes it. Overwriting or
+/// appending to an existing file still asks.
+pub(crate) fn creates_new_file(args: &Value) -> bool {
+    let append = args.get("append").and_then(Value::as_bool).unwrap_or(false);
+    let path = args.get("path").and_then(Value::as_str).unwrap_or_default();
+    !append && !path.is_empty() && under_home(path).is_ok_and(|p| !p.exists())
+}
+
 /// `path`, or `path` with a numeric suffix when the name is taken — two files
 /// called `photo.png` from different folders are two different photos.
 fn free_name(path: &std::path::Path) -> std::path::PathBuf {
@@ -328,106 +342,115 @@ pub const ACTIONS: &[Action] = &[
         run: search::run,
     },
     Action {
-        name: "ALOUD_MUSIC_NOW_PLAYING",
-        description: "Get the name and artist of the track Music is currently \
-                      playing, or report that nothing is playing.",
-        app: "Music",
-        read_only: true,
-        params: || json!({ "type": "object", "properties": {} }),
-        run: |_args| {
-            // `player state` avoids raising an error when nothing is loaded.
-            let out = script::run(
-                "Music",
-                r#"tell application "Music"
-                    if player state is stopped then return "stopped"
-                    return (get name of current track) & " — " & (get artist of current track)
-                end tell"#,
-            )?;
-            if out == "stopped" {
-                Ok(json!({ "playing": false }))
-            } else {
-                Ok(json!({ "playing": true, "track": out }))
-            }
-        },
-    },
-    Action {
-        name: "ALOUD_MUSIC_PLAY",
-        description: "Start or resume playback in Music. If `query` is given, \
-                      search the library and play the best match; otherwise \
-                      resume whatever is loaded.",
+        name: "ALOUD_MUSIC",
+        description: "Control the Music app: play (with `query`, play the best match from the \
+                      library; without, resume), pause, next, previous, or now_playing.",
         app: "Music",
         read_only: false,
         params: || {
             json!({
                 "type": "object",
+                "required": ["action"],
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Optional song, album, or artist to search \
-                                        the library for and play."
-                    }
+                    "action": { "type": "string", "enum": ["play", "pause", "next", "previous", "now_playing"] },
+                    "query": { "type": "string", "description": "For play: a song, album or artist in the library." }
                 }
             })
         },
         run: |args| {
-            let query = args.get("query").and_then(Value::as_str).unwrap_or("");
-            if query.is_empty() {
-                script::run("Music", r#"tell application "Music" to play"#)?;
-                return Ok(json!({ "played": "resumed" }));
-            }
-            // Play the first library track whose name or artist matches. `whose`
-            // filters in-app, so no track list crosses the AppleScript bridge.
-            let q = script::escape(query);
-            let source = format!(
-                r#"tell application "Music"
-                    set hits to (every track of library playlist 1 whose name contains "{q}" or artist contains "{q}")
-                    if hits is {{}} then return "none"
-                    play (item 1 of hits)
-                    return (get name of current track) & " — " & (get artist of current track)
-                end tell"#
-            );
-            let out = script::run("Music", &source)?;
-            if out == "none" {
-                Ok(
-                    json!({ "played": false, "reason": format!("nothing in the library matched {query:?}") }),
-                )
-            } else {
-                Ok(json!({ "played": true, "track": out }))
-            }
-        },
-    },
-    Action {
-        name: "ALOUD_MUSIC_PAUSE",
-        description: "Pause playback in Music.",
-        app: "Music",
-        read_only: false,
-        params: || json!({ "type": "object", "properties": {} }),
-        run: |_args| {
-            script::run("Music", r#"tell application "Music" to pause"#)?;
-            Ok(json!({ "paused": true }))
-        },
-    },
-    Action {
-        name: "ALOUD_MUSIC_NEXT",
-        description: "Skip to the next track in Music.",
-        app: "Music",
-        read_only: false,
-        params: || json!({ "type": "object", "properties": {} }),
-        run: |_args| {
-            let out = script::run(
+            let action = required_str(args, "action")?;
+            let query = args
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            // `whose` filters in-app, so no track list crosses the bridge; `player state` avoids an
+            // error when nothing is loaded.
+            let out = script::run_jxa(
                 "Music",
-                r#"tell application "Music"
-                    next track
-                    return (get name of current track) & " — " & (get artist of current track)
-                end tell"#,
+                r#"const M = Application("Music");
+                const now = () => M.playerState() === "stopped" ? null : M.currentTrack.name() + " — " + M.currentTrack.artist();
+                if (ARG.action === "play" && ARG.query) {
+                    const hits = M.libraryPlaylists[0].tracks.whose({ _or: [{ name: { _contains: ARG.query } }, { artist: { _contains: ARG.query } }] })();
+                    if (!hits.length) return JSON.stringify({ played: false, reason: "nothing in the library matched " + ARG.query });
+                    hits[0].play();
+                } else if (ARG.action === "play") M.play();
+                else if (ARG.action === "pause") M.pause();
+                else if (ARG.action === "next") M.nextTrack();
+                else if (ARG.action === "previous") M.previousTrack();
+                // The player reports its old state for a moment after a command; reading it at
+                // once had a pause answer "playing".
+                if (ARG.action === "pause") return JSON.stringify({ paused: true });
+                if (ARG.action !== "now_playing") delay(0.6);
+                return JSON.stringify({ state: M.playerState(), track: now() });"#,
+                &json!({ "action": action, "query": query }),
             )?;
-            Ok(json!({ "skipped": true, "track": out }))
+            Ok(serde_json::from_str(&out).unwrap_or_else(|_| json!({ "done": action })))
+        },
+    },
+    Action {
+        name: "ALOUD_SPOTIFY",
+        description: "Control the Spotify app: play, pause, next, previous, or now_playing. To \
+                      play something specific give `uri` (a spotify: URI or an open.spotify.com \
+                      link). With only `query`, Spotify opens its search for it, since the app \
+                      cannot search on its own — say so in your answer.",
+        app: "Spotify",
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                    "action": { "type": "string", "enum": ["play", "pause", "next", "previous", "now_playing"] },
+                    "uri": { "type": "string", "description": "spotify:… URI or open.spotify.com link to play." },
+                    "query": { "type": "string", "description": "What to search for when there is no URI." }
+                }
+            })
+        },
+        run: |args| {
+            let action = required_str(args, "action")?;
+            let uri = args
+                .get("uri")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(|link| {
+                    media::spotify_uri(link).ok_or_else(|| {
+                        ScriptError::Failed(format!("{link:?} is not a Spotify link or URI"))
+                    })
+                })
+                .transpose()?;
+            // ponytail: Spotify's scripting has no search, so a bare query opens the search page and
+            // stops there. A connected Spotify search (Web API via Composio) that returns a URI is
+            // the upgrade; one-off users of dev-mode apps are capped at 5 since Feb 2026.
+            let out = script::run_jxa(
+                "Spotify",
+                r#"const S = Application("Spotify");
+                const now = () => { try { return S.currentTrack.name() + " — " + S.currentTrack.artist(); } catch (e) { return null; } };
+                if (ARG.action === "play" && ARG.uri) S.playTrack(ARG.uri);
+                else if (ARG.action === "play" && ARG.query) {
+                    const app = Application.currentApplication(); app.includeStandardAdditions = true;
+                    app.openLocation("spotify:search:" + encodeURIComponent(ARG.query));
+                    return JSON.stringify({ searched: ARG.query, note: "opened Spotify's search; pick a result to play" });
+                }
+                else if (ARG.action === "play") S.play();
+                else if (ARG.action === "pause") S.pause();
+                else if (ARG.action === "next") S.nextTrack();
+                else if (ARG.action === "previous") S.previousTrack();
+                // The player reports its old state for a moment after a command; reading it at
+                // once had a pause answer "playing".
+                if (ARG.action === "pause") return JSON.stringify({ paused: true });
+                if (ARG.action !== "now_playing") delay(0.6);
+                return JSON.stringify({ state: S.playerState(), track: now() });"#,
+                &json!({ "action": action, "uri": uri, "query": args.get("query").and_then(Value::as_str) }),
+            )?;
+            Ok(serde_json::from_str(&out).unwrap_or_else(|_| json!({ "done": action })))
         },
     },
     Action {
         name: "ALOUD_REMINDERS_ADD",
-        description: "Add a reminder to the Reminders app. `list` is optional; \
-                      omit it to use the default list.",
+        description: "Add a reminder to the Reminders app. Give `due` whenever the user says \
+                      when (\"at 5\", \"tomorrow morning\", \"on Friday\"), worked out from \
+                      today's date: YYYY-MM-DDTHH:MM in local time, or YYYY-MM-DD for a whole \
+                      day. `list` is optional; omit it for the default list.",
         app: "Reminders",
         read_only: false,
         params: || {
@@ -435,7 +458,11 @@ pub const ACTIONS: &[Action] = &[
                 "type": "object",
                 "required": ["text"],
                 "properties": {
-                    "text": { "type": "string", "description": "The reminder text." },
+                    "text": { "type": "string", "description": "What to be reminded of." },
+                    "due": {
+                        "type": "string",
+                        "description": "When, local time: 2026-10-03T17:00, or 2026-10-03 for all day."
+                    },
                     "list": {
                         "type": "string",
                         "description": "Optional named list; defaults to the default list."
@@ -445,64 +472,210 @@ pub const ACTIONS: &[Action] = &[
         },
         run: |args| {
             let text = required_str(args, "text")?;
-            let text = script::escape(text);
-            let source = match args
-                .get("list")
+            let due = match args
+                .get("due")
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
             {
-                Some(list) => {
-                    let list = script::escape(list);
-                    format!(
-                        r#"tell application "Reminders"
-                            make new reminder at end of list "{list}" with properties {{name:"{text}"}}
-                        end tell"#
-                    )
+                Some(due) => {
+                    let due = reminders::due_parts(due).map_err(ScriptError::Failed)?;
+                    let (hour, minute) = due.time.unzip();
+                    json!([due.year, due.month, due.day, hour, minute])
                 }
-                None => format!(
-                    r#"tell application "Reminders"
-                        make new reminder with properties {{name:"{text}"}}
-                    end tell"#
-                ),
+                None => Value::Null,
             };
-            script::run("Reminders", &source)?;
-            Ok(json!({ "added": true }))
+            // `new Date(...)` sets every field at once, so a validated date cannot roll over the way
+            // AppleScript's field-by-field dates do.
+            let out = script::run_jxa(
+                "Reminders",
+                r#"const R = Application("Reminders");
+                const list = ARG.list ? R.lists.byName(ARG.list) : R.defaultList();
+                const props = { name: ARG.text };
+                if (ARG.due) {
+                    const [y, m, d, h, mi] = ARG.due;
+                    if (h === null) props.alldayDueDate = new Date(y, m - 1, d);
+                    else props.dueDate = props.remindMeDate = new Date(y, m - 1, d, h, mi);
+                }
+                list.reminders.push(R.Reminder(props));
+                return list.name();"#,
+                &json!({ "text": text, "due": due, "list": args.get("list").and_then(Value::as_str).filter(|s| !s.is_empty()) }),
+            )?;
+            Ok(json!({ "added": true, "list": out }))
         },
     },
     Action {
-        name: "ALOUD_NOTES_APPEND",
-        description: "Append a line to a note by title in the Notes app, \
-                      creating the note if it does not exist.",
+        name: "ALOUD_NOTES_CREATE",
+        description: "Create a new note in the Notes app and open it. Write the content yourself \
+                      into `body` as markdown (lines, `- ` bullets, `1.` steps, `## ` headings): \
+                      for \"make a shopping list for a cake and put it in a note\", body is the \
+                      actual list. Plain text, no emoji. Omit `body` for an empty note.",
         app: "Notes",
         read_only: false,
         params: || {
             json!({
                 "type": "object",
-                "required": ["title", "text"],
+                "required": ["title"],
                 "properties": {
                     "title": { "type": "string", "description": "The note's title." },
-                    "text": { "type": "string", "description": "The line to append." }
+                    "body": { "type": "string", "description": "The note's content, as markdown." }
                 }
             })
         },
         run: |args| {
-            let title = script::escape(required_str(args, "title")?);
-            let text = script::escape(required_str(args, "text")?);
-            // Notes bodies are HTML; a <br> keeps the appended line on its own
-            // line. Create-if-missing so "add to my Groceries note" works even
-            // the first time.
-            let source = format!(
-                r#"tell application "Notes"
-                    if not (exists note "{title}") then
-                        make new note with properties {{name:"{title}", body:"{text}"}}
-                    else
-                        set n to note "{title}"
-                        set body of n to (body of n) & "<br>{text}"
-                    end if
-                end tell"#
-            );
-            script::run("Notes", &source)?;
-            Ok(json!({ "appended": true }))
+            let title = required_str(args, "title")?;
+            let body = args.get("body").and_then(Value::as_str).unwrap_or_default();
+            let name = script::run_jxa(
+                "Notes",
+                r#"const Notes = Application("Notes");
+                const note = Notes.make({ new: "note", withProperties: { body: ARG.body } });
+                Notes.activate();
+                Notes.show(note);
+                return note.name();"#,
+                &json!({ "body": notes::note_body(title, body) }),
+            )?;
+            Ok(json!({ "created": true, "title": name }))
+        },
+    },
+    Action {
+        name: "ALOUD_NOTES_APPEND",
+        description:
+            "Add to an existing note in the Notes app — \"add eggs to my shopping note\", \
+                      \"add this to my note\". `title` is any part of the note's name; omit it to \
+                      add to the note open in Notes (else the most recent). A note that doesn't \
+                      exist yet is created. Write the content yourself into `body` as markdown.",
+        app: "Notes",
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["body"],
+                "properties": {
+                    "title": { "type": "string", "description": "Part of the note's name." },
+                    "body": { "type": "string", "description": "What to add, as markdown." }
+                }
+            })
+        },
+        run: |args| {
+            let body = required_str(args, "body")?;
+            let title = args
+                .get("title")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
+            // Appending rewrites the whole body, and attachments are not in the HTML a script
+            // reads, so a note with any is refused rather than silently stripped of them.
+            let out = script::run_jxa(
+                "Notes",
+                r#"const Notes = Application("Notes");
+                let note = null;
+                if (ARG.title) {
+                    const found = Notes.notes.whose({ name: { _contains: ARG.title } })();
+                    note = found.length ? found[0] : null;
+                } else {
+                    try { const picked = Notes.selection(); if (picked.length) note = picked[0]; } catch (e) {}
+                    if (!note && Notes.notes.length) note = Notes.notes[0];
+                }
+                if (!note) {
+                    note = Notes.make({ new: "note", withProperties: { body: ARG.fresh } });
+                    Notes.activate(); Notes.show(note);
+                    return JSON.stringify({ created: true, title: note.name() });
+                }
+                if (note.attachments.length > 0) {
+                    throw new Error("“" + note.name() + "” has images or files in it, which rewriting it would delete; add this to a different note.");
+                }
+                // Notes joins a list to the one right before it: more bullets under a shopping list
+                // is right, bullets becoming steps 3 and 4 of a numbered list is not.
+                const old = note.body().trimEnd();
+                const clash = (old.endsWith("</ol>") && ARG.html.startsWith("<ul>"))
+                    || (old.endsWith("</ul>") && ARG.html.startsWith("<ol>"));
+                note.body = old + (clash ? "<div><br></div>" : "") + ARG.html;
+                Notes.activate(); Notes.show(note);
+                return JSON.stringify({ appended: true, title: note.name() });"#,
+                &json!({
+                    "title": title,
+                    "html": notes::to_html(body),
+                    "fresh": notes::note_body(title.unwrap_or("Note"), body),
+                }),
+            )?;
+            Ok(serde_json::from_str(&out).unwrap_or_else(|_| json!({ "appended": true })))
+        },
+    },
+    Action {
+        name: "ALOUD_PHOTO_BOOTH_TAKE_PHOTO",
+        description: "Take a photo with Photo Booth: opens it and presses Take Photo (a short \
+                      countdown, then the shutter).",
+        app: "Photo Booth",
+        read_only: false,
+        params: || json!({ "type": "object", "properties": {} }),
+        run: |_args| {
+            open_one("Photo Booth")?;
+            wait_until_frontmost("Photo Booth");
+            // The camera takes a moment to come up; a press before it does is ignored.
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            // Photo Booth has no scripting dictionary, so its own control is pressed through
+            // System Events: the menu item first, the window button if the menu lacks it.
+            // The menu walk is macos-automator-mcp's jxa_ui_menu_actions fallback (MIT).
+            let how = script::run_jxa(
+                "System Events",
+                r#"const proc = Application("System Events").processes.byName("Photo Booth");
+                for (const bar of proc.menuBars[0].menuBarItems()) {
+                    const hits = bar.menus[0].menuItems.whose({ name: { _beginsWith: "Take" } })();
+                    if (hits.length && hits[0].enabled()) { hits[0].click(); return "menu " + hits[0].name(); }
+                }
+                const buttons = proc.windows[0].entireContents().filter((e) => {
+                    try { return e.role() === "AXButton" && /take/i.test(e.description() + e.name()); } catch (x) { return false; }
+                });
+                if (buttons.length) { buttons[0].click(); return "button"; }
+                throw new Error("Photo Booth showed no Take Photo control");"#,
+                &json!({}),
+            )?;
+            Ok(json!({ "took_photo": true, "via": how }))
+        },
+    },
+    Action {
+        name: "ALOUD_DISCORD_MESSAGE",
+        description: "Send a Discord message to a person or channel by name: opens Discord's \
+                      quick switcher, goes to `to`, and sends `text`. Write the message yourself.",
+        app: "Discord",
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["to", "text"],
+                "properties": {
+                    "to": { "type": "string", "description": "The person's or channel's name as it appears in Discord." },
+                    "text": { "type": "string", "description": "The message to send." }
+                }
+            })
+        },
+        run: |args| {
+            let to = required_str(args, "to")?;
+            let text = required_str(args, "text")?;
+            open_one("Discord")?;
+            wait_until_frontmost("Discord");
+            // Discord has no scripting dictionary; its ⌘K switcher is the reliable way in. The
+            // window title is checked before typing: a fuzzy switcher match on the wrong person
+            // would otherwise get the message. Newlines would press Return mid-message.
+            // ponytail: keystrokes can mistype non-ASCII; pasting through aloud_paste is the upgrade.
+            let out = script::run_jxa(
+                "System Events",
+                r#"const se = Application("System Events");
+                const proc = se.processes.byName("Discord");
+                se.keystroke("k", { using: "command down" }); delay(0.5);
+                se.keystroke(ARG.to); delay(0.8);
+                se.keyCode(36); delay(1.0);
+                const title = proc.windows[0].name();
+                if (!title.toLowerCase().includes(ARG.to.toLowerCase())) {
+                    se.keyCode(53);
+                    throw new Error("Discord opened “" + title + "”, not " + ARG.to + "; nothing was sent.");
+                }
+                se.keystroke(ARG.text.replace(/\s*\n\s*/g, " "));
+                if (!ARG.dry_run) se.keyCode(36);
+                return title;"#,
+                &json!({ "to": to, "text": text, "dry_run": args.get("dry_run").and_then(Value::as_bool).unwrap_or(false) }),
+            )?;
+            Ok(
+                json!({ "sent": !args.get("dry_run").and_then(Value::as_bool).unwrap_or(false), "to": out }),
+            )
         },
     },
     Action {
@@ -665,8 +838,10 @@ pub const ACTIONS: &[Action] = &[
         name: "ALOUD_WRITE_FILE",
         description: "Write text to a file, creating it if it does not exist. Use when the \
              user asks to save, write or note something down as a file — a summary, \
-             a list, notes. Give the whole text in one call; it replaces the file's \
-             contents unless append is set.",
+             a list, notes, code. Give the whole text in one call; it replaces the file's \
+             contents unless append is set. To make a file in an editor (\"open Cursor and \
+             create todo.md\"), set open_with. When no folder is named, write to Desktop/ \
+             and say so.",
         app: crate::ALWAYS,
         read_only: false,
         params: || {
@@ -684,6 +859,11 @@ pub const ACTIONS: &[Action] = &[
                     "append": {
                         "type": "boolean",
                         "description": "Add to the end instead of replacing. Defaults to false.",
+                    },
+                    "open_with": {
+                        "type": "string",
+                        "enum": ["cursor", "vscode", "default"],
+                        "description": "Open the file afterwards in this editor, or the default app.",
                     }
                 }
             })
@@ -692,7 +872,20 @@ pub const ACTIONS: &[Action] = &[
             let path = required_str(args, "path")?;
             let text = args.get("text").and_then(Value::as_str).unwrap_or("");
             let append = args.get("append").and_then(Value::as_bool).unwrap_or(false);
-            write_home_file(path, text, append)
+            let mut wrote = write_home_file(path, text, append)?;
+            if let Some(with) = args.get("open_with").and_then(Value::as_str) {
+                let file = wrote["wrote"].as_str().unwrap_or_default().to_string();
+                // By bundle path, not the `cursor` CLI: a Finder-launched app has a PATH without it.
+                let mut open = std::process::Command::new("/usr/bin/open");
+                match with {
+                    "cursor" => open.args(["-a", &bundle_path("Cursor")?]),
+                    "vscode" => open.args(["-a", &bundle_path("Visual Studio Code")?]),
+                    _ => &mut open,
+                };
+                let opened = open.arg(&file).status().is_ok_and(|s| s.success());
+                wrote["opened"] = json!(opened);
+            }
+            Ok(wrote)
         },
     },
     Action {
@@ -995,28 +1188,46 @@ pub const ACTIONS: &[Action] = &[
     },
     Action {
         name: "ALOUD_SYSTEM_VOLUME",
-        description: "Set the system output volume to a level from 0 to 100.",
+        description: "Set the system output volume: `level` 0–100, or `change` to go up or down \
+                      by that many points (\"turn it up\" is about +10, \"mute\" is level 0).",
         // A system-wide action with no app of its own.
         app: crate::ALWAYS,
         read_only: false,
         params: || {
             json!({
                 "type": "object",
-                "required": ["level"],
                 "properties": {
                     "level": {
                         "type": "integer", "minimum": 0, "maximum": 100,
                         "description": "Output volume, 0 (mute) to 100 (max)."
+                    },
+                    "change": {
+                        "type": "integer", "minimum": -100, "maximum": 100,
+                        "description": "Points to raise (positive) or lower (negative) the volume by."
                     }
                 }
             })
         },
         run: |args| {
-            let level = args
-                .get("level")
-                .and_then(Value::as_i64)
-                .ok_or_else(|| ScriptError::Failed("level must be a number 0–100".into()))?
-                .clamp(0, 100);
+            let level = match (
+                args.get("level").and_then(Value::as_i64),
+                args.get("change").and_then(Value::as_i64),
+            ) {
+                (Some(level), _) => level,
+                (None, Some(change)) => {
+                    let now: i64 =
+                        script::run("System Events", "output volume of (get volume settings)")?
+                            .parse()
+                            .map_err(|_| {
+                                ScriptError::Failed("couldn't read the current volume".into())
+                            })?;
+                    now + change
+                }
+                (None, None) => {
+                    return Err(ScriptError::Failed("give a level 0–100 or a change".into()))
+                }
+            }
+            .clamp(0, 100);
             script::run(
                 "System Events",
                 &format!("set volume output volume {level}"),
@@ -1033,19 +1244,20 @@ mod tests {
     #[test]
     fn read_only_flags_are_honest() {
         // A write mislabelled read-only silently skips the confirmation gate —
-        // the one non-negotiable property in this codebase. NOW_PLAYING reads;
-        // PLAY writes.
-        let now = ACTIONS
+        // the one non-negotiable property in this codebase. A tool that can
+        // both read and act (now_playing vs play) must count as a write.
+        let search = ACTIONS
             .iter()
-            .find(|a| a.name == "ALOUD_MUSIC_NOW_PLAYING")
+            .find(|a| a.name == "ALOUD_FINDER_SEARCH")
             .unwrap();
-        assert!(now.read_only, "NOW_PLAYING must be read-only");
-
-        let play = ACTIONS
-            .iter()
-            .find(|a| a.name == "ALOUD_MUSIC_PLAY")
-            .unwrap();
-        assert!(!play.read_only, "PLAY changes playback — must be a write");
+        assert!(search.read_only, "FINDER_SEARCH only reads");
+        for name in ["ALOUD_MUSIC", "ALOUD_SPOTIFY", "ALOUD_NOTES_CREATE"] {
+            let action = ACTIONS.iter().find(|a| a.name == name).unwrap();
+            assert!(
+                !action.read_only,
+                "{name} changes something — must be a write"
+            );
+        }
     }
 
     /// "Open TextEdit" is the most common thing anyone says to this app, and

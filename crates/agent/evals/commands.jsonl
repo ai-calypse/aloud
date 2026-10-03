@@ -1,0 +1,46 @@
+{"input":"open calculator app","fast":true,"expected":[{"callsTool":{"name":"ALOUD_OPEN_APP","arguments":{"names":"Calculator"}}}]}
+{"input":"Open Spotify.","fast":true,"expected":[{"callsTool":{"name":"ALOUD_OPEN_APP","arguments":{"names":"Spotify"}}}]}
+{"input":"launch photo booth","fast":true,"expected":[{"callsTool":{"name":"ALOUD_OPEN_APP","arguments":{"names":"Photo Booth"}}}]}
+{"input":"switch to Safari","fast":true,"expected":[{"callsTool":{"name":"ALOUD_OPEN_APP","arguments":{"names":"Safari"}}}]}
+{"input":"open Notes and Calendar","fast":true,"expected":[{"callsTool":{"name":"ALOUD_OPEN_APP","arguments":{"names":"Calendar"}}}]}
+{"input":"pause","fast":true,"expected":[{"callsTool":{"name":["ALOUD_SPOTIFY","ALOUD_MUSIC"],"arguments":{"action":"pause"}}}]}
+{"input":"next song","fast":true,"expected":[{"callsTool":{"name":["ALOUD_SPOTIFY","ALOUD_MUSIC"],"arguments":{"action":"next"}}}]}
+{"input":"set the volume to 30","fast":true,"expected":[{"callsTool":{"name":"ALOUD_SYSTEM_VOLUME","arguments":{"level":"30"}}}]}
+{"input":"mute","fast":true,"expected":[{"callsTool":{"name":"ALOUD_SYSTEM_VOLUME","arguments":{"level":{"eq":0}}}}]}
+{"input":"quit Safari","fast":true,"expected":[{"callsTool":{"name":"ALOUD_QUIT_APP","arguments":{"name":"Safari"}}}]}
+{"input":"go to youtube","fast":true,"expected":[{"callsTool":{"name":"ALOUD_BROWSER_TASK"}}]}
+{"input":"search lofi on youtube","fast":true,"expected":[{"callsTool":{"name":"ALOUD_BROWSER_TASK"}}]}
+{"input":"check the price of a raspberry pi 5 on adafruit.com","fast":true,"expected":[{"callsTool":{"name":"ALOUD_BROWSER_TASK"}}]}
+{"input":"Open notes app and create a new note","fast":false,"expected":[{"callsTool":{"name":"ALOUD_NOTES_CREATE"}}]}
+{"input":"create a new note","fast":false,"expected":[{"callsTool":{"name":"ALOUD_NOTES_CREATE"}}]}
+{"input":"make a list of items to buy to make a cake and add it to a note","fast":false,"expected":[{"callsTool":{"name":["ALOUD_NOTES_CREATE","ALOUD_NOTES_APPEND"],"arguments":{"body":"flour"}}}]}
+{"input":"add this to my groceries note","selection":"oat milk","fast":false,"expected":[{"callsTool":{"name":"ALOUD_NOTES_APPEND","arguments":{"title":"grocer","body":"oat milk"}}}]}
+{"input":"add eggs and butter to my shopping note","fast":false,"expected":[{"callsTool":{"name":"ALOUD_NOTES_APPEND","arguments":{"title":"shopping","body":"eggs"}}}]}
+{"input":"create a note called Ideas with three startup ideas","fast":false,"expected":[{"callsTool":{"name":"ALOUD_NOTES_CREATE","arguments":{"title":"Ideas"}}}]}
+{"input":"take a note: call the plumber on Monday","fast":false,"expected":[{"callsTool":{"name":["ALOUD_NOTES_CREATE","ALOUD_NOTES_APPEND"],"arguments":{"body":"plumber"}}}]}
+{"input":"remind me to call Ana at 5","fast":false,"expected":[{"callsTool":{"name":"ALOUD_REMINDERS_ADD","arguments":{"text":"ana","due":"17:00"}}}]}
+{"input":"remind me tomorrow at 9am to send the invoice","fast":false,"expected":[{"callsTool":{"name":"ALOUD_REMINDERS_ADD","arguments":{"text":"invoice","due":"09:00"}}}]}
+{"input":"remind me to buy milk","fast":false,"expected":[{"callsTool":{"name":"ALOUD_REMINDERS_ADD","arguments":{"text":"milk"}}}]}
+{"input":"play my discover weekly on spotify","fast":false,"expected":[{"callsTool":{"name":"ALOUD_SPOTIFY","arguments":{"action":"play"}}}]}
+{"input":"play https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M on spotify","fast":false,"expected":[{"callsTool":{"name":"ALOUD_SPOTIFY","arguments":{"uri":"37i9dQZF1DXcBWIGoYBM5M"}}}]}
+{"input":"what song is playing","fast":false,"expected":[{"callsTool":{"name":["ALOUD_SPOTIFY","ALOUD_MUSIC"],"arguments":{"action":"now_playing"}}}]}
+{"input":"open Cursor and create a file called todo.md","fast":false,"expected":[{"callsTool":{"name":"ALOUD_WRITE_FILE","arguments":{"path":"todo.md","open_with":"cursor"}}}]}
+{"input":"find my tax pdf","fast":false,"expected":[{"callsTool":{"name":"ALOUD_FINDER_SEARCH","arguments":{"query":"tax"}}}]}
+{"input":"find the screenshots on my desktop","fast":false,"expected":[{"callsTool":{"name":"ALOUD_FINDER_SEARCH","arguments":{"kind":"screenshot"}}}]}
+{"input":"snap this window to the left half","fast":false,"expected":[{"callsTool":{"name":"ALOUD_WINDOW_ARRANGE","arguments":{"position":"left"}}}]}
+{"input":"save a packing list for a beach trip to my desktop","fast":false,"expected":[{"callsTool":{"name":"ALOUD_WRITE_FILE","arguments":{"path":"desktop"}}}]}
+{"input":"copy hello world to the clipboard","fast":false,"expected":[{"callsTool":{"name":"ALOUD_CLIPBOARD","arguments":{"text":"hello world"}}}]}
+{"input":"open Photo Booth and take a photo","fast":false,"expected":[{"callsTool":{"name":"ALOUD_PHOTO_BOOTH_TAKE_PHOTO"}}]}
+{"input":"message Sam on Discord saying I'll be late","fast":false,"expected":[{"callsTool":{"name":"ALOUD_DISCORD_MESSAGE","arguments":{"to":"sam","text":"late"}}}]}
+{"input":"search for restaurants near me","fast":false,"expected":[{"callsTool":{"name":"ALOUD_BROWSER_TASK"}}]}
+{"input":"what's the population of Tokyo on Wikipedia","fast":false,"expected":[{"callsTool":{"name":"ALOUD_BROWSER_TASK"}}]}
+{"input":"summarize my unread emails","fast":false,"expected":[{"callsTool":{"name":"GMAIL_"}}]}
+{"input":"what's on my calendar tomorrow","fast":false,"expected":[{"callsTool":{"name":"GOOGLECALENDAR_"}}]}
+{"input":"schedule lunch with Priya on Friday at 1pm","fast":false,"expected":[{"callsTool":{"name":["GOOGLECALENDAR_CREATE_EVENT","GOOGLECONTACTS_SEARCH_CONTACTS","GMAIL_SEARCH_PEOPLE"]}}]}
+{"input":"what is my github username","fast":false,"expected":[{"callsTool":{"name":"GITHUB_GET_THE_AUTHENTICATED_USER"}}]}
+{"input":"post our standup update in the team slack channel","fast":false,"expected":[{"callsTool":{"name":"SLACK_"}}]}
+{"input":"what's the capital of France","fast":false,"expected":[{"not":{"callsTool":{}}}]}
+{"input":"write a haiku about rain","fast":false,"expected":[{"not":{"callsTool":{}}}]}
+{"input":"what does this error mean","selection":"TypeError: undefined is not a function","fast":false,"expected":[{"not":{"callsTool":{}}}]}
+{"input":"how do I exit vim","fast":false,"expected":[{"not":{"callsTool":{}}}]}
+{"input":"what's 15% of 80","fast":false,"expected":[{"not":{"callsTool":{}}}]}

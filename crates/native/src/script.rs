@@ -42,8 +42,26 @@ impl std::fmt::Display for ScriptError {
 /// ponytail: a hard 20s timeout implemented by killing the child, not
 /// `wait_timeout` — pulling in a crate for one call site is not worth it.
 pub fn run(app: &str, source: &str) -> Result<String, ScriptError> {
+    osascript(app, &["-e", source])
+}
+
+/// Runs a JavaScript for Automation `body` with `arg` available as `ARG`, and
+/// returns its stdout. Ported from eliotshea/notes-mcp's `runJxa` (MIT): the
+/// argument travels as one JSON string in argv, so user text never touches the
+/// script source and needs no escaping. The `--` (macos-automator-mcp #295)
+/// keeps a value starting with `-`, like a markdown list, from being read as
+/// an osascript option.
+pub fn run_jxa(app: &str, body: &str, arg: &serde_json::Value) -> Result<String, ScriptError> {
+    let source = format!("function run(argv) {{ const ARG = JSON.parse(argv[0]); {body} }}");
+    osascript(
+        app,
+        &["-l", "JavaScript", "-e", &source, "--", &arg.to_string()],
+    )
+}
+
+fn osascript(app: &str, args: &[&str]) -> Result<String, ScriptError> {
     let mut child = Command::new("osascript")
-        .args(["-e", source])
+        .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -104,6 +122,22 @@ mod tests {
         assert_eq!(escape(r#"say "hi""#), r#"say \"hi\""#);
         assert_eq!(escape(r"a\b"), r"a\\b");
         assert_eq!(escape("plain"), "plain");
+    }
+
+    /// The whole point of passing JSON in argv: a note body that starts with a
+    /// dash, quotes, newlines and non-ASCII must arrive byte for byte. No app is
+    /// scripted, so this needs no Automation grant.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn json_arg_survives_leading_dash_quotes_newlines_and_unicode() {
+        let text = "- flour \"00\"\n- eggs\\ & <butter> — 🎂 ok";
+        let out = run_jxa(
+            "test",
+            "return ARG.text;",
+            &serde_json::json!({ "text": text }),
+        )
+        .unwrap();
+        assert_eq!(out, text);
     }
 
     #[test]

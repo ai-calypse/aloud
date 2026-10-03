@@ -4,10 +4,7 @@
 #
 # Two things do not survive bundling on their own:
 #
-#   - The MacosUseSDK helpers. `build.rs` compiles them into an OUT_DIR whose
-#     name carries a build hash, so there is no stable path for the bundler to
-#     reference. Copied here under fixed names; `helper::locate` already looks
-#     in `../Resources`.
+#   - The browser engine and its axd helper (built here).
 #   - `.env`. A `.app` launched from Finder has a working directory of `/`, so
 #     the walk that finds it in dev finds nothing and every API key is empty.
 #
@@ -21,21 +18,7 @@ out="$here/resources"
 
 mkdir -p "$out"
 
-# Newest first: several OUT_DIRs accumulate across debug/release builds, and a
-# stale helper would ship silently.
-for tool in TraversalTool InputControllerTool; do
-    found=$(find "$repo/target" -name "$tool" -type f -perm -111 \
-        -not -path '*dSYM*' -not -path '*.build*' 2>/dev/null \
-        | xargs -I{} stat -f '%m %N' {} 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
-    if [ -z "$found" ]; then
-        echo "error: $tool not built — run 'cargo build --release -p aloud-computer' first" >&2
-        exit 1
-    fi
-    cp "$found" "$out/$tool"
-    echo "staged $tool from $found"
-done
-
-# The task engine (browser + Mac-app tasks for the agent): its TypeScript, production dependencies
+# The task engine (browser tasks for the agent): its TypeScript, production dependencies
 # only (dev tools and the 240 MB Claude SDK stay out), and the axd accessibility helper.
 rm -rf "$out/engine"
 mkdir -p "$out/engine"
