@@ -66,7 +66,11 @@
     "macOS": {
       "minimumSystemVersion": "13.0",
       "signingIdentity": "-"
-    }
+    },
+    "resources": [
+      "resources/*",
+      "resources/engine/**/*"
+    ]
   },
   "plugins": {
     "updater": {

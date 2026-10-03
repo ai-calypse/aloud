@@ -5,6 +5,9 @@
 //! the realtime tap.
 
 pub mod resample;
+mod segment;
+
+pub use segment::Segmenter;
 
 use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -82,6 +85,24 @@ impl Recorder {
         device_id: Option<&str>,
         on_pcm16: Option<Box<dyn FnMut(Vec<u8>) + Send>>,
     ) -> Result<Self> {
+        Self::open(device_id, on_pcm16, true)
+    }
+
+    /// Like [`start`](Self::start), but keeps nothing: audio reaches only the
+    /// tap. For an always-on mic, where the buffer `start` keeps for `stop`
+    /// would grow by ~690 MB an hour.
+    pub fn tap_only(
+        device_id: Option<&str>,
+        on_pcm16: Box<dyn FnMut(Vec<u8>) + Send>,
+    ) -> Result<Self> {
+        Self::open(device_id, Some(on_pcm16), false)
+    }
+
+    fn open(
+        device_id: Option<&str>,
+        on_pcm16: Option<Box<dyn FnMut(Vec<u8>) + Send>>,
+        keep: bool,
+    ) -> Result<Self> {
         let device = resolve_device(device_id)?;
         let supported = device
             .default_input_config()
@@ -113,8 +134,10 @@ impl Recorder {
                     Err(e) => tracing::warn!(%e, "realtime resample failed"),
                 }
             }
-            if let Ok(mut buf) = sink.lock() {
-                buf.extend_from_slice(&mono);
+            if keep {
+                if let Ok(mut buf) = sink.lock() {
+                    buf.extend_from_slice(&mono);
+                }
             }
         };
 

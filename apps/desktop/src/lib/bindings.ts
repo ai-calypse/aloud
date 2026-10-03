@@ -30,6 +30,29 @@ export const commands = {
 	 */
 	installedApps: () => typedError<InstalledApp[], string>(__TAURI_INVOKE("installed_apps")),
 	/**
+	 *  Runs a Spotlight search and renders a thumbnail per hit. `kind` is "image",
+	 *  "document", or "any". Blocking (process spawns per thumbnail), so async +
+	 *  spawn_blocking like `installed_apps`.
+	 */
+	finderSearch: (query: string, kind: string) => typedError<FinderResults, string>(__TAURI_INVOKE("finder_search", { query, kind })),
+	/**
+	 *  Reveals a path in Finder — the grid's click target. Thin wrapper over the
+	 *  native tool so the panel does not re-implement the AppleScript.
+	 */
+	finderReveal: (path: string) => typedError<null, string>(__TAURI_INVOKE("finder_reveal", { path })),
+	/**
+	 *  Arms a file path to be dragged out of the notch on the next mouse-drag. The
+	 *  frontend calls this on `mousedown` over a draggable result; the native
+	 *  event monitor (installed at setup) turns the following drag into a real
+	 *  system file drag. See `crates/drag`.
+	 */
+	armFileDrag: (path: string) => __TAURI_INVOKE<void>("arm_file_drag", { path }),
+	/**
+	 *  Clears an armed drag — called on mouseup, so a click that armed a path does
+	 *  not leave it primed to drag on some later, unrelated gesture.
+	 */
+	disarmFileDrag: () => __TAURI_INVOKE<void>("disarm_file_drag"),
+	/**
 	 *  Whether the OS lets us listen for keys. False on macOS until the user
 	 *  grants Accessibility permission.
 	 */
@@ -241,6 +264,13 @@ export const commands = {
 	answerAgent: (answer: string | null) => __TAURI_INVOKE<void>("answer_agent", { answer }),
 	/**  Lets the panel dismiss itself on Escape or after showing a result. */
 	closeAgent: () => __TAURI_INVOKE<void>("close_agent"),
+	/**  The bar's first paint: it may load after the session's first update. */
+	listenState: () => __TAURI_INVOKE<ListenState>("listen_state"),
+	listenToggleMic: () => __TAURI_INVOKE<void>("listen_toggle_mic"),
+	/**  A typed request, queued like a spoken one. */
+	listenSubmit: (text: string) => __TAURI_INVOKE<void>("listen_submit", { text }),
+	/**  Stops the running request and drops the queue; the mic stays on. */
+	listenCancel: () => __TAURI_INVOKE<void>("listen_cancel"),
 };
 
 /** Events */
@@ -255,6 +285,7 @@ export const events = {
 	dictationPartial: makeEvent<DictationPartial>("dictation-partial"),
 	dictationPhase: makeEvent<Phase>("dictation-phase"),
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
+	listenState: makeEvent<ListenState>("listen-state"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
 	notchHover: makeEvent<NotchHover>("notch-hover"),
@@ -609,6 +640,30 @@ export type Entry = {
 };
 
 /**
+ *  A Finder search's results for the panel grid. The model runs the search tool
+ *  itself (and speaks the count); this command is what the panel calls with the
+ *  same query to draw thumbnails — so the two views stay in step without
+ *  piping the tool payload back through the loop.
+ */
+export type FinderResults = {
+	query: string,
+	/**  Total matches found, which may exceed `files.len()` when truncated. */
+	count: number,
+	files: FoundFile[],
+};
+
+/**
+ *  One file the notch grid draws for a Finder search: its path, display name,
+ *  and a Quick Look thumbnail if one could be rendered.
+ */
+export type FoundFile = {
+	path: string,
+	name: string,
+	/**  A `data:image/png;base64,…` preview, or None when Quick Look has none. */
+	thumbnail: string | null,
+};
+
+/**
  *  What the settings pane needs to draw: whether ours are in, and who owns
  *  approvals if anyone.
  */
@@ -648,6 +703,21 @@ export type InstalledApp = {
 export type Key = "leftCommand" | "rightCommand" | "leftShift" | "rightShift" | "leftOption" | "rightOption" | "leftControl" | "rightControl" | 
 /**  macOS only; no Windows equivalent. */
 "fn" | "escape" | "space" | ({ char: string }) & { f?: never } | ({ f: number }) & { char?: never };
+
+/**
+ *  What the bar draws, sent whole on every change: it is small, and a bar that
+ *  loads late or misses one still ends up right.
+ */
+export type ListenState = {
+	mic: boolean,
+	/**  What is being said now, else the last request heard. */
+	transcript: string,
+	busy: boolean,
+	/**  Requests waiting behind the running one. */
+	queued: number,
+	/**  Why the mic is not hearing, e.g. a dropped stream being reopened. */
+	problem: string | null,
+};
 
 /**
  *  A local git repo the composer can offer, so the user picks instead of typing
@@ -823,6 +893,12 @@ export type Settings = {
 	 *  limit is too low for the agent's heavier calls.
 	 */
 	geminiApiKey?: string,
+	/**
+	 *  Deepgram key. Always-listening streams the mic to Deepgram's Flux, which
+	 *  decides where a spoken request ends; without it the mode falls back to a
+	 *  pause detector and local whisper.
+	 */
+	deepgramApiKey?: string,
 	engine?: Engine,
 	transcriptionModel?: string,
 	baseUrl?: string,

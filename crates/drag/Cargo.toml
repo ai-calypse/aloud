@@ -1,0 +1,32 @@
+[package]
+name = "aloud-drag"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Dragging a real file out of the notch into another app (native NSDraggingSession)"
+
+[dependencies]
+tracing.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.5", features = ["relax-sign-encoding"] }
+objc2-app-kit = { version = "0.2", features = [
+  "block2",
+  "NSApplication",
+  "NSEvent",
+  "NSResponder",
+  "NSView",
+  "NSWindow",
+  "NSPasteboard",
+  "NSDragging",
+  "NSDraggingItem",
+  "NSDraggingSession",
+  "NSImage",
+] }
+objc2-foundation = { version = "0.2", features = [
+  "NSArray",
+  "NSGeometry",
+  "NSString",
+  "NSURL",
+] }
+block2 = "0.5"

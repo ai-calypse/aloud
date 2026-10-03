@@ -24,6 +24,7 @@ import {
   type AgentTranscript,
   type AgentTranscriptEntry,
   type Agent as CodingAgent,
+  type FinderResults,
   type Quota,
   type QuotaWindow,
   type ApprovalReply,
@@ -55,6 +56,7 @@ import {
   bodyFor,
   editsFor,
   labelFor,
+  text,
   type ToolArgs,
 } from "./lib/tool-views";
 import { diffLines } from "./lib/diff";
@@ -3297,9 +3299,18 @@ function AgentRun({
               {/* Only what this tool is worth showing, and never for the step
                   awaiting a decision — the gate below shows that one, and
                   rendering both put the same draft on screen twice. */}
-              {step !== pending && (
-                <span className="agent__body">{bodyFor(step.name, step.args)}</span>
-              )}
+              {step !== pending &&
+                (step.name === "ALOUD_FINDER_SEARCH" ? (
+                  // The search wall renders its own thumbnails once the results
+                  // land, so it replaces the static body rather than sitting
+                  // beside it.
+                  <FinderGrid
+                    query={text(step.args, "query")}
+                    kind={text(step.args, "kind")}
+                  />
+                ) : (
+                  <span className="agent__body">{bodyFor(step.name, step.args)}</span>
+                ))}
             </li>
             ),
           )}
@@ -3676,6 +3687,70 @@ function CodingAgentComposer({
  * "nothing", which the loop reports as unanswered — the model then closes the
  * run rather than retrying into the same wall.
  */
+/**
+ * The Finder search result wall — Option 1, a 4-up thumbnail grid under a
+ * "find my …" step. The model runs the search tool itself and speaks the count;
+ * this fetches the same query again for thumbnails, so the panel shows the files
+ * without the tool payload being piped back through the loop.
+ *
+ * Fetches once per (query, kind). A click reveals the file in Finder. Renders
+ * nothing until results land — the panel's own height animation covers the gap,
+ * and an empty grid flashing before the fill would fight it.
+ */
+function FinderGrid({ query, kind }: { query: string; kind: string }) {
+  const [results, setResults] = useState<FinderResults | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void commands.finderSearch(query, kind || "any").then((res) => {
+      // The command returns Result; ignore the error arm — a failed search
+      // already surfaced through the tool result the model speaks.
+      if (live && res.status === "ok") setResults(res.data);
+    });
+    return () => {
+      live = false;
+    };
+  }, [query, kind]);
+
+  if (!results || results.files.length === 0) return null;
+
+  const noun = kind === "image" ? "image" : "file";
+  return (
+    <div className="finder">
+      <p className="finder-grid__count">
+        {results.count} {noun}
+        {results.count === 1 ? "" : "s"}
+      </p>
+      <div className="finder-grid" role="list">
+        {results.files.map((file, i) => (
+          <button
+            key={file.path}
+            className="finder-tile"
+            role="listitem"
+            title={file.name}
+            style={{ ["--i" as string]: i }}
+            // Arm the native drag on mousedown: a real system file drag can only
+            // start from the live mouse event, which a JS click cannot supply,
+            // so Rust stashes the path and the native monitor drags it. See
+            // crates/drag. Cleared on mouseup so a plain click stays a click.
+            onMouseDown={() => void commands.armFileDrag(file.path)}
+            onMouseUp={() => void commands.disarmFileDrag()}
+            onClick={() => void commands.finderReveal(file.path)}
+          >
+            {file.thumbnail ? (
+              // draggable=false so the img's own image-bytes drag never
+              // pre-empts the tile's file drag — we want a file, not a picture.
+              <img src={file.thumbnail} alt={file.name} draggable={false} />
+            ) : (
+              <span className="finder-tile__name">{file.name}</span>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AskGate({ asked }: { asked: { question: string; options: string[] } }) {
   const [typed, setTyped] = useState("");
   const answer = (text: string | null) => void commands.answerAgent(text);

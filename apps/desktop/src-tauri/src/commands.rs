@@ -170,6 +170,106 @@ pub async fn installed_apps() -> CmdResult<Vec<aloud_selection::InstalledApp>> {
         .map_err(|e| format!("listing installed apps: {e}"))
 }
 
+/// One file the notch grid draws for a Finder search: its path, display name,
+/// and a Quick Look thumbnail if one could be rendered.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FoundFile {
+    pub path: String,
+    pub name: String,
+    /// A `data:image/png;base64,…` preview, or None when Quick Look has none.
+    pub thumbnail: Option<String>,
+}
+
+/// A Finder search's results for the panel grid. The model runs the search tool
+/// itself (and speaks the count); this command is what the panel calls with the
+/// same query to draw thumbnails — so the two views stay in step without
+/// piping the tool payload back through the loop.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FinderResults {
+    pub query: String,
+    /// Total matches found, which may exceed `files.len()` when truncated.
+    pub count: u32,
+    pub files: Vec<FoundFile>,
+}
+
+/// Runs a Spotlight search and renders a thumbnail per hit. `kind` is "image",
+/// "document", or "any". Blocking (process spawns per thumbnail), so async +
+/// spawn_blocking like `installed_apps`.
+#[tauri::command]
+#[specta::specta]
+pub async fn finder_search(query: String, kind: String) -> CmdResult<FinderResults> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let args = serde_json::json!({ "query": query, "kind": kind });
+        let result = aloud_native::execute("ALOUD_FINDER_SEARCH", &args)
+            .ok_or_else(|| "finder search tool missing".to_string())?
+            .map_err(|e| e.to_string())?;
+
+        let query = result["query"].as_str().unwrap_or_default().to_string();
+        let count = result["count"].as_u64().unwrap_or(0) as u32;
+        let files = result["results"]
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .map(|row| {
+                        let path = row["path"].as_str().unwrap_or_default().to_string();
+                        let name = row["name"].as_str().unwrap_or_default().to_string();
+                        let thumbnail = aloud_native::thumbnail(&path);
+                        FoundFile {
+                            path,
+                            name,
+                            thumbnail,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(FinderResults {
+            query,
+            count,
+            files,
+        })
+    })
+    .await
+    .map_err(|e| format!("finder search: {e}"))?
+}
+
+/// Arms a file path to be dragged out of the notch on the next mouse-drag. The
+/// frontend calls this on `mousedown` over a draggable result; the native
+/// event monitor (installed at setup) turns the following drag into a real
+/// system file drag. See `crates/drag`.
+#[tauri::command]
+#[specta::specta]
+pub fn arm_file_drag(path: String) {
+    aloud_drag::arm(path);
+}
+
+/// Clears an armed drag — called on mouseup, so a click that armed a path does
+/// not leave it primed to drag on some later, unrelated gesture.
+#[tauri::command]
+#[specta::specta]
+pub fn disarm_file_drag() {
+    aloud_drag::disarm();
+}
+
+/// Reveals a path in Finder — the grid's click target. Thin wrapper over the
+/// native tool so the panel does not re-implement the AppleScript.
+#[tauri::command]
+#[specta::specta]
+pub async fn finder_reveal(path: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let args = serde_json::json!({ "path": path });
+        aloud_native::execute("ALOUD_FINDER_REVEAL", &args)
+            .ok_or_else(|| "finder reveal tool missing".to_string())?
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("finder reveal: {e}"))?
+}
+
 /// Monitor names, to fill the overlay's "Show on" picker. Unnamed monitors are
 /// dropped: the setting stores a name, so such a row could never match back.
 #[tauri::command]

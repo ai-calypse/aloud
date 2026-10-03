@@ -89,6 +89,7 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
     let recording = state.pipeline.is_recording();
     let in_meeting = state.meeting.lock().map(|m| m.is_some()).unwrap_or(false);
+    let listening = state.listener.lock().map(|l| l.is_some()).unwrap_or(false);
     let last = state.pipeline.last_transcript();
 
     let menu = Menu::new(app)?;
@@ -118,6 +119,18 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             "Stop Meeting Notes & Save"
         } else {
             "Start Meeting Notes"
+        },
+        true,
+        None::<&str>,
+    )?)?;
+
+    menu.append(&MenuItem::with_id(
+        app,
+        "listen",
+        if listening {
+            "Stop Always Listening"
+        } else {
+            "Always Listening"
         },
         true,
         None::<&str>,
@@ -253,6 +266,10 @@ fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         "meeting" => {
             let state = app.state::<AppState>();
             crate::toggle_meeting(app, &state.settings, &state.meeting);
+            refresh(app);
+        }
+        "listen" => {
+            crate::toggle_listening(app);
             refresh(app);
         }
         "paste_again" => {

@@ -1,0 +1,18 @@
+{
+  "name": "aloud-engine",
+  "private": true,
+  "type": "module",
+  "description": "Browser and Mac-app task engine for Aloud's agent (from voice-mac): Jev picks each step.",
+  "scripts": {
+    "typecheck": "tsc",
+    "check": "node browser.check.ts"
+  },
+  "dependencies": {
+    "@typesafe-ai/sdk": "^0.6.0",
+    "playwright": "^1.63.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2"
+  }
+}

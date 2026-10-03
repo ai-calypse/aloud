@@ -1080,7 +1080,7 @@ impl Pipeline {
         // abandon the loop mid-tool, and the loop wants to stop *between*
         // tools — after the one in flight, before the next.
         let generation = self.generation();
-        crate::agent::run(&self.app, command, &settings, || {
+        crate::agent::run(&self.app, command, &settings, false, || {
             self.generation() != generation
         })
         .await

@@ -20,7 +20,9 @@ serde.workspace = true
 serde_json.workspace = true
 specta.workspace = true
 thiserror.workspace = true
-tokio = { version = "1", features = ["fs", "sync", "rt"] }
+tokio = { version = "1", features = ["fs", "sync", "rt", "macros"] }
+# Always-listening's live stream to Deepgram. rustls for the same reason as reqwest.
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 tracing.workspace = true
 whisper-rs = "0.16"
 # Used unconditionally (model download stream, data_dir), so they must be
@@ -38,6 +40,6 @@ aloud-audio = { path = "../audio" }
 whisper-rs = { version = "0.16", features = ["metal"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tempfile = "3"
 tracing-subscriber = "0.3"

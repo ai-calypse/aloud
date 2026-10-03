@@ -52,6 +52,10 @@ pub struct Settings {
     /// Gemini key. Agent tool-call parsing runs here — Groq's tokens-per-minute
     /// limit is too low for the agent's heavier calls.
     pub gemini_api_key: String,
+    /// Deepgram key. Always-listening streams the mic to Deepgram's Flux, which
+    /// decides where a spoken request ends; without it the mode falls back to a
+    /// pause detector and local whisper.
+    pub deepgram_api_key: String,
 
     // Transcription
     pub engine: aloud_transcribe::Engine,
@@ -167,6 +171,7 @@ impl Default for Settings {
             groq_api_key: String::new(),
             composio_api_key: String::new(),
             gemini_api_key: String::new(),
+            deepgram_api_key: String::new(),
             // Local by default: works with no key and no network.
             engine: aloud_transcribe::Engine::Local,
             transcription_model: aloud_transcribe::cloud::DEFAULT_MODEL.into(),
@@ -300,6 +305,7 @@ impl Settings {
             ("GROQ_API_KEY", &mut self.groq_api_key),
             ("COMPOSIO_API_KEY", &mut self.composio_api_key),
             ("GEMINI_API_KEY", &mut self.gemini_api_key),
+            ("DEEPGRAM_API_KEY", &mut self.deepgram_api_key),
         ] {
             if !field.trim().is_empty() {
                 continue;
@@ -363,7 +369,8 @@ impl Settings {
 }
 
 /// A var from the process environment, else the first `.env` found walking up
-/// from the working directory. No dotenv crate: three keys, `KEY=value` lines.
+/// from the working directory, else one bundled beside the app. No dotenv
+/// crate: three keys, `KEY=value` lines.
 fn env_or_dotenv(var: &str) -> Option<String> {
     if let Ok(value) = std::env::var(var) {
         let trimmed = value.trim();
@@ -372,18 +379,40 @@ fn env_or_dotenv(var: &str) -> Option<String> {
         }
     }
 
-    let mut dir = std::env::current_dir().ok()?;
-    loop {
-        let candidate = dir.join(".env");
-        if let Ok(contents) = fs::read_to_string(&candidate) {
+    if let Ok(mut dir) = std::env::current_dir() {
+        loop {
+            let candidate = dir.join(".env");
+            if let Ok(contents) = fs::read_to_string(&candidate) {
+                if let Some(value) = parse_dotenv_value(&contents, var) {
+                    return Some(value);
+                }
+            }
+            if !dir.pop() {
+                break;
+            }
+        }
+    }
+
+    // A `.app` launched from Finder has `current_dir()` of `/`, so the walk
+    // above finds nothing and every key stays empty — which reads as "agent
+    // mode is unavailable" rather than as a packaging problem. A `.env` copied
+    // into the bundle's Resources is the fallback.
+    //
+    // ponytail: keys in the bundle are readable by anyone with the .app. Fine
+    // for a build you hand to yourself or a demo machine; a public release
+    // wants Keychain and a real BYOK settings pane instead.
+    // Tauri keeps the declared folder name, so a `resources/*` bundle rule
+    // lands one level below Resources itself; both are tried.
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    for candidate in ["../Resources/resources/.env", "../Resources/.env"] {
+        if let Ok(contents) = fs::read_to_string(dir.join(candidate)) {
             if let Some(value) = parse_dotenv_value(&contents, var) {
                 return Some(value);
             }
         }
-        if !dir.pop() {
-            return None;
-        }
     }
+    None
 }
 
 /// Pulls `var` out of `.env` contents, trimming surrounding quotes/whitespace.

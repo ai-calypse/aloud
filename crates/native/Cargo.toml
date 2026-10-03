@@ -1,0 +1,17 @@
+[package]
+name = "aloud-native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native macOS actions as agent tools — the local half of agent mode"
+
+[dependencies]
+anyhow.workspace = true
+aloud-selection = { path = "../selection" }
+base64 = "0.22"
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tracing-subscriber = "0.3"

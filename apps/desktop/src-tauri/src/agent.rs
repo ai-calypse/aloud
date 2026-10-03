@@ -41,6 +41,39 @@ struct Pending {
 #[derive(Default)]
 pub struct PendingQuestion(Mutex<Option<oneshot::Sender<Option<String>>>>);
 
+/// Which run the panel is currently showing.
+///
+/// A run is only stopped *between* tools — the pipeline polls its cancel flag
+/// rather than dropping the future, so a superseded run keeps executing its
+/// current tool and then emits into a panel the next run has already reset.
+/// That is how a new command ended up showing the previous one's steps. Every
+/// run takes a ticket here and its events are dropped once it is no longer the
+/// holder, so a late event from an abandoned run cannot reach the panel.
+static CURRENT_RUN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Claims the panel for a new run, returning its ticket.
+fn claim_run() -> u64 {
+    CURRENT_RUN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+
+fn is_current(run: u64) -> bool {
+    CURRENT_RUN.load(std::sync::atomic::Ordering::SeqCst) == run
+}
+
+/// Whether the current run is reporting to the listening bar alone. An
+/// always-listening request that clicks through Calculator needs no panel over
+/// the bar; one that has to ask, or has an answer to read, gets [`surface`]d.
+static QUIET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Opens the panel on a quiet run, re-sending what was asked so it opens on
+/// the request rather than on a question with no context.
+fn surface(app: &AppHandle, run: u64, transcript: &str) {
+    if is_current(run) && QUIET.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        crate::overlay::show_panel(app);
+        emit_for(app, run, AgentEvent::RunStarted(transcript.to_string()));
+    }
+}
+
 /// Streamed to the agent panel. Names follow the AG-UI protocol's tool-call
 /// lifecycle (https://docs.ag-ui.com) so the shape maps onto AI Elements' tool
 /// renderer — the vocabulary only, not the wire protocol.
@@ -108,34 +141,81 @@ pub struct ToolResult {
 }
 
 fn emit(app: &AppHandle, event: AgentEvent) {
+    // The listening bar shows every run's progress; a no-op while it is closed.
+    let _ = event.emit_to(app, crate::listen::LABEL);
+    if QUIET.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     if let Err(e) = event.emit_to(app, LABEL) {
         tracing::warn!(%e, "could not send to agent panel");
     }
 }
 
+/// Emits only while `run` still owns the panel. A superseded run keeps
+/// executing until its current tool returns, and without this its results land
+/// in the panel belonging to the command the user has since spoken.
+fn emit_for(app: &AppHandle, run: u64, event: AgentEvent) {
+    if !is_current(run) {
+        tracing::debug!(?event, run, "dropping an event from a superseded run");
+        return;
+    }
+    emit(app, event);
+}
+
 /// Runs the full agent flow for a transcript. Called by the pipeline, which
 /// owns `cancelled` — the loop polls it between tool calls so Escape stops a
 /// multi-tool round part-way instead of after all of it.
+///
+/// `quiet` (always-listening) keeps the panel closed until the run needs the
+/// user or has an answer to show; until then only the listening bar hears it.
 pub async fn run(
     app: &AppHandle,
     transcript: String,
     settings: &Settings,
+    quiet: bool,
     cancelled: impl Fn() -> bool,
 ) -> Result<()> {
-    crate::overlay::show_panel(app);
-    emit(app, AgentEvent::RunStarted(transcript.clone()));
+    // A previous run that ended without the panel being dismissed — it finished
+    // on its own, errored, or was cancelled — leaves its unanswered gate in the
+    // slot. The next command then finds it occupied and declines its own
+    // confirmation with no prompt on screen. Nothing else clears it: only
+    // `close_agent` does, and that needs an explicit dismissal. Clearing at the
+    // start of every run means no exit path can leak into the next command.
+    clear_pending(app);
 
-    match execute(app, &transcript, settings, cancelled).await {
-        Ok(message) => emit(app, AgentEvent::RunFinished(message)),
+    // Taking the ticket also invalidates any run still in flight: its events
+    // stop reaching the panel from here on, even though it keeps executing
+    // until its current tool returns.
+    let run = claim_run();
+    QUIET.store(quiet, std::sync::atomic::Ordering::SeqCst);
+
+    // Read before `show_panel`, which focuses our own window and would make us the front app. Our own
+    // name means a panel still held focus from the last run; the engine then falls back to the app that
+    // run operated.
+    let front = aloud_selection::frontmost_app()
+        .map(|a| a.name)
+        .filter(|name| !name.eq_ignore_ascii_case("aloud"));
+
+    if !quiet {
+        crate::overlay::show_panel(app);
+    }
+    emit_for(app, run, AgentEvent::RunStarted(transcript.clone()));
+
+    match execute(app, run, &transcript, front.as_deref(), settings, cancelled).await {
+        Ok(message) => emit_for(app, run, AgentEvent::RunFinished(message)),
         // A cancel is the user's own doing: close the panel rather than
         // showing them an error for the thing they just asked to stop.
         Err(e) if is_cancelled(&e) => {
             tracing::info!("agent cancelled");
-            hide(app);
+            // Only if nothing has replaced us — hiding here would otherwise
+            // close the panel of the run the user just started.
+            if is_current(run) && !QUIET.load(std::sync::atomic::Ordering::SeqCst) {
+                hide(app);
+            }
         }
         Err(e) => {
             tracing::error!(%e, "agent failed");
-            emit(app, AgentEvent::RunError(format!("{e:#}")));
+            emit_for(app, run, AgentEvent::RunError(format!("{e:#}")));
         }
     }
     Ok(())
@@ -146,6 +226,18 @@ pub async fn run(
 /// a typed error for one string is not worth the crate boundary.
 fn is_cancelled(error: &anyhow::Error) -> bool {
     error.to_string() == "cancelled"
+}
+
+/// Drops any unanswered gate or question. Dropping a sender resolves whoever is
+/// waiting on it — as a declined write or an unanswered question — so an
+/// abandoned run never leaves a live channel behind.
+fn clear_pending(app: &AppHandle) {
+    if let Some(state) = app.try_state::<PendingConfirmation>() {
+        state.0.lock().unwrap().take();
+    }
+    if let Some(state) = app.try_state::<PendingQuestion>() {
+        state.0.lock().unwrap().take();
+    }
 }
 
 // Gemini, not Groq: a multi-round tool loop makes several chat calls in a row
@@ -161,10 +253,26 @@ const GEMINI_MODEL: &str = "gemini-3.1-flash-lite";
 )]
 async fn execute(
     app: &AppHandle,
+    run: u64,
     transcript: &str,
+    front: Option<&str>,
     settings: &Settings,
     cancelled: impl Fn() -> bool,
 ) -> Result<String> {
+    // The fast path, before any language model: Jev routes the command (~0.15 s) and Mac-app and
+    // website tasks run straight on the engine. Email, calendar, questions and anything it isn't sure
+    // about come back as None and take the full agent loop below.
+    if let Some(started) = aloud_engine::command(transcript, front).await {
+        return run_direct(
+            app,
+            run,
+            transcript,
+            started.map_err(anyhow::Error::msg)?,
+            &cancelled,
+        )
+        .await;
+    }
+
     if settings.gemini_api_key.trim().is_empty() {
         bail!("Agent mode is unavailable — no Gemini credential is configured");
     }
@@ -172,30 +280,97 @@ async fn execute(
         bail!("Agent mode is unavailable — no Composio credential is configured");
     }
 
+    // The model's path is where confirmations, questions and read-out answers
+    // live, so a quiet run takes the panel from here.
+    surface(app, run, transcript);
+
     let llm = aloud_llm::LlmClient::new(&settings.gemini_api_key, Some(GEMINI_BASE_URL))?;
     let composio = aloud_agent::ComposioClient::new(&settings.composio_api_key)?;
 
     // A Composio round-trip on every command, before the model is even asked —
     // invisible in any per-tool timing, so it gets its own span.
-    let tools = composio
+    let mut tools = composio
         .available_tools(transcript)
         .instrument(tracing::info_span!(
             "tool_discovery",
             count = tracing::field::Empty
         ))
         .await?;
+
+    // The local half: native macOS actions for apps that are installed, the
+    // same ToolDef shape so the loop dispatches them with one branch. Composio
+    // may be unconnected and native tools still make the command runnable, so
+    // the "nothing to do" bail moves below the concat.
+    let installed = aloud_selection::installed_apps();
+    tools.extend(
+        aloud_native::tools(&installed)
+            .into_iter()
+            .map(|t| aloud_agent::ToolDef {
+                name: t.name,
+                toolkit: "macOS".to_string(),
+                description: t.description,
+                parameters: t.parameters,
+                read_only: t.read_only,
+            }),
+    );
+
+    // Layer 2: driving the focused app by its real accessibility elements, for
+    // everything no named tool covers. Empty when the helpers are not in this
+    // build, so the tool list simply lacks them rather than offering tools that
+    // can only fail.
+    // With the engine present its Mac task does the same job far faster (in-process accessibility,
+    // Jev per step), so the per-call helper tools are only offered without it.
+    let engine_tools = aloud_engine::tools();
+    if engine_tools.is_empty() {
+        tools.extend(
+            aloud_computer::tools()
+                .into_iter()
+                .map(|t| aloud_agent::ToolDef {
+                    name: t.name,
+                    toolkit: "Screen".to_string(),
+                    description: t.description,
+                    parameters: t.parameters,
+                    read_only: t.read_only,
+                }),
+        );
+    }
+
+    // Layer 3: whole tasks on the Voice Mac engine — a website in the user's browser, or a Mac app
+    // operated step by step — each chosen by Jev. Empty when the engine wasn't staged into this build.
+    tools.extend(engine_tools.into_iter().map(|t| {
+        aloud_agent::ToolDef {
+            toolkit: if t.name == aloud_engine::BROWSER_TASK {
+                "Browser"
+            } else {
+                "Mac"
+            }
+            .to_string(),
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+            read_only: t.read_only,
+        }
+    }));
+
     tracing::Span::current().record("tool_count", tools.len());
     if tools.is_empty() {
         bail!("No app is connected in Composio yet");
     }
 
+    // The same context the engine's router had, so a follow-up handed here ("what's 90 + 7" with
+    // Calculator open) can still become a Mac task instead of an answer in the panel.
+    let command = match front {
+        Some(app) => format!("{transcript}\n(The app on screen: {app})"),
+        None => transcript.to_string(),
+    };
+
     aloud_agent::run_tool_loop(
         &llm,
         GEMINI_MODEL,
         &composio,
-        transcript,
+        &command,
         &tools,
-        |event| emit(app, event_of(event)),
+        |event| emit_for(app, run, event_of(event)),
         // The safety gate. The offered tools carry their toolkit, so it names
         // the real app rather than deriving one from the slug.
         |name, args| {
@@ -204,7 +379,7 @@ async fn execute(
                 .find(|t| t.name == name)
                 .map(|t| t.toolkit.clone())
                 .unwrap_or_else(|| tool_app(&name));
-            confirm_write(app, name, toolkit, args)
+            confirm_write(app, run, name, toolkit, args)
         },
         // The question itself already went out through `on_event`; this only
         // opens the reply channel and waits on it.
@@ -215,6 +390,91 @@ async fn execute(
 }
 
 /// Waits for the panel's reply to the question `event_of` has already emitted.
+/// Drives one engine task to the end on the panel: a tool row, each step as the status line, a Yes/No
+/// question before a risky click, and the engine's answer as the run's message.
+async fn run_direct(
+    app: &AppHandle,
+    run: u64,
+    transcript: &str,
+    mut task: aloud_engine::Task,
+    cancelled: &impl Fn() -> bool,
+) -> Result<String> {
+    let name = task.tool().to_string();
+    emit_for(
+        app,
+        run,
+        AgentEvent::ToolCall(ToolCall {
+            app: if name == aloud_engine::MAC_TASK {
+                "Mac"
+            } else {
+                "Browser"
+            }
+            .to_string(),
+            name: name.clone(),
+            args: [("goal".to_string(), transcript.to_string())].into(),
+            requires_confirmation: false,
+        }),
+    );
+    loop {
+        if cancelled() {
+            let _ = task.stop().await;
+            bail!("cancelled");
+        }
+        match task.next().await {
+            None => {}
+            Some(aloud_engine::Update::Step(text)) => emit_for(app, run, AgentEvent::Status(text)),
+            Some(aloud_engine::Update::NeedsApproval(question)) => {
+                surface(app, run, transcript);
+                emit_for(
+                    app,
+                    run,
+                    AgentEvent::Asked(Question {
+                        question,
+                        options: vec!["Yes".to_string(), "No".to_string()],
+                    }),
+                );
+                let yes = matches!(await_answer(app).await.as_deref(), Some("Yes"));
+                task.approve(yes).await.map_err(anyhow::Error::msg)?;
+            }
+            Some(aloud_engine::Update::Finished(result)) => {
+                let success = result["successful"].as_bool().unwrap_or(false);
+                emit_for(
+                    app,
+                    run,
+                    AgentEvent::ToolResult(ToolResult {
+                        success,
+                        message: format!("{name} {}", if success { "done" } else { "failed" }),
+                    }),
+                );
+                if !success {
+                    bail!(
+                        "{}",
+                        result["error"].as_str().unwrap_or("the task didn't finish")
+                    );
+                }
+                // What the page or app showed, else the last thing done.
+                let answer: Vec<&str> = result["answer"]
+                    .as_array()
+                    .map(|lines| lines.iter().filter_map(|l| l.as_str()).take(4).collect())
+                    .unwrap_or_default();
+                let last = result["steps"]
+                    .as_array()
+                    .and_then(|s| {
+                        s.iter()
+                            .rev()
+                            .find_map(|l| l.as_str().filter(|l| *l != "Done"))
+                    })
+                    .unwrap_or("Done");
+                return Ok(if answer.is_empty() {
+                    last.to_string()
+                } else {
+                    answer.join(" · ")
+                });
+            }
+        }
+    }
+}
+
 async fn await_answer(app: &AppHandle) -> Option<String> {
     let (tx, rx) = oneshot::channel();
     if let Some(state) = app.try_state::<PendingQuestion>() {
@@ -250,12 +510,21 @@ pub fn answer_agent(app: AppHandle, answer: Option<String>) {
 /// owned args so the returned future doesn't borrow the loop's transient data.
 async fn confirm_write(
     app: &AppHandle,
+    run: u64,
     name: String,
     toolkit: String,
     args: serde_json::Value,
 ) -> Option<serde_json::Value> {
-    emit(
+    // A superseded run must not open a gate: its prompt would appear over the
+    // new run's panel, and it would occupy the single confirmation slot the
+    // current run needs. Declining is right — the user has moved on.
+    if !is_current(run) {
+        tracing::info!(%name, run, "declining a write from a superseded run");
+        return None;
+    }
+    emit_for(
         app,
+        run,
         AgentEvent::ToolCall(ToolCall {
             app: toolkit,
             name,
@@ -320,6 +589,8 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
         aloud_agent::LoopEvent::RateLimited { seconds } => {
             AgentEvent::Status(format!("Rate limited — retrying in {seconds}s…"))
         }
+        // The shimmering status line: replaced by each new step, cleared by the result.
+        aloud_agent::LoopEvent::Progress { text, .. } => AgentEvent::Status(text),
     }
 }
 
@@ -334,7 +605,17 @@ fn tool_app(slug: &str) -> String {
 async fn await_confirmation(app: &AppHandle, args: serde_json::Value) -> Option<serde_json::Value> {
     let (tx, rx) = oneshot::channel();
     if let Some(state) = app.try_state::<PendingConfirmation>() {
-        *state.0.lock().unwrap() = Some(Pending { reply: tx, args });
+        let mut slot = state.0.lock().unwrap();
+        // Replacing a live confirmation drops its sender, which resolves the
+        // waiting dispatch as "declined" without the user ever seeing a prompt.
+        // The panel renders one gate at a time, so a second one here means two
+        // writes are racing; refusing the newcomer is the honest answer, and it
+        // keeps the visible prompt the one that is actually answerable.
+        if slot.as_ref().is_some_and(|p| !p.reply.is_closed()) {
+            tracing::warn!("a confirmation is already open; declining the second");
+            return None;
+        }
+        *slot = Some(Pending { reply: tx, args });
     } else {
         tracing::error!("PendingConfirmation state missing");
         return None;
@@ -405,15 +686,9 @@ pub fn hide(app: &AppHandle) {
 #[specta::specta]
 pub fn close_agent(app: AppHandle) {
     // Abandoning a pending confirmation reads as a rejection; the write never
-    // fires.
-    if let Some(state) = app.try_state::<PendingConfirmation>() {
-        state.0.lock().unwrap().take();
-    }
-    // A dropped sender resolves the question as unanswered, so a closed panel
-    // never leaves the loop waiting out its full timeout.
-    if let Some(state) = app.try_state::<PendingQuestion>() {
-        state.0.lock().unwrap().take();
-    }
+    // fires. A dropped question sender resolves as unanswered, so a closed
+    // panel never leaves the loop waiting out its full timeout.
+    clear_pending(&app);
     hide(&app);
 }
 
@@ -421,6 +696,29 @@ pub fn close_agent(app: AppHandle) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A run is stopped only *between* tools, so a superseded one keeps
+    /// executing and then emits — into the panel the next command already
+    /// reset. That is how a new run showed the previous run's steps. Only the
+    /// latest ticket may write to the panel.
+    #[test]
+    fn only_the_newest_run_owns_the_panel() {
+        let first = claim_run();
+        assert!(is_current(first));
+
+        // The user speaks again while the first run is still mid-tool.
+        let second = claim_run();
+        assert!(is_current(second));
+        assert!(
+            !is_current(first),
+            "the superseded run must not still own the panel"
+        );
+
+        // Tickets are strictly increasing, so a late run can never look current
+        // again by coincidence.
+        assert!(second > first);
+        assert!(claim_run() > second);
+    }
 
     /// The panel only ever sees `display_args`' flat strings, so approving a
     /// gate has to rebuild the nested shape the tool expects. Getting this

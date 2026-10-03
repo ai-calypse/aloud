@@ -41,7 +41,7 @@ export type Editable = {
 };
 
 /** A string field, or "" when absent or not a string. */
-function text(args: ToolArgs, key: string): string {
+export function text(args: ToolArgs, key: string): string {
   const value = args[key];
   return typeof value === "string" ? value : "";
 }
@@ -269,6 +269,209 @@ const VIEWS: Record<string, ToolView> = {
         }),
       },
     ],
+  },
+
+  // Native macOS actions (aloud-native). Registered for real labels; the
+  // fall-through would render "Aloud: music play" and hide what actually runs.
+  ALOUD_MUSIC_PLAY: {
+    label: (a) => {
+      const q = text(a, "query");
+      return q ? `Playing ${q}` : "Resuming Music";
+    },
+  },
+  ALOUD_MUSIC_PAUSE: { label: () => "Pausing Music" },
+  ALOUD_MUSIC_NEXT: { label: () => "Skipping to the next track" },
+  ALOUD_MUSIC_NOW_PLAYING: { label: () => "Checking what's playing" },
+  ALOUD_REMINDERS_ADD: {
+    label: (a) => {
+      const t = text(a, "text");
+      return t ? `Adding a reminder: ${t}` : "Adding a reminder";
+    },
+  },
+  ALOUD_NOTES_APPEND: {
+    label: (a) => {
+      const title = text(a, "title");
+      return title ? `Adding a line to "${title}"` : "Appending to a note";
+    },
+    body: (a) => {
+      const line = text(a, "text");
+      return line ? (
+        <ToolCard>
+          <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
+            {line}
+          </p>
+        </ToolCard>
+      ) : null;
+    },
+  },
+  // The one with real blast radius. Same treatment GMAIL_SEND_EMAIL got after
+  // the wrong-recipient bug: the gate shows the FULL handle, never abbreviated,
+  // and the recipient is editable so a name that resolved to nothing — or to the
+  // wrong person — is fixable before it sends.
+  ALOUD_MESSAGES_SEND: {
+    label: (a) => {
+      const to = text(a, "to");
+      return to ? `Messaging ${to}` : "Sending a message";
+    },
+    body: (a) => {
+      const to = text(a, "to");
+      const msg = text(a, "text");
+      return (
+        <ToolCard>
+          {to ? (
+            <p className="m-0 break-all text-ui text-muted-foreground">
+              To: <span className="text-ink">{to}</span>
+            </p>
+          ) : (
+            <p className="m-0 text-ui italic text-warning">
+              No recipient — cancel and ask again.
+            </p>
+          )}
+          {msg ? (
+            <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
+              {msg}
+            </p>
+          ) : (
+            <p className="m-0 text-ui italic text-warning">
+              No message — cancel and ask again.
+            </p>
+          )}
+        </ToolCard>
+      );
+    },
+    edits: [
+      {
+        key: "to",
+        label: "To",
+        placeholder: "+1 555 123 4567 or email",
+        get: (a) => text(a, "to"),
+        set: (args, value) => ({ ...args, to: value }),
+      },
+    ],
+  },
+  ALOUD_FINDER_SEARCH: {
+    // The grid renders the results; this is just the step label above it.
+    label: (a) => {
+      const q = text(a, "query");
+      return q ? `Searching your Mac for "${q}"` : "Searching your Mac";
+    },
+  },
+  ALOUD_FINDER_REVEAL: {
+    label: (a) => {
+      const path = text(a, "path");
+      return path ? `Revealing ${path.split("/").pop() || path}` : "Revealing in Finder";
+    },
+  },
+  ALOUD_SYSTEM_VOLUME: {
+    label: (a) => {
+      const level = a["level"];
+      return typeof level === "number" ? `Setting volume to ${level}` : "Setting the volume";
+    },
+  },
+  ALOUD_RUN_SHORTCUT: {
+    label: (a) => {
+      const name = text(a, "name");
+      return name ? `Running "${name}"` : "Running a shortcut";
+    },
+  },
+  ALOUD_OPEN_APP: {
+    label: (a) => {
+      // One call can open many, so the gate has to name them — "opening an
+      // app" while fifteen launch is not something anyone can approve.
+      const names = nested(a, "names");
+      const list = Array.isArray(names) ? names.map(String) : [];
+      if (list.length > 3) return `Opening ${list.length} apps`;
+      if (list.length) return `Opening ${list.join(", ")}`;
+      return text(a, "name") ? `Opening ${text(a, "name")}` : "Opening an app";
+    },
+  },
+  ALOUD_WRITE_FILE: {
+    label: (a) => {
+      const path = text(a, "path");
+      const name = path.split("/").pop() || path;
+      return name ? `Saving ${name}` : "Saving a file";
+    },
+  },
+  ALOUD_COLLECT_FILES: {
+    label: (a) => {
+      const paths = nested(a, "paths");
+      const count = Array.isArray(paths) ? paths.length : 0;
+      const verb = String(a["move"]) === "true" ? "Moving" : "Copying";
+      const where = text(a, "destination");
+      const what = count ? `${count} file${count === 1 ? "" : "s"}` : "files";
+      return where ? `${verb} ${what} to ${where}` : `${verb} ${what}`;
+    },
+  },
+  ALOUD_ORGANIZE_FOLDER: {
+    // The gate is approving a bulk move of real files, so the label names the
+    // folder and the scheme — "tidy up" with no detail is not a gate.
+    label: (a) => {
+      const folder = text(a, "folder") || "Downloads";
+      // `display_args` stringifies every non-string argument, so the rules map
+      // arrives as JSON text — `nested` is the existing undo for that.
+      const rules = nested(a, "rules");
+      const names =
+        rules && typeof rules === "object" ? Object.keys(rules as Record<string, unknown>) : [];
+      return names.length
+        ? `Sorting ${folder} into ${names.join(", ")}`
+        : `Sorting your ${folder}`;
+    },
+  },
+  ALOUD_UNDO_ORGANIZE: {
+    label: (a) => `Putting ${text(a, "folder") || "Downloads"} back as it was`,
+  },
+  ALOUD_WINDOW_ARRANGE: {
+    label: (a) => {
+      const position = text(a, "position");
+      const where: Record<string, string> = {
+        full: "filling the screen",
+        left: "to the left half",
+        right: "to the right half",
+        center: "to the centre",
+      };
+      return position
+        ? `Moving the window ${where[position] ?? `to ${position}`}`
+        : "Arranging the window";
+    },
+  },
+  ALOUD_BROWSER_TAB: {
+    label: (a) =>
+      text(a, "action") === "current"
+        ? "Checking the current page"
+        : `Opening ${text(a, "url") || "a page"}`,
+  },
+  ALOUD_CLIPBOARD: {
+    label: (a) =>
+      text(a, "action") === "read" ? "Reading the clipboard" : "Copying to the clipboard",
+  },
+  ALOUD_QUIT_APP: {
+    label: (a) => {
+      const name = text(a, "name");
+      return name ? `Quitting ${name}` : "Quitting an app";
+    },
+  },
+  // Screen control. The click gate is the one confirmation a computer-use run
+  // gets, so its label has to say what will be clicked — the model passes the
+  // element's own text for exactly this, and a bare coordinate pair is a gate
+  // nobody can judge.
+  ALOUD_SCREEN_READ: { label: () => "Reading the screen" },
+  ALOUD_SCREEN_CLICK: {
+    label: (a) => {
+      const what = text(a, "label");
+      return what ? `Clicking "${what}"` : "Clicking on screen";
+    },
+  },
+  ALOUD_SCREEN_TYPE: {
+    label: (a) => {
+      const typed = text(a, "text");
+      return typed ? `Typing "${typed}"` : "Typing on screen";
+    },
+  },
+  ALOUD_SCREEN_KEY: {
+    label: (a) => {
+      const keys = text(a, "keys");
+      return keys ? `Pressing ${keys}` : "Pressing a key";
+    },
   },
 };
 
