@@ -391,7 +391,7 @@ fn status_line(app: &AppHandle) -> String {
         Phase::Transcribing => "Transcribing…",
         Phase::Error => "Last dictation failed",
         Phase::NoSpeech => "No speech detected",
-        Phase::Idle | Phase::Done => "Ready",
+        Phase::Idle | Phase::Done | Phase::Listening => "Ready",
     }
     .to_string()
 }

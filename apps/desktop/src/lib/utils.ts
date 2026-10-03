@@ -10,7 +10,7 @@ import { extendTailwindMerge } from "tailwind-merge";
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
-      "font-size": [{ text: ["row", "ui", "hint", "micro"] }],
+      "font-size": [{ text: ["row", "ui", "hint"] }],
       "text-color": [
         {
           text: [
@@ -24,9 +24,6 @@ const twMerge = extendTailwindMerge({
             "warning",
             "chevron",
             "search-icon",
-            "bar-accent",
-            "bar-on-accent",
-            "bar-muted",
           ],
         },
       ],
@@ -46,21 +43,15 @@ const twMerge = extendTailwindMerge({
             "toggle-on",
             "toggle-off",
             "separator",
-            "bar",
-            "bar-accent",
-            "bar-accent-wash",
-            "bar-off-wash",
-            "bar-muted",
-            "bar-busy",
           ],
         },
       ],
-      "border-color": [{ border: ["surface-border", "separator", "brand", "bar-stroke"] }],
+      "border-color": [{ border: ["surface-border", "separator", "brand"] }],
       // Must stay in step with any `ring-<token>` used in a component: without
       // it tailwind-merge files ring-brand alongside ring-2 and ring-offset-2
       // and drops one of the three.
       "ring-color": [{ ring: ["brand"] }],
-      rounded: [{ rounded: ["card", "field", "row", "chip", "bar", "bar-key"] }],
+      rounded: [{ rounded: ["card", "field", "row", "chip"] }],
       "shadow-color": [{ shadow: ["card", "field", "accent", "knob"] }],
     },
   },

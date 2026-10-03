@@ -151,17 +151,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
             agent::confirm_agent,
             agent::answer_agent,
             agent::close_agent,
-            listen::listen_state,
-            listen::listen_toggle_mic,
-            listen::listen_submit,
-            listen::listen_cancel,
         ])
         .events(collect_events![
             pipeline::Phase,
             meeting::MeetingPhase,
             ask::AskEvent,
             agent::AgentEvent,
-            listen::ListenState,
             overlay::AudioLevel,
             overlay::OverlayError,
             overlay::DictationPartial,
@@ -576,10 +571,19 @@ pub(crate) fn toggle_listening(app: &tauri::AppHandle) {
         return;
     }
     let settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
-    match listen::Listener::start(app.clone(), settings, state.pipeline.busy_flag()) {
+    match listen::Listener::start(app.clone(), settings, state.pipeline.clone()) {
         Ok(listener) => *slot = Some(listener),
         Err(e) => tracing::error!(%e, "starting always-listening failed"),
     }
+}
+
+/// Turns always-listening off, if it is on — "stop listening" said aloud.
+pub(crate) fn stop_listening(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let stopped = state.listener.lock().ok().and_then(|mut slot| slot.take());
+    // Dropped outside the lock: closing the mic waits on the audio thread.
+    drop(stopped);
+    tray::refresh(app);
 }
 
 #[cfg(test)]

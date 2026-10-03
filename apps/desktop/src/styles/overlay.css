@@ -1155,6 +1155,13 @@
   background: var(--sys-orange);
 }
 
+/* Always-listening at rest: on all day, so a slow breath rather than the
+   recording light — present without pulling the eye. */
+.dot--listening {
+  background: var(--sys-teal);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+
 @keyframes breathe {
   50% {
     opacity: 0.35;

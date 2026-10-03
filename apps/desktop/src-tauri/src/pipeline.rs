@@ -38,6 +38,9 @@ const START_CHIME_LEAD: Duration = Duration::from_millis(400);
 #[tauri_specta(event_name = "dictation-phase")]
 pub enum Phase {
     Idle,
+    /// Always-listening is on and nothing is being said: the wings sit in the
+    /// menu bar. Never set by a dictation; see `crate::listen`.
+    Listening,
     Recording,
     Transcribing,
     Done,
@@ -205,7 +208,7 @@ impl Pipeline {
             Phase::Transcribing => Some(crate::sound::Chime::Stop),
             Phase::Error => Some(crate::sound::Chime::Error),
             // Silence is not a failure, so no error chime.
-            Phase::Done | Phase::Idle | Phase::NoSpeech => None,
+            Phase::Done | Phase::Idle | Phase::NoSpeech | Phase::Listening => None,
         };
         if let Some(chime) = chime {
             let settings = self.settings();
@@ -230,10 +233,10 @@ impl Pipeline {
                 };
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(linger).await;
-                    crate::overlay::hide(&app);
+                    crate::overlay::rest(&app);
                 });
             }
-            Phase::Idle => crate::overlay::hide(&self.app),
+            Phase::Idle | Phase::Listening => crate::overlay::rest(&self.app),
         }
     }
 
@@ -774,6 +777,22 @@ impl Pipeline {
                 Err(e) => tracing::warn!(%e, "could not fetch the on-device model"),
             }
         });
+    }
+
+    /// Transcribes 24 kHz PCM16 the way a dictation is — same engine, cached
+    /// local model, cloud-to-local fallback — for an always-listening turn,
+    /// whose own live transcript is a preview, not the command.
+    pub async fn transcribe_pcm16(&self, pcm: &[u8]) -> Result<String> {
+        let settings = self.settings();
+        let wav = std::env::temp_dir().join(format!(
+            "aloud-turn-{}-{}.wav",
+            std::process::id(),
+            next_utterance_id()
+        ));
+        aloud_audio::write_pcm16_wav(&wav, pcm)?;
+        let result = self.transcribe_with_local_fallback(&settings, &wav).await;
+        let _ = std::fs::remove_file(&wav);
+        Ok(result?.0)
     }
 
     /// Transcribes, retrying on-device once if the cloud call failed for a
