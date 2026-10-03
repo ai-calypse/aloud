@@ -8,6 +8,8 @@ description = "Native macOS actions as agent tools — the local half of agent m
 [dependencies]
 anyhow.workspace = true
 aloud-selection = { path = "../selection" }
+# Pressed shortcuts go through its main-thread, layout-aware chord path.
+aloud-paste = { path = "../paste" }
 base64 = "0.22"
 # Reminder due dates: strict parsing, offsets to local time.
 chrono = "0.4"

@@ -200,6 +200,106 @@ fn send_paste(press_enter: bool) -> Result<()> {
     })?
 }
 
+/// A modifier held for [`press_chord`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Modifier {
+    Command,
+    Shift,
+    Option,
+    Control,
+}
+
+/// The key of a chord: a character, resolved against the active layout so ⌘Z
+/// is the key that types "z" on AZERTY too, or a raw virtual key code for keys
+/// with no character (Return, Escape, F5, the arrows).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChordKey {
+    Char(char),
+    Code(u16),
+}
+
+/// Presses one chord as a person would — modifiers down, the key, modifiers up
+/// — through the same main-thread CGEvent path as the paste chord. Posted
+/// events need only Accessibility; System Events' `keystroke` also needs an
+/// Automation grant and adds an Apple Event round trip.
+pub fn press_chord(modifiers: &[Modifier], key: ChordKey) -> Result<()> {
+    // A password field or Terminal's Secure Keyboard Entry drops synthetic
+    // keys without a word; saying so beats a shortcut that silently did nothing.
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "Carbon", kind = "framework")]
+        extern "C" {
+            fn IsSecureEventInputEnabled() -> bool;
+        }
+        // SAFETY: a read-only query with no arguments.
+        if unsafe { IsSecureEventInputEnabled() } {
+            anyhow::bail!(
+                "secure keyboard input is on (a password field or Terminal's Secure Keyboard \
+                 Entry), which blocks pressed keys"
+            );
+        }
+    }
+    let modifiers = modifiers.to_vec();
+    on_main_thread(move || -> Result<()> {
+        let mut enigo = Enigo::new(&Settings::default()).context("creating input simulator")?;
+        let held: Vec<Key> = modifiers
+            .iter()
+            .map(|m| match m {
+                Modifier::Command => Key::Meta,
+                Modifier::Shift => Key::Shift,
+                Modifier::Option => Key::Alt,
+                Modifier::Control => Key::Control,
+            })
+            .collect();
+        for k in &held {
+            enigo.key(*k, Direction::Press)?;
+        }
+        let pressed = enigo.key(
+            match key {
+                ChordKey::Char(c) => match main_row(c) {
+                    Some(code) => Key::Other(u32::from(code)),
+                    None => Key::Unicode(c),
+                },
+                ChordKey::Code(code) => Key::Other(u32::from(code)),
+            },
+            Direction::Click,
+        );
+        // Always release, in reverse: a stuck Cmd wedges the user's keyboard.
+        for k in held.iter().rev() {
+            let _ = enigo.key(*k, Direction::Release);
+        }
+        pressed.context("pressing the key")?;
+        Ok(())
+    })?
+}
+
+/// The main-row key for characters the numeric keypad also types. enigo finds
+/// a character's key by scanning every key, and for "5" it lands on keypad 5 —
+/// the same character, but ⌘⇧keypad-5 is not the screenshot shortcut, which
+/// macOS matches on the key, not the character. The digit row is the same key
+/// on every common layout. Letters have no keypad twin and keep going through
+/// the layout, which is what app menu shortcuts match.
+fn main_row(c: char) -> Option<u16> {
+    // kVK_ANSI_* codes.
+    Some(match c {
+        '1' => 18,
+        '2' => 19,
+        '3' => 20,
+        '4' => 21,
+        '5' => 23,
+        '6' => 22,
+        '7' => 26,
+        '8' => 28,
+        '9' => 25,
+        '0' => 29,
+        '-' => 27,
+        '=' => 24,
+        '/' => 44,
+        '.' => 47,
+        _ => return None,
+    })
+}
+
 /// Copies the current selection and returns it, restoring the clipboard. The
 /// cross-platform fallback for reading selected text.
 pub fn copy_selection() -> Result<String> {

@@ -402,6 +402,19 @@ const VIEWS: Record<string, ToolView> = {
     ],
   },
   ALOUD_PHOTO_BOOTH_TAKE_PHOTO: { label: () => "Taking a photo in Photo Booth" },
+  ALOUD_PRESS_KEYS: {
+    label: (a) => {
+      const keys = text(a, "keys");
+      return keys ? `Pressing ${keys}` : "Pressing a shortcut";
+    },
+  },
+  ALOUD_MENU: {
+    label: (a) => {
+      if (a.list === true) return "Reading the menus";
+      const item = text(a, "item") || (Array.isArray(a.path) ? a.path.join(" › ") : "");
+      return item ? `Choosing ${item}` : "Choosing a menu command";
+    },
+  },
   ALOUD_FINDER_SEARCH: {
     // The grid renders the results; this is just the step label above it.
     label: (a) => {

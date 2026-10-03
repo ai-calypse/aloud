@@ -216,6 +216,7 @@ dependencies = [
 name = "aloud-native"
 version = "0.1.0"
 dependencies = [
+ "aloud-paste",
  "aloud-selection",
  "anyhow",
  "base64 0.22.1",

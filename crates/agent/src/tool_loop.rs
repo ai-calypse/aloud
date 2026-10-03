@@ -151,7 +151,10 @@ make or add content — a list, a note, a reminder, a file, a message — write 
 content yourself, in full, inside the tool's arguments: for \"make a shopping \
 list for a cake and put it in a note\", call ALOUD_NOTES_CREATE with the actual \
 list as its body. Plain text, no emoji. When the user names a note (\"my \
-shopping note\"), pass that name as its title. \
+shopping note\"), pass that name as its title. Anything the Mac or an app does \
+with a keyboard shortcut or a menu command that no named tool covers — the \
+screenshot and recording toolbar, locking the screen, Export as PDF — is \
+ALOUD_PRESS_KEYS or ALOUD_MENU; never say there is no tool for it. \
 Second, the tools for the user's connected services — email, calendar, GitHub \
 and whatever else the list offers. If the command needs a connected service \
 whose tools you do not have, load them with ALOUD_MORE_TOOLS. \
