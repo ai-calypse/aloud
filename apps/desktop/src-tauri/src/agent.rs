@@ -225,6 +225,20 @@ async fn execute(
     settings: &Settings,
     cancelled: impl Fn() -> bool,
 ) -> Result<String> {
+    // The fast path, before any language model: Jev routes the command (~0.15 s) and Mac-app and
+    // website tasks run straight on the engine. Email, calendar, questions and anything it isn't sure
+    // about come back as None and take the full agent loop below.
+    if let Some(started) = aloud_engine::command(transcript).await {
+        return run_direct(
+            app,
+            run,
+            transcript,
+            started.map_err(anyhow::Error::msg)?,
+            &cancelled,
+        )
+        .await;
+    }
+
     if settings.gemini_api_key.trim().is_empty() {
         bail!("Agent mode is unavailable — no Gemini credential is configured");
     }
@@ -266,17 +280,39 @@ async fn execute(
     // everything no named tool covers. Empty when the helpers are not in this
     // build, so the tool list simply lacks them rather than offering tools that
     // can only fail.
-    tools.extend(
-        aloud_computer::tools()
-            .into_iter()
-            .map(|t| aloud_agent::ToolDef {
-                name: t.name,
-                toolkit: "Screen".to_string(),
-                description: t.description,
-                parameters: t.parameters,
-                read_only: t.read_only,
-            }),
-    );
+    // With the engine present its Mac task does the same job far faster (in-process accessibility,
+    // Jev per step), so the per-call helper tools are only offered without it.
+    let engine_tools = aloud_engine::tools();
+    if engine_tools.is_empty() {
+        tools.extend(
+            aloud_computer::tools()
+                .into_iter()
+                .map(|t| aloud_agent::ToolDef {
+                    name: t.name,
+                    toolkit: "Screen".to_string(),
+                    description: t.description,
+                    parameters: t.parameters,
+                    read_only: t.read_only,
+                }),
+        );
+    }
+
+    // Layer 3: whole tasks on the Voice Mac engine — a website in the user's browser, or a Mac app
+    // operated step by step — each chosen by Jev. Empty when the engine wasn't staged into this build.
+    tools.extend(engine_tools.into_iter().map(|t| {
+        aloud_agent::ToolDef {
+            toolkit: if t.name == aloud_engine::BROWSER_TASK {
+                "Browser"
+            } else {
+                "Mac"
+            }
+            .to_string(),
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+            read_only: t.read_only,
+        }
+    }));
 
     tracing::Span::current().record("tool_count", tools.len());
     if tools.is_empty() {
@@ -309,6 +345,90 @@ async fn execute(
 }
 
 /// Waits for the panel's reply to the question `event_of` has already emitted.
+/// Drives one engine task to the end on the panel: a tool row, each step as the status line, a Yes/No
+/// question before a risky click, and the engine's answer as the run's message.
+async fn run_direct(
+    app: &AppHandle,
+    run: u64,
+    transcript: &str,
+    mut task: aloud_engine::Task,
+    cancelled: &impl Fn() -> bool,
+) -> Result<String> {
+    let name = task.tool().to_string();
+    emit_for(
+        app,
+        run,
+        AgentEvent::ToolCall(ToolCall {
+            app: if name == aloud_engine::MAC_TASK {
+                "Mac"
+            } else {
+                "Browser"
+            }
+            .to_string(),
+            name: name.clone(),
+            args: [("goal".to_string(), transcript.to_string())].into(),
+            requires_confirmation: false,
+        }),
+    );
+    loop {
+        if cancelled() {
+            let _ = task.stop().await;
+            bail!("cancelled");
+        }
+        match task.next().await {
+            None => {}
+            Some(aloud_engine::Update::Step(text)) => emit_for(app, run, AgentEvent::Status(text)),
+            Some(aloud_engine::Update::NeedsApproval(question)) => {
+                emit_for(
+                    app,
+                    run,
+                    AgentEvent::Asked(Question {
+                        question,
+                        options: vec!["Yes".to_string(), "No".to_string()],
+                    }),
+                );
+                let yes = matches!(await_answer(app).await.as_deref(), Some("Yes"));
+                task.approve(yes).await.map_err(anyhow::Error::msg)?;
+            }
+            Some(aloud_engine::Update::Finished(result)) => {
+                let success = result["successful"].as_bool().unwrap_or(false);
+                emit_for(
+                    app,
+                    run,
+                    AgentEvent::ToolResult(ToolResult {
+                        success,
+                        message: format!("{name} {}", if success { "done" } else { "failed" }),
+                    }),
+                );
+                if !success {
+                    bail!(
+                        "{}",
+                        result["error"].as_str().unwrap_or("the task didn't finish")
+                    );
+                }
+                // What the page or app showed, else the last thing done.
+                let answer: Vec<&str> = result["answer"]
+                    .as_array()
+                    .map(|lines| lines.iter().filter_map(|l| l.as_str()).take(4).collect())
+                    .unwrap_or_default();
+                let last = result["steps"]
+                    .as_array()
+                    .and_then(|s| {
+                        s.iter()
+                            .rev()
+                            .find_map(|l| l.as_str().filter(|l| *l != "Done"))
+                    })
+                    .unwrap_or("Done");
+                return Ok(if answer.is_empty() {
+                    last.to_string()
+                } else {
+                    answer.join(" · ")
+                });
+            }
+        }
+    }
+}
+
 async fn await_answer(app: &AppHandle) -> Option<String> {
     let (tx, rx) = oneshot::channel();
     if let Some(state) = app.try_state::<PendingQuestion>() {
@@ -423,6 +543,8 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
         aloud_agent::LoopEvent::RateLimited { seconds } => {
             AgentEvent::Status(format!("Rate limited — retrying in {seconds}s…"))
         }
+        // The shimmering status line: replaced by each new step, cleared by the result.
+        aloud_agent::LoopEvent::Progress { text, .. } => AgentEvent::Status(text),
     }
 }
 

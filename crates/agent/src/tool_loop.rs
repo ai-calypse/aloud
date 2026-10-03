@@ -129,6 +129,9 @@ pub enum LoopEvent {
     },
     /// The chat API throttled us; the loop is waiting this long to retry once.
     RateLimited { seconds: u64 },
+    /// A long-running engine task (browser or Mac app) took a step. Live progress only; the model
+    /// sees the whole run in the tool result.
+    Progress { name: String, text: String },
 }
 
 const TOOL_SYSTEM_PROMPT: &str = "\
@@ -163,6 +166,11 @@ To tidy or organise a folder, call ALOUD_ORGANIZE_FOLDER exactly once. It sorts 
 every file in the folder in that single call, so never call it repeatedly and \
 never move files one at a time. You choose the categories: pick ones that fit \
 what the user likely has, and give each the file extensions that belong in it. \
+For anything to do on a website — open a site, search it, play a video at a \
+time, read a value off a page, open a section of a dashboard — call \
+ALOUD_BROWSER_TASK once with the user's whole request as the goal; it runs every \
+step itself. For a multi-step job inside a Mac app that no named tool covers, \
+prefer ALOUD_MAC_TASK with the whole request over driving the screen yourself. \
 When no tool in the list does what was asked, you can drive the app the user is \
 looking at directly: ALOUD_SCREEN_READ lists its real on-screen controls with \
 their positions, and the screen click/type/key tools act on them. This is the \
@@ -683,11 +691,16 @@ where
             }
 
             let is_screen = is_screen_write(&name);
-            let gate_needed = if is_screen {
-                !screen_approved
-            } else {
-                is_write(&name, tools)
-            };
+            // Engine tasks gate inside themselves: each risky click (buy, send, delete, sign in)
+            // pauses for a yes/no below, so a gate on the whole goal would ask twice for one action.
+            let gate_needed =
+                if aloud_engine::is_engine_tool(&name) || aloud_native::low_risk(&name) {
+                    false
+                } else if is_screen {
+                    !screen_approved
+                } else {
+                    is_write(&name, tools)
+                };
 
             let mut args = args;
             let declined = if gate_needed {
@@ -731,17 +744,23 @@ where
                 // gate, dedup, and budgets above all key off the tool name.
                 // osascript blocks, so it runs on a blocking thread rather than
                 // stalling the runtime.
-                let result = match run_native(&name, &args).instrument(span.clone()).await {
-                    Some(native) => native,
-                    None => match run_computer(&name, &args).instrument(span.clone()).await {
-                        Some(screen) => screen,
-                        None => {
-                            composio
-                                .execute(&name, &args)
-                                .instrument(span.clone())
-                                .await
-                        }
-                    },
+                let result = if aloud_engine::is_engine_tool(&name) {
+                    run_engine(&name, &args, &mut on_event, &ask, &cancelled)
+                        .instrument(span.clone())
+                        .await
+                } else {
+                    match run_native(&name, &args).instrument(span.clone()).await {
+                        Some(native) => native,
+                        None => match run_computer(&name, &args).instrument(span.clone()).await {
+                            Some(screen) => screen,
+                            None => {
+                                composio
+                                    .execute(&name, &args)
+                                    .instrument(span.clone())
+                                    .await
+                            }
+                        },
+                    }
                 };
                 let success = tool_succeeded(&result);
                 span.record("ok", success);
@@ -753,7 +772,7 @@ where
                 result
             };
 
-            if !declined && !is_write(&name, tools) {
+            if !declined && !is_write(&name, tools) && !aloud_engine::is_engine_tool(&name) {
                 seen.insert((name.clone(), args.to_string()), result.clone());
             }
             messages.push(Message::tool_result(&call.id, result));
@@ -786,6 +805,51 @@ async fn run_native(name: &str, args: &serde_json::Value) -> Option<String> {
         Ok(value) => value.to_string(),
         Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
     })
+}
+
+/// Runs a browser or Mac task on the Voice Mac engine to completion, streaming each step as
+/// [`LoopEvent::Progress`] and turning the engine's pause before a risky click into a Yes/No
+/// question through the same `ask` path as [`ASK_USER`]. Escape stops the task, not just the loop.
+async fn run_engine<A>(
+    name: &str,
+    args: &serde_json::Value,
+    on_event: &mut impl FnMut(LoopEvent),
+    ask: &impl Fn(String) -> A,
+    cancelled: &impl Fn() -> bool,
+) -> String
+where
+    A: Future<Output = Option<String>>,
+{
+    let mut task = match aloud_engine::start(name, args).await {
+        Some(Ok(task)) => task,
+        Some(Err(e)) => return serde_json::json!({ "error": e }).to_string(),
+        None => return serde_json::json!({ "error": "not an engine tool" }).to_string(),
+    };
+    loop {
+        if cancelled() {
+            let _ = task.stop().await;
+            return r#"{"error":"the user cancelled the task"}"#.to_string();
+        }
+        match task.next().await {
+            None => {}
+            Some(aloud_engine::Update::Step(text)) => on_event(LoopEvent::Progress {
+                name: name.to_string(),
+                text,
+            }),
+            Some(aloud_engine::Update::NeedsApproval(question)) => {
+                on_event(LoopEvent::Asked {
+                    question: question.clone(),
+                    options: vec!["Yes".to_string(), "No".to_string()],
+                });
+                let yes = matches!(ask(question).await.as_deref(), Some("Yes"));
+                if task.approve(yes).await.is_err() {
+                    return r#"{"error":"the Voice Mac engine stopped while waiting for approval"}"#
+                        .to_string();
+                }
+            }
+            Some(aloud_engine::Update::Finished(result)) => return result.to_string(),
+        }
+    }
 }
 
 /// Runs a screen-control tool, `None` when the name is not one of those — the

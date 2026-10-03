@@ -102,6 +102,27 @@ pub fn tools(installed: &[aloud_selection::InstalledApp]) -> Vec<NativeTool> {
 /// The `Ok` value is a JSON result in the same shape Composio returns, so the
 /// loop's `tool_succeeded` and the panel need no special case. A `ScriptError`
 /// is surfaced as an error result the model can read back.
+/// Writes too small to confirm: each is undone by saying the opposite (open/quit, play/pause, volume,
+/// a window moved, a reminder or a note line added, the clipboard set). Asking "are you sure?" before
+/// opening Safari made every command a two-step chore. Sending, quitting, Shortcuts and file moves or
+/// writes are left out, so they still ask.
+pub fn low_risk(name: &str) -> bool {
+    matches!(
+        name,
+        "ALOUD_OPEN_APP"
+            | "ALOUD_MUSIC_PLAY"
+            | "ALOUD_MUSIC_PAUSE"
+            | "ALOUD_MUSIC_NEXT"
+            | "ALOUD_REMINDERS_ADD"
+            | "ALOUD_NOTES_APPEND"
+            | "ALOUD_WINDOW_ARRANGE"
+            | "ALOUD_BROWSER_TAB"
+            | "ALOUD_CLIPBOARD"
+            | "ALOUD_FINDER_REVEAL"
+            | "ALOUD_SYSTEM_VOLUME"
+    )
+}
+
 pub fn execute(name: &str, args: &Value) -> Option<Result<Value, ScriptError>> {
     if name == RUN_SHORTCUT {
         tracing::info!(tool = name, "running native tool");
@@ -137,6 +158,20 @@ fn app_installed(app: &str, installed: &[aloud_selection::InstalledApp]) -> bool
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn sending_quitting_and_file_moves_still_ask_first() {
+        for name in [
+            "ALOUD_MESSAGES_SEND",
+            "ALOUD_QUIT_APP",
+            "ALOUD_COLLECT_FILES",
+            "ALOUD_WRITE_FILE",
+            "ALOUD_ORGANIZE_FOLDER",
+        ] {
+            assert!(!low_risk(name), "{name} must keep its confirmation");
+        }
+        assert!(low_risk("ALOUD_OPEN_APP"));
+    }
     use super::*;
     use aloud_selection::InstalledApp;
 

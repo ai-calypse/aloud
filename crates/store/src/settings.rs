@@ -363,7 +363,8 @@ impl Settings {
 }
 
 /// A var from the process environment, else the first `.env` found walking up
-/// from the working directory. No dotenv crate: three keys, `KEY=value` lines.
+/// from the working directory, else one bundled beside the app. No dotenv
+/// crate: three keys, `KEY=value` lines.
 fn env_or_dotenv(var: &str) -> Option<String> {
     if let Ok(value) = std::env::var(var) {
         let trimmed = value.trim();
@@ -372,18 +373,40 @@ fn env_or_dotenv(var: &str) -> Option<String> {
         }
     }
 
-    let mut dir = std::env::current_dir().ok()?;
-    loop {
-        let candidate = dir.join(".env");
-        if let Ok(contents) = fs::read_to_string(&candidate) {
+    if let Some(mut dir) = std::env::current_dir().ok() {
+        loop {
+            let candidate = dir.join(".env");
+            if let Ok(contents) = fs::read_to_string(&candidate) {
+                if let Some(value) = parse_dotenv_value(&contents, var) {
+                    return Some(value);
+                }
+            }
+            if !dir.pop() {
+                break;
+            }
+        }
+    }
+
+    // A `.app` launched from Finder has `current_dir()` of `/`, so the walk
+    // above finds nothing and every key stays empty — which reads as "agent
+    // mode is unavailable" rather than as a packaging problem. A `.env` copied
+    // into the bundle's Resources is the fallback.
+    //
+    // ponytail: keys in the bundle are readable by anyone with the .app. Fine
+    // for a build you hand to yourself or a demo machine; a public release
+    // wants Keychain and a real BYOK settings pane instead.
+    // Tauri keeps the declared folder name, so a `resources/*` bundle rule
+    // lands one level below Resources itself; both are tried.
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    for candidate in ["../Resources/resources/.env", "../Resources/.env"] {
+        if let Ok(contents) = fs::read_to_string(dir.join(candidate)) {
             if let Some(value) = parse_dotenv_value(&contents, var) {
                 return Some(value);
             }
         }
-        if !dir.pop() {
-            return None;
-        }
     }
+    None
 }
 
 /// Pulls `var` out of `.env` contents, trimming surrounding quotes/whitespace.

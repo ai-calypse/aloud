@@ -1,0 +1,56 @@
+//! Run one engine task end to end against the real Mac, approving any risky step from stdin.
+//!
+//! cargo run -p aloud-engine --example engine_task -- mac "In Calculator, calculate 12 times 3"
+//! cargo run -p aloud-engine --example engine_task -- browser "What does serendipity mean? Check Wiktionary"
+//!
+//! Uses the repo's `engine/` (run `npm install` there first, and build `engine/axd/axd` for Mac tasks).
+
+use aloud_engine::{Update, BROWSER_TASK, MAC_TASK};
+use serde_json::json;
+
+#[tokio::main]
+async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let [_, kind, goal] = args.as_slice() else {
+        eprintln!("usage: engine_task <mac|browser> <goal>");
+        std::process::exit(2);
+    };
+    let name = if kind == "browser" {
+        BROWSER_TASK
+    } else {
+        MAC_TASK
+    };
+    println!(
+        "tools offered: {:?}",
+        aloud_engine::tools()
+            .iter()
+            .map(|t| &t.name)
+            .collect::<Vec<_>>()
+    );
+    let started = std::time::Instant::now();
+    let mut task = match aloud_engine::start(name, &json!({ "goal": goal })).await {
+        Some(Ok(task)) => task,
+        Some(Err(e)) => return eprintln!("couldn't start: {e}"),
+        None => return eprintln!("not an engine tool"),
+    };
+    loop {
+        match task.next().await {
+            None => continue,
+            Some(Update::Step(s)) => println!("  {s}"),
+            Some(Update::NeedsApproval(q)) => {
+                println!("  ? {q} [y/N]");
+                let mut line = String::new();
+                let _ = std::io::stdin().read_line(&mut line);
+                let _ = task.approve(line.trim().eq_ignore_ascii_case("y")).await;
+            }
+            Some(Update::Finished(result)) => {
+                println!(
+                    "finished in {:.1}s:\n{}",
+                    started.elapsed().as_secs_f32(),
+                    serde_json::to_string_pretty(&result).unwrap_or_default()
+                );
+                break;
+            }
+        }
+    }
+}

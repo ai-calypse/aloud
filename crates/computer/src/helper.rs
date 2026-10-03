@@ -72,7 +72,11 @@ fn locate(name: &str) -> Option<PathBuf> {
             candidates.push(dir.join(name));
             // The un-stripped sidecar name, in case bundling left it on.
             candidates.push(dir.join(format!("{name}-{}", env!("HELPER_TARGET_TRIPLE"))));
-            // macOS .app layout: MacOS/aloud → Resources/.
+            // macOS .app layout: MacOS/aloud → Resources/. Tauri keeps the
+            // declared folder name, so a `resources/*` rule lands them one
+            // level deeper than Resources itself — verified against a real
+            // bundle, where only the nested path exists.
+            candidates.push(dir.join("../Resources/resources").join(name));
             candidates.push(dir.join("../Resources").join(name));
         }
     }

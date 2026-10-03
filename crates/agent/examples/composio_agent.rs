@@ -72,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
             LoopEvent::RateLimited { seconds } => {
                 println!("  [rate-limited] retrying in {seconds}s");
             }
+            LoopEvent::Progress { text, .. } => println!("    · {text}"),
         },
         // No panel here: auto-approve writes with the arguments as-is. Reads
         // dominate the test commands.

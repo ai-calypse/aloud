@@ -48,6 +48,7 @@ dependencies = [
  "aloud-bridge",
  "aloud-computer",
  "aloud-drag",
+ "aloud-engine",
  "aloud-hotkey",
  "aloud-llm",
  "aloud-meeting",
@@ -89,6 +90,7 @@ name = "aloud-agent"
 version = "0.1.0"
 dependencies = [
  "aloud-computer",
+ "aloud-engine",
  "aloud-llm",
  "aloud-native",
  "aloud-store",
@@ -158,6 +160,15 @@ dependencies = [
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
+ "tracing",
+]
+
+[[package]]
+name = "aloud-engine"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tokio",
  "tracing",
 ]
 
@@ -5323,6 +5334,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

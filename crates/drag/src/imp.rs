@@ -8,10 +8,10 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{declare_class, msg_send, msg_send_id, mutability, ClassType, DeclaredClass};
-use objc2_foundation::MainThreadMarker;
 use objc2_app_kit::{
     NSDraggingItem, NSDraggingSession, NSDraggingSource, NSEvent, NSEventMask, NSEventType, NSView,
 };
+use objc2_foundation::MainThreadMarker;
 use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString, NSURL};
 
 // Our `NSDraggingSource`. It carries no state — the source operation is a

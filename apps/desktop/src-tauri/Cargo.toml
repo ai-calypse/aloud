@@ -24,6 +24,7 @@ aloud-audio = { path = "../../../crates/audio" }
 aloud-drag = { path = "../../../crates/drag" }
 aloud-meeting = { path = "../../../crates/meeting" }
 aloud-computer = { path = "../../../crates/computer" }
+aloud-engine = { path = "../../../crates/engine" }
 aloud-native = { path = "../../../crates/native" }
 aloud-hotkey = { path = "../../../crates/hotkey" }
 aloud-llm = { path = "../../../crates/llm" }

@@ -14,3 +14,6 @@ package-lock.json
 # src/content/docs/ back over reference/. Scoped to this one skill so a
 # hand-written project skill can still be committed.
 .claude/skills/tauri-wisdom/
+
+# Staged bundle resources — contains .env with real API keys
+apps/desktop/src-tauri/resources/
