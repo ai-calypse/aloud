@@ -50,3 +50,6 @@
 {"input":"what does this error mean","selection":"TypeError: undefined is not a function","fast":false,"expected":[{"not":{"callsTool":{}}}]}
 {"input":"how do I exit vim","fast":false,"expected":[{"not":{"callsTool":{}}}]}
 {"input":"what's 15% of 80","fast":false,"expected":[{"not":{"callsTool":{}}}]}
+{"input":"turn on show battery percentage in control center settings","fast":false,"expected":[{"callsTool":{"name":["ALOUD_OPEN_APP","ALOUD_SCREEN_READ"],"arguments":{}}}]}
+{"input":"click the bold button","front":"TextEdit","fast":false,"expected":[{"callsTool":{"name":["ALOUD_SCREEN_READ","ALOUD_PRESS_KEYS","ALOUD_MENU"],"arguments":{}}}]}
+{"input":"in System Settings, open the Wi-Fi page","fast":false,"expected":[{"callsTool":{"name":["ALOUD_OPEN_APP","ALOUD_SCREEN_READ"],"arguments":{}}}]}

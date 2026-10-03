@@ -27,6 +27,8 @@ static CALLED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::
 #[derive(Deserialize)]
 struct Case {
     input: String,
+    /// The app on screen, as `with_context` hears it.
+    front: Option<String>,
     selection: Option<String>,
     fast: Option<bool>,
     expected: Vec<Value>,
@@ -157,7 +159,11 @@ async fn judge(
                     return (Verdict::Skip(format!("{name} not offered here")), "brain");
                 }
             }
-            let command = aloud_agent::with_context(&case.input, None, case.selection.as_deref());
+            let command = aloud_agent::with_context(
+                &case.input,
+                case.front.as_deref(),
+                case.selection.as_deref(),
+            );
             if std::env::var_os("EVAL_SIZE").is_some() {
                 let schema_chars: usize =
                     tools.iter().map(|t| t.to_openai().to_string().len()).sum();

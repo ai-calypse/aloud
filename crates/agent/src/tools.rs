@@ -15,10 +15,10 @@ pub struct CommandTools {
     pub more: Vec<String>,
 }
 
-/// Every tool a command may use: the Mac's own actions, the browser task and the
-/// connected services the command is about. Composio is optional; missing or
-/// down, the command still runs on the local tools instead of failing before
-/// the model is asked.
+/// Every tool a command may use: the Mac's own actions, screen control, the
+/// browser task and the connected services the command is about. Composio is
+/// optional; missing or down, the command still runs on the local tools instead
+/// of failing before the model is asked.
 pub async fn command_tools(
     transcript: &str,
     installed: &[aloud_selection::InstalledApp],
@@ -46,6 +46,14 @@ pub async fn command_tools(
         name: t.name,
         toolkit: "macOS".to_string(),
         description: t.description,
+        parameters: t.parameters,
+        read_only: t.read_only,
+    }));
+    // Empty when Cua Driver isn't installed.
+    tools.extend(aloud_screen::tools().into_iter().map(|t| ToolDef {
+        name: t.name.to_string(),
+        toolkit: "Screen".to_string(),
+        description: t.description.to_string(),
         parameters: t.parameters,
         read_only: t.read_only,
     }));

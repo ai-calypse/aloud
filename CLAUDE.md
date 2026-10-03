@@ -24,6 +24,7 @@ crates/
   native/              Mac app actions (AppleScript/JXA) + the no-model fast path
   notes/               markdown notes + search, app data paths
   paste/               clipboard snapshot/restore, synthetic paste
+  screen/              screen control through Cua Driver: read, click, type
   selection/           reading the focused app and its selected text
   store/               settings, history, stats, migrations, timings
   transcribe/          local whisper.cpp + cloud whisper + Deepgram streaming
@@ -102,7 +103,8 @@ all run one agent) and **Meeting**. A command goes:
    Flash-Lite on failover (`aloud_agent::brains`). Tools, in the order the prompt
    gives them: `ALOUD_*` Mac intent tools (the model writes content into their
    arguments), the connected services the command is about (Composio; others
-   load on demand via `ALOUD_MORE_TOOLS`), `ALOUD_BROWSER_TASK`, else an answer.
+   load on demand via `ALOUD_MORE_TOOLS`), `ALOUD_BROWSER_TASK`, screen control
+   for a Mac app nothing else covers, else an answer.
 3. A run of Mac writes that all worked ends on the tool's own confirmation —
    no second model call.
 
@@ -114,9 +116,14 @@ cargo run -p aloud-agent --example command_eval            # every brain with a 
 cargo run -p aloud-native --example demo -- fast "<said>"  # what the fast path does
 ```
 
-There is no screen control (clicking through arbitrary UI): the Jev click loop
-and `crates/computer` were removed for looping and getting stuck. It returns as
-a fallback on trycua's Cua Driver at the marked seam in `tool_loop`'s dispatch.
+Screen control is the last tier, on trycua's Cua Driver (`crates/screen`, which
+shells out to `cua-driver call`): read an app's accessibility tree as numbered
+elements, click or type by number, and each action returns the window afterwards.
+One yes covers a run, and the first screen call raises the round budget from 5
+to 30. Two traps: element numbers belong to a driver *session*, so every call
+carries one label (a bare `call` is a session of its own and every click comes
+back stale), and an ended label is dead for good, so each run gets a fresh one.
+A driver action takes ~1.5–2s — its own post-action window watch, no knob.
 
 ## Frontend architecture
 

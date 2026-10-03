@@ -27,6 +27,11 @@ export type ToolView = {
    * before putting a form in front of someone who never wanted one.
    */
   ask?: (args: ToolArgs) => string;
+  /**
+   * The approval gate's title, where "<label> — this writes to <app>" would
+   * misstate what a yes covers.
+   */
+  gate?: (args: ToolArgs) => string;
 };
 
 /** One field in an editable approval gate. */
@@ -415,6 +420,28 @@ const VIEWS: Record<string, ToolView> = {
       return item ? `Choosing ${item}` : "Choosing a menu command";
     },
   },
+  ALOUD_SCREEN_READ: {
+    label: (a) => {
+      const app = text(a, "app");
+      return app ? `Reading ${app}'s window` : "Reading the screen";
+    },
+  },
+  // One yes covers the run: a screen task is read, click, read, type, and a
+  // prompt per click would have the user answering faster than it works.
+  ALOUD_SCREEN_CLICK: {
+    label: (a) => (text(a, "app") ? `Clicking in ${text(a, "app")}` : "Clicking"),
+    gate: (a) =>
+      `Let Aloud click and type in ${text(a, "app") || "this app"} until this command is done?`,
+  },
+  ALOUD_SCREEN_TYPE: {
+    label: (a) => {
+      const typed = text(a, "text");
+      const app = text(a, "app");
+      return typed ? `Typing "${typed}"${app ? ` in ${app}` : ""}` : "Typing";
+    },
+    gate: (a) =>
+      `Let Aloud click and type in ${text(a, "app") || "this app"} until this command is done?`,
+  },
   ALOUD_FINDER_SEARCH: {
     // The grid renders the results; this is just the step label above it.
     label: (a) => {
@@ -613,6 +640,15 @@ export function bodyFor(name: string, args: ToolArgs): ReactNode {
     return viewFor(name).body?.(args) ?? null;
   } catch {
     return null;
+  }
+}
+
+/** The approval gate's own title, or "" to use the label. */
+export function gateFor(name: string, args: ToolArgs): string {
+  try {
+    return viewFor(name).gate?.(args) ?? "";
+  } catch {
+    return "";
   }
 }
 

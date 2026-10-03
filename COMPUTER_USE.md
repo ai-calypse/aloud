@@ -2,10 +2,10 @@
 
 > **Superseded (2026-10).** The Layer 2 described below — `crates/computer` over
 > the vendored MacosUseSDK, and later the engine's Jev click loop — has been
-> removed. Mac apps are driven by scripted intent tools in `crates/native`; a
-> screen-control tier comes back later on trycua's Cua Driver (MIT,
-> `libs/cua-driver`) as one more fall-through in `tool_loop`'s dispatch. The
-> rest of this document is kept as the record of what was learned.
+> removed. Mac apps are driven by scripted intent tools in `crates/native`, and
+> screen control is back as the last tier on trycua's Cua Driver (MIT,
+> `libs/cua-driver`) in `crates/screen`. The rest of this document is kept as
+> the record of what was learned.
 
 Notes toward letting the agent drive the screen — click, type, scroll — instead
 of only calling APIs.
