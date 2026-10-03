@@ -8,34 +8,40 @@ use tracing::Instrument;
 /// not become the prompt.
 const MAX_SELECTION: usize = 4000;
 
+/// What a command is offered: its tools, and the connected services left out
+/// because the command doesn't mention them, which the model can still load.
+pub struct CommandTools {
+    pub tools: Vec<ToolDef>,
+    pub more: Vec<String>,
+}
+
 /// Every tool a command may use: the Mac's own actions, the browser task and the
-/// user's connected services. Composio is optional and fetched alongside the
-/// rest; missing or down, the command still runs on the local tools instead of
-/// failing before the model is asked.
+/// connected services the command is about. Composio is optional; missing or
+/// down, the command still runs on the local tools instead of failing before
+/// the model is asked.
 pub async fn command_tools(
     transcript: &str,
     installed: &[aloud_selection::InstalledApp],
     composio: Option<&ComposioClient>,
-) -> Vec<ToolDef> {
-    let remote = async {
-        let Some(composio) = composio else {
-            return Vec::new();
-        };
+) -> CommandTools {
+    let (mut tools, more) = match composio {
+        None => (Vec::new(), Vec::new()),
         // A round trip before the model is even asked — invisible in any
         // per-tool timing, so it gets its own span.
-        match composio
-            .available_tools(transcript)
+        Some(composio) => match composio
+            .tools_for(transcript, |toolkit| {
+                crate::composio::concerns(toolkit, transcript)
+            })
             .instrument(tracing::info_span!("tool_discovery"))
             .await
         {
-            Ok(tools) => tools,
+            Ok(found) => found,
             Err(e) => {
                 tracing::warn!(%e, "connected services unavailable; running on local tools");
-                Vec::new()
+                (Vec::new(), Vec::new())
             }
-        }
+        },
     };
-    let mut tools = remote.await;
     tools.extend(aloud_native::tools(installed).into_iter().map(|t| ToolDef {
         name: t.name,
         toolkit: "macOS".to_string(),
@@ -51,7 +57,7 @@ pub async fn command_tools(
         parameters: t.parameters,
         read_only: t.read_only,
     }));
-    tools
+    CommandTools { tools, more }
 }
 
 /// The command as the model sees it: what was said, plus the app the user was

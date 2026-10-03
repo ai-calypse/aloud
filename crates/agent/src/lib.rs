@@ -13,8 +13,8 @@ pub mod tools;
 
 pub use cache::ResponseCache;
 pub use composio::{toolkit_of_slug, ComposioClient, ToolDef, Toolkit, TOOLS_PER_TOOLKIT};
-pub use tool_loop::{run as run_tool_loop, LoopEvent};
-pub use tools::{command_tools, with_context};
+pub use tool_loop::{first_turn, run as run_tool_loop, LoopEvent};
+pub use tools::{command_tools, with_context, CommandTools};
 
 /// A model the command loop runs on, with the client that reaches it. The loop
 /// takes these best first and moves down on the first round when one is out of
@@ -34,6 +34,19 @@ const GEMINI: (&str, &str) = (
     "https://generativelanguage.googleapis.com/v1beta/openai",
     "gemini-3.5-flash",
 );
+
+/// One named brain on its own, for the eval to compare them: "cerebras" or "gemini".
+pub fn brain(name: &str, key: &str) -> anyhow::Result<Brain> {
+    let (base_url, model) = match name {
+        "cerebras" => CEREBRAS,
+        "gemini" => GEMINI,
+        other => anyhow::bail!("no brain called {other:?}"),
+    };
+    Ok(Brain {
+        client: aloud_llm::LlmClient::new(key, Some(base_url))?,
+        model,
+    })
+}
 
 /// The brains a command may use, best first, for whichever keys are set.
 pub fn brains(cerebras_key: &str, gemini_key: &str) -> anyhow::Result<Vec<Brain>> {

@@ -43,6 +43,31 @@ const MAX_QUESTIONS: usize = 2;
 /// toolkit, so nothing can collide with it.
 pub const ASK_USER: &str = "ALOUD_ASK_USER";
 
+/// Loads a connected service's tools mid-run. The command's tools leave out
+/// services it doesn't mention (see `composio::concerns`); this is how the model
+/// gets one back when the command needs it after all — Anthropic's tool-search
+/// pattern, a round trip on a miss instead of every schema on every command.
+pub const MORE_TOOLS: &str = "ALOUD_MORE_TOOLS";
+
+fn more_tools_schema(services: &[String]) -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": MORE_TOOLS,
+            "description": format!(
+                "Load the tools for a connected service that is not in your list yet, when the \
+                 command needs it: {}. Its tools are available on your next step.",
+                services.join(", ")
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["service"],
+                "properties": { "service": { "type": "string", "enum": services } }
+            }
+        }
+    })
+}
+
 fn ask_user_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -337,6 +362,42 @@ fn unfinished_reason(verdict: &str) -> Option<String> {
     )
 }
 
+/// The schemas and messages every run starts from.
+fn opening(
+    command: &str,
+    tools: &[ToolDef],
+    more: &[String],
+) -> (Vec<serde_json::Value>, Vec<Message>) {
+    // The synthetic tools ride alongside Composio's; the model cannot tell them
+    // apart, and `execute` never sees them.
+    let mut schemas: Vec<serde_json::Value> = tools.iter().map(ToolDef::to_openai).collect();
+    schemas.push(ask_user_schema());
+    if !more.is_empty() {
+        schemas.push(more_tools_schema(more));
+    }
+    let messages = vec![
+        Message::system(format!("{TOOL_SYSTEM_PROMPT} {}", now_line())),
+        Message::user(command),
+    ];
+    (schemas, messages)
+}
+
+/// The brain's first move on `command` — what it would call, or answer — with
+/// nothing executed. For the command eval: the choice made here is what
+/// decides whether a command goes to the right place.
+pub async fn first_turn(
+    brain: &Brain,
+    command: &str,
+    tools: &[ToolDef],
+    more: &[String],
+) -> Result<aloud_llm::ToolTurn> {
+    let (schemas, messages) = opening(command, tools, more);
+    brain
+        .client
+        .chat_with_tools(brain.model, &messages, Some(&schemas), Some(0.3))
+        .await
+}
+
 /// Runs the loop for `command`. Returns the model's final answer.
 ///
 /// `on_event` fires for each tool call so the panel can show progress.
@@ -360,6 +421,7 @@ pub async fn run<F, A>(
     composio: &ComposioClient,
     command: &str,
     tools: &[ToolDef],
+    more: &[String],
     mut on_event: impl FnMut(LoopEvent),
     confirm: impl Fn(String, serde_json::Value) -> F,
     ask: impl Fn(String) -> A,
@@ -369,14 +431,9 @@ where
     F: Future<Output = Option<serde_json::Value>>,
     A: Future<Output = Option<String>>,
 {
-    // The synthetic tool rides alongside Composio's; the model cannot tell them
-    // apart, and `execute` never sees it.
-    let mut schemas: Vec<serde_json::Value> = tools.iter().map(ToolDef::to_openai).collect();
-    schemas.push(ask_user_schema());
-    let mut messages = vec![
-        Message::system(format!("{TOOL_SYSTEM_PROMPT} {}", now_line())),
-        Message::user(command),
-    ];
+    let (mut schemas, mut messages) = opening(command, tools, more);
+    // Owned: a service loaded mid-run adds to it.
+    let mut tools = tools.to_vec();
 
     // The empty-answer fallback must not say "Done." over a failure.
     let mut any_failed = false;
@@ -556,6 +613,30 @@ where
             let args: serde_json::Value = serde_json::from_str(&call.function.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
 
+            if name == MORE_TOOLS {
+                let service = args["service"].as_str().unwrap_or_default().to_string();
+                let result = if !more.contains(&service) {
+                    format!("{{\"error\":\"{service} is not a connected service\"}}")
+                } else if tools.iter().any(|t| t.toolkit == service) {
+                    format!("{{\"loaded\":\"{service}\",\"note\":\"already loaded\"}}")
+                } else {
+                    match composio
+                        .toolkit_tools(&service, command, crate::composio::TOOLS_PER_TOOLKIT)
+                        .await
+                    {
+                        Ok(found) => {
+                            schemas.extend(found.iter().map(ToolDef::to_openai));
+                            let names: Vec<String> = found.iter().map(|t| t.name.clone()).collect();
+                            tools.extend(found);
+                            serde_json::json!({ "loaded": service, "tools": names }).to_string()
+                        }
+                        Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+                    }
+                };
+                messages.push(Message::tool_result(&call.id, result));
+                continue;
+            }
+
             // Answered by the user, not by Composio. Before the dedup below,
             // which would hand back a previous answer to a new question.
             if name == ASK_USER {
@@ -615,14 +696,14 @@ where
             // the model has no memory of having asked. Writes are excluded: two
             // identical sends are two emails, and collapsing them would swallow
             // the second silently.
-            if !is_write(&name, tools) {
+            if !is_write(&name, &tools) {
                 if let Some(previous) = seen.get(&(name.clone(), args.to_string())) {
                     tracing::debug!(tool = %name, "identical read already made; reusing");
                     messages.push(Message::tool_result(&call.id, previous.clone()));
                     continue;
                 }
             }
-            if !is_write(&name, tools) {
+            if !is_write(&name, &tools) {
                 // Independent of the dedup above: a model that varies one
                 // argument each time never hits the cache and would otherwise
                 // loop until the round limit.
@@ -668,7 +749,7 @@ where
             // pauses for a yes/no below, so a gate on the whole goal would ask twice for one action.
             let gate_needed = !aloud_engine::is_engine_tool(&name)
                 && !aloud_native::low_risk(&name, &args)
-                && is_write(&name, tools);
+                && is_write(&name, &tools);
 
             let mut args = args;
             let declined = if gate_needed {
@@ -734,7 +815,7 @@ where
                 result
             };
 
-            if !declined && !is_write(&name, tools) && !aloud_engine::is_engine_tool(&name) {
+            if !declined && !is_write(&name, &tools) && !aloud_engine::is_engine_tool(&name) {
                 seen.insert((name.clone(), args.to_string()), result.clone());
             }
             messages.push(Message::tool_result(&call.id, result));

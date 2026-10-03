@@ -329,7 +329,7 @@ async fn execute(
     // Connected services are optional: without a Composio key the Mac's own tools still run.
     let composio = aloud_agent::ComposioClient::new(&settings.composio_api_key)?;
     let has_composio = !settings.composio_api_key.trim().is_empty();
-    let tools =
+    let aloud_agent::CommandTools { tools, more } =
         aloud_agent::command_tools(transcript, &installed, has_composio.then_some(&composio)).await;
     tracing::Span::current().record("tool_count", tools.len());
 
@@ -340,6 +340,7 @@ async fn execute(
         &composio,
         &command,
         &tools,
+        &more,
         |event| {
             match &event {
                 aloud_agent::LoopEvent::ToolCallStart { .. } => {

@@ -52,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
         &composio,
         &command,
         &tools,
+        &[],
         |event| match event {
             LoopEvent::Planned { names } => {
                 println!("  [plan] {}", names.join(" → "));
