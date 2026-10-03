@@ -131,6 +131,60 @@ pub fn low_risk(name: &str, args: &Value) -> bool {
     )
 }
 
+/// One sentence saying what a native write did, built from its arguments and
+/// result — so a run that only did this needs no second model call to say so.
+/// None for tools whose outcome the model should phrase (reads, searches, file
+/// moves) or when the result lacks what the sentence needs.
+pub fn confirmation(name: &str, args: &Value, result: &Value) -> Option<String> {
+    let arg = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    let got = |key: &str| {
+        result
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    let player = |app: &str| match arg("action")? {
+        "play" => Some(match got("track") {
+            Some(track) => format!("Playing {track}."),
+            None => format!("Opened {app}'s search for {}.", arg("query")?),
+        }),
+        "pause" => Some(format!("Paused {app}.")),
+        "next" | "previous" => Some(match got("track") {
+            Some(track) => format!("Now playing {track}."),
+            None => format!("Changed track in {app}."),
+        }),
+        _ => None,
+    };
+    Some(match name {
+        "ALOUD_NOTES_CREATE" => format!("Created the note “{}”.", got("title").or(arg("title"))?),
+        "ALOUD_NOTES_APPEND" if result.get("created").is_some() => {
+            format!("Created the note “{}”.", got("title")?)
+        }
+        "ALOUD_NOTES_APPEND" => format!("Added to “{}”.", got("title")?),
+        "ALOUD_REMINDERS_ADD" => match arg("due") {
+            Some(due) => format!(
+                "Added a reminder: {}, due {}.",
+                arg("text")?,
+                due.replace('T', " ")
+            ),
+            None => format!("Added a reminder: {}.", arg("text")?),
+        },
+        "ALOUD_MUSIC" => player("Music")?,
+        "ALOUD_SPOTIFY" => player("Spotify")?,
+        "ALOUD_SYSTEM_VOLUME" => format!("Volume at {}%.", result.get("volume")?),
+        "ALOUD_WINDOW_ARRANGE" => format!("Moved the window {}.", arg("position")?),
+        "ALOUD_CLIPBOARD" if arg("action") == Some("write") => "Copied to the clipboard.".into(),
+        "ALOUD_PHOTO_BOOTH_TAKE_PHOTO" => "Taking a photo in Photo Booth.".into(),
+        "ALOUD_BROWSER_TAB" if arg("action") == Some("open") => format!("Opened {}.", arg("url")?),
+        "ALOUD_WRITE_FILE" => format!("Saved {}.", got("wrote")?),
+        _ => return None,
+    })
+}
+
 pub fn execute(name: &str, args: &Value) -> Option<Result<Value, ScriptError>> {
     if name == RUN_SHORTCUT {
         tracing::info!(tool = name, "running native tool");
@@ -166,6 +220,44 @@ fn app_installed(app: &str, installed: &[aloud_selection::InstalledApp]) -> bool
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn writes_confirm_themselves_and_reads_leave_it_to_the_model() {
+        assert_eq!(
+            confirmation(
+                "ALOUD_NOTES_CREATE",
+                &json!({ "title": "Cake" }),
+                &json!({ "created": true, "title": "Cake shopping list" })
+            )
+            .as_deref(),
+            Some("Created the note “Cake shopping list”.")
+        );
+        assert_eq!(
+            confirmation(
+                "ALOUD_REMINDERS_ADD",
+                &json!({ "text": "Call Ana", "due": "2026-10-03T17:00" }),
+                &json!({ "added": true })
+            )
+            .as_deref(),
+            Some("Added a reminder: Call Ana, due 2026-10-03 17:00.")
+        );
+        assert_eq!(
+            confirmation("ALOUD_SPOTIFY", &json!({ "action": "pause" }), &json!({})).as_deref(),
+            Some("Paused Spotify.")
+        );
+        assert_eq!(
+            confirmation("ALOUD_FINDER_SEARCH", &json!({}), &json!({})),
+            None
+        );
+        assert_eq!(
+            confirmation(
+                "ALOUD_SPOTIFY",
+                &json!({ "action": "now_playing" }),
+                &json!({})
+            ),
+            None
+        );
+    }
 
     #[test]
     fn sending_quitting_and_file_moves_still_ask_first() {

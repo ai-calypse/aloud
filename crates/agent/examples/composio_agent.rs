@@ -32,11 +32,12 @@ async fn main() -> anyhow::Result<()> {
 
     let composio = ComposioClient::new(&settings.composio_api_key)?;
 
-    println!("→ selecting connected tools for this command…");
-    let tools = composio.available_tools(&command).await?;
-    if tools.is_empty() {
-        anyhow::bail!("no account connected in Composio");
-    }
+    // The same tools the app offers: the Mac's own, the browser task, and the
+    // connected services the command is about.
+    println!("→ selecting tools for this command…");
+    let installed = aloud_selection::installed_apps();
+    let aloud_agent::CommandTools { tools, more } =
+        aloud_agent::command_tools(&command, &installed, Some(&composio)).await;
     println!(
         "  tools available: {}",
         tools
@@ -47,12 +48,13 @@ async fn main() -> anyhow::Result<()> {
     );
 
     println!("→ command: {command}\n");
+    let started = std::time::Instant::now();
     let answer = run_tool_loop(
         &brains,
         &composio,
         &command,
         &tools,
-        &[],
+        &more,
         |event| match event {
             LoopEvent::Planned { names } => {
                 println!("  [plan] {}", names.join(" → "));
@@ -88,6 +90,9 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
-    println!("\n=== answer ===\n{answer}");
+    println!(
+        "\n=== answer ({:.2}s) ===\n{answer}",
+        started.elapsed().as_secs_f32()
+    );
     Ok(())
 }

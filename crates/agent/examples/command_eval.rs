@@ -21,6 +21,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
+static SAID_WITH_CALL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static CALLED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 #[derive(Deserialize)]
 struct Case {
     input: String,
@@ -104,6 +107,11 @@ async fn main() -> anyhow::Result<()> {
             "{label}: {passed}/{} passed, {failed} failed, {skipped} skipped; median brain turn {median:.2}s",
             passed + failed
         );
+        println!(
+            "{label}: {} of {} tool calls came with the confirmation alongside (early finish possible)",
+            SAID_WITH_CALL.swap(0, std::sync::atomic::Ordering::Relaxed),
+            CALLED.swap(0, std::sync::atomic::Ordering::Relaxed)
+        );
     }
     Ok(())
 }
@@ -179,14 +187,29 @@ async fn judge(
                 turn = aloud_agent::first_turn(brain, &command, &tools, &more).await;
             }
             match turn {
-                Ok(turn) => (
-                    turn.tool_calls.first().map(|call| {
-                        let args =
-                            serde_json::from_str(&call.function.arguments).unwrap_or(Value::Null);
-                        (call.function.name.clone(), args)
-                    }),
-                    "brain",
-                ),
+                Ok(turn) => {
+                    // Whether this call could end the run early: the brain said
+                    // what it did in the same reply.
+                    if !turn.tool_calls.is_empty()
+                        && turn
+                            .content
+                            .as_deref()
+                            .is_some_and(|c| !c.trim().is_empty())
+                    {
+                        SAID_WITH_CALL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    if !turn.tool_calls.is_empty() {
+                        CALLED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    (
+                        turn.tool_calls.first().map(|call| {
+                            let args = serde_json::from_str(&call.function.arguments)
+                                .unwrap_or(Value::Null);
+                            (call.function.name.clone(), args)
+                        }),
+                        "brain",
+                    )
+                }
                 Err(e) => return (Verdict::Fail(format!("error: {e:#}")), "brain"),
             }
         }

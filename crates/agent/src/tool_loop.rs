@@ -462,6 +462,9 @@ where
     let mut budget: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut asked = 0usize;
     let mut verifier_retries = 0;
+    // Whether every tool call so far was a native write that worked; None
+    // before the first. See `native_write`.
+    let mut only_native_writes: Option<bool> = None;
 
     if brains.is_empty() {
         anyhow::bail!("no model is configured for commands");
@@ -572,7 +575,14 @@ where
             // that back to the model rather than telling the user it is done.
             // Skipped once the budget is spent and on the last round, where
             // tools are forbidden and a nudge could not be acted on anyway.
-            if verifier_retries < MAX_VERIFIER_RETRIES && !is_last && !cancelled() {
+            // Not for a run of native writes that all worked: the grader sees
+            // only the command and the answer, and its real target is a
+            // connected service drafting without sending.
+            if verifier_retries < MAX_VERIFIER_RETRIES
+                && !is_last
+                && !cancelled()
+                && only_native_writes != Some(true)
+            {
                 if let Some(missing) = verify(&brains[brain], command, &answer).await {
                     verifier_retries += 1;
                     tracing::info!(%missing, verifier_retries, "answer graded unfinished");
@@ -618,6 +628,10 @@ where
             });
         }
 
+        // Cleared by any call that is not a native write that worked.
+        let mut round_native_ok = true;
+        // What each of those writes did, in its own words; see `finishes_early`.
+        let mut confirmations: Vec<Option<String>> = Vec::new();
         for call in &turn.tool_calls {
             // Between dispatches, not just at the top of the round: a round
             // holding six calls otherwise runs all six after Escape, and the
@@ -629,6 +643,7 @@ where
             let name = call.function.name.clone();
             let args: serde_json::Value = serde_json::from_str(&call.function.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
+            round_native_ok &= native_write(&name, &args, &tools);
 
             if name == MORE_TOOLS {
                 let service = args["service"].as_str().unwrap_or_default().to_string();
@@ -784,6 +799,7 @@ where
                 false
             };
 
+            round_native_ok &= !declined;
             let result = if declined {
                 on_event(LoopEvent::ToolCallResult {
                     name: name.clone(),
@@ -825,6 +841,11 @@ where
                 let success = tool_succeeded(&result);
                 span.record("ok", success);
                 any_failed |= !success;
+                round_native_ok &= success;
+                if success {
+                    let parsed = serde_json::from_str(&result).unwrap_or_default();
+                    confirmations.push(aloud_native::confirmation(&name, &args, &parsed));
+                }
                 on_event(LoopEvent::ToolCallResult {
                     name: name.clone(),
                     success,
@@ -836,6 +857,14 @@ where
                 seen.insert((name.clone(), args.to_string()), result.clone());
             }
             messages.push(Message::tool_result(&call.id, result));
+        }
+        only_native_writes = Some(only_native_writes.unwrap_or(true) && round_native_ok);
+        // The model already said what it did, and what it did was ours and
+        // worked: asking it again to say so, then grading that, was two more
+        // model calls (~0.8s) on every "create a note".
+        if let Some(said) = finishes_early(turn.content.as_deref(), round_native_ok, &confirmations)
+        {
+            return Ok(said);
         }
         round += 1;
     }
@@ -908,6 +937,38 @@ where
             Some(aloud_engine::Update::Finished(result)) => return result.to_string(),
         }
     }
+}
+
+/// Whether a call is one the run may finish on without asking the model again:
+/// one of our own Mac actions that changes something and reports nothing the
+/// model has yet to read. A search or "what's playing" returns what the answer
+/// is about, so text written before it ran cannot be the answer.
+fn native_write(name: &str, args: &serde_json::Value, tools: &[ToolDef]) -> bool {
+    name.starts_with("ALOUD_")
+        && name != ASK_USER
+        && name != MORE_TOOLS
+        && !aloud_engine::is_engine_tool(name)
+        && is_write(name, tools)
+        && args["action"] != "now_playing"
+}
+
+/// The run's answer, if this round can be the last: every call was a native
+/// write that worked, and either the model already said what it did or each
+/// write says so itself (`aloud_native::confirmation`). Most models put no text
+/// beside a tool call — qwen did in 0 of 26 — so the second is the usual way.
+fn finishes_early(
+    content: Option<&str>,
+    round_native_ok: bool,
+    confirmations: &[Option<String>],
+) -> Option<String> {
+    if !round_native_ok {
+        return None;
+    }
+    if let Some(said) = content.map(str::trim).filter(|c| !c.is_empty()) {
+        return Some(said.to_string());
+    }
+    let own: Option<Vec<String>> = confirmations.iter().cloned().collect();
+    own.filter(|o| !o.is_empty()).map(|o| o.join(" "))
 }
 
 /// Whether a tool needs confirmation. Fail-safe: only an explicit
@@ -990,6 +1051,58 @@ mod tests {
         // A hallucinated name we never offered must not pass as a read.
         assert!(is_write("SLACK_DELETE_EVERYTHING", &tools));
         assert!(is_write("anything", &[]));
+    }
+
+    #[test]
+    fn only_our_own_writes_can_end_a_run_early() {
+        let tools = [
+            tool("ALOUD_NOTES_CREATE", false),
+            tool("ALOUD_FINDER_SEARCH", true),
+            tool("ALOUD_SPOTIFY", false),
+            tool("GMAIL_SEND_EMAIL", false),
+        ];
+        let none = serde_json::json!({});
+        assert!(native_write("ALOUD_NOTES_CREATE", &none, &tools));
+        assert!(!native_write("ALOUD_FINDER_SEARCH", &none, &tools));
+        assert!(!native_write(
+            "ALOUD_SPOTIFY",
+            &serde_json::json!({ "action": "now_playing" }),
+            &tools
+        ));
+        assert!(native_write(
+            "ALOUD_SPOTIFY",
+            &serde_json::json!({ "action": "pause" }),
+            &tools
+        ));
+        assert!(!native_write("GMAIL_SEND_EMAIL", &none, &tools));
+        assert!(!native_write(ASK_USER, &none, &tools));
+        assert!(!native_write("ALOUD_BROWSER_TASK", &none, &tools));
+    }
+
+    /// A round with no text, or with a failed or foreign call, goes back to the
+    /// model as before.
+    #[test]
+    fn an_early_finish_needs_the_models_own_words_and_a_clean_round() {
+        let none: [Option<String>; 0] = [];
+        assert_eq!(
+            finishes_early(Some(" Created the note. "), true, &none).as_deref(),
+            Some("Created the note.")
+        );
+        assert_eq!(
+            finishes_early(Some("Created the note."), false, &none),
+            None
+        );
+        assert_eq!(finishes_early(Some("  "), true, &none), None);
+        assert_eq!(finishes_early(None, true, &none), None);
+        // No words from the model, but every write said what it did.
+        let own = [Some("Created the note “Cake”.".to_string())];
+        assert_eq!(
+            finishes_early(None, true, &own).as_deref(),
+            Some("Created the note “Cake”.")
+        );
+        // One write that can't phrase itself sends the round back to the model.
+        let partly = [Some("Paused Spotify.".to_string()), None];
+        assert_eq!(finishes_early(None, true, &partly), None);
     }
 
     #[test]
