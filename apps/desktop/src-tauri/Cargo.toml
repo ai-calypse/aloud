@@ -54,6 +54,8 @@ specta-typescript = "0.0.12"
 # the only thing standing between a window and the filesystem.
 tauri = { version = "2", features = ["tray-icon", "macos-private-api", "protocol-asset"] }
 tokio = { version = "1", features = ["time", "sync"] }
+# Only to pick the TLS crypto provider at startup — see `run`.
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
 # Native NSVisualEffectView vibrancy behind the main window (macOS Liquid Glass).
 window-vibrancy = "0.5"
 tauri-plugin-updater = "2"

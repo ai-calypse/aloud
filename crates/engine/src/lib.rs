@@ -92,9 +92,12 @@ pub fn tools() -> Vec<EngineTool> {
 /// Route a spoken command straight to the engine, skipping the agent's language model: one Jev request
 /// (~0.15 s) decides Mac app, website, or neither. `None` means "not ours" (no engine in this build, or a
 /// connected-service request, a plain question, or an unsure route) and the agent loop should take it.
-pub async fn command(text: &str) -> Option<Result<Task, String>> {
+///
+/// `front` is the app the user was looking at when they spoke, read before this process's own panel
+/// took focus; it is what lets a follow-up like "what's 90 + 7" run in the Calculator already open.
+pub async fn command(text: &str, front: Option<&str>) -> Option<Result<Task, String>> {
     let dir = engine_dir()?;
-    engine::command(&dir, text).await.transpose()
+    engine::command(&dir, text, front).await.transpose()
 }
 
 /// Start a task for `name` (one of [`tools`]). `None` when the name isn't an engine tool — the same

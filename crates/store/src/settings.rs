@@ -52,6 +52,10 @@ pub struct Settings {
     /// Gemini key. Agent tool-call parsing runs here — Groq's tokens-per-minute
     /// limit is too low for the agent's heavier calls.
     pub gemini_api_key: String,
+    /// Deepgram key. Always-listening streams the mic to Deepgram's Flux, which
+    /// decides where a spoken request ends; without it the mode falls back to a
+    /// pause detector and local whisper.
+    pub deepgram_api_key: String,
 
     // Transcription
     pub engine: aloud_transcribe::Engine,
@@ -167,6 +171,7 @@ impl Default for Settings {
             groq_api_key: String::new(),
             composio_api_key: String::new(),
             gemini_api_key: String::new(),
+            deepgram_api_key: String::new(),
             // Local by default: works with no key and no network.
             engine: aloud_transcribe::Engine::Local,
             transcription_model: aloud_transcribe::cloud::DEFAULT_MODEL.into(),
@@ -300,6 +305,7 @@ impl Settings {
             ("GROQ_API_KEY", &mut self.groq_api_key),
             ("COMPOSIO_API_KEY", &mut self.composio_api_key),
             ("GEMINI_API_KEY", &mut self.gemini_api_key),
+            ("DEEPGRAM_API_KEY", &mut self.deepgram_api_key),
         ] {
             if !field.trim().is_empty() {
                 continue;
@@ -373,7 +379,7 @@ fn env_or_dotenv(var: &str) -> Option<String> {
         }
     }
 
-    if let Some(mut dir) = std::env::current_dir().ok() {
+    if let Ok(mut dir) = std::env::current_dir() {
         loop {
             let candidate = dir.join(".env");
             if let Ok(contents) = fs::read_to_string(&candidate) {

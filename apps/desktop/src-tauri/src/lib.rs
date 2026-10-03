@@ -1,6 +1,7 @@
 mod agent;
 mod ask;
 mod commands;
+mod listen;
 mod meeting;
 mod notch;
 mod overlay;
@@ -37,6 +38,8 @@ pub struct AppState {
     pub settings: Arc<Mutex<Settings>>,
     pub pipeline: Arc<pipeline::Pipeline>,
     pub meeting: Arc<Mutex<Option<meeting::Meeting>>>,
+    /// Some while always-listening mode is on.
+    pub listener: Mutex<Option<listen::Listener>>,
     /// Shared with the listener thread, so a rebind from Settings applies
     /// without a restart.
     pub hotkey_config: Arc<Mutex<aloud_hotkey::model::Config>>,
@@ -60,6 +63,12 @@ pub fn run() {
             aloud_store::Timings::open_in_memory().expect("in-memory sqlite")
         });
     let timings = Arc::new(Mutex::new(timings));
+
+    // The updater compiles rustls with `ring`, reqwest with `aws-lc-rs`; with
+    // both in, rustls cannot pick one and panics the first time something asks
+    // for the default — Deepgram's socket, which died silently in its task and
+    // left the bar saying "Listening" while hearing nothing.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     use tracing_subscriber::prelude::*;
     tracing_subscriber::registry()
@@ -142,12 +151,17 @@ fn specta_builder() -> Builder<tauri::Wry> {
             agent::confirm_agent,
             agent::answer_agent,
             agent::close_agent,
+            listen::listen_state,
+            listen::listen_toggle_mic,
+            listen::listen_submit,
+            listen::listen_cancel,
         ])
         .events(collect_events![
             pipeline::Phase,
             meeting::MeetingPhase,
             ask::AskEvent,
             agent::AgentEvent,
+            listen::ListenState,
             overlay::AudioLevel,
             overlay::OverlayError,
             overlay::DictationPartial,
@@ -222,6 +236,7 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
                 settings: settings.clone(),
                 pipeline: pipeline.clone(),
                 meeting: meeting.clone(),
+                listener: Mutex::new(None),
                 hotkey_config: hotkey_config.clone(),
                 hotkey_capture: hotkey_capture.clone(),
                 connectors: Default::default(),
@@ -544,6 +559,23 @@ pub(crate) fn toggle_meeting(
                 Err(e) => tracing::error!(%e, "starting meeting failed"),
             }
         }
+    }
+}
+
+/// Turns always-listening mode on, or off. Off drops the listener, which
+/// closes the mic and stops its queue.
+pub(crate) fn toggle_listening(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let Ok(mut slot) = state.listener.lock() else {
+        return;
+    };
+    if slot.take().is_some() {
+        return;
+    }
+    let settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
+    match listen::Listener::start(app.clone(), settings, state.pipeline.busy_flag()) {
+        Ok(listener) => *slot = Some(listener),
+        Err(e) => tracing::error!(%e, "starting always-listening failed"),
     }
 }
 

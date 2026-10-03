@@ -60,6 +60,20 @@ fn is_current(run: u64) -> bool {
     CURRENT_RUN.load(std::sync::atomic::Ordering::SeqCst) == run
 }
 
+/// Whether the current run is reporting to the listening bar alone. An
+/// always-listening request that clicks through Calculator needs no panel over
+/// the bar; one that has to ask, or has an answer to read, gets [`surface`]d.
+static QUIET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Opens the panel on a quiet run, re-sending what was asked so it opens on
+/// the request rather than on a question with no context.
+fn surface(app: &AppHandle, run: u64, transcript: &str) {
+    if is_current(run) && QUIET.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        crate::overlay::show_panel(app);
+        emit_for(app, run, AgentEvent::RunStarted(transcript.to_string()));
+    }
+}
+
 /// Streamed to the agent panel. Names follow the AG-UI protocol's tool-call
 /// lifecycle (https://docs.ag-ui.com) so the shape maps onto AI Elements' tool
 /// renderer — the vocabulary only, not the wire protocol.
@@ -127,6 +141,11 @@ pub struct ToolResult {
 }
 
 fn emit(app: &AppHandle, event: AgentEvent) {
+    // The listening bar shows every run's progress; a no-op while it is closed.
+    let _ = event.emit_to(app, crate::listen::LABEL);
+    if QUIET.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     if let Err(e) = event.emit_to(app, LABEL) {
         tracing::warn!(%e, "could not send to agent panel");
     }
@@ -146,10 +165,14 @@ fn emit_for(app: &AppHandle, run: u64, event: AgentEvent) {
 /// Runs the full agent flow for a transcript. Called by the pipeline, which
 /// owns `cancelled` — the loop polls it between tool calls so Escape stops a
 /// multi-tool round part-way instead of after all of it.
+///
+/// `quiet` (always-listening) keeps the panel closed until the run needs the
+/// user or has an answer to show; until then only the listening bar hears it.
 pub async fn run(
     app: &AppHandle,
     transcript: String,
     settings: &Settings,
+    quiet: bool,
     cancelled: impl Fn() -> bool,
 ) -> Result<()> {
     // A previous run that ended without the panel being dismissed — it finished
@@ -164,11 +187,21 @@ pub async fn run(
     // stop reaching the panel from here on, even though it keeps executing
     // until its current tool returns.
     let run = claim_run();
+    QUIET.store(quiet, std::sync::atomic::Ordering::SeqCst);
 
-    crate::overlay::show_panel(app);
+    // Read before `show_panel`, which focuses our own window and would make us the front app. Our own
+    // name means a panel still held focus from the last run; the engine then falls back to the app that
+    // run operated.
+    let front = aloud_selection::frontmost_app()
+        .map(|a| a.name)
+        .filter(|name| !name.eq_ignore_ascii_case("aloud"));
+
+    if !quiet {
+        crate::overlay::show_panel(app);
+    }
     emit_for(app, run, AgentEvent::RunStarted(transcript.clone()));
 
-    match execute(app, run, &transcript, settings, cancelled).await {
+    match execute(app, run, &transcript, front.as_deref(), settings, cancelled).await {
         Ok(message) => emit_for(app, run, AgentEvent::RunFinished(message)),
         // A cancel is the user's own doing: close the panel rather than
         // showing them an error for the thing they just asked to stop.
@@ -176,7 +209,7 @@ pub async fn run(
             tracing::info!("agent cancelled");
             // Only if nothing has replaced us — hiding here would otherwise
             // close the panel of the run the user just started.
-            if is_current(run) {
+            if is_current(run) && !QUIET.load(std::sync::atomic::Ordering::SeqCst) {
                 hide(app);
             }
         }
@@ -222,13 +255,14 @@ async fn execute(
     app: &AppHandle,
     run: u64,
     transcript: &str,
+    front: Option<&str>,
     settings: &Settings,
     cancelled: impl Fn() -> bool,
 ) -> Result<String> {
     // The fast path, before any language model: Jev routes the command (~0.15 s) and Mac-app and
     // website tasks run straight on the engine. Email, calendar, questions and anything it isn't sure
     // about come back as None and take the full agent loop below.
-    if let Some(started) = aloud_engine::command(transcript).await {
+    if let Some(started) = aloud_engine::command(transcript, front).await {
         return run_direct(
             app,
             run,
@@ -245,6 +279,10 @@ async fn execute(
     if settings.composio_api_key.trim().is_empty() {
         bail!("Agent mode is unavailable — no Composio credential is configured");
     }
+
+    // The model's path is where confirmations, questions and read-out answers
+    // live, so a quiet run takes the panel from here.
+    surface(app, run, transcript);
 
     let llm = aloud_llm::LlmClient::new(&settings.gemini_api_key, Some(GEMINI_BASE_URL))?;
     let composio = aloud_agent::ComposioClient::new(&settings.composio_api_key)?;
@@ -319,11 +357,18 @@ async fn execute(
         bail!("No app is connected in Composio yet");
     }
 
+    // The same context the engine's router had, so a follow-up handed here ("what's 90 + 7" with
+    // Calculator open) can still become a Mac task instead of an answer in the panel.
+    let command = match front {
+        Some(app) => format!("{transcript}\n(The app on screen: {app})"),
+        None => transcript.to_string(),
+    };
+
     aloud_agent::run_tool_loop(
         &llm,
         GEMINI_MODEL,
         &composio,
-        transcript,
+        &command,
         &tools,
         |event| emit_for(app, run, event_of(event)),
         // The safety gate. The offered tools carry their toolkit, so it names
@@ -379,6 +424,7 @@ async fn run_direct(
             None => {}
             Some(aloud_engine::Update::Step(text)) => emit_for(app, run, AgentEvent::Status(text)),
             Some(aloud_engine::Update::NeedsApproval(question)) => {
+                surface(app, run, transcript);
                 emit_for(
                     app,
                     run,

@@ -22,14 +22,17 @@ const DIRECT = 0.6; // routing confidence needed to skip the agent's language mo
 
 /** The fast path: one Jev request decides whether a spoken command is a Mac or web task and starts it
  *  directly; anything else (connected services, answers, unsure) is handed back to the caller's agent. */
-async function command({ text }: { text?: string }) {
+async function command({ text, front }: { text?: string; front?: string }) {
   const t = String(text ?? "").trim();
   if (!t) return { deferred: true, where: "none" };
-  const a: any = await ask({ request: t }, { where: { type: "choice", instructions: "Where should `request` be carried out?", criteria: WHERE } }, "route command");
+  // What is on screen is the context a follow-up leans on: "what's 90 + 7" with Calculator in front is
+  // a Mac task, not a question to answer in the panel.
+  const app = await mac.frontApp(front);
+  const a: any = await ask({ request: t, front_app: app || "none" }, { where: { type: "choice", instructions: "Where should `request` be carried out? `front_app` is the app on screen right now: a request that can be done in it (arithmetic while Calculator is in front, typing while an editor is) is carried out there, not answered.", criteria: WHERE } }, "route command");
   const where = a.where.choice as keyof typeof WHERE;
   if (a.where.confidence < DIRECT || where === "service" || where === "answer") return { deferred: true, where, confidence: a.where.confidence };
   // Web tasks run in the user's default browser through accessibility, like any Mac app.
-  const task = await mac.start({ goal: t, web: where === "web" });
+  const task = await mac.start({ goal: t, web: where === "web", front: app });
   return { id: task.id, where, confidence: a.where.confidence };
 }
 

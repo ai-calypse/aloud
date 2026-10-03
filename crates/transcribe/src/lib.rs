@@ -2,6 +2,7 @@
 //! OpenAI-compatible cloud endpoint. Either can be the default.
 
 pub mod cloud;
+pub mod deepgram;
 pub mod download;
 pub mod hallucination;
 pub mod local;

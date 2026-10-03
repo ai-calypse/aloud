@@ -21,6 +21,8 @@ type Task = {
   steps: Step[]; answer?: { lines: string[]; app: string; url?: string }; error?: string; requirements?: string[];
   pending?: { label: string; risky: number }; approve?: (ok: boolean) => void;
   stop: boolean; started: number; calls: ReturnType<typeof traced>["calls"]; web?: boolean;
+  /** The app the user was looking at when they spoke, from the caller (whose own panel may hold focus now). */
+  front?: string;
 };
 
 const MAX_ACTIONS = 30;
@@ -91,12 +93,21 @@ async function installedApps() {
   return [...new Set(names.filter((n) => n.endsWith(".app")).map((n) => n.slice(0, -4)))].sort();
 }
 
+/** The app the last task operated. A follow-up ("what's 90 + 7" after "open Calculator") means that app
+ *  when the caller can't say what is in front — its own panel took focus when the follow-up started. */
+let lastApp = "";
+
+/** The app on screen as far as the caller knows, else the one the last task left in front. */
+export async function frontApp(hint?: string): Promise<string> {
+  return hint || lastApp || ((await ax("frontmost")).name as string);
+}
+
 /** The app the goal is about: named in it, else Jev picks among installed apps (the front app first). */
-async function pickApp(goal: string): Promise<string> {
+async function pickApp(goal: string, hint?: string): Promise<string> {
   const apps = await installedApps();
   const named = apps.filter((a) => new RegExp(`\\b${a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(goal));
   if (named.length) return named.sort((a, b) => b.length - a.length)[0];
-  const front = (await ax("frontmost")).name as string;
+  const front = await frontApp(hint);
   const options = [front, ...apps.filter((a) => a !== front)].filter(Boolean).slice(0, 250);
   const a: any = await ask(
     { goal, frontmost_app: front },
@@ -276,10 +287,10 @@ async function runQuick(task: Task): Promise<boolean> {
 
 async function run(task: Task) {
   if (!task.web && (await runQuick(task))) return;
-  const [app, requirements] = await Promise.all([task.web ? defaultBrowser() : pickApp(task.goal), requirementsFor(task.goal)]);
+  const [app, requirements] = await Promise.all([task.web ? defaultBrowser() : pickApp(task.goal, task.front), requirementsFor(task.goal)]);
   task.requirements = requirements;
   const { pid, name } = await focus(app);
-  task.app = name;
+  task.app = lastApp = name;
   const history: Hist[] = [];
   const read = (before?: string) => (task.web ? settled(pid, name, before) : observe(pid, name));
   if (task.web) {
@@ -402,12 +413,12 @@ async function run(task: Task) {
 // ---------- actions (same shapes as the browser engine's, ids prefixed "m-") ----------
 const tasks = new Map<string, Task>();
 
-export async function start({ goal, web }: { goal?: string; web?: boolean }) {
+export async function start({ goal, web, front }: { goal?: string; web?: boolean; front?: string }) {
   const g = String(goal ?? "").trim();
   if (g.length < 4) throw new UserError("Say what to do on the Mac, for example: add a reminder to call Ana at 5.");
   if ([...tasks.values()].some((t) => t.status === "running" || t.status === "waiting")) throw new UserError("A Mac task is already running. Stop it first.");
   // "w-" marks a web task (run in the user's default browser), "m-" a Mac-app task.
-  const task: Task = { id: (web ? "w-" : "m-") + crypto.randomUUID().slice(0, 8), goal: g, status: "running", steps: [], stop: false, started: Date.now(), calls: [], web };
+  const task: Task = { id: (web ? "w-" : "m-") + crypto.randomUUID().slice(0, 8), goal: g, status: "running", steps: [], stop: false, started: Date.now(), calls: [], web, front };
   tasks.set(task.id, task);
   const { calls, result } = traced(() => run(task));
   task.calls = calls;

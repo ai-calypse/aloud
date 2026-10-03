@@ -90,6 +90,14 @@
   --color-warning-bg: var(--warning-bg);
   --color-toggle-on: var(--toggle-on);
   --color-toggle-off: var(--toggle-off);
+  --color-bar: var(--bar-bg);
+  --color-bar-stroke: var(--bar-stroke);
+  --color-bar-accent: var(--bar-accent);
+  --color-bar-accent-wash: var(--bar-accent-wash);
+  --color-bar-off-wash: var(--bar-off-wash);
+  --color-bar-on-accent: var(--bar-on-accent);
+  --color-bar-muted: var(--bar-muted);
+  --color-bar-busy: var(--bar-busy);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -100,6 +108,8 @@
   --radius-field: var(--radius-field);
   --radius-row: var(--radius-row);
   --radius-chip: var(--radius-chip);
+  --radius-bar: var(--radius-bar);
+  --radius-bar-key: var(--radius-bar-key);
 
   --shadow-card: var(--shadow-card);
   --shadow-field: var(--shadow-field);
@@ -110,4 +120,5 @@
   --text-row: var(--text-row);
   --text-ui: var(--text-ui);
   --text-hint: var(--text-hint);
+  --text-micro: var(--text-micro);
 }

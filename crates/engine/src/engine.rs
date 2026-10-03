@@ -221,10 +221,16 @@ pub struct Task {
 
 /// The fast path: the engine routes a spoken command with one Jev request and starts it when it is a
 /// Mac or web task. `Ok(None)` hands it back to the caller (email, calendar, answers, unsure routing).
-pub(crate) async fn command(dir: &Path, text: &str) -> Result<Option<Task>, String> {
+pub(crate) async fn command(
+    dir: &Path,
+    text: &str,
+    front: Option<&str>,
+) -> Result<Option<Task>, String> {
     let engine = engine(dir).await?;
     let events = engine.events.subscribe();
-    let result = engine.call("command", json!({ "text": text })).await?;
+    let result = engine
+        .call("command", json!({ "text": text, "front": front }))
+        .await?;
     let Some(id) = result["id"].as_str() else {
         return Ok(None);
     };

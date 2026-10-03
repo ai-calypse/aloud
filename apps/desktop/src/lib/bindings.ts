@@ -264,6 +264,13 @@ export const commands = {
 	answerAgent: (answer: string | null) => __TAURI_INVOKE<void>("answer_agent", { answer }),
 	/**  Lets the panel dismiss itself on Escape or after showing a result. */
 	closeAgent: () => __TAURI_INVOKE<void>("close_agent"),
+	/**  The bar's first paint: it may load after the session's first update. */
+	listenState: () => __TAURI_INVOKE<ListenState>("listen_state"),
+	listenToggleMic: () => __TAURI_INVOKE<void>("listen_toggle_mic"),
+	/**  A typed request, queued like a spoken one. */
+	listenSubmit: (text: string) => __TAURI_INVOKE<void>("listen_submit", { text }),
+	/**  Stops the running request and drops the queue; the mic stays on. */
+	listenCancel: () => __TAURI_INVOKE<void>("listen_cancel"),
 };
 
 /** Events */
@@ -278,6 +285,7 @@ export const events = {
 	dictationPartial: makeEvent<DictationPartial>("dictation-partial"),
 	dictationPhase: makeEvent<Phase>("dictation-phase"),
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
+	listenState: makeEvent<ListenState>("listen-state"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
 	notchHover: makeEvent<NotchHover>("notch-hover"),
@@ -697,6 +705,21 @@ export type Key = "leftCommand" | "rightCommand" | "leftShift" | "rightShift" | 
 "fn" | "escape" | "space" | ({ char: string }) & { f?: never } | ({ f: number }) & { char?: never };
 
 /**
+ *  What the bar draws, sent whole on every change: it is small, and a bar that
+ *  loads late or misses one still ends up right.
+ */
+export type ListenState = {
+	mic: boolean,
+	/**  What is being said now, else the last request heard. */
+	transcript: string,
+	busy: boolean,
+	/**  Requests waiting behind the running one. */
+	queued: number,
+	/**  Why the mic is not hearing, e.g. a dropped stream being reopened. */
+	problem: string | null,
+};
+
+/**
  *  A local git repo the composer can offer, so the user picks instead of typing
  *  a path. `name` is the folder; `path` is what `start_coding_agent` takes.
  */
@@ -870,6 +893,12 @@ export type Settings = {
 	 *  limit is too low for the agent's heavier calls.
 	 */
 	geminiApiKey?: string,
+	/**
+	 *  Deepgram key. Always-listening streams the mic to Deepgram's Flux, which
+	 *  decides where a spoken request ends; without it the mode falls back to a
+	 *  pause detector and local whisper.
+	 */
+	deepgramApiKey?: string,
 	engine?: Engine,
 	transcriptionModel?: string,
 	baseUrl?: string,
