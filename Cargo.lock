@@ -205,6 +205,8 @@ dependencies = [
  "aloud-llm",
  "aloud-notes",
  "anyhow",
+ "chrono",
+ "tempfile",
  "tokio",
  "tracing",
 ]

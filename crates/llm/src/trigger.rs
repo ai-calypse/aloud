@@ -37,6 +37,33 @@ pub fn after_trigger(transcript: &str, phrases: &[&[&[&str]]]) -> Option<String>
     None
 }
 
+/// "…see you then, press enter": the spoken submit that ends a dictation.
+pub const PRESS_ENTER: &[&[&[&str]]] = &[&[&["press", "hit"], &["enter", "return"]]];
+
+/// What precedes any of `phrases` at the end of `transcript` — the mirror of
+/// [`after_trigger`], for a phrase that closes an utterance rather than opens
+/// it. "Press enter to continue" is dictation: only the last words count. The
+/// phrase alone is None, so it is typed rather than submitting nothing.
+pub fn before_suffix(transcript: &str, phrases: &[&[&[&str]]]) -> Option<String> {
+    let words: Vec<&str> = transcript.split_whitespace().collect();
+
+    for phrase in phrases {
+        if words.len() <= phrase.len() {
+            continue;
+        }
+        let (rest, tail) = words.split_at(words.len() - phrase.len());
+        let matches = tail
+            .iter()
+            .zip(*phrase)
+            .all(|(word, spellings)| spellings.contains(&normalize(word).as_str()));
+        if matches {
+            let rest = rest.join(" ").trim_end_matches([',', ' ']).to_string();
+            return (!rest.is_empty()).then_some(rest);
+        }
+    }
+    None
+}
+
 /// Lowercased, letters and digits only — so "Hey," matches "hey". The
 /// transcriber attaches punctuation freely.
 fn normalize(word: &str) -> String {
@@ -79,5 +106,19 @@ mod tests {
             after_trigger("Hey, flow, what is rust", PHRASES).as_deref(),
             Some("what is rust")
         );
+    }
+
+    #[test]
+    fn press_enter_submits_only_at_the_end() {
+        assert_eq!(
+            before_suffix("Thanks, see you then. Press enter.", PRESS_ENTER).as_deref(),
+            Some("Thanks, see you then.")
+        );
+        assert_eq!(
+            before_suffix("ship it, hit return", PRESS_ENTER).as_deref(),
+            Some("ship it")
+        );
+        assert_eq!(before_suffix("Press enter to continue", PRESS_ENTER), None);
+        assert_eq!(before_suffix("Press enter.", PRESS_ENTER), None);
     }
 }

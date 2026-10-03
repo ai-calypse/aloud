@@ -3,6 +3,7 @@
 //! fails. Recording and OS wiring stay in the app.
 
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 
 /// Seconds of audio per chunk, and so the timestamp granularity: a segment is
 /// stamped with its chunk's start, not its own.
@@ -90,6 +91,47 @@ pub async fn notes(model: Model<'_>, transcript: &str) -> (String, String) {
     }
 }
 
+/// Keeps the running transcript on disk while a meeting records, so a crash or
+/// a quit loses at most the chunk being transcribed. Written beside and renamed
+/// over, so a crash mid-write leaves the previous draft, never half of one.
+pub fn save_draft(path: &Path, transcript: &str) -> Result<()> {
+    let partial = path.with_extension("partial");
+    std::fs::write(&partial, transcript)?;
+    std::fs::rename(&partial, path)?;
+    Ok(())
+}
+
+/// Saves a draft a meeting left behind as a note, then removes it. None when
+/// there is nothing to recover.
+///
+/// ponytail: the raw transcript, unsummarised — this runs at launch, before
+/// anyone is waiting on a network round-trip. Summarising on open is the
+/// upgrade if recovered notes turn out to be common.
+pub fn recover_draft(draft: &Path, notes_dir: &Path) -> Result<Option<PathBuf>> {
+    let transcript = match std::fs::read_to_string(draft) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    if transcript.trim().is_empty() {
+        std::fs::remove_file(draft)?;
+        return Ok(None);
+    }
+    // Stamped when the meeting last wrote, not now: it files beside the day
+    // it happened.
+    let at = std::fs::metadata(draft)
+        .and_then(|m| m.modified())
+        .map(chrono::DateTime::<chrono::Utc>::from)
+        .unwrap_or_else(|_| chrono::Utc::now());
+    let note = format!(
+        "# Recovered meeting\n\n_Aloud quit before this meeting was saved; this is the transcript up to then._\n\n## Transcript\n\n{transcript}"
+    );
+    let path = aloud_notes::write_note(notes_dir, "Recovered meeting", &note, at)?;
+    // Only once the note exists: removing first would lose it to a full disk.
+    std::fs::remove_file(draft)?;
+    Ok(Some(path))
+}
+
 async fn summarize(model: &Model<'_>, transcript: &str) -> Result<String> {
     let client = aloud_llm::LlmClient::new(model.api_key, Some(model.base_url))?;
     let messages = [
@@ -111,6 +153,25 @@ async fn summarize(model: &Model<'_>, transcript: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A meeting the app quit on must come back as a note on the next launch,
+    /// once — a draft left in place would be recovered again every launch.
+    #[test]
+    fn a_left_over_draft_becomes_a_note_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let draft = dir.path().join("meeting-draft.md");
+        let notes = dir.path().join("Notes");
+
+        assert_eq!(recover_draft(&draft, &notes).unwrap(), None);
+
+        save_draft(&draft, "[00:00] first minute").unwrap();
+        save_draft(&draft, "[00:00] first minute\n\n[00:01] second").unwrap();
+        let note = recover_draft(&draft, &notes).unwrap().expect("a note");
+        let text = std::fs::read_to_string(note).unwrap();
+        assert!(text.contains("[00:01] second"), "{text}");
+        assert!(!draft.exists());
+        assert_eq!(recover_draft(&draft, &notes).unwrap(), None);
+    }
 
     #[test]
     fn assembles_timestamped_transcript_skipping_silence() {

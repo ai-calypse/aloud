@@ -215,6 +215,7 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             // Load the transcription model now rather than inside the user's
             // first dictation. Returns immediately; the work is spawned.
             pipeline.warm_up();
+            meeting::recover_unsaved();
             let meeting: Arc<Mutex<Option<meeting::Meeting>>> = Arc::new(Mutex::new(None));
             let hotkey_config = Arc::new(Mutex::new(
                 settings
@@ -548,7 +549,8 @@ pub(crate) fn toggle_meeting(
         }
         None => {
             let settings_snapshot = settings.lock().map(|s| s.clone()).unwrap_or_default();
-            match meeting::Meeting::start(app.clone(), settings_snapshot) {
+            let pipeline = app.state::<AppState>().pipeline.clone();
+            match meeting::Meeting::start(app.clone(), settings_snapshot, pipeline) {
                 Ok(session) => *slot = Some(session),
                 Err(e) => tracing::error!(%e, "starting meeting failed"),
             }

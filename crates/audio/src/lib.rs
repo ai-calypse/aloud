@@ -275,6 +275,10 @@ pub struct Chunker {
     pending: Vec<u8>,
     next_index: usize,
     chunk_bytes: usize,
+    /// How far before each boundary a cut may move to land in a pause.
+    search_bytes: usize,
+    /// Bytes already handed out, so boundaries stay on the absolute timeline.
+    consumed: usize,
 }
 
 impl Chunker {
@@ -283,7 +287,19 @@ impl Chunker {
             pending: Vec::new(),
             next_index: 0,
             chunk_bytes,
+            search_bytes: 0,
+            consumed: 0,
         }
+    }
+
+    /// Ends each chunk of PCM16 at the quietest 20 ms in the `search_bytes`
+    /// before its boundary instead of on it, so a word is not split between
+    /// two transcriptions — whisper garbles both halves. A cut moves only its
+    /// own chunk's end, never the next boundary, so chunk `i` still starts
+    /// within `search_bytes` of `i * chunk_bytes` and timestamps do not drift.
+    pub fn cutting_in_pauses(mut self, search_bytes: usize) -> Self {
+        self.search_bytes = search_bytes;
+        self
     }
 
     /// Adds bytes and returns every whole chunk they completed. A Vec, not an
@@ -292,8 +308,14 @@ impl Chunker {
     pub fn push(&mut self, bytes: &[u8]) -> Vec<(usize, Vec<u8>)> {
         self.pending.extend_from_slice(bytes);
         let mut chunks = Vec::new();
-        while self.pending.len() >= self.chunk_bytes {
-            let chunk: Vec<u8> = self.pending.drain(..self.chunk_bytes).collect();
+        loop {
+            let boundary = (self.next_index + 1) * self.chunk_bytes - self.consumed;
+            if self.pending.len() < boundary {
+                break;
+            }
+            let cut = quietest_cut(&self.pending[..boundary], self.search_bytes);
+            let chunk: Vec<u8> = self.pending.drain(..cut).collect();
+            self.consumed += cut;
             chunks.push((self.next_index, chunk));
             self.next_index += 1;
         }
@@ -305,6 +327,31 @@ impl Chunker {
     pub fn take_tail(&mut self) -> (usize, Vec<u8>) {
         (self.next_index, std::mem::take(&mut self.pending))
     }
+}
+
+/// 20 ms of PCM16 at the realtime rate: short enough to fit between words.
+const FRAME_BYTES: usize = REALTIME_RATE as usize / 50 * 2;
+
+/// Where to end PCM16 `audio`: after its quietest frame within the last
+/// `search` bytes, or at its end when there is nowhere to search. The latest
+/// frame wins a tie, so unbroken sound or silence cuts on the boundary.
+fn quietest_cut(audio: &[u8], search: usize) -> usize {
+    let end = audio.len();
+    if search < FRAME_BYTES {
+        return end;
+    }
+    let energy = |frame: &[u8]| -> i64 {
+        frame
+            .chunks_exact(2)
+            .map(|s| i64::from(i16::from_le_bytes([s[0], s[1]])).pow(2))
+            .sum()
+    };
+    let from = end.saturating_sub(search) & !1;
+    (from..end - FRAME_BYTES + 1)
+        .step_by(FRAME_BYTES)
+        .rev()
+        .min_by_key(|&at| energy(&audio[at..at + FRAME_BYTES]))
+        .map_or(end, |at| at + FRAME_BYTES)
 }
 
 #[cfg(test)]
@@ -347,6 +394,33 @@ mod tests {
         let mut chunker = Chunker::new(8);
         assert_eq!(chunker.push(&[1; 16]).len(), 2);
         assert_eq!(chunker.take_tail(), (2, Vec::new()));
+    }
+
+    /// The pause, not the boundary, ends the chunk — and the next boundary
+    /// stays put, or a long meeting's timestamps would creep earlier.
+    #[test]
+    fn a_cut_lands_in_the_pause_before_the_boundary() {
+        let second = REALTIME_RATE as usize * 2;
+        let loud =
+            |n: usize| -> Vec<u8> { (0..n / 2).flat_map(|_| 8000i16.to_le_bytes()).collect() };
+        // 0.7 s of speech, 0.1 s pause, speech up to 2 s.
+        let mut audio = loud(second * 7 / 10);
+        audio.extend(vec![0; second / 10]);
+        audio.extend(loud(2 * second - audio.len()));
+
+        let mut chunker = Chunker::new(second).cutting_in_pauses(second / 2);
+        let chunks = chunker.push(&audio);
+        assert_eq!(chunks.len(), 2);
+        let cut = chunks[0].1.len();
+        assert!(
+            (second * 7 / 10..=second * 8 / 10).contains(&cut),
+            "cut at {cut}, outside the pause"
+        );
+        assert_eq!(
+            chunks[1].1.len(),
+            2 * second - cut,
+            "the second boundary moved"
+        );
     }
 
     #[test]
