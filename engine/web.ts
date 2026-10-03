@@ -198,9 +198,13 @@ async function run(task: Task) {
   const history: Hist[] = [];
   const read = (before?: string) => settled(pid, name, before);
   const start = startUrlFor(task.goal);
+  // The page as it was, so the first read waits for the new one. Without it the old page counted as
+  // settled the moment two reads matched, ~250 ms in, and Jev judged "go to github.com" done while
+  // looking at the site it was leaving.
+  const before = (await observe(pid, name)).fingerprint;
   await navigate(name, start);
   history.push({ action: "Open", kind: "url", text: start, page_changed: true, url: name });
-  let snap = await read("");
+  let snap = await read(before);
   let lastMet: number[] = [];
   let rejected = 0;
   let doubted = "";
