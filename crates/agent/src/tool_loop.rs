@@ -22,6 +22,20 @@ use tracing::Instrument;
 /// going after five is looping rather than working.
 const MAX_ROUNDS: usize = 5;
 
+/// Rounds allowed once a command starts driving the screen. Screen control is
+/// read, click, read the result, click again: "open System Settings and turn on
+/// dark mode" is four rounds before the useful click, and hit the limit of 5
+/// mid-navigation. Raised only for runs that touch the screen, so a confused
+/// model cannot burn thirty turns on a command that should take three.
+///
+/// 30, not more: a driver action is ~1.5-2s plus a model round-trip, so thirty
+/// rounds is already most of a minute.
+const MAX_SCREEN_ROUNDS: usize = 30;
+
+/// How many screen reads one command may make. A read must be repeatable after
+/// every change, or the agent clicks on a layout it can no longer see.
+const MAX_SCREEN_READS: usize = 40;
+
 /// How many times one read tool may run in a single command. Rounds are already
 /// capped, but a round can hold any number of calls, and a model that varies an
 /// argument slips past the identical-call cache indefinitely.
@@ -162,6 +176,12 @@ Third, ALOUD_BROWSER_TASK for anything to do on a website — open a site, searc
 it, play a video at a time, read a value off a page, open a section of a \
 dashboard. Call it once with the user's whole request as the goal; it runs every \
 step itself. \
+Fourth, only when nothing above can do it and the task is inside a Mac app, \
+drive the app on screen: ALOUD_SCREEN_READ lists its window's controls as \
+numbered elements, and ALOUD_SCREEN_CLICK and ALOUD_SCREEN_TYPE act on one \
+element by its number and return the window as it is afterwards. Take each \
+number from the latest result, never from an older read or a guess. Open the app \
+with ALOUD_OPEN_APP first if it is not open; pass `find` to narrow a big window. \
 Otherwise answer: a few sentences of simple markdown, under 150 words. If \
 nothing here can do what was asked inside that app, say so plainly rather than \
 improvising. \
@@ -474,13 +494,18 @@ where
     }
     // Which of `brains` this run is on; only ever moves forward.
     let mut brain = 0usize;
+    // Raised the first time the run touches the screen; see MAX_SCREEN_ROUNDS.
+    let mut max_rounds = MAX_ROUNDS;
+    // Screen control asks once per run, not per click; see `screen_gate`.
+    let mut screen_approved = false;
+    let mut screen = ScreenSession(false);
 
     let mut round = 0usize;
-    while round < MAX_ROUNDS {
+    while round < max_rounds {
         if cancelled() {
             anyhow::bail!("cancelled");
         }
-        let is_last = round + 1 == MAX_ROUNDS;
+        let is_last = round + 1 == max_rounds;
         // By index: a `&Brain` parameter makes the returned future's borrow a
         // closure-local lifetime the compiler will not infer.
         let chat = |index: usize| {
@@ -731,7 +756,9 @@ where
             // the model has no memory of having asked. Writes are excluded: two
             // identical sends are two emails, and collapsing them would swallow
             // the second silently.
-            if !is_write(&name, &tools) {
+            // Except a screen read: the reason to read again is that something
+            // moved, and a cached one is the layout from before the click.
+            if !is_write(&name, &tools) && name != aloud_screen::READ {
                 if let Some(previous) = seen.get(&(name.clone(), args.to_string())) {
                     tracing::debug!(tool = %name, "identical read already made; reusing");
                     messages.push(Message::tool_result(&call.id, previous.clone()));
@@ -742,7 +769,11 @@ where
                 // Independent of the dedup above: a model that varies one
                 // argument each time never hits the cache and would otherwise
                 // loop until the round limit.
-                let cap = MAX_CALLS_PER_TOOL;
+                let cap = if name == aloud_screen::READ {
+                    MAX_SCREEN_READS
+                } else {
+                    MAX_CALLS_PER_TOOL
+                };
                 let calls = budget.entry(name.clone()).or_insert(0);
                 *calls += 1;
                 if *calls > cap {
@@ -782,9 +813,18 @@ where
             // A read tool never reaches the gate and keeps the model's.
             // Engine tasks gate inside themselves: each risky click (buy, send, delete, sign in)
             // pauses for a yes/no below, so a gate on the whole goal would ask twice for one action.
-            let gate_needed = !aloud_engine::is_engine_tool(&name)
-                && !aloud_native::low_risk(&name, &args)
-                && is_write(&name, &tools);
+            if aloud_screen::is_screen_tool(&name) && max_rounds == MAX_ROUNDS {
+                tracing::info!("screen control engaged; raising the round budget");
+                max_rounds = MAX_SCREEN_ROUNDS;
+                screen.0 = true;
+            }
+            let gate_needed = if aloud_screen::is_screen_write(&name) {
+                screen_gate(&mut screen_approved)
+            } else {
+                !aloud_engine::is_engine_tool(&name)
+                    && !aloud_native::low_risk(&name, &args)
+                    && is_write(&name, &tools)
+            };
 
             let mut args = args;
             let declined = if gate_needed {
@@ -796,7 +836,14 @@ where
                         args = approved;
                         false
                     }
-                    None => true,
+                    None => {
+                        // A no re-arms the screen gate rather than leaving the
+                        // run approved for the next click.
+                        if aloud_screen::is_screen_write(&name) {
+                            screen_approved = false;
+                        }
+                        true
+                    }
                 }
             } else {
                 false
@@ -827,18 +874,17 @@ where
                         .instrument(span.clone())
                         .await
                 } else {
-                    // ponytail: no screen control. Cua Driver (trycua/cua
-                    // libs/cua-driver, MIT) becomes one more fall-through here;
-                    // the once-per-run gate and 30-round budget it needs are in
-                    // git history (9de8723).
                     match run_native(&name, &args).instrument(span.clone()).await {
                         Some(native) => native,
-                        None => {
-                            composio
-                                .execute(&name, &args)
-                                .instrument(span.clone())
-                                .await
-                        }
+                        None => match run_screen(&name, &args).instrument(span.clone()).await {
+                            Some(screen) => screen,
+                            None => {
+                                composio
+                                    .execute(&name, &args)
+                                    .instrument(span.clone())
+                                    .await
+                            }
+                        },
                     }
                 };
                 let success = tool_succeeded(&result);
@@ -856,7 +902,11 @@ where
                 result
             };
 
-            if !declined && !is_write(&name, &tools) && !aloud_engine::is_engine_tool(&name) {
+            if !declined
+                && !is_write(&name, &tools)
+                && !aloud_engine::is_engine_tool(&name)
+                && name != aloud_screen::READ
+            {
                 seen.insert((name.clone(), args.to_string()), result.clone());
             }
             messages.push(Message::tool_result(&call.id, result));
@@ -872,9 +922,46 @@ where
         round += 1;
     }
 
+    // Naming the budget matters: 5 rounds and 30 are different failures, and
+    // the message is what the panel shows.
     anyhow::bail!(
-        "the command needed more than {MAX_ROUNDS} rounds and was stopped before it finished"
+        "the command needed more than {max_rounds} rounds and was stopped before it finished"
     )
+}
+
+/// Whether this screen action must ask first, marking the run approved. Once
+/// per run, not per click: a screen task is read, click, read, type, and a
+/// prompt per step has the user answering faster than the agent works. Marked
+/// up front so a model that sends click and type in one round cannot slip the
+/// second past while the first is on screen; a no re-arms it.
+fn screen_gate(approved: &mut bool) -> bool {
+    !std::mem::replace(approved, true)
+}
+
+/// Ends the driver session however a run that drove the screen ends — answer,
+/// error or cancel — so the next run starts with no stale snapshots.
+struct ScreenSession(bool);
+
+impl Drop for ScreenSession {
+    fn drop(&mut self) {
+        if self.0 {
+            aloud_screen::finish();
+        }
+    }
+}
+
+/// Runs a screen-control tool; None when the name is not one, the same
+/// fall-through contract as [`run_native`].
+async fn run_screen(name: &str, args: &serde_json::Value) -> Option<String> {
+    if !aloud_screen::is_screen_tool(name) {
+        return None;
+    }
+    let (name, args) = (name.to_string(), args.clone());
+    // Each step is a driver subprocess and an action takes seconds.
+    let outcome = tokio::task::spawn_blocking(move || aloud_screen::execute(&name, &args))
+        .await
+        .unwrap_or_else(|e| Some(serde_json::json!({ "error": e.to_string() })))?;
+    Some(outcome.to_string())
 }
 
 /// Runs a native macOS tool, returning `Some(json_string)` in the same shape
@@ -951,6 +1038,8 @@ fn native_write(name: &str, args: &serde_json::Value, tools: &[ToolDef]) -> bool
         && name != ASK_USER
         && name != MORE_TOOLS
         && !aloud_engine::is_engine_tool(name)
+        // A screen action is a step, never the end: the run reads what it did.
+        && !aloud_screen::is_screen_tool(name)
         && is_write(name, tools)
         && args["action"] != "now_playing"
 }
@@ -1063,6 +1152,7 @@ mod tests {
             tool("ALOUD_FINDER_SEARCH", true),
             tool("ALOUD_SPOTIFY", false),
             tool("GMAIL_SEND_EMAIL", false),
+            tool(aloud_screen::CLICK, false),
         ];
         let none = serde_json::json!({});
         assert!(native_write("ALOUD_NOTES_CREATE", &none, &tools));
@@ -1080,6 +1170,25 @@ mod tests {
         assert!(!native_write("GMAIL_SEND_EMAIL", &none, &tools));
         assert!(!native_write(ASK_USER, &none, &tools));
         assert!(!native_write("ALOUD_BROWSER_TASK", &none, &tools));
+        // One click of several: ending the run on it would stop mid-task.
+        assert!(!native_write(aloud_screen::CLICK, &none, &tools));
+    }
+
+    /// One yes covers a screen run: the first action asks, the rest do not,
+    /// and a no re-arms it (the loop's decline arm clears the flag).
+    #[test]
+    fn screen_control_asks_once_per_run() {
+        let mut approved = false;
+        assert!(
+            screen_gate(&mut approved),
+            "the first screen action must ask"
+        );
+        assert!(
+            !screen_gate(&mut approved),
+            "a yes covers the rest of the run"
+        );
+        approved = false;
+        assert!(screen_gate(&mut approved), "a no asks again next time");
     }
 
     /// A round with no text, or with a failed or foreign call, goes back to the

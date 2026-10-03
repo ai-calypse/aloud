@@ -91,6 +91,7 @@ dependencies = [
  "aloud-engine",
  "aloud-llm",
  "aloud-native",
+ "aloud-screen",
  "aloud-selection",
  "aloud-store",
  "anyhow",
@@ -271,6 +272,15 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "aloud-screen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
  "tracing",
 ]
 

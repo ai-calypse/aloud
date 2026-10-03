@@ -1,0 +1,13 @@
+[package]
+name = "aloud-screen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Screen control through Cua Driver: read an app's controls, click and type into them"
+
+[dependencies]
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true

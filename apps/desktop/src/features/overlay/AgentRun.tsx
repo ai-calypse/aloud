@@ -19,6 +19,7 @@ import {
   askFor,
   bodyFor,
   editsFor,
+  gateFor,
   labelFor,
   text,
   type ToolArgs,
@@ -309,7 +310,8 @@ function ConfirmGate({ step }: { step: Step }) {
       <p className="agent__confirm-title">
         {asking && askFor(step.name, draft)
           ? askFor(step.name, draft)
-          : `${labelFor(step.name, draft)} — this writes to ${step.app}.`}
+          : gateFor(step.name, draft) ||
+            `${labelFor(step.name, draft)} — this writes to ${step.app}.`}
       </p>
       {/* Approving a write without seeing what it will do is not a gate, so the
           body shows here even though the step list is otherwise quiet. */}
