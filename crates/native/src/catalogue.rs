@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use crate::organize;
 use crate::script::{self, ScriptError};
 use crate::search;
-use crate::{notes, reminders};
+use crate::{media, notes, reminders};
 
 /// Pulls a required string argument, or a readable error the model can recover
 /// from — a missing field is the model's mistake, not a permission problem.
@@ -329,100 +329,107 @@ pub const ACTIONS: &[Action] = &[
         run: search::run,
     },
     Action {
-        name: "ALOUD_MUSIC_NOW_PLAYING",
-        description: "Get the name and artist of the track Music is currently \
-                      playing, or report that nothing is playing.",
-        app: "Music",
-        read_only: true,
-        params: || json!({ "type": "object", "properties": {} }),
-        run: |_args| {
-            // `player state` avoids raising an error when nothing is loaded.
-            let out = script::run(
-                "Music",
-                r#"tell application "Music"
-                    if player state is stopped then return "stopped"
-                    return (get name of current track) & " — " & (get artist of current track)
-                end tell"#,
-            )?;
-            if out == "stopped" {
-                Ok(json!({ "playing": false }))
-            } else {
-                Ok(json!({ "playing": true, "track": out }))
-            }
-        },
-    },
-    Action {
-        name: "ALOUD_MUSIC_PLAY",
-        description: "Start or resume playback in Music. If `query` is given, \
-                      search the library and play the best match; otherwise \
-                      resume whatever is loaded.",
+        name: "ALOUD_MUSIC",
+        description: "Control the Music app: play (with `query`, play the best match from the \
+                      library; without, resume), pause, next, previous, or now_playing.",
         app: "Music",
         read_only: false,
         params: || {
             json!({
                 "type": "object",
+                "required": ["action"],
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Optional song, album, or artist to search \
-                                        the library for and play."
-                    }
+                    "action": { "type": "string", "enum": ["play", "pause", "next", "previous", "now_playing"] },
+                    "query": { "type": "string", "description": "For play: a song, album or artist in the library." }
                 }
             })
         },
         run: |args| {
-            let query = args.get("query").and_then(Value::as_str).unwrap_or("");
-            if query.is_empty() {
-                script::run("Music", r#"tell application "Music" to play"#)?;
-                return Ok(json!({ "played": "resumed" }));
-            }
-            // Play the first library track whose name or artist matches. `whose`
-            // filters in-app, so no track list crosses the AppleScript bridge.
-            let q = script::escape(query);
-            let source = format!(
-                r#"tell application "Music"
-                    set hits to (every track of library playlist 1 whose name contains "{q}" or artist contains "{q}")
-                    if hits is {{}} then return "none"
-                    play (item 1 of hits)
-                    return (get name of current track) & " — " & (get artist of current track)
-                end tell"#
-            );
-            let out = script::run("Music", &source)?;
-            if out == "none" {
-                Ok(
-                    json!({ "played": false, "reason": format!("nothing in the library matched {query:?}") }),
-                )
-            } else {
-                Ok(json!({ "played": true, "track": out }))
-            }
-        },
-    },
-    Action {
-        name: "ALOUD_MUSIC_PAUSE",
-        description: "Pause playback in Music.",
-        app: "Music",
-        read_only: false,
-        params: || json!({ "type": "object", "properties": {} }),
-        run: |_args| {
-            script::run("Music", r#"tell application "Music" to pause"#)?;
-            Ok(json!({ "paused": true }))
-        },
-    },
-    Action {
-        name: "ALOUD_MUSIC_NEXT",
-        description: "Skip to the next track in Music.",
-        app: "Music",
-        read_only: false,
-        params: || json!({ "type": "object", "properties": {} }),
-        run: |_args| {
-            let out = script::run(
+            let action = required_str(args, "action")?;
+            let query = args
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            // `whose` filters in-app, so no track list crosses the bridge; `player state` avoids an
+            // error when nothing is loaded.
+            let out = script::run_jxa(
                 "Music",
-                r#"tell application "Music"
-                    next track
-                    return (get name of current track) & " — " & (get artist of current track)
-                end tell"#,
+                r#"const M = Application("Music");
+                const now = () => M.playerState() === "stopped" ? null : M.currentTrack.name() + " — " + M.currentTrack.artist();
+                if (ARG.action === "play" && ARG.query) {
+                    const hits = M.libraryPlaylists[0].tracks.whose({ _or: [{ name: { _contains: ARG.query } }, { artist: { _contains: ARG.query } }] })();
+                    if (!hits.length) return JSON.stringify({ played: false, reason: "nothing in the library matched " + ARG.query });
+                    hits[0].play();
+                } else if (ARG.action === "play") M.play();
+                else if (ARG.action === "pause") M.pause();
+                else if (ARG.action === "next") M.nextTrack();
+                else if (ARG.action === "previous") M.previousTrack();
+                // The player reports its old state for a moment after a command; reading it at
+                // once had a pause answer "playing".
+                if (ARG.action === "pause") return JSON.stringify({ paused: true });
+                if (ARG.action !== "now_playing") delay(0.6);
+                return JSON.stringify({ state: M.playerState(), track: now() });"#,
+                &json!({ "action": action, "query": query }),
             )?;
-            Ok(json!({ "skipped": true, "track": out }))
+            Ok(serde_json::from_str(&out).unwrap_or_else(|_| json!({ "done": action })))
+        },
+    },
+    Action {
+        name: "ALOUD_SPOTIFY",
+        description: "Control the Spotify app: play, pause, next, previous, or now_playing. To \
+                      play something specific give `uri` (a spotify: URI or an open.spotify.com \
+                      link). With only `query`, Spotify opens its search for it, since the app \
+                      cannot search on its own — say so in your answer.",
+        app: "Spotify",
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                    "action": { "type": "string", "enum": ["play", "pause", "next", "previous", "now_playing"] },
+                    "uri": { "type": "string", "description": "spotify:… URI or open.spotify.com link to play." },
+                    "query": { "type": "string", "description": "What to search for when there is no URI." }
+                }
+            })
+        },
+        run: |args| {
+            let action = required_str(args, "action")?;
+            let uri = args
+                .get("uri")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(|link| {
+                    media::spotify_uri(link).ok_or_else(|| {
+                        ScriptError::Failed(format!("{link:?} is not a Spotify link or URI"))
+                    })
+                })
+                .transpose()?;
+            // ponytail: Spotify's scripting has no search, so a bare query opens the search page and
+            // stops there. A connected Spotify search (Web API via Composio) that returns a URI is
+            // the upgrade; one-off users of dev-mode apps are capped at 5 since Feb 2026.
+            let out = script::run_jxa(
+                "Spotify",
+                r#"const S = Application("Spotify");
+                const now = () => { try { return S.currentTrack.name() + " — " + S.currentTrack.artist(); } catch (e) { return null; } };
+                if (ARG.action === "play" && ARG.uri) S.playTrack(ARG.uri);
+                else if (ARG.action === "play" && ARG.query) {
+                    const app = Application.currentApplication(); app.includeStandardAdditions = true;
+                    app.openLocation("spotify:search:" + encodeURIComponent(ARG.query));
+                    return JSON.stringify({ searched: ARG.query, note: "opened Spotify's search; pick a result to play" });
+                }
+                else if (ARG.action === "play") S.play();
+                else if (ARG.action === "pause") S.pause();
+                else if (ARG.action === "next") S.nextTrack();
+                else if (ARG.action === "previous") S.previousTrack();
+                // The player reports its old state for a moment after a command; reading it at
+                // once had a pause answer "playing".
+                if (ARG.action === "pause") return JSON.stringify({ paused: true });
+                if (ARG.action !== "now_playing") delay(0.6);
+                return JSON.stringify({ state: S.playerState(), track: now() });"#,
+                &json!({ "action": action, "uri": uri, "query": args.get("query").and_then(Value::as_str) }),
+            )?;
+            Ok(serde_json::from_str(&out).unwrap_or_else(|_| json!({ "done": action })))
         },
     },
     Action {
@@ -1069,28 +1076,46 @@ pub const ACTIONS: &[Action] = &[
     },
     Action {
         name: "ALOUD_SYSTEM_VOLUME",
-        description: "Set the system output volume to a level from 0 to 100.",
+        description: "Set the system output volume: `level` 0–100, or `change` to go up or down \
+                      by that many points (\"turn it up\" is about +10, \"mute\" is level 0).",
         // A system-wide action with no app of its own.
         app: crate::ALWAYS,
         read_only: false,
         params: || {
             json!({
                 "type": "object",
-                "required": ["level"],
                 "properties": {
                     "level": {
                         "type": "integer", "minimum": 0, "maximum": 100,
                         "description": "Output volume, 0 (mute) to 100 (max)."
+                    },
+                    "change": {
+                        "type": "integer", "minimum": -100, "maximum": 100,
+                        "description": "Points to raise (positive) or lower (negative) the volume by."
                     }
                 }
             })
         },
         run: |args| {
-            let level = args
-                .get("level")
-                .and_then(Value::as_i64)
-                .ok_or_else(|| ScriptError::Failed("level must be a number 0–100".into()))?
-                .clamp(0, 100);
+            let level = match (
+                args.get("level").and_then(Value::as_i64),
+                args.get("change").and_then(Value::as_i64),
+            ) {
+                (Some(level), _) => level,
+                (None, Some(change)) => {
+                    let now: i64 =
+                        script::run("System Events", "output volume of (get volume settings)")?
+                            .parse()
+                            .map_err(|_| {
+                                ScriptError::Failed("couldn't read the current volume".into())
+                            })?;
+                    now + change
+                }
+                (None, None) => {
+                    return Err(ScriptError::Failed("give a level 0–100 or a change".into()))
+                }
+            }
+            .clamp(0, 100);
             script::run(
                 "System Events",
                 &format!("set volume output volume {level}"),
@@ -1107,19 +1132,20 @@ mod tests {
     #[test]
     fn read_only_flags_are_honest() {
         // A write mislabelled read-only silently skips the confirmation gate —
-        // the one non-negotiable property in this codebase. NOW_PLAYING reads;
-        // PLAY writes.
-        let now = ACTIONS
+        // the one non-negotiable property in this codebase. A tool that can
+        // both read and act (now_playing vs play) must count as a write.
+        let search = ACTIONS
             .iter()
-            .find(|a| a.name == "ALOUD_MUSIC_NOW_PLAYING")
+            .find(|a| a.name == "ALOUD_FINDER_SEARCH")
             .unwrap();
-        assert!(now.read_only, "NOW_PLAYING must be read-only");
-
-        let play = ACTIONS
-            .iter()
-            .find(|a| a.name == "ALOUD_MUSIC_PLAY")
-            .unwrap();
-        assert!(!play.read_only, "PLAY changes playback — must be a write");
+        assert!(search.read_only, "FINDER_SEARCH only reads");
+        for name in ["ALOUD_MUSIC", "ALOUD_SPOTIFY", "ALOUD_NOTES_CREATE"] {
+            let action = ACTIONS.iter().find(|a| a.name == name).unwrap();
+            assert!(
+                !action.read_only,
+                "{name} changes something — must be a write"
+            );
+        }
     }
 
     /// "Open TextEdit" is the most common thing anyone says to this app, and

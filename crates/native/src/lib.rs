@@ -10,6 +10,7 @@
 
 mod catalogue;
 pub mod fast;
+mod media;
 mod notes;
 mod organize;
 mod reminders;
@@ -113,9 +114,8 @@ pub fn low_risk(name: &str) -> bool {
     matches!(
         name,
         "ALOUD_OPEN_APP"
-            | "ALOUD_MUSIC_PLAY"
-            | "ALOUD_MUSIC_PAUSE"
-            | "ALOUD_MUSIC_NEXT"
+            | "ALOUD_MUSIC"
+            | "ALOUD_SPOTIFY"
             | "ALOUD_REMINDERS_ADD"
             | "ALOUD_NOTES_APPEND"
             | "ALOUD_NOTES_CREATE"
@@ -193,11 +193,9 @@ mod tests {
         // No Music installed → no Music tools.
         let names =
             |apps: &[InstalledApp]| tools(apps).into_iter().map(|t| t.name).collect::<Vec<_>>();
-        assert!(!names(&[]).iter().any(|n| n == "ALOUD_MUSIC_PLAY"));
+        assert!(!names(&[]).iter().any(|n| n == "ALOUD_MUSIC"));
         // Music installed → its tools appear.
-        assert!(names(&[app("Music")])
-            .iter()
-            .any(|n| n == "ALOUD_MUSIC_PLAY"));
+        assert!(names(&[app("Music")]).iter().any(|n| n == "ALOUD_MUSIC"));
     }
 
     #[test]

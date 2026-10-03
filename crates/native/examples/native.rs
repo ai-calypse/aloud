@@ -30,7 +30,7 @@ fn main() {
     let (name, params) = match args.first().map(String::as_str) {
         Some("play") => {
             let query = args.get(1).cloned().unwrap_or_default();
-            ("ALOUD_MUSIC_PLAY", json!({ "query": query }))
+            ("ALOUD_MUSIC", json!({ "action": "play", "query": query }))
         }
         Some("search") => {
             let query = args.get(1).cloned().unwrap_or_else(|| "aloud".into());
@@ -40,7 +40,7 @@ fn main() {
                 json!({ "query": query, "kind": kind }),
             )
         }
-        _ => ("ALOUD_MUSIC_NOW_PLAYING", json!({})),
+        _ => ("ALOUD_MUSIC", json!({ "action": "now_playing" })),
     };
 
     println!("\nrunning {name} with {params}...");

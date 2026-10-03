@@ -273,15 +273,8 @@ const VIEWS: Record<string, ToolView> = {
 
   // Native macOS actions (aloud-native). Registered for real labels; the
   // fall-through would render "Aloud: music play" and hide what actually runs.
-  ALOUD_MUSIC_PLAY: {
-    label: (a) => {
-      const q = text(a, "query");
-      return q ? `Playing ${q}` : "Resuming Music";
-    },
-  },
-  ALOUD_MUSIC_PAUSE: { label: () => "Pausing Music" },
-  ALOUD_MUSIC_NEXT: { label: () => "Skipping to the next track" },
-  ALOUD_MUSIC_NOW_PLAYING: { label: () => "Checking what's playing" },
+  ALOUD_MUSIC: { label: (a) => mediaLabel("Music", a) },
+  ALOUD_SPOTIFY: { label: (a) => mediaLabel("Spotify", a) },
   ALOUD_REMINDERS_ADD: {
     label: (a) => {
       const t = text(a, "text");
@@ -469,6 +462,23 @@ const VIEWS: Record<string, ToolView> = {
     },
   },
 };
+
+/** "Playing lofi in Spotify", "Pausing Music": one label for every media action. */
+function mediaLabel(app: string, a: Record<string, unknown>): string {
+  const what = text(a, "query") || text(a, "uri");
+  switch (text(a, "action")) {
+    case "play":
+      return what ? `Playing ${what} in ${app}` : `Resuming ${app}`;
+    case "pause":
+      return `Pausing ${app}`;
+    case "next":
+      return `Skipping to the next track in ${app}`;
+    case "previous":
+      return `Going back a track in ${app}`;
+    default:
+      return `Checking what's playing in ${app}`;
+  }
+}
 
 /** The gate's editable fields for a tool; empty for the yes/no majority. */
 export function editsFor(name: string): Editable[] {
