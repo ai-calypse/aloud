@@ -9,6 +9,8 @@ description = "Native macOS actions as agent tools — the local half of agent m
 anyhow.workspace = true
 aloud-selection = { path = "../selection" }
 base64 = "0.22"
+# Reminder due dates: strict parsing, offsets to local time.
+chrono = "0.4"
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

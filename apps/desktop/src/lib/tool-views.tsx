@@ -285,16 +285,34 @@ const VIEWS: Record<string, ToolView> = {
   ALOUD_REMINDERS_ADD: {
     label: (a) => {
       const t = text(a, "text");
-      return t ? `Adding a reminder: ${t}` : "Adding a reminder";
+      const due = text(a, "due");
+      if (!t) return "Adding a reminder";
+      return due ? `Adding a reminder: ${t} (${due.replace("T", " ")})` : `Adding a reminder: ${t}`;
+    },
+  },
+  ALOUD_NOTES_CREATE: {
+    label: (a) => {
+      const title = text(a, "title");
+      return title ? `Creating the note "${title}"` : "Creating a note";
+    },
+    body: (a) => {
+      const line = text(a, "body");
+      return line ? (
+        <ToolCard>
+          <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
+            {line}
+          </p>
+        </ToolCard>
+      ) : null;
     },
   },
   ALOUD_NOTES_APPEND: {
     label: (a) => {
       const title = text(a, "title");
-      return title ? `Adding a line to "${title}"` : "Appending to a note";
+      return title ? `Adding to "${title}"` : "Adding to the open note";
     },
     body: (a) => {
-      const line = text(a, "text");
+      const line = text(a, "body");
       return line ? (
         <ToolCard>
           <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">

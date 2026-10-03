@@ -8,6 +8,7 @@
 //! cargo run -p aloud-native --example demo               # the safe reads
 //! cargo run -p aloud-native --example demo -- window left
 //! cargo run -p aloud-native --example demo -- organize   # DRY RUN, prints the plan
+//! cargo run -p aloud-native --example demo -- call ALOUD_NOTES_CREATE '{"title":"Cake","body":"- flour"}'
 //! ```
 
 use serde_json::json;
@@ -53,6 +54,11 @@ fn main() {
             println!("organize is covered by `cargo test -p aloud-native organize`.");
             println!("To try it live, use the app — the gate previews every move first.");
         }
+        // Any tool with literal arguments: what the model would send, minus the model.
+        [cmd, name, json] if cmd == "call" => match serde_json::from_str(json) {
+            Ok(args) => call(name, args),
+            Err(e) => println!("bad JSON arguments: {e}"),
+        },
         other => println!("unknown: {other:?}"),
     }
 }

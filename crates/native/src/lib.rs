@@ -10,7 +10,9 @@
 
 mod catalogue;
 pub mod fast;
+mod notes;
 mod organize;
+mod reminders;
 mod script;
 mod search;
 mod shortcuts;
@@ -116,6 +118,7 @@ pub fn low_risk(name: &str) -> bool {
             | "ALOUD_MUSIC_NEXT"
             | "ALOUD_REMINDERS_ADD"
             | "ALOUD_NOTES_APPEND"
+            | "ALOUD_NOTES_CREATE"
             | "ALOUD_WINDOW_ARRANGE"
             | "ALOUD_BROWSER_TAB"
             | "ALOUD_CLIPBOARD"

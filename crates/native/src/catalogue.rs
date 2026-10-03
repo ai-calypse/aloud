@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use crate::organize;
 use crate::script::{self, ScriptError};
 use crate::search;
+use crate::{notes, reminders};
 
 /// Pulls a required string argument, or a readable error the model can recover
 /// from — a missing field is the model's mistake, not a permission problem.
@@ -426,8 +427,10 @@ pub const ACTIONS: &[Action] = &[
     },
     Action {
         name: "ALOUD_REMINDERS_ADD",
-        description: "Add a reminder to the Reminders app. `list` is optional; \
-                      omit it to use the default list.",
+        description: "Add a reminder to the Reminders app. Give `due` whenever the user says \
+                      when (\"at 5\", \"tomorrow morning\", \"on Friday\"), worked out from \
+                      today's date: YYYY-MM-DDTHH:MM in local time, or YYYY-MM-DD for a whole \
+                      day. `list` is optional; omit it for the default list.",
         app: "Reminders",
         read_only: false,
         params: || {
@@ -435,7 +438,11 @@ pub const ACTIONS: &[Action] = &[
                 "type": "object",
                 "required": ["text"],
                 "properties": {
-                    "text": { "type": "string", "description": "The reminder text." },
+                    "text": { "type": "string", "description": "What to be reminded of." },
+                    "due": {
+                        "type": "string",
+                        "description": "When, local time: 2026-10-03T17:00, or 2026-10-03 for all day."
+                    },
                     "list": {
                         "type": "string",
                         "description": "Optional named list; defaults to the default list."
@@ -445,64 +452,131 @@ pub const ACTIONS: &[Action] = &[
         },
         run: |args| {
             let text = required_str(args, "text")?;
-            let text = script::escape(text);
-            let source = match args
-                .get("list")
+            let due = match args
+                .get("due")
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
             {
-                Some(list) => {
-                    let list = script::escape(list);
-                    format!(
-                        r#"tell application "Reminders"
-                            make new reminder at end of list "{list}" with properties {{name:"{text}"}}
-                        end tell"#
-                    )
+                Some(due) => {
+                    let due = reminders::due_parts(due).map_err(ScriptError::Failed)?;
+                    let (hour, minute) = due.time.unzip();
+                    json!([due.year, due.month, due.day, hour, minute])
                 }
-                None => format!(
-                    r#"tell application "Reminders"
-                        make new reminder with properties {{name:"{text}"}}
-                    end tell"#
-                ),
+                None => Value::Null,
             };
-            script::run("Reminders", &source)?;
-            Ok(json!({ "added": true }))
+            // `new Date(...)` sets every field at once, so a validated date cannot roll over the way
+            // AppleScript's field-by-field dates do.
+            let out = script::run_jxa(
+                "Reminders",
+                r#"const R = Application("Reminders");
+                const list = ARG.list ? R.lists.byName(ARG.list) : R.defaultList();
+                const props = { name: ARG.text };
+                if (ARG.due) {
+                    const [y, m, d, h, mi] = ARG.due;
+                    if (h === null) props.alldayDueDate = new Date(y, m - 1, d);
+                    else props.dueDate = props.remindMeDate = new Date(y, m - 1, d, h, mi);
+                }
+                list.reminders.push(R.Reminder(props));
+                return list.name();"#,
+                &json!({ "text": text, "due": due, "list": args.get("list").and_then(Value::as_str).filter(|s| !s.is_empty()) }),
+            )?;
+            Ok(json!({ "added": true, "list": out }))
         },
     },
     Action {
-        name: "ALOUD_NOTES_APPEND",
-        description: "Append a line to a note by title in the Notes app, \
-                      creating the note if it does not exist.",
+        name: "ALOUD_NOTES_CREATE",
+        description: "Create a new note in the Notes app and open it. Write the content yourself \
+                      into `body` as markdown (lines, `- ` bullets, `1.` steps, `## ` headings): \
+                      for \"make a shopping list for a cake and put it in a note\", body is the \
+                      actual list. Plain text, no emoji. Omit `body` for an empty note.",
         app: "Notes",
         read_only: false,
         params: || {
             json!({
                 "type": "object",
-                "required": ["title", "text"],
+                "required": ["title"],
                 "properties": {
                     "title": { "type": "string", "description": "The note's title." },
-                    "text": { "type": "string", "description": "The line to append." }
+                    "body": { "type": "string", "description": "The note's content, as markdown." }
                 }
             })
         },
         run: |args| {
-            let title = script::escape(required_str(args, "title")?);
-            let text = script::escape(required_str(args, "text")?);
-            // Notes bodies are HTML; a <br> keeps the appended line on its own
-            // line. Create-if-missing so "add to my Groceries note" works even
-            // the first time.
-            let source = format!(
-                r#"tell application "Notes"
-                    if not (exists note "{title}") then
-                        make new note with properties {{name:"{title}", body:"{text}"}}
-                    else
-                        set n to note "{title}"
-                        set body of n to (body of n) & "<br>{text}"
-                    end if
-                end tell"#
-            );
-            script::run("Notes", &source)?;
-            Ok(json!({ "appended": true }))
+            let title = required_str(args, "title")?;
+            let body = args.get("body").and_then(Value::as_str).unwrap_or_default();
+            let name = script::run_jxa(
+                "Notes",
+                r#"const Notes = Application("Notes");
+                const note = Notes.make({ new: "note", withProperties: { body: ARG.body } });
+                Notes.activate();
+                Notes.show(note);
+                return note.name();"#,
+                &json!({ "body": notes::note_body(title, body) }),
+            )?;
+            Ok(json!({ "created": true, "title": name }))
+        },
+    },
+    Action {
+        name: "ALOUD_NOTES_APPEND",
+        description:
+            "Add to an existing note in the Notes app — \"add eggs to my shopping note\", \
+                      \"add this to my note\". `title` is any part of the note's name; omit it to \
+                      add to the note open in Notes (else the most recent). A note that doesn't \
+                      exist yet is created. Write the content yourself into `body` as markdown.",
+        app: "Notes",
+        read_only: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["body"],
+                "properties": {
+                    "title": { "type": "string", "description": "Part of the note's name." },
+                    "body": { "type": "string", "description": "What to add, as markdown." }
+                }
+            })
+        },
+        run: |args| {
+            let body = required_str(args, "body")?;
+            let title = args
+                .get("title")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
+            // Appending rewrites the whole body, and attachments are not in the HTML a script
+            // reads, so a note with any is refused rather than silently stripped of them.
+            let out = script::run_jxa(
+                "Notes",
+                r#"const Notes = Application("Notes");
+                let note = null;
+                if (ARG.title) {
+                    const found = Notes.notes.whose({ name: { _contains: ARG.title } })();
+                    note = found.length ? found[0] : null;
+                } else {
+                    try { const picked = Notes.selection(); if (picked.length) note = picked[0]; } catch (e) {}
+                    if (!note && Notes.notes.length) note = Notes.notes[0];
+                }
+                if (!note) {
+                    note = Notes.make({ new: "note", withProperties: { body: ARG.fresh } });
+                    Notes.activate(); Notes.show(note);
+                    return JSON.stringify({ created: true, title: note.name() });
+                }
+                if (note.attachments.length > 0) {
+                    throw new Error("“" + note.name() + "” has images or files in it, which rewriting it would delete; add this to a different note.");
+                }
+                // Notes joins a list to the one right before it: more bullets under a shopping list
+                // is right, bullets becoming steps 3 and 4 of a numbered list is not.
+                const old = note.body().trimEnd();
+                const clash = (old.endsWith("</ol>") && ARG.html.startsWith("<ul>"))
+                    || (old.endsWith("</ul>") && ARG.html.startsWith("<ol>"));
+                note.body = old + (clash ? "<div><br></div>" : "") + ARG.html;
+                Notes.activate(); Notes.show(note);
+                return JSON.stringify({ appended: true, title: note.name() });"#,
+                &json!({
+                    "title": title,
+                    "html": notes::to_html(body),
+                    "fresh": notes::note_body(title.unwrap_or("Note"), body),
+                }),
+            )?;
+            Ok(serde_json::from_str(&out).unwrap_or_else(|_| json!({ "appended": true })))
         },
     },
     Action {
