@@ -170,8 +170,7 @@ what the user likely has, and give each the file extensions that belong in it. \
 For anything to do on a website — open a site, search it, play a video at a \
 time, read a value off a page, open a section of a dashboard — call \
 ALOUD_BROWSER_TASK once with the user's whole request as the goal; it runs every \
-step itself. For a multi-step job inside a Mac app that no named tool covers, \
-prefer ALOUD_MAC_TASK with the whole request over driving the screen yourself. \
+step itself. \
 When no tool in the list does what was asked, you can drive the app the user is \
 looking at directly: ALOUD_SCREEN_READ lists its real on-screen controls with \
 their positions, and the screen click/type/key tools act on them. This is the \
@@ -455,14 +454,14 @@ where
                     (!is_last).then_some(schemas.as_slice()),
                     Some(0.3),
                 )
-            // Per round, not per run: "the model was slow" and "the model went
-            // round twice" are different problems with different fixes.
-            .instrument(tracing::info_span!(
-                "tool_select",
-                model,
-                round,
-                usage = tracing::field::Empty
-            ))
+                // Per round, not per run: "the model was slow" and "the model went
+                // round twice" are different problems with different fixes.
+                .instrument(tracing::info_span!(
+                    "tool_select",
+                    model,
+                    round,
+                    usage = tracing::field::Empty
+                ))
         };
 
         // Per round, not per run: a run that survived a 429 in round one still

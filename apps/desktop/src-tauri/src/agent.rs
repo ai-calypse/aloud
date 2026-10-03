@@ -190,8 +190,8 @@ pub async fn run(
     QUIET.store(quiet, std::sync::atomic::Ordering::SeqCst);
 
     // Read before `show_panel`, which focuses our own window and would make us the front app. Our own
-    // name means a panel still held focus from the last run; the engine then falls back to the app that
-    // run operated.
+    // name means a panel still held focus from the last run, which says nothing about what the user is
+    // looking at, so it is dropped.
     let front = aloud_selection::frontmost_app()
         .map(|a| a.name)
         .filter(|name| !name.eq_ignore_ascii_case("aloud"));
@@ -253,18 +253,18 @@ async fn execute(
     settings: &Settings,
     cancelled: impl Fn() -> bool,
 ) -> Result<String> {
-    // The fast path, before any language model: Jev routes the command (~0.15 s) and Mac-app and
-    // website tasks run straight on the engine. Email, calendar, questions and anything it isn't sure
-    // about come back as None and take the full agent loop below.
-    if let Some(started) = aloud_engine::command(transcript, front).await {
-        return run_direct(
-            app,
-            run,
-            transcript,
-            started.map_err(anyhow::Error::msg)?,
-            &cancelled,
-        )
-        .await;
+    let installed = aloud_selection::installed_apps();
+
+    // The fast path, before any language model: "go to youtube", "search lofi on youtube" go
+    // straight to the browser engine, as quick as the router this replaced. Everything else, and a
+    // browser engine missing from this build, takes the brain below.
+    if aloud_native::fast::route(transcript, &installed) == Some(aloud_native::fast::Fast::Web) {
+        let goal = serde_json::json!({ "goal": transcript });
+        match aloud_engine::start(aloud_engine::BROWSER_TASK, &goal).await {
+            Some(Ok(task)) => return run_direct(app, run, transcript, task, &cancelled).await,
+            Some(Err(e)) => tracing::warn!(%e, "browser engine unavailable; asking the brain"),
+            None => {}
+        }
     }
 
     let brains = aloud_agent::brains(&settings.cerebras_api_key, &settings.gemini_api_key)?;
@@ -295,7 +295,6 @@ async fn execute(
     // same ToolDef shape so the loop dispatches them with one branch. Composio
     // may be unconnected and native tools still make the command runnable, so
     // the "nothing to do" bail moves below the concat.
-    let installed = aloud_selection::installed_apps();
     tools.extend(
         aloud_native::tools(&installed)
             .into_iter()
@@ -329,21 +328,14 @@ async fn execute(
         );
     }
 
-    // Layer 3: whole tasks on the Voice Mac engine — a website in the user's browser, or a Mac app
-    // operated step by step — each chosen by Jev. Empty when the engine wasn't staged into this build.
-    tools.extend(engine_tools.into_iter().map(|t| {
-        aloud_agent::ToolDef {
-            toolkit: if t.name == aloud_engine::BROWSER_TASK {
-                "Browser"
-            } else {
-                "Mac"
-            }
-            .to_string(),
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters,
-            read_only: t.read_only,
-        }
+    // Layer 3: whole tasks on a website in the user's browser, run by the engine. Empty when the
+    // engine wasn't staged into this build.
+    tools.extend(engine_tools.into_iter().map(|t| aloud_agent::ToolDef {
+        toolkit: "Browser".to_string(),
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+        read_only: t.read_only,
     }));
 
     tracing::Span::current().record("tool_count", tools.len());
@@ -382,9 +374,8 @@ async fn execute(
     .await
 }
 
-/// Waits for the panel's reply to the question `event_of` has already emitted.
-/// Drives one engine task to the end on the panel: a tool row, each step as the status line, a Yes/No
-/// question before a risky click, and the engine's answer as the run's message.
+/// Drives one browser task to the end on the panel: a tool row, each step as the status line, a
+/// Yes/No question before a risky click, and the engine's answer as the run's message.
 async fn run_direct(
     app: &AppHandle,
     run: u64,
@@ -392,17 +383,12 @@ async fn run_direct(
     mut task: aloud_engine::Task,
     cancelled: &impl Fn() -> bool,
 ) -> Result<String> {
-    let name = task.tool().to_string();
+    let name = aloud_engine::BROWSER_TASK.to_string();
     emit_for(
         app,
         run,
         AgentEvent::ToolCall(ToolCall {
-            app: if name == aloud_engine::MAC_TASK {
-                "Mac"
-            } else {
-                "Browser"
-            }
-            .to_string(),
+            app: "Browser".to_string(),
             name: name.clone(),
             args: [("goal".to_string(), transcript.to_string())].into(),
             requires_confirmation: false,

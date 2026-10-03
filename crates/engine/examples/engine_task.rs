@@ -1,25 +1,24 @@
-//! Run one engine task end to end against the real Mac, approving any risky step from stdin.
+//! Run one browser task end to end against the real Mac, approving any risky step from stdin.
 //!
-//! cargo run -p aloud-engine --example engine_task -- mac "In Calculator, calculate 12 times 3"
 //! cargo run -p aloud-engine --example engine_task -- browser "What does serendipity mean? Check Wiktionary"
 //!
-//! Uses the repo's `engine/` (run `npm install` there first, and build `engine/axd/axd` for Mac tasks).
+//! Uses the repo's `engine/` (run `npm install` there first, and build `engine/axd/axd`).
 
-use aloud_engine::{Update, BROWSER_TASK, MAC_TASK};
+use aloud_engine::{Update, BROWSER_TASK};
 use serde_json::json;
 
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
     let [_, kind, goal] = args.as_slice() else {
-        eprintln!("usage: engine_task <mac|browser> <goal>");
+        eprintln!("usage: engine_task browser <goal>");
         std::process::exit(2);
     };
-    let name = if kind == "browser" {
-        BROWSER_TASK
-    } else {
-        MAC_TASK
-    };
+    if kind != "browser" {
+        eprintln!("only browser tasks run on the engine now; Mac apps use aloud_native");
+        std::process::exit(2);
+    }
+    let name = BROWSER_TASK;
     println!(
         "tools offered: {:?}",
         aloud_engine::tools()

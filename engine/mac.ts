@@ -7,7 +7,6 @@ import { ask, noul, summarize, traced, UserError } from "./lib/jev.ts";
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { ax } from "./lib/ax.ts";
-import * as quick from "./quick.ts";
 import { execFile } from "node:child_process";
 import { allowedUrl, extract, fieldText, requirementsFor, startUrlFor, validateChoice, type Action, type Hist, type Obs } from "./browser.ts";
 
@@ -252,41 +251,7 @@ async function choose(snap: Snap, goal: string, history: Hist[], requirements: s
   };
 }
 
-/** A curated command when one fits the whole request: one Jev pick, one text-model fill, one script. */
-async function runQuick(task: Task): Promise<boolean> {
-  const t = performance.now();
-  const r = await quick.route(task.goal);
-  if (!r.quick) return false;
-  const q = r.quick;
-  const a = await quick.args(q, task.goal);
-  const label = `${q.what}${Object.keys(a).length ? ` (${Object.values(a).filter((v) => v !== "").join(", ")})` : ""}`;
-  const step: Step = { n: 1, app: q.app ?? "Mac", op: "QUICK", target: { id: q.id, label }, why: { op: r.probabilities }, ms_jev: Math.round(performance.now() - t), ms_act: 0 };
-  task.app = q.app ?? "Mac";
-  if (q.risky) {
-    task.steps.push(step);
-    task.status = "waiting";
-    task.pending = { label, risky: 1 };
-    const ok = await new Promise<boolean>((resolve) => (task.approve = resolve));
-    task.pending = undefined;
-    task.steps.pop();
-    if (!ok) {
-      task.steps.push({ ...step, note: "You declined, so nothing ran." });
-      task.status = "stopped";
-      return true;
-    }
-    task.status = "running";
-  }
-  const t2 = performance.now();
-  const out = await q.run(a);
-  step.ms_act = Math.round(performance.now() - t2);
-  task.steps.push({ ...step, note: out });
-  task.answer = { app: task.app, lines: out.split("\n") };
-  task.status = "done";
-  return true;
-}
-
 async function run(task: Task) {
-  if (!task.web && (await runQuick(task))) return;
   const [app, requirements] = await Promise.all([task.web ? defaultBrowser() : pickApp(task.goal, task.front), requirementsFor(task.goal)]);
   task.requirements = requirements;
   const { pid, name } = await focus(app);
@@ -415,7 +380,9 @@ const tasks = new Map<string, Task>();
 
 export async function start({ goal, web, front }: { goal?: string; web?: boolean; front?: string }) {
   const g = String(goal ?? "").trim();
-  if (g.length < 4) throw new UserError("Say what to do on the Mac, for example: add a reminder to call Ana at 5.");
+  // Mac apps are driven by aloud_native's scripted actions now; this loop only runs websites.
+  if (!web) throw new UserError("Only website tasks run here now.");
+  if (g.length < 4) throw new UserError("Say what to do on the website, for example: search lofi on YouTube.");
   if ([...tasks.values()].some((t) => t.status === "running" || t.status === "waiting")) throw new UserError("A Mac task is already running. Stop it first.");
   // "w-" marks a web task (run in the user's default browser), "m-" a Mac-app task.
   const task: Task = { id: (web ? "w-" : "m-") + crypto.randomUUID().slice(0, 8), goal: g, status: "running", steps: [], stop: false, started: Date.now(), calls: [], web, front };
