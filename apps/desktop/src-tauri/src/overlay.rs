@@ -246,7 +246,7 @@ static HIDE_GENERATION: AtomicU64 = AtomicU64::new(0);
 /// Ask/Agent both end on `Phase::Idle`, which hides the overlay — right for a
 /// status pill, wrong for an answer the user is still reading. The run's hide
 /// is suppressed while this is set; only [`end_panel`] or a new [`show`] wins.
-/// `show_panel` sets it for ask/agent, [`set_panel_interactive`] for a browse;
+/// `show_panel` sets it for an agent run, [`set_panel_interactive`] for a browse;
 /// [`end_panel`] and [`show`] are the sole clearers.
 static PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 
@@ -562,7 +562,7 @@ pub fn rest(app: &AppHandle) {
     show(app, Phase::Listening);
 }
 
-/// Closes a browse of the notch. Symmetric with `close_ask`/`close_agent`: a
+/// Closes a browse of the notch. Symmetric with `close_agent`: a
 /// browse now sets `PANEL_OPEN` (via [`set_panel_interactive`]), so it needs an
 /// explicit close to clear it — the webview clearing `browsing` alone would
 /// leave `PANEL_OPEN` stuck true. Idempotent, so the several frontend paths
@@ -585,7 +585,7 @@ pub fn dismiss_on_focus_loss(app: &AppHandle) {
     if !INTERACTIVE.load(Ordering::SeqCst) {
         return;
     }
-    // Every panel now sets `PANEL_OPEN` (ask/agent via `show_panel`, browse via
+    // Every panel now sets `PANEL_OPEN` (an agent run via `show_panel`, browse via
     // `set_panel_interactive`), so one path closes them all. `end_panel` resets
     // to resting and emits `OverlayDismiss`; its `hide` never takes the notch
     // window away, because the notch is always resting (`NOTCH_RESTING`).

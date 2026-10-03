@@ -14,8 +14,6 @@ import type { OverlayStyle, Phase } from "./bindings";
 export type PreviewCommand = {
   phase?: Phase;
   style?: OverlayStyle;
-  /** `stream` types the answer in, so the panel can be watched chasing it. */
-  ask?: "open" | "close" | "stream";
   /**
    * The live dictation transcript. `stream` includes a mid-way revision, which
    * is the case that can make the panel jitter.

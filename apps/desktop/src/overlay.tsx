@@ -390,31 +390,6 @@ function useNotchPanel(
 }
 
 /**
- * A question and the answer streaming in under it, or null when the panel is
- * just a status pill.
- */
-type Ask = {
-  question: string;
-  answer: string;
-  /** Set instead of an answer when the request failed. */
-  error: string | null;
-  /** The stream has finished — stops the follow-to-bottom and re-arms input. */
-  done: boolean;
-};
-
-/** Dev/QA: `?ask` / `?ask=<ms>` reaches the answer state without a mic. */
-const ASK_PREVIEW: Ask = {
-  question: "What is the difference between a spring and an easing curve?",
-  answer:
-    "An **easing curve** is a shape someone drew; a **spring** is a shape physics produced.\n\n- a bezier decelerates on a schedule\n- a spring *settles*, and can be redirected mid-flight without restarting\n\nThat second property is why retargetable motion has to integrate a real oscillator rather than replay a baked curve.",
-  error: null,
-  done: true,
-};
-
-/** How fast `ask: "stream"` types, in ms between chunks. */
-const STREAM_MS = 45;
-
-/**
  * A dictation preview, as whisper produces one: each entry is the *whole*
  * transcript at that moment, so it can go backwards. The two shortenings are
  * deliberate — a revision is what makes the panel shrink mid-flight.
@@ -457,7 +432,7 @@ const AGENT_PREVIEW: Run = {
 };
 
 /**
- * One tab in the notch's strip. Tab 0 is the live ask/agent panel; the rest are
+ * One tab in the notch's strip. Tab 0 is the live agent panel; the rest are
  * blank until we decide what they hold. `closing` is set instead of removing
  * the tab, so its exit has something to play on — see `closeTab`.
  */
@@ -503,7 +478,6 @@ function Overlay() {
   const [partial, setPartial] = useState("");
   // Latched once a run has produced words; see `effectiveStyle`.
   const [droppedDown, setDroppedDown] = useState(false);
-  const [ask, setAsk] = useState<Ask | null>(null);
   const [agent, setAgent] = useState<Run | null>(null);
   // The notch opened by clicking it rather than by speaking. Its own state
   // because it belongs to no dictation and must survive `run` changing.
@@ -549,7 +523,7 @@ function Overlay() {
   // that the cross, click-away and Escape all read as broken. Closing with a
   // card pending is fine: the hook waits (24h), the card stays queued under
   // the Agents tab's dot, and reopening the notch finds it again.
-  const panelOpen = ask !== null || agent !== null || browsing;
+  const panelOpen = agent !== null || browsing;
   // A ref, not the state it mirrors: the phase listener subscribes once, and
   // depending on `panelOpen` would rebuild it on every streamed token.
   const openRef = useRef(panelOpen);
@@ -582,8 +556,8 @@ function Overlay() {
   // opening by click, by a permission arriving, or by the run closing out
   // from under the strip all land there rather than on an empty tab 0.
   useEffect(() => {
-    if (panelOpen && !ask && !agent) setActiveTab(AGENTS_TAB);
-  }, [panelOpen, ask, agent]);
+    if (panelOpen && !agent) setActiveTab(AGENTS_TAB);
+  }, [panelOpen, agent]);
 
   // Dev/QA: `?agents=2` fakes a session list and `?hover` holds the peek row
   // open, so the resting notch's two states are reachable in a browser. The
@@ -782,10 +756,10 @@ function Overlay() {
       );
       // Closing the active tab lands on the run when there is one, else on
       // the agents — tab 0 without a run is an empty panel.
-      const home = ask || agent ? 0 : AGENTS_TAB;
+      const home = agent ? 0 : AGENTS_TAB;
       setActiveTab((active) => (active === id ? home : active));
     },
-    [ask, agent],
+    [agent],
   );
 
   const dropTab = useCallback(
@@ -800,13 +774,6 @@ function Overlay() {
     const timer = setTimeout(() => setDismissing(true), dismissAfter);
     return () => clearTimeout(timer);
   }, [dismissAfter]);
-  // The answer's own hatch; see ASK_PREVIEW.
-  const askAfter = new URLSearchParams(location.search).get("ask");
-  useEffect(() => {
-    if (askAfter === null) return;
-    const timer = setTimeout(() => setAsk(ASK_PREVIEW), Number(askAfter) || 0);
-    return () => clearTimeout(timer);
-  }, [askAfter]);
   // Only while words are being said — a dictation, or always-listening — never
   // under "Transcribing…", which is about the whole utterance being re-read.
   const transcript =
@@ -957,9 +924,8 @@ function Overlay() {
       // the last real phase and start collapsing instead — blanking here is
       // what made a no-speech run cut off dead while a pasted one animated.
       if (e.payload === "idle") {
-        // …unless an answer is on screen: both Ask paths end the run on
-        // `idle`, which is exactly when the answer wants reading. Rust
-        // suppresses the matching hide for the same reason (ANSWERING).
+        // …unless an answer is on screen: the run ends on `idle`, which is
+        // exactly when the answer wants reading.
         if (!openRef.current) setDismissing(true);
         return;
       }
@@ -979,7 +945,6 @@ function Overlay() {
         // A dictation started over the top of an answer takes the panel back —
         // including from the agents surface, or the pill and the panel fight
         // over the same strip.
-        setAsk(null);
         setAgent(null);
         setBrowsing(false);
         setSelected(null);
@@ -989,13 +954,12 @@ function Overlay() {
       }
     });
     // A dismiss is Rust declaring the panel over, so the panel *state* goes
-    // with it. Leaving `ask`/`agent` latched here is what made the panel
+    // with it. Leaving `agent` latched here is what made the panel
     // spring back open the moment `dismissing` reset — and the second click
     // on the cross was then a no-op, because Rust's `end_panel` had already
     // cleared its side and had nothing left to close.
     const unlistenDismiss = events.overlayDismiss.listen(() => {
       setDismissing(true);
-      setAsk(null);
       setAgent(null);
       setBrowsing(false);
       setSelected(null);
@@ -1040,50 +1004,9 @@ function Overlay() {
     };
   }, []);
 
-  // The answer stream. Separate from the phase listener above because it is
-  // not a phase: the run is over by the time the last token lands.
-  useEffect(() => {
-    const unlisten = events.ask.listen(({ payload }) => {
-      switch (payload.kind) {
-        case "question":
-          // A follow-up reuses the panel, so a new question resets it.
-          setAsk({ question: payload.value, answer: "", error: null, done: false });
-          break;
-        case "delta":
-          setAsk((a) => a && { ...a, answer: a.answer + payload.value });
-          break;
-        case "done":
-          setAsk((a) => a && { ...a, done: true });
-          break;
-        case "failed":
-          setAsk((a) => a && { ...a, error: payload.value, done: true });
-          break;
-      }
-    });
-    return () => {
-      unlisten.then((off) => off());
-    };
-  }, []);
-
   // The tuning page's hatch; see PreviewCommand. Inert in the real app.
   useEffect(() => {
     let typing = 0;
-    const stream = () => {
-      clearInterval(typing);
-      const chunks = ASK_PREVIEW.answer.match(/\S+\s*/g) ?? [];
-      let at = 0;
-      setAsk({ ...ASK_PREVIEW, answer: "", done: false });
-      typing = window.setInterval(() => {
-        if (at >= chunks.length) {
-          clearInterval(typing);
-          setAsk((a) => a && { ...a, done: true });
-          return;
-        }
-        const chunk = chunks[at++];
-        setAsk((a) => a && { ...a, answer: a.answer + chunk });
-      }, STREAM_MS);
-    };
-
     const dictate = () => {
       clearInterval(typing);
       let at = 0;
@@ -1108,24 +1031,15 @@ function Overlay() {
         setDismissing(false);
         if (command.phase === "recording") {
           clearInterval(typing);
-          setAsk(null);
-          setAgent(null);
+            setAgent(null);
           setError(null);
           setPartial("");
           setDroppedDown(false);
           setRun((previous) => previous + 1);
         }
       }
-      if (command.ask === "open") setAsk(ASK_PREVIEW);
-      if (command.ask === "close") {
-        clearInterval(typing);
-        setAsk(null);
-        setAgent(null);
-      }
-      if (command.ask === "stream") stream();
       if (command.partial === "stream") dictate();
       if (command.agent === "run") {
-        setAsk(null);
         setAgent({
           ...AGENT_PREVIEW,
           steps: [AGENT_PREVIEW.steps[0]],
@@ -1134,11 +1048,9 @@ function Overlay() {
         });
       }
       if (command.agent === "pending") {
-        setAsk(null);
         setAgent(AGENT_PREVIEW);
       }
       if (command.agent === "planned") {
-        setAsk(null);
         setAgent({
           ...AGENT_PREVIEW,
           steps: [AGENT_PREVIEW.steps[0]],
@@ -1151,7 +1063,6 @@ function Overlay() {
       // The editable gate, as it arrives after both lookups came back empty:
       // a name and no address, which is exactly the state the inputs exist for.
       if (command.agent === "contact") {
-        setAsk(null);
         setAgent({
           heard: "Email Genghis Khan the release notes",
           steps: [
@@ -1199,7 +1110,6 @@ function Overlay() {
       // The model waiting on the user; the run is suspended in Rust for as
       // long as this is up.
       if (command.agent === "asked") {
-        setAsk(null);
         setAgent({
           heard: "Send hi to Charlie Yang",
           steps: [
@@ -1227,7 +1137,6 @@ function Overlay() {
       // The same channel, asking a question whose answers are known — which is
       // what a lookup with several matches should do instead of picking.
       if (command.agent === "choose") {
-        setAsk(null);
         setAgent({
           heard: "Send hi to Sam",
           steps: [
@@ -1345,7 +1254,7 @@ function Overlay() {
       // A browse sets `PANEL_OPEN` in Rust (via `setPanelInteractive`), so
       // closing it has to clear that too — `closeBrowse` does, and clearing
       // only the webview `browsing` would leave the Rust flag stuck.
-      if (!agent && !ask) {
+      if (!agent) {
         void commands.closeBrowse();
         setBrowsing(false);
         setSelected(null);
@@ -1353,11 +1262,11 @@ function Overlay() {
       }
       // `closeAgent` also abandons a pending confirmation, so Escape reads as
       // "no" rather than leaving a write waiting on a channel nobody answers.
-      void (agent ? commands.closeAgent() : commands.closeAsk());
+      void commands.closeAgent();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [panelOpen, agent, ask]);
+  }, [panelOpen, agent]);
 
   // A dismissal is an animation, not a state of being: once the collapse has
   // settled, the panel is back to resting so the notch (and the agents under
@@ -1377,12 +1286,6 @@ function Overlay() {
     }, 600);
     return () => clearTimeout(timer);
   }, [dismissing]);
-
-  // Follow the stream to the bottom; simpler than tracking manual scroll.
-  useEffect(() => {
-    const el = answerRef.current;
-    if (el && ask && !ask.done) el.scrollTop = el.scrollHeight;
-  }, [ask]);
 
   // Follow the words down as they arrive: past the height cap in overlay.css
   // this is the only thing keeping the newest ones on screen.
@@ -1424,7 +1327,6 @@ function Overlay() {
         if (!panelOpen) return;
         if ((e.target as HTMLElement).closest(".drop-pill")) return;
         if (agent) void commands.closeAgent();
-        else if (ask) void commands.closeAsk();
         else {
           void commands.closeBrowse();
           setBrowsing(false);
@@ -1510,16 +1412,15 @@ function Overlay() {
             )
           ) : panelOpen ? (
             // Everything under one notch: the strip always shows, the agents
-            // are a tab on it, and a dictation's ask/agent panel is another —
+            // are a tab on it, and a dictation's agent panel is another —
             // so escaping one never takes the other away.
             <>
               <TabStrip
                 tabs={tabs}
                 active={activeTab}
-                runOpen={ask !== null || agent !== null}
+                runOpen={agent !== null}
                 asking={permissions.length > 0}
                 title={
-                  ask?.question ??
                   agent?.heard ??
                   // Opened from the notch rather than by speaking, so there is
                   // no utterance to name the tab after.
@@ -1556,7 +1457,7 @@ function Overlay() {
                       // With a run open the X leaves the panel up on that run;
                       // only a browse-only panel actually closes — and that is
                       // the case that has to clear Rust's `PANEL_OPEN`.
-                      if (ask || agent) setActiveTab(0);
+                      if (agent) setActiveTab(0);
                       else void commands.closeBrowse();
                     }}
                   />
@@ -1570,14 +1471,6 @@ function Overlay() {
                   key={activeTab}
                   bodyRef={answerRef}
                   onClose={() => closeTab(activeTab)}
-                  onAddTab={tabs.length < MAX_TABS ? addTab : undefined}
-                />
-              ) : ask ? (
-                // Keyed on the question so a new one resets copy state and input.
-                <Answer
-                  key={ask.question}
-                  ask={ask}
-                  answerRef={answerRef}
                   onAddTab={tabs.length < MAX_TABS ? addTab : undefined}
                 />
               ) : agent ? (
@@ -1638,7 +1531,7 @@ function Overlay() {
 /**
  * The "I am listening" cat. The meme captions itself, so it only has to appear
  * while the app is genuinely listening for the joke to land — the caller gates
- * that (dictating, or an ask/agent you spoke). A fixed asset, not a stage cat:
+ * that (dictating, or an agent you spoke). A fixed asset, not a stage cat:
  * the gag is this one specific caption, not "a cat for the current state".
  */
 function ListeningCat() {
@@ -3091,7 +2984,7 @@ function AssistantRow({ text }: { text: string }) {
 function TabStrip({
   tabs,
   active,
-  /** Whether an ask/agent run exists — its tabs and `+` only show then. */
+  /** Whether an agent run exists — its tabs and `+` only show then. */
   runOpen,
   /** An agent is waiting on an answer: the Agents chip carries the flag. */
   asking,
@@ -3173,73 +3066,6 @@ function TabStrip({
         </button>
       )}
     </div>
-  );
-}
-
-/**
- * The question and its streaming answer, inside the drop-down panel. Nothing
- * here sizes anything: it is the measured content node's only child, so the
- * springs in `useNotchPanel` settle around it through the ResizeObserver.
- */
-function Answer({
-  ask,
-  answerRef,
-  onAddTab,
-}: {
-  ask: Ask;
-  answerRef: React.RefObject<HTMLDivElement | null>;
-  onAddTab?: () => void;
-}) {
-  const [typed, setTyped] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // DOM focus only, never a window focus request — `show_panel` already made
-  // the overlay key, and it is the only thing that takes focus from the app.
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, [ask.question]);
-
-  return (
-    <Panel
-      title={ask.question}
-      bodyRef={answerRef}
-      copyText={ask.answer}
-      onClose={() => void commands.closeAsk()}
-      onAddTab={onAddTab}
-      footer={
-        <input
-          ref={inputRef}
-          className="ask__input"
-          // Not "Ask a follow-up": `stream_answer` builds a fresh
-          // [system, user] pair, so there is no conversation to follow up on.
-          placeholder="Ask a question…"
-          value={typed}
-          // Disabled mid-answer: two streams write Delta into the same panel,
-          // and the second one's Question event resets the answer to "" while
-          // the first keeps appending — the two answers splice together.
-          disabled={!ask.done}
-          onChange={(e) => setTyped(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter" || !typed.trim() || !ask.done) return;
-            // Cleared here, not on the backend's echo: until that lands the
-            // text sits in the field and is trivially re-submittable.
-            const question = typed;
-            setTyped("");
-            // The same backend entry point the spoken trigger uses, so the two
-            // paths cannot answer differently.
-            void commands.askText(question);
-          }}
-        />
-      }
-    >
-      {ask.error ? (
-        <p className="ask__error">{ask.error}</p>
-      ) : ask.answer ? (
-        <MessageResponse>{ask.answer}</MessageResponse>
-      ) : (
-        <span className="dot dot--transcribing" aria-hidden />
-      )}
-    </Panel>
   );
 }
 
@@ -3946,7 +3772,7 @@ function stepStatus(step: Step, pending: boolean): string {
 }
 
 /**
- * The chrome both Ask and Agent draw inside the notch panel: what was heard,
+ * The chrome an agent run draws inside the notch panel: what was heard,
  * a rule, the scrolling body, and a footer.
  */
 function Panel({

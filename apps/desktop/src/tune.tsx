@@ -271,8 +271,6 @@ function Tuner() {
             <Action onClick={() => send({ agent: "planned" })}>Agent (queued)</Action>
             <Action onClick={() => send({ agent: "pending" })}>Agent (approve)</Action>
             <Action onClick={() => send({ agent: "run" })}>Agent (done)</Action>
-            <Action onClick={() => send({ ask: "open" })}>Answer (whole)</Action>
-            <Action onClick={() => send({ ask: "stream" })}>Answer (stream)</Action>
             <Action onClick={() => send({ dismissing: true })}>Dismiss</Action>
             <Action
               onClick={() =>
@@ -283,8 +281,8 @@ function Tuner() {
             </Action>
           </div>
           <p className="mt-2 mb-0 text-caption text-ink-2">
-            The full run: Listening → Transcript → Transcribing → Answer
-            (stream) → Dismiss. The transcript preview includes the revisions
+            The full run: Listening → Transcript → Transcribing → Agent
+            (done) → Dismiss. The transcript preview includes the revisions
             whisper really makes, which is what can shrink the panel mid-flight.
           </p>
         </Section>
