@@ -240,12 +240,6 @@ fn clear_pending(app: &AppHandle) {
     }
 }
 
-// Gemini, not Groq: a multi-round tool loop makes several chat calls in a row
-// and Groq's tokens-per-minute limit throttles it mid-command. The endpoint is
-// OpenAI-compatible, so the same LlmClient works unchanged.
-const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
-const GEMINI_MODEL: &str = "gemini-3.1-flash-lite";
-
 #[tracing::instrument(
     name = "agent_run",
     skip_all,
@@ -273,8 +267,9 @@ async fn execute(
         .await;
     }
 
-    if settings.gemini_api_key.trim().is_empty() {
-        bail!("Agent mode is unavailable — no Gemini credential is configured");
+    let brains = aloud_agent::brains(&settings.cerebras_api_key, &settings.gemini_api_key)?;
+    if brains.is_empty() {
+        bail!("Agent mode is unavailable — no Cerebras or Gemini credential is configured");
     }
     if settings.composio_api_key.trim().is_empty() {
         bail!("Agent mode is unavailable — no Composio credential is configured");
@@ -284,7 +279,6 @@ async fn execute(
     // live, so a quiet run takes the panel from here.
     surface(app, run, transcript);
 
-    let llm = aloud_llm::LlmClient::new(&settings.gemini_api_key, Some(GEMINI_BASE_URL))?;
     let composio = aloud_agent::ComposioClient::new(&settings.composio_api_key)?;
 
     // A Composio round-trip on every command, before the model is even asked —
@@ -365,8 +359,7 @@ async fn execute(
     };
 
     aloud_agent::run_tool_loop(
-        &llm,
-        GEMINI_MODEL,
+        &brains,
         &composio,
         &command,
         &tools,

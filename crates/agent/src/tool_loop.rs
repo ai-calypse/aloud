@@ -10,7 +10,8 @@
 //! graded against the original command before it is accepted — see [`verify`].
 
 use crate::composio::{ComposioClient, ToolDef};
-use aloud_llm::{LlmClient, LlmError, Message};
+use crate::Brain;
+use aloud_llm::{LlmError, Message};
 use anyhow::Result;
 use std::future::Future;
 use std::time::Duration;
@@ -268,6 +269,21 @@ fn backoff(error: &LlmError) -> Option<&'static [f64]> {
     }
 }
 
+/// Whether a failure on the first round should move to the next brain rather
+/// than wait: everything [`backoff`] would retry, plus the errors waiting cannot
+/// fix — a key with no billing (Cerebras answers 402), a revoked key, a model id
+/// the provider no longer serves.
+fn fails_over(error: &LlmError) -> bool {
+    backoff(error).is_some()
+        || matches!(
+            error,
+            LlmError::Failed {
+                status: 401..=404,
+                ..
+            }
+        )
+}
+
 /// How long to wait before retry attempt `attempt`. A server-sent `retry-after`
 /// outranks the schedule — it knows the real budget — but is capped so a
 /// "come back in an hour" cannot strand a spoken command; past the cap we would
@@ -326,12 +342,14 @@ if UNFINISHED — a colon and a short phrase naming what is still undone.";
 /// broken grader must be an unverified answer, never a command trapped in a
 /// loop it cannot leave. This is why the check is "does it start with
 /// UNFINISHED" rather than "is it FINISHED": every unexpected output accepts.
-async fn verify(llm: &LlmClient, model: &str, command: &str, answer: &str) -> Option<String> {
+async fn verify(brain: &Brain, command: &str, answer: &str) -> Option<String> {
     let messages = [
         Message::system(VERIFIER_PROMPT),
         Message::user(format!("COMMAND: {command}\n\nFINAL ANSWER: {answer}")),
     ];
-    let turn = llm
+    let model = brain.model;
+    let turn = brain
+        .client
         .chat_with_tools(model, &messages, None, Some(0.0))
         .instrument(tracing::info_span!("verify", model))
         .await
@@ -373,8 +391,7 @@ fn unfinished_reason(verdict: &str) -> Option<String> {
 // Worth doing the moment a second caller has to assemble this list.
 #[allow(clippy::too_many_arguments)]
 pub async fn run<F, A>(
-    llm: &LlmClient,
-    model: &str,
+    brains: &[Brain],
     composio: &ComposioClient,
     command: &str,
     tools: &[ToolDef],
@@ -413,19 +430,31 @@ where
     // A command that never touches it keeps the tight structured-tool budget.
     let mut max_rounds = MAX_ROUNDS;
 
+    if brains.is_empty() {
+        anyhow::bail!("no model is configured for commands");
+    }
+    // Which of `brains` this run is on; only ever moves forward.
+    let mut brain = 0usize;
+
     let mut round = 0usize;
     while round < max_rounds {
         if cancelled() {
             anyhow::bail!("cancelled");
         }
         let is_last = round + 1 == max_rounds;
-        let chat = || {
-            llm.chat_with_tools(
-                model,
-                &messages,
-                (!is_last).then_some(schemas.as_slice()),
-                Some(0.3),
-            )
+        // By index: a `&Brain` parameter makes the returned future's borrow a
+        // closure-local lifetime the compiler will not infer.
+        let chat = |index: usize| {
+            let current = &brains[index];
+            let model = current.model;
+            current
+                .client
+                .chat_with_tools(
+                    model,
+                    &messages,
+                    (!is_last).then_some(schemas.as_slice()),
+                    Some(0.3),
+                )
             // Per round, not per run: "the model was slow" and "the model went
             // round twice" are different problems with different fixes.
             .instrument(tracing::info_span!(
@@ -446,10 +475,21 @@ where
         // otherwise going fine. Here rather than in the llm crate so the panel
         // can show the wait instead of looking hung.
         let turn = loop {
-            let error = match chat().await {
+            let error = match chat(brain).await {
                 Ok(turn) => break turn,
                 Err(e) => e,
             };
+            // Another brain beats waiting out this one's budget. Only before
+            // anything has run: Gemini 3 rejects a history holding another
+            // model's tool calls, which lack its thought signatures.
+            if round == 0
+                && brain + 1 < brains.len()
+                && error.downcast_ref::<LlmError>().is_some_and(fails_over)
+            {
+                tracing::warn!(%error, from = brains[brain].model, to = brains[brain + 1].model, "failing over");
+                brain += 1;
+                continue;
+            }
             let Some(schedule) = error.downcast_ref::<LlmError>().and_then(backoff) else {
                 return Err(error);
             };
@@ -500,7 +540,7 @@ where
             // Skipped once the budget is spent and on the last round, where
             // tools are forbidden and a nudge could not be acted on anyway.
             if verifier_retries < MAX_VERIFIER_RETRIES && !is_last && !cancelled() {
-                if let Some(missing) = verify(llm, model, command, &answer).await {
+                if let Some(missing) = verify(&brains[brain], command, &answer).await {
                     verifier_retries += 1;
                     tracing::info!(%missing, verifier_retries, "answer graded unfinished");
                     messages.push(Message {
@@ -1111,6 +1151,24 @@ mod tests {
         assert_eq!(unfinished_reason("I think it looks unfinished?"), None);
         assert_eq!(unfinished_reason("unfinished: lowercase"), None);
         assert_eq!(unfinished_reason("The answer is UNFINISHED"), None);
+    }
+
+    /// An unpaid Cerebras key answers 402 instantly and forever: waiting cannot
+    /// fix it, the next brain can. A malformed request is the same everywhere.
+    #[test]
+    fn unpaid_and_throttled_brains_fail_over_but_bad_requests_do_not() {
+        let failed = |status| LlmError::Failed {
+            status,
+            body: String::new(),
+        };
+        assert!(fails_over(&failed(402)));
+        assert!(fails_over(&failed(503)));
+        assert!(fails_over(&LlmError::RateLimited {
+            model: "qwen-3.8-27b".into(),
+            retry_after: Duration::from_secs(60),
+        }));
+        assert!(!fails_over(&failed(400)));
+        assert!(!fails_over(&LlmError::EmptyOutput));
     }
 
     #[test]

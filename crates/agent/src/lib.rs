@@ -14,6 +14,39 @@ pub use cache::ResponseCache;
 pub use composio::{toolkit_of_slug, ComposioClient, ToolDef, Toolkit, TOOLS_PER_TOOLKIT};
 pub use tool_loop::{run as run_tool_loop, LoopEvent};
 
+/// A model the command loop runs on, with the client that reaches it. The loop
+/// takes these best first and moves down on the first round when one is out of
+/// budget or unpaid; see `tool_loop::fails_over`.
+pub struct Brain {
+    pub client: aloud_llm::LlmClient,
+    pub model: &'static str,
+}
+
+/// First choice: on the same tool call qwen answered in 0.34s against Gemini's
+/// ~1.1s, and this key allows 450 requests a minute (gpt-oss on Cerebras was as
+/// fast but capped at 5). Measured 2026-10-03.
+const CEREBRAS: (&str, &str) = ("https://api.cerebras.ai/v1", "qwen-3.8-27b");
+/// Behind it: headroom when Cerebras's per-minute budget trips, and the vision
+/// model the screen-control tier will need.
+const GEMINI: (&str, &str) = (
+    "https://generativelanguage.googleapis.com/v1beta/openai",
+    "gemini-3.5-flash",
+);
+
+/// The brains a command may use, best first, for whichever keys are set.
+pub fn brains(cerebras_key: &str, gemini_key: &str) -> anyhow::Result<Vec<Brain>> {
+    [(cerebras_key, CEREBRAS), (gemini_key, GEMINI)]
+        .into_iter()
+        .filter(|(key, _)| !key.trim().is_empty())
+        .map(|(key, (base_url, model))| {
+            Ok(Brain {
+                client: aloud_llm::LlmClient::new(key, Some(base_url))?,
+                model,
+            })
+        })
+        .collect()
+}
+
 /// Whether a command is an agent request or plain dictation. Agent mode is
 /// entered explicitly, never inferred from content — a dedicated hotkey, or
 /// these spoken triggers as a convenience.
