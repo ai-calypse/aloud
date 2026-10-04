@@ -511,6 +511,7 @@ mod tests {
                 before: None,
                 origin: None,
                 editable: true,
+                cells: Vec::new(),
             })
             .collect();
         preview

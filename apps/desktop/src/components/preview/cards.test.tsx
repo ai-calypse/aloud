@@ -44,6 +44,20 @@ describe("PreviewCard", () => {
     expect(del).toContain("and 35 more");
   });
 
+  it("draws a sheet's rows as cells under their columns, and an event's zone under its time", () => {
+    const row = html("row");
+    expect(row).toContain("<th>A</th><th>B</th><th>C</th><th>D</th>");
+    expect(row).toContain("<td>3 Oct</td><td>Lunch</td><td>42</td><td>Food</td>");
+    expect(html("event")).toContain(
+      '<span class="preview__under">Asia/Kolkata · 1 hr</span>',
+    );
+  });
+
+  it("names the safer tool a strict delete could use instead", () => {
+    expect(html("delete")).toContain("Safer: Move to Trash");
+    expect(html("delete", true)).not.toContain("Safer");
+  });
+
   it("says whose words a message is", () => {
     expect(html("message")).toContain("your words");
     expect(html("email")).toContain("written by Aloud");

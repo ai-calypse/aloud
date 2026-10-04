@@ -113,8 +113,47 @@ export function HeadingText({ field }: { field: Field }) {
   return edits ? <FieldInput field={field} edits={edits} /> : <>{field.value}</>;
 }
 
-export function WhenBlock({ when, big }: { when: string; big?: boolean }) {
-  return <span className={big ? "preview__when preview__when--big" : "preview__when"}>{when}</span>;
+/** A time, and on an event the zone and length on one line under it. */
+export function WhenBlock({ when, under, big }: { when: string; under?: string; big?: boolean }) {
+  return (
+    <>
+      <span className={big ? "preview__when preview__when--big" : "preview__when"}>{when}</span>
+      {under && <span className="preview__under">{under}</span>}
+    </>
+  );
+}
+
+/**
+ * Rows being written to a sheet, drawn as the sheet will hold them: column
+ * letters over the cells, so a value in the wrong column shows as one.
+ */
+export function SheetTable({ field }: { field: Field }) {
+  const [head, ...rows] = field.cells;
+  const rest = field.count - rows.length;
+  return (
+    <div className="preview__lead preview__sheet">
+      <table>
+        <thead>
+          <tr>
+            {head.map((letter) => (
+              <th key={letter}>{letter}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            // Fixed rows in a fixed order; two rows may hold the same cells.
+            <tr key={i}>
+              {row.map((cell, j) => (
+                <td key={head[j]}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rest > 0 && <span className="preview__faint">and {rest} more rows</span>}
+    </div>
+  );
 }
 
 /**
@@ -172,6 +211,15 @@ export function ItemSample({ field }: { field: Field }) {
 /** One consequence in a sentence: who hears about it, whether it can be undone. */
 export function RiskLine({ text, danger }: { text: string; danger?: boolean }) {
   return <p className={danger ? "preview__risk preview__risk--danger" : "preview__risk"}>{text}</p>;
+}
+
+/**
+ * The gentler tool for the same job, by name. A line rather than a button:
+ * saying no and asking for it is the way to get it, so the gate keeps one
+ * answer per question.
+ */
+export function SaferLine({ label }: { label: string }) {
+  return <p className="preview__risk">Safer: {label} — cancel and ask for that instead.</p>;
 }
 
 /** A file's path, or where it goes from and to when the call names both. */

@@ -74,13 +74,14 @@ pub fn build(name: &str, args: &Value, schema: Option<&Value>) -> ActionPreview 
         .map_or_else(|| default_verb(kind), |(_, label)| label)
         .to_string();
     let noun = noun(kind, &words, verb_word.map(|(word, _)| *word));
+    let to = preposition(kind, &verb);
     let target = shown
         .iter()
         .map(|(_, f)| f)
         .find(|f| matches!(f.role, Role::Destination | Role::Person) && !f.unresolved)
-        .map(|f| match f.items.first() {
-            Some(first) if f.count > 1 => format!("to {first} and {} more", f.count - 1),
-            _ => format!("to {}", f.value),
+        .map(|f| match to {
+            "" => who(f),
+            to => format!("{to} {}", who(f)),
         });
     let title = [Some(verb.clone()), Some(noun), target]
         .into_iter()
@@ -137,6 +138,30 @@ pub(super) const VERBS: &[(&str, &str)] = &[
     ("take", "Take"),
     ("play", "Play"),
 ];
+
+/// The word between a title's action and who it is for. Only a send goes "to"
+/// someone and only a share or an event is "with" them; anything else takes
+/// its target directly: "Create contact dana@acme.co", never "… to dana", and
+/// "Invite user dana@acme.co" though its slug reads as a share.
+pub(super) fn preposition(kind: CardKind, verb: &str) -> &'static str {
+    match (kind, verb) {
+        (CardKind::Event, _) | (_, "Share") => "with",
+        (CardKind::Message | CardKind::Email, _) | (_, "Send") => "to",
+        _ => "",
+    }
+}
+
+/// How a title names a person, place or record: by name, else as given, a
+/// list by its first entry.
+pub(super) fn who(field: &Field) -> String {
+    match (&field.name, field.items.first()) {
+        (Some(name), _) => name.clone(),
+        (None, Some(first)) if field.count > 1 => {
+            format!("{first} and {} more", field.count - 1)
+        }
+        _ => field.value.clone(),
+    }
+}
 
 /// The label when the slug names no action, e.g. `ALOUD_DISCORD_MESSAGE`.
 fn default_verb(kind: CardKind) -> &'static str {
@@ -286,6 +311,7 @@ pub(super) fn shape(
         before: None,
         origin: None,
         editable: false,
+        cells: Vec::new(),
     }
 }
 
@@ -551,7 +577,7 @@ fn label(key: &str, prop: Option<&Value>) -> String {
 
 /// Lowercase words of a key or slug, split on punctuation and camelCase:
 /// `chatId` and `chat_id` both give `["chat", "id"]`.
-fn words(key: &str) -> Vec<String> {
+pub(super) fn words(key: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
     let mut after_lower = false;
@@ -787,6 +813,34 @@ mod tests {
         assert_eq!(field.role, Role::Url);
         assert_eq!(field.value, "accounts.google.com.sign-in.example");
         assert_eq!(field.items, [url]);
+    }
+
+    #[test]
+    fn a_create_takes_its_object_directly_and_only_a_send_goes_to_someone() {
+        let title = |name: &str, args: Value| build(name, &args, None).title;
+        assert_eq!(
+            title(
+                "HUBSPOT_CREATE_CONTACT",
+                json!({ "email": "dana@acme.co", "firstname": "Dana" })
+            ),
+            "Create contact dana@acme.co"
+        );
+        assert_eq!(
+            title("ACME_INVITE_USER", json!({ "email": "dana@acme.co" })),
+            "Invite user dana@acme.co"
+        );
+        assert_eq!(
+            title("ACME_SEND_INVOICE", json!({ "recipient": "dana@acme.co" })),
+            "Send invoice to dana@acme.co"
+        );
+        assert_eq!(
+            title("OUTLOOK_SEND_EMAIL", json!({ "to": "dana@acme.co" })),
+            "Send email to dana@acme.co"
+        );
+        assert_eq!(
+            title("BOX_SHARE_FOLDER", json!({ "email": "dana@acme.co" })),
+            "Share folder with dana@acme.co"
+        );
     }
 
     #[test]

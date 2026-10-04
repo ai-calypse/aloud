@@ -697,6 +697,11 @@ export type Field = {
 	before: string | null,
 	origin: Origin | null,
 	editable: boolean,
+	/**
+	 *  A sheet's rows as the sheet draws them: column letters first, then the
+	 *  first few rows' cells. Empty for anything that is not rows of cells.
+	 */
+	cells: string[][],
 };
 
 /**
@@ -952,7 +957,10 @@ export type Role =
 "destination" | 
 /**  Who it goes to: an address or attendee list. */
 "person" | "heading" | 
-/**  A date or time, already formatted. */
+/**
+ *  A date or time, already formatted. On an event, `items[0]` is the line
+ *  under it: time zone and length.
+ */
 "when" | 
 /**  Body text, shown in full and never truncated. */
 "text" | 

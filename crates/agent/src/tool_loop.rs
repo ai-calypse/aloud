@@ -200,7 +200,10 @@ Choose tools in this order. \
 First, the ALOUD_ tools act on this Mac's own apps: Notes, Reminders, Music, \
 Spotify, Messages, Mail, FaceTime, files, windows, apps, Photo Booth, Discord. \
 They act in the background without bringing the app forward; never call \
-ALOUD_OPEN_APP before them. When the command asks you to \
+ALOUD_OPEN_APP before or instead of them. \
+Email is the exception: when a connected service can send it (GMAIL_SEND_EMAIL, \
+OUTLOOK_SEND_EMAIL), use that, not ALOUD_MAIL_SEND; the Mail app may have no \
+account set up. When the command asks you to \
 make or add content — a list, a note, a reminder, a file, a message — write that \
 content yourself, in full, inside the tool's arguments: for \"make a shopping \
 list for a cake and put it in a note\", call ALOUD_NOTES_CREATE with the actual \
@@ -216,9 +219,10 @@ Third, ALOUD_BROWSER_TASK for anything to do on a website — open a site, searc
 it, play a video at a time, read a value off a page, open a section of a \
 dashboard. Call it once with the user's whole request as the goal; it runs every \
 step itself. \
-Fourth, only when nothing above can do it and the task is inside a Mac app, \
-drive the app on screen: ALOUD_SCREEN_READ lists its window's controls as \
-numbered elements, and ALOUD_SCREEN_CLICK and ALOUD_SCREEN_TYPE act on one \
+Fourth, only when nothing above can do it and the task is inside a Mac app — \
+a setting to change in System Settings, say — drive the app on screen: \
+ALOUD_SCREEN_READ lists its window's controls as numbered elements, and \
+ALOUD_SCREEN_CLICK and ALOUD_SCREEN_TYPE act on one \
 element by its number and return the window as it is afterwards. Take each \
 number from the latest result, never from an older read or a guess. Open the app \
 with ALOUD_OPEN_APP first if it is not open; pass `find` to narrow a big window. \

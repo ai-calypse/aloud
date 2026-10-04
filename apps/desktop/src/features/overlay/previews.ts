@@ -43,6 +43,7 @@ function f(
     before: null,
     origin: null,
     editable: false,
+    cells: [],
     ...rest,
   };
 }
@@ -178,9 +179,9 @@ export const CARD_PREVIEWS: Record<CardKind, Run> = {
         f("heading", "/summary", "Title", "Lunch with Priya", {
           editable: true,
         }),
-        f("when", "/start_datetime", "Starts", "Fri, Oct 9, 2026, 1:00 PM"),
-        f("plain", "/event_duration_hour", "Hours", "1"),
-        f("plain", "/timezone", "Time zone", "Asia/Kolkata"),
+        f("when", "/start_datetime", "Starts", "Fri, Oct 9, 2026, 1:00 PM", {
+          items: ["Asia/Kolkata · 1 hr"],
+        }),
         f("person", "/attendees", "Guests", "priya@acme.co", {
           items: ["priya@acme.co"],
           count: 1,
@@ -285,7 +286,7 @@ export const CARD_PREVIEWS: Record<CardKind, Run> = {
           "b86e2b0f-6b1a-4db8-9731-41ef97f5ba8e",
           { name: "Priya Shah" },
         ),
-        f("plain", "/priority", "Priority", "2"),
+        f("plain", "/priority", "Priority", "High"),
       ],
       set: 5,
       total: 12,
@@ -319,6 +320,10 @@ export const CARD_PREVIEWS: Record<CardKind, Run> = {
         f("list", "/values", "Rows", "3 Oct, Lunch, 42, Food", {
           items: ["3 Oct, Lunch, 42, Food"],
           count: 1,
+          cells: [
+            ["A", "B", "C", "D"],
+            ["3 Oct", "Lunch", "42", "Food"],
+          ],
         }),
         f("pill", "/insertDataOption", "Mode", "INSERT_ROWS"),
       ],
@@ -457,8 +462,8 @@ export const CARD_PREVIEWS: Record<CardKind, Run> = {
     },
     {
       kind: "money",
-      verb: "Create",
-      title: "Create payment",
+      verb: "Charge",
+      title: "Charge Acme Inc",
       fields: [
         f("money", "/amount", "Amount", "42.00 USD"),
         f("id", "/customer", "Customer", "cus_Q3f2xY", { name: "Acme Inc" }),
@@ -487,7 +492,7 @@ export const CARD_PREVIEWS: Record<CardKind, Run> = {
     {
       kind: "fallback",
       verb: "Create",
-      title: "Create contact to dana@acme.co",
+      title: "Create contact dana@acme.co",
       fields: [
         f("person", "/email", "Email", "dana@acme.co"),
         f("id", "/hubspot_owner_id", "Owner", "81234567", { unresolved: true }),
