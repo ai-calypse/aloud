@@ -326,7 +326,8 @@ const VIEWS: Record<string, ToolView> = {
   // wrong person — is fixable before it sends.
   ALOUD_MESSAGES_SEND: {
     label: (a) => {
-      const to = text(a, "to");
+      // `to_name` is who Rust resolved a spoken name to; `to` is then the handle.
+      const to = text(a, "to_name") || text(a, "to");
       return to ? `Messaging ${to}` : "Sending a message";
     },
     body: (a) => {
@@ -361,9 +362,23 @@ const VIEWS: Record<string, ToolView> = {
         label: "To",
         placeholder: "+1 555 123 4567 or email",
         get: (a) => text(a, "to"),
-        set: (args, value) => ({ ...args, to: value }),
+        // A new handle is no longer the resolved person. Emptied, not deleted:
+        // Rust keeps any key the edits leave out.
+        set: (args, value) => ({ ...args, to: value, to_name: "" }),
       },
     ],
+  },
+  ALOUD_MAIL_SEND: {
+    label: (a) => {
+      const to = text(a, "to_name") || text(a, "to");
+      return to ? `Emailing ${to}` : "Sending an email";
+    },
+  },
+  ALOUD_FACETIME_CALL: {
+    label: (a) => {
+      const to = text(a, "to_name") || text(a, "to");
+      return to ? `Calling ${to} on FaceTime` : "Starting a FaceTime call";
+    },
   },
   ALOUD_DISCORD_MESSAGE: {
     label: (a) => {

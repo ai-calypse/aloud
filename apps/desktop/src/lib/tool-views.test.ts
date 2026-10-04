@@ -12,6 +12,21 @@ describe("tool views", () => {
     expect(labelFor("GMAIL_FETCH_EMAILS", {})).toBe("Reading your inbox");
   });
 
+  /** Rust resolves "text Suhani" to a handle before the gate; the label names the person. */
+  it("names the person a message goes to, not their number", () => {
+    const resolved = { to: "+15550001111", to_name: "Suhani Shah", text: "hi" };
+    expect(labelFor("ALOUD_MESSAGES_SEND", resolved)).toBe("Messaging Suhani Shah");
+    expect(labelFor("ALOUD_MESSAGES_SEND", { to: "+15550001111" })).toBe(
+      "Messaging +15550001111",
+    );
+    expect(labelFor("ALOUD_MAIL_SEND", { to: "bob@example.com" })).toBe(
+      "Emailing bob@example.com",
+    );
+    expect(labelFor("ALOUD_FACETIME_CALL", { to_name: "Mom", to: "+15550001111" })).toBe(
+      "Calling Mom on FaceTime",
+    );
+  });
+
   /** After Connectors, most tools come from toolkits nobody wrote a view for. */
   it("falls back to a readable label for an unregistered tool", () => {
     expect(humanise("SLACK_SEND_MESSAGE")).toBe("Slack: send message");

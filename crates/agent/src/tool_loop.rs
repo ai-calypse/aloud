@@ -159,9 +159,9 @@ sentence, transcribed, so it may contain small errors; act on the intent. Either
 do it with tools or just answer. \
 Choose tools in this order. \
 First, the ALOUD_ tools act on this Mac's own apps: Notes, Reminders, Music, \
-Spotify, Messages, files, windows, apps, Photo Booth, Discord. They act in the \
-background without bringing the app forward; never call ALOUD_OPEN_APP before \
-them. When the command asks you to \
+Spotify, Messages, Mail, FaceTime, files, windows, apps, Photo Booth, Discord. \
+They act in the background without bringing the app forward; never call \
+ALOUD_OPEN_APP before them. When the command asks you to \
 make or add content — a list, a note, a reminder, a file, a message — write that \
 content yourself, in full, inside the tool's arguments: for \"make a shopping \
 list for a cake and put it in a note\", call ALOUD_NOTES_CREATE with the actual \
@@ -183,6 +183,7 @@ numbered elements, and ALOUD_SCREEN_CLICK and ALOUD_SCREEN_TYPE act on one \
 element by its number and return the window as it is afterwards. Take each \
 number from the latest result, never from an older read or a guess. Open the app \
 with ALOUD_OPEN_APP first if it is not open; pass `find` to narrow a big window. \
+Never use screen control to message someone when a messaging tool exists. \
 Otherwise answer: a few sentences of simple markdown, under 150 words. If \
 nothing here can do what was asked inside that app, say so plainly rather than \
 improvising. \
@@ -243,6 +244,10 @@ assumption stated plainly in your answer. Prefer acting and saying what you \
 assumed. Never ask twice for the same thing, and never ask in your final \
 answer instead of with the tool — that answer arrives after the run is over \
 and cannot be replied to. \
+ALOUD_MESSAGES_SEND, ALOUD_MAIL_SEND and ALOUD_FACETIME_CALL take a person's \
+name as said — \"text Suhani\" is `to` \"Suhani\" — and look it up themselves, \
+so pass the name straight in with no lookup first. If several people match, the \
+result lists their names: ask which one, with those names as the options. \
 The user speaks names, not addresses. When an argument needs an email address, \
 a Slack user or a GitHub username and the command gives only a name, look it up \
 first with the directory tool in the list and use what it returns — never \
@@ -838,6 +843,19 @@ where
                 }
             }
 
+            // Before the panel and the gate, so both show the person a spoken
+            // name resolved to. Several or none goes back for the model to ask.
+            let args = match prepare(&name, &args, mock).await {
+                None => args,
+                Some(Ok(resolved)) => resolved,
+                Some(Err(error)) => {
+                    any_failed = true;
+                    round_native_ok = false;
+                    messages.push(Message::tool_result(&call.id, error.to_string()));
+                    continue;
+                }
+            };
+
             on_event(LoopEvent::ToolCallStart {
                 name: name.clone(),
                 args: args.clone(),
@@ -1055,6 +1073,23 @@ async fn run_native(name: &str, args: &serde_json::Value) -> Option<String> {
     })
 }
 
+/// [`aloud_native::prepare`] on a blocking thread, since a Contacts lookup is an
+/// osascript run. Never under a mock: an eval must not read the real Contacts,
+/// and its canned results stand in for whatever the lookup would have found.
+async fn prepare(
+    name: &str,
+    args: &serde_json::Value,
+    mock: Option<&Mock<'_>>,
+) -> Option<Result<serde_json::Value, serde_json::Value>> {
+    if mock.is_some() {
+        return None;
+    }
+    let (name, args) = (name.to_string(), args.clone());
+    tokio::task::spawn_blocking(move || aloud_native::prepare(&name, &args))
+        .await
+        .unwrap_or_else(|e| Some(Err(serde_json::json!({ "error": e.to_string() }))))
+}
+
 /// Runs a browser or Mac task on the Voice Mac engine to completion, streaming each step as
 /// [`LoopEvent::Progress`] and turning the engine's pause before a risky click into a Yes/No
 /// question through the same `ask` path as [`ASK_USER`]. Escape stops the task, not just the loop.
@@ -1210,6 +1245,30 @@ mod tests {
         assert!(TOOL_SYSTEM_PROMPT.contains(
             "When a command has independent steps, call all of their tools together in one reply."
         ));
+    }
+
+    #[test]
+    fn messaging_goes_through_its_tools_by_name_not_the_screen() {
+        assert!(TOOL_SYSTEM_PROMPT
+            .contains("Never use screen control to message someone when a messaging tool exists."));
+        assert!(TOOL_SYSTEM_PROMPT.contains("pass the name straight in"));
+    }
+
+    /// A mocked eval run must not read the real Contacts, or a case's outcome
+    /// would depend on whose Mac it ran on.
+    #[tokio::test]
+    async fn an_eval_run_never_looks_up_contacts() {
+        let mock = |_: &str, _: &serde_json::Value| String::new();
+        let to_a_name = serde_json::json!({ "to": "Suhani", "text": "hi" });
+        assert!(prepare("ALOUD_MESSAGES_SEND", &to_a_name, Some(&mock))
+            .await
+            .is_none());
+        // Unmocked, it is wired: a handle comes back as it went in.
+        let to_a_handle = serde_json::json!({ "to": "+15550001111", "text": "hi" });
+        assert_eq!(
+            prepare("ALOUD_MESSAGES_SEND", &to_a_handle, None).await,
+            Some(Ok(to_a_handle.clone()))
+        );
     }
 
     /// The confirmation gate is the one non-negotiable safety property, so it

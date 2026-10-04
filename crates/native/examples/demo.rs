@@ -11,6 +11,7 @@
 //! cargo run -p aloud-native --example demo -- call ALOUD_NOTES_CREATE '{"title":"Cake","body":"- flour"}'
 //! cargo run -p aloud-native --example demo -- fast "open calculator app"   # the no-model route
 //! cargo run -p aloud-native --example demo -- contacts Suhani   # lookup timing, handles masked
+//! cargo run -p aloud-native --example demo -- prepare ALOUD_MESSAGES_SEND '{"to":"Suhani","text":"test","dry_run":true}'
 //! ```
 
 use aloud_native::contacts::{self, Match};
@@ -102,6 +103,47 @@ fn main() {
                 Match::One(_) => println!("→ One"),
                 Match::Many(people) => println!("→ Many ({})", people.len()),
                 Match::None => println!("→ None"),
+            }
+        }
+        // What the loop's pre-gate lookup makes of `to`, then, with "dry_run": true, the tool run
+        // on the result short of sending. Prints the outcome, never a whole handle.
+        [cmd, name, json] if cmd == "prepare" => {
+            let args: serde_json::Value = match serde_json::from_str(json) {
+                Ok(args) => args,
+                Err(e) => return println!("bad JSON arguments: {e}"),
+            };
+            let started = std::time::Instant::now();
+            let resolved = match aloud_native::prepare(name, &args) {
+                None => return println!("? {name} has no recipient to resolve"),
+                Some(Err(e)) => {
+                    let elapsed = started.elapsed();
+                    return match e["candidates"].as_array() {
+                        Some(names) => println!("→ Many ({}) in {elapsed:?}", names.len()),
+                        None => println!("→ Err in {elapsed:?}: {}", e["error"]),
+                    };
+                }
+                Some(Ok(resolved)) => resolved,
+            };
+            let to = resolved["to"].as_str().unwrap_or_default().to_string();
+            match resolved["to_name"].as_str() {
+                Some(who) => println!(
+                    "→ One in {:?}: to_name {who:?}, to {}",
+                    started.elapsed(),
+                    mask(&to)
+                ),
+                None => println!("→ a handle, passed through: {}", mask(&to)),
+            }
+            if resolved["dry_run"] == true {
+                match aloud_native::execute(name, &resolved) {
+                    Some(Ok(mut out)) => {
+                        out["to"] = json!(mask(&to));
+                        println!("✓ dry run {out}");
+                    }
+                    Some(Err(e)) => {
+                        println!("✗ dry run: {}", e.to_string().replace(&to, &mask(&to)))
+                    }
+                    None => {}
+                }
             }
         }
         // Any tool with literal arguments: what the model would send, minus the model.

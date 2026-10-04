@@ -2,7 +2,7 @@
 //! certain enough to message without asking.
 
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::script::{self, ScriptError};
 
@@ -101,6 +101,114 @@ pub fn looks_like_handle(s: &str) -> bool {
         && s.chars().filter(char::is_ascii_digit).count() >= 7
 }
 
+/// Turns the person named in `to` into the handle Messages, Mail or FaceTime
+/// needs, before the gate, so the user confirms the person rather than a guess
+/// they never saw. One match sets `to` to a handle and `to_name` to who it is;
+/// several or none is an `Err` meant as the tool result, so the model asks.
+/// A handle passes through untouched. None for every other tool.
+///
+/// Blocking: the lookup is an osascript run.
+pub fn prepare(name: &str, args: &Value) -> Option<Result<Value, Value>> {
+    if !matches!(
+        name,
+        "ALOUD_MESSAGES_SEND" | "ALOUD_MAIL_SEND" | "ALOUD_FACETIME_CALL"
+    ) {
+        return None;
+    }
+    let to = args.get("to").and_then(Value::as_str).map_or("", str::trim);
+    // Empty is the tool's own "missing argument" to report.
+    if to.is_empty() || looks_like_handle(to) {
+        return Some(Ok(args.clone()));
+    }
+    Some(
+        find(to)
+            .map_err(|e| json!({ "error": e.to_string() }))
+            .and_then(|people| resolve(name, args, rank(to, people), chat_handles)),
+    )
+}
+
+/// What [`prepare`] makes of a match. `chats` is asked only for a Messages
+/// send to someone with more than one handle, the one case it can change.
+fn resolve(
+    name: &str,
+    args: &Value,
+    found: Match,
+    chats: impl FnOnce() -> Vec<String>,
+) -> Result<Value, Value> {
+    let to = args["to"].as_str().unwrap_or_default().trim();
+    let person = match found {
+        Match::One(person) => person,
+        // Names only: the numbers of people the user did not mean stay out of
+        // the transcript and the model's context.
+        Match::Many(people) => {
+            return Err(json!({
+                "error": "several contacts match",
+                "candidates": people.into_iter().map(|p| p.name).collect::<Vec<_>>(),
+                "note": "ask which one, with these names as options",
+            }))
+        }
+        Match::None => return Err(json!({ "error": format!("no contact named {to}") })),
+    };
+    // Messages and FaceTime both reach an Apple ID email when there is no phone.
+    let handles = if name == "ALOUD_MAIL_SEND" {
+        person.emails
+    } else {
+        [person.phones, person.emails].concat()
+    };
+    let in_chats = if name == "ALOUD_MESSAGES_SEND" && handles.len() > 1 {
+        chats()
+    } else {
+        Vec::new()
+    };
+    let Some(handle) = best_handle(&handles, &in_chats) else {
+        let what = if name == "ALOUD_MAIL_SEND" {
+            "email address"
+        } else {
+            "phone number or email"
+        };
+        return Err(json!({ "error": format!("{} has no {what} in Contacts", person.name) }));
+    };
+    let mut args = args.clone();
+    args["to"] = json!(handle);
+    args["to_name"] = json!(person.name);
+    Ok(args)
+}
+
+/// The handle already used in a Messages chat, else the first: the number the
+/// conversation lives on beats a work line nobody texts.
+fn best_handle<'a>(handles: &'a [String], in_chats: &[String]) -> Option<&'a String> {
+    handles
+        .iter()
+        .find(|h| in_chats.iter().any(|c| same_handle(h, c)))
+        .or(handles.first())
+}
+
+/// Contacts stores "+91 98765 43210", Messages "+919876543210", and a local
+/// number drops the country code: phones compare on their last 10 digits.
+fn same_handle(a: &str, b: &str) -> bool {
+    if a.contains('@') || b.contains('@') {
+        return a.trim().eq_ignore_ascii_case(b.trim());
+    }
+    let digits = |s: &str| s.chars().filter(char::is_ascii_digit).collect::<String>();
+    let (a, b) = (digits(a), digits(b));
+    let n = a.len().min(b.len()).min(10);
+    n >= 7 && a[a.len() - n..] == b[b.len() - n..]
+}
+
+/// Every handle in the user's Messages chats, one Apple Event for the lot. A
+/// failure (no grant, Messages broken) is only a lost preference, so it is
+/// empty rather than an error.
+fn chat_handles() -> Vec<String> {
+    script::run_jxa(
+        "Messages",
+        r#"return JSON.stringify([].concat(...Application("Messages").chats.participants.handle()));"#,
+        &json!({}),
+    )
+    .ok()
+    .and_then(|out| serde_json::from_str(&out).ok())
+    .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,5 +263,54 @@ mod tests {
         for name in ["Suhani", "mom", "Suhani Shah", "555-01", "@home", "a@b"] {
             assert!(!looks_like_handle(name), "{name} is not a handle");
         }
+        // Through `prepare` unchanged: no Contacts lookup, no `to_name`.
+        let args = json!({ "to": "+91 98765 43210", "text": "hi" });
+        assert_eq!(
+            prepare("ALOUD_MESSAGES_SEND", &args),
+            Some(Ok(args.clone()))
+        );
+        assert_eq!(prepare("ALOUD_NOTES_CREATE", &args), None);
+    }
+
+    #[test]
+    fn an_existing_chat_handle_wins_over_another_number() {
+        let handles = ["+1 (415) 555-0132".to_string(), "+91 98765 43210".into()];
+        let chats = ["+919876543210".to_string(), "someone@example.com".into()];
+        assert_eq!(best_handle(&handles, &chats), Some(&handles[1]));
+        // No chat with either: the first, as Contacts lists them.
+        assert_eq!(best_handle(&handles, &[]), Some(&handles[0]));
+        assert_eq!(best_handle(&[], &chats), None);
+        // A local number is the same line as its international form.
+        assert!(same_handle("098765 43210", "+919876543210"));
+        assert!(!same_handle("555-0132", "+14155550199"));
+    }
+
+    #[test]
+    fn several_matching_contacts_come_back_as_names_only() {
+        let with_handles = |name: &str, phone: &str| Person {
+            name: name.into(),
+            phones: vec![phone.into()],
+            emails: vec![format!("{phone}@example.com")],
+        };
+        let args = json!({ "to": "Suhani", "text": "hi" });
+        let found = Match::Many(vec![
+            with_handles("Suhani Shah", "+15550001111"),
+            with_handles("Suhani Mehta", "+15550002222"),
+        ]);
+        let err = resolve("ALOUD_MESSAGES_SEND", &args, found, Vec::new).unwrap_err();
+        assert_eq!(err["candidates"], json!(["Suhani Shah", "Suhani Mehta"]));
+        assert!(!err.to_string().contains("555"), "a handle leaked: {err}");
+
+        let none = resolve("ALOUD_MAIL_SEND", &args, Match::None, Vec::new).unwrap_err();
+        assert_eq!(none["error"], "no contact named Suhani");
+
+        // One person: the phone for Messages, the email for Mail, and who it is.
+        let one = || Match::One(with_handles("Suhani Shah", "+15550001111"));
+        let sent = resolve("ALOUD_MESSAGES_SEND", &args, one(), Vec::new).unwrap();
+        assert_eq!(sent["to"], "+15550001111");
+        assert_eq!(sent["to_name"], "Suhani Shah");
+        assert_eq!(sent["text"], "hi");
+        let mailed = resolve("ALOUD_MAIL_SEND", &args, one(), Vec::new).unwrap();
+        assert_eq!(mailed["to"], "+15550001111@example.com");
     }
 }

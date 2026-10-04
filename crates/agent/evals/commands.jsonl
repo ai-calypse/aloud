@@ -53,3 +53,8 @@
 {"input":"turn on show battery percentage in control center settings","fast":false,"expected":[{"callsTool":{"name":["ALOUD_OPEN_APP","ALOUD_SCREEN_READ"],"arguments":{}}}]}
 {"input":"click the bold button","front":"TextEdit","fast":false,"expected":[{"callsTool":{"name":["ALOUD_SCREEN_READ","ALOUD_PRESS_KEYS","ALOUD_MENU"],"arguments":{}}}]}
 {"input":"in System Settings, open the Wi-Fi page","fast":false,"expected":[{"callsTool":{"name":["ALOUD_OPEN_APP","ALOUD_SCREEN_READ"],"arguments":{}}}]}
+{"input":"text Suhani I'm on my way","fast":false,"expected":[{"callsTool":{"name":"ALOUD_MESSAGES_SEND","arguments":{"to":"suhani"}}}]}
+{"input":"send a message to mom saying call me","fast":false,"expected":[{"callsTool":{"name":"ALOUD_MESSAGES_SEND","arguments":{"to":"mom"}}}]}
+{"input":"message the team on slack I'm running late","fast":false,"expected":[{"callsTool":{"name":"SLACK_"}}]}
+{"input":"email bob@example.com the notes are ready","fast":false,"expected":[{"callsTool":{"name":"ALOUD_MAIL_SEND","arguments":{"to":"bob@example.com"}}}]}
+{"input":"facetime mom","fast":false,"expected":[{"callsTool":{"name":"ALOUD_FACETIME_CALL","arguments":{"to":"mom"}}}]}
