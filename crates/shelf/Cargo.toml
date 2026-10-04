@@ -1,0 +1,24 @@
+[package]
+name = "aloud-shelf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The notch's Shelf: parked files, screenshots, downloads and drives"
+
+[dependencies]
+anyhow.workspace = true
+base64 = "0.22"
+notify = "8"
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+specta-typescript = "0.0.12"
+tracing.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.5", features = ["relax-sign-encoding"] }
+objc2-app-kit = { version = "0.2", features = ["NSSharingService", "NSResponder"] }
+objc2-foundation = { version = "0.2", features = ["NSArray", "NSString", "NSURL", "NSThread"] }
+
+[dev-dependencies]
+tempfile = "3"
