@@ -145,6 +145,10 @@ pub struct Settings {
     /// browser tab. It reads only media state (title, host, position), but it
     /// does script the browser, which asks macOS for Automation permission.
     pub browser_media: bool,
+    /// Whether the notch's Now Playing shows whatever any app plays, through
+    /// macOS's private MediaRemote interface (`aloud_media::mediaremote`). Off
+    /// means the helper process is not running at all.
+    pub any_app_media: bool,
     pub overlay_display: OverlayDisplay,
     /// Put the previous clipboard back after pasting. Off leaves the dictated
     /// text on the clipboard so it can be pasted again.
@@ -214,6 +218,7 @@ impl Default for Settings {
             // toggle exists for people who find the self-opening notch rude.
             agent_open_on_permission: true,
             browser_media: true,
+            any_app_media: true,
             overlay_display: OverlayDisplay::Active,
             preserve_clipboard: true,
             history_retention: 50,

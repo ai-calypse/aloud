@@ -44,11 +44,13 @@ pub fn update_settings(
         .settings
         .lock()
         .map_err(|_| "settings lock poisoned")?;
-    let browsers_changed = current.browser_media != settings.browser_media;
+    let browsers_changed = current.browser_media != settings.browser_media
+        || current.any_app_media != settings.any_app_media;
     *current = settings;
     drop(current);
     if browsers_changed {
-        // Now Playing should show or drop the browser tab now, not at the next tick.
+        // Now Playing should show or drop the browser tab, or start or stop the
+        // any-app helper, now and not at the next tick.
         crate::media::poll_now();
     }
     Ok(())

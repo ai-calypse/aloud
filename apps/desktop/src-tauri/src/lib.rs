@@ -477,6 +477,10 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             if let tauri::RunEvent::Reopen { .. } = _event {
                 tray::show_main(_app);
             }
+            // The Now Playing helper is a child process; a normal quit must not leave it.
+            if let tauri::RunEvent::Exit = _event {
+                aloud_media::mediaremote::shutdown();
+            }
         });
 }
 

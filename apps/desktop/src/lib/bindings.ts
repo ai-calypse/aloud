@@ -1364,10 +1364,14 @@ export type NowPlaying = {
 	speedPct: number,
 	/**
 	 *  Spotify's own https cover URL, a YouTube thumbnail, or a page's
-	 *  `og:image`; Music has none and is read from the app.
+	 *  `og:image`; Music has none and is read from the app. For MediaRemote an
+	 *  opaque `mediaremote:<n>` that changes when the cover does.
 	 */
 	artworkUrl: string | null,
-	/**  Browser only, and only when the title and channel parse cleanly. */
+	/**
+	 *  Browser and MediaRemote only, and only when the title and artist are a
+	 *  track: a page that names its song cleanly, or a music app.
+	 */
 	song: Song | null,
 };
 
@@ -1481,7 +1485,9 @@ export type PlayState = "playing" | "paused";
 
 export type Player = "spotify" | "music" | 
 /**  A tab in a browser; which one is [`NowPlaying::source`]. */
-"browser";
+"browser" | 
+/**  Whatever app macOS says is playing; which one is [`NowPlaying::source`]. */
+"mediaRemote";
 
 export type PrivacyUse = {
 	mic: boolean,
@@ -1718,6 +1724,12 @@ export type Settings = {
 	 *  does script the browser, which asks macOS for Automation permission.
 	 */
 	browserMedia?: boolean,
+	/**
+	 *  Whether the notch's Now Playing shows whatever any app plays, through
+	 *  macOS's private MediaRemote interface (`aloud_media::mediaremote`). Off
+	 *  means the helper process is not running at all.
+	 */
+	anyAppMedia?: boolean,
 	overlayDisplay?: OverlayDisplay,
 	/**
 	 *  Put the previous clipboard back after pasting. Off leaves the dictated
@@ -1893,6 +1905,8 @@ export type SoundState = {
  */
 export type Source = {
 	app: string,
+	/**  Known for what MediaRemote reports. */
+	bundleId: string | null,
 	host: string | null,
 	tab: string | null,
 };

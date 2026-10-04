@@ -54,6 +54,13 @@ fn browsers_on(app: &AppHandle) -> bool {
         .unwrap_or(true)
 }
 
+/// Whether the any-app helper may run: the Settings row, on by default.
+fn any_app_on(app: &AppHandle) -> bool {
+    app.try_state::<crate::AppState>()
+        .and_then(|state| state.settings.lock().ok().map(|s| s.any_app_media))
+        .unwrap_or(true)
+}
+
 /// Background polling (no Media view open) starts once the user has opened
 /// Media once, so Spotify's Automation prompt appears when they ask for the
 /// feature, not at launch.
@@ -75,11 +82,16 @@ fn enable() {
 
 pub fn start(app: &AppHandle) {
     let app = app.clone();
+    // A change MediaRemote reports is shown at once, not at the next tick.
+    aloud_media::mediaremote::start(poll_now);
     tauri::async_runtime::spawn(async move {
         let mut shown: Option<NowPlaying> = None;
         loop {
             let watched = WATCHERS.load(Ordering::Relaxed) > 0;
             let browsers = browsers_on(&app);
+            // The helper runs only for a user who has asked for Media (the same
+            // gate as the polling) and has not switched it off.
+            aloud_media::mediaremote::set_enabled(any_app_on(&app) && (watched || enabled()));
             let reading = if watched || enabled() {
                 tauri::async_runtime::spawn_blocking(move || {
                     aloud_media::now_playing::read(browsers)
@@ -148,20 +160,27 @@ fn sync_island(app: &AppHandle, now: Option<NowPlaying>, shown: &mut Option<NowP
         }
         return;
     };
-    if shown.as_ref().is_some_and(|s| s.key() == now.key()) {
+    let same_track = shown.as_ref().is_some_and(|s| s.key() == now.key());
+    // A MediaRemote cover arrives after the title: same track, new cover.
+    let same_cover = shown
+        .as_ref()
+        .is_some_and(|s| s.artwork_url == now.artwork_url);
+    if same_track && same_cover {
         return;
     }
-    crate::islands::push(app, island(&now, None));
+    if !same_track {
+        crate::islands::push(app, island(&now, None));
+    }
     *shown = Some(now.clone());
     // The cover can take a network round trip; the island is up without it
     // and takes it when it arrives.
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         // A page with no cover shows the browser's own icon: a web video's
-        // island is otherwise a blank tile.
+        // island is otherwise a blank tile. Any other app shows its own.
         let art = match aloud_media::artwork(&now).await {
             Some(art) => Some(art),
-            None if now.player == Player::Browser => {
+            None if matches!(now.player, Player::Browser | Player::MediaRemote) => {
                 let name = now.source.app.clone();
                 tauri::async_runtime::spawn_blocking(move || {
                     aloud_media::now_playing::app_icon(&name)
@@ -178,12 +197,23 @@ fn sync_island(app: &AppHandle, now: Option<NowPlaying>, shown: &mut Option<NowP
     });
 }
 
+/// What the island's button tells `actions.ts` to drive: the app's name for the
+/// players and browsers (the way it always has), `mediaRemote` for the rest.
+fn action_player(now: &NowPlaying) -> &str {
+    match now.player {
+        Player::MediaRemote => "mediaRemote",
+        _ => &now.source.app,
+    }
+}
+
 fn island(now: &NowPlaying, art: Option<String>) -> Island {
     Island {
         id: ISLAND.into(),
         kind: IslandKind::Live,
         priority: IslandPriority::Low,
-        icon: art.or_else(|| (now.player != Player::Browser).then(|| "music".into())),
+        icon: art.or_else(|| {
+            matches!(now.player, Player::Spotify | Player::Music).then(|| "music".into())
+        }),
         // The row in Now › Overview reads artist over song; the pill, which
         // has one short value, shows the song.
         title: if now.artist.is_empty() {
@@ -192,7 +222,7 @@ fn island(now: &NowPlaying, art: Option<String>) -> Island {
             now.artist.clone()
         },
         detail: Some(now.title.clone()),
-        actions: vec![IslandAction::new("Pause", "media.toggle").arg("player", &now.source.app)],
+        actions: vec![IslandAction::new("Pause", "media.toggle").arg("player", action_player(now))],
         expires: None,
     }
 }
