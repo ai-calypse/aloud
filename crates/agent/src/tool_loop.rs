@@ -10,6 +10,7 @@
 //! graded against the original command before it is accepted — see [`verify`].
 
 use crate::composio::{ComposioClient, ToolDef};
+use crate::preview::Names;
 use crate::Brain;
 use aloud_llm::{LlmError, Message};
 use anyhow::Result;
@@ -474,6 +475,11 @@ pub struct ProposedCall {
     pub name: String,
     pub args: serde_json::Value,
     pub tool: Option<ToolDef>,
+    /// `Command::said`, for the card to tag the user's own words.
+    pub said: String,
+    /// What the run's reads have named so far, so the card shows "#launch"
+    /// rather than the id the model copied out of a list.
+    pub names: Names,
 }
 
 /// The gate's answer: run with these arguments (the user may have edited
@@ -549,6 +555,8 @@ where
     let mut seen: std::collections::HashMap<(String, String), String> =
         std::collections::HashMap::new();
     let mut budget: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    // Every id those reads returned, by name, for the gate's card.
+    let mut names = Names::default();
     let mut asked = 0usize;
     let mut verifier_retries = 0;
     // Whether every tool call so far was a native write that worked; None
@@ -900,6 +908,8 @@ where
                     name: name.clone(),
                     args: args.clone(),
                     tool: tools.iter().find(|t| t.name == name).cloned(),
+                    said: said.to_string(),
+                    names: names.clone(),
                 };
                 match confirm(proposed)
                     .instrument(tracing::info_span!("confirm", tool = %name, toolkit))
@@ -982,6 +992,9 @@ where
                 && !aloud_engine::is_engine_tool(&name)
                 && name != aloud_screen::READ
             {
+                if let Ok(parsed) = serde_json::from_str(&result) {
+                    names.harvest(&parsed, &query_of(&name, &args));
+                }
                 seen.insert((name.clone(), args.to_string()), result.clone());
             }
             messages.push(Message::tool_result(&call.id, result));
@@ -1133,6 +1146,24 @@ where
             }
             Some(aloud_engine::Update::Finished(result)) => return result.to_string(),
         }
+    }
+}
+
+/// How a read found what it returned, in words a card can show under "picked
+/// by": its text arguments ("category:promotions older_than:30d"), else the
+/// tool itself.
+fn query_of(name: &str, args: &serde_json::Value) -> String {
+    let words: Vec<&str> = args
+        .as_object()
+        .into_iter()
+        .flat_map(|a| a.values())
+        .filter_map(serde_json::Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    if words.is_empty() {
+        name.to_string()
+    } else {
+        words.join(" ")
     }
 }
 
@@ -1382,6 +1413,88 @@ mod tests {
             "a round of calls, the answer, the grader"
         );
         assert!(requests.iter().all(|body| !body.contains("_front_")));
+    }
+
+    /// The model lists channels, then posts to one by the id it copied out:
+    /// the gate has to say "launch", which only the earlier read knew.
+    #[tokio::test]
+    async fn a_channel_id_from_an_earlier_read_in_the_run_shows_its_name_at_the_gate() {
+        let call = |id: &str, name: &str, args: serde_json::Value| {
+            serde_json::json!({ "choices": [{ "message": { "tool_calls": [
+                { "id": id, "type": "function",
+                  "function": { "name": name, "arguments": args.to_string() } },
+            ] } }] })
+        };
+        let list = call(
+            "a",
+            "SLACK_FIND_CHANNELS",
+            serde_json::json!({ "query": "launch" }),
+        );
+        let post = call(
+            "b",
+            "SLACK_CHAT_POST_MESSAGE",
+            serde_json::json!({ "channel": "C0123ABCD45", "markdown_text": "hi" }),
+        );
+        let finished = serde_json::json!({ "choices": [{ "message": { "content": "FINISHED" } }] });
+        let (brain, _) = fake_brain(vec![list, post, finished]);
+        let tools = [
+            tool("SLACK_FIND_CHANNELS", true),
+            tool("SLACK_CHAT_POST_MESSAGE", false),
+        ];
+        let mock = |name: &str, _: &serde_json::Value| match name {
+            "SLACK_FIND_CHANNELS" => {
+                serde_json::json!({ "successful": true, "data": { "channels": [
+                { "id": "C0123ABCD45", "name": "launch" },
+                { "id": "C0999ZZZZ99", "name": "random" },
+            ] } })
+                .to_string()
+            }
+            _ => r#"{"successful":true}"#.to_string(),
+        };
+        let gates = std::sync::Mutex::new(Vec::new());
+
+        run(
+            &[brain],
+            &ComposioClient::new("").unwrap(),
+            Command {
+                said: "send hi to the launch channel",
+                prompt: "send hi to the launch channel",
+                tools: &tools,
+                more: &[],
+                front: None,
+                document: None,
+                project: None,
+            },
+            Callbacks {
+                on_event: |_| {},
+                confirm: |call: ProposedCall| {
+                    let ctx = crate::preview::Context {
+                        said: &call.said,
+                        names: &call.names,
+                    };
+                    let card = crate::preview::render(&call.name, &call.args, None, &ctx);
+                    gates.lock().unwrap().push(card);
+                    async move { Verdict::Run(call.args) }
+                },
+                ask: |_: String| async { None },
+                cancelled: || false,
+                mock: Some(&mock),
+            },
+        )
+        .await
+        .unwrap();
+
+        let gates = gates.into_inner().unwrap();
+        let [card] = gates.as_slice() else {
+            panic!("one gate, got {}", gates.len());
+        };
+        assert_eq!(card.title, "Send message to launch");
+        let channel = &card.fields[0];
+        assert_eq!(
+            (channel.name.as_deref(), channel.unresolved),
+            (Some("launch"), false)
+        );
+        assert_eq!(card.fields[1].origin, Some(crate::preview::Origin::Yours));
     }
 
     #[test]

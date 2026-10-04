@@ -1,5 +1,5 @@
 import { ChevronRightIcon } from "lucide-react";
-import type { ActionPreview, Field } from "@/lib/bindings";
+import type { Field, Origin } from "@/lib/bindings";
 import {
   Collapsible,
   CollapsibleContent,
@@ -30,8 +30,88 @@ export function MessageBody({ text }: { text: string }) {
   return <p className="preview__body">{text}</p>;
 }
 
-export function WhenBlock({ when }: { when: string }) {
-  return <span className="preview__when">{when}</span>;
+/**
+ * Whose words these are. "Your words" only when the user said them whole;
+ * anything the model wrote or reworded is marked as Aloud's, because that is
+ * the text worth reading twice before it goes out.
+ */
+export function OriginTag({ origin }: { origin: Origin }) {
+  return origin === "yours" ? (
+    <span className="preview__origin preview__origin--yours">your words</span>
+  ) : (
+    <span className="preview__origin preview__origin--aloud">written by Aloud</span>
+  );
+}
+
+/** A text field on its own line, full width, with whose words it is. */
+export function TextBlock({ field }: { field: Field }) {
+  return (
+    <div className="preview__text">
+      <MessageBody text={field.value} />
+      {field.origin && <OriginTag origin={field.origin} />}
+    </div>
+  );
+}
+
+export function WhenBlock({ when, big }: { when: string; big?: boolean }) {
+  return <span className={big ? "preview__when preview__when--big" : "preview__when"}>{when}</span>;
+}
+
+/**
+ * One field an update changes: what it is now, struck through, and what it
+ * becomes. A field whose current value no read returned shows only the new
+ * one — never a guessed "before".
+ */
+export function DiffRow({ field }: { field: Field }) {
+  return (
+    <div className="preview__row">
+      <span className="preview__label">{field.label}</span>
+      <span className="preview__value">
+        {field.before != null && (
+          <>
+            <span className="preview__old">{field.before}</span>
+            <span className="preview__arrow">→</span>
+          </>
+        )}
+        <span className="preview__new">{field.name ?? field.value}</span>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * What a bulk action acts on: the first few items as a read showed them, and
+ * how many more. Each item is "who · what" when the read gave both.
+ */
+export function ItemSample({ field }: { field: Field }) {
+  const items = field.items.length > 0 ? field.items : [field.value];
+  const rest = field.count - items.length;
+  return (
+    <div className="preview__sample">
+      {items.map((item, i) => {
+        const [who, ...what] = item.split(" · ");
+        return (
+          // A fixed sample that never reorders, and two items may read alike.
+          <div className="preview__item" key={i}>
+            {what.length > 0 ? (
+              <>
+                <span className="preview__faint">{who}</span>
+                <span>{what.join(" · ")}</span>
+              </>
+            ) : (
+              <span>{item}</span>
+            )}
+          </div>
+        );
+      })}
+      {rest > 0 && <span className="preview__faint">and {rest} more</span>}
+    </div>
+  );
+}
+
+/** One consequence in a sentence: who hears about it, whether it can be undone. */
+export function RiskLine({ text, danger }: { text: string; danger?: boolean }) {
+  return <p className={danger ? "preview__risk preview__risk--danger" : "preview__risk"}>{text}</p>;
 }
 
 /** A file's path, or where it goes from and to when the call names both. */
@@ -84,7 +164,7 @@ function Value({ field }: { field: Field }) {
       );
     }
     case "text":
-      return <MessageBody text={field.value} />;
+      return <TextBlock field={field} />;
     case "when":
       return <WhenBlock when={field.value} />;
     case "money":
@@ -151,23 +231,5 @@ export function MoreFields({ fields }: { fields: Field[] }) {
         <FieldRows fields={fields} />
       </CollapsibleContent>
     </Collapsible>
-  );
-}
-
-/**
- * The card for a tool nobody has drawn one for yet, straight from its schema:
- * plainer than a hand-made view, but never blank.
- */
-export function FallbackCard({ preview }: { preview: ActionPreview }) {
-  return (
-    <div className="preview">
-      <FieldRows fields={preview.fields} />
-      <MoreFields fields={preview.more} />
-      {preview.total > 0 && (
-        <p className="preview__foot">
-          {preview.set} of {preview.total} fields set
-        </p>
-      )}
-    </div>
   );
 }

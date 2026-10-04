@@ -275,6 +275,21 @@ fn catalogue(
     CACHE.get_or_init(Default::default)
 }
 
+/// How long a read an approval card made is reused. A channel's name or an event's title does
+/// not change between one command and the next, and the card waits on every read it makes.
+const CARD_READ_TTL: Duration = Duration::from_secs(600);
+
+/// Card reads by hash of (credential, slug, arguments), the catalogue's shape.
+// ponytail: dropped wholesale at 256 entries rather than evicting the oldest — being wrong
+// costs one refetch, and a session rarely names that many things.
+fn card_reads(
+) -> &'static std::sync::Mutex<std::collections::HashMap<u64, (std::time::Instant, Value)>> {
+    static CACHE: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<u64, (std::time::Instant, Value)>>,
+    > = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
 pub struct ComposioClient {
     client: reqwest::Client,
     api_key: String,
@@ -771,6 +786,33 @@ impl ComposioClient {
             Ok(s) => s,
             Err(e) => error_json(&e.to_string()),
         }
+    }
+
+    /// A read an approval card makes to name what a write points at
+    /// (`preview::enrich`), reused for [`CARD_READ_TTL`]. `None` when it fails, and a failure is
+    /// not kept, so the next card asks again. The caller bounds the wait.
+    pub async fn read_cached(&self, slug: &str, arguments: &Value) -> Option<Value> {
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (&self.api_key, slug, arguments.to_string()).hash(&mut hasher);
+            hasher.finish()
+        };
+        let hit = card_reads().lock().ok().and_then(|c| c.get(&key).cloned());
+        if let Some((_, value)) = hit.filter(|(at, _)| at.elapsed() < CARD_READ_TTL) {
+            return Some(value);
+        }
+        let value: Value = serde_json::from_str(&self.execute(slug, arguments).await).ok()?;
+        if value.get("successful").and_then(Value::as_bool) != Some(true) {
+            return None;
+        }
+        if let Ok(mut cache) = card_reads().lock() {
+            if cache.len() >= 256 {
+                cache.clear();
+            }
+            cache.insert(key, (std::time::Instant::now(), value.clone()));
+        }
+        Some(value)
     }
 
     async fn execute_inner(&self, slug: &str, arguments: &Value) -> Result<String> {

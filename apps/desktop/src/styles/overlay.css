@@ -910,6 +910,17 @@
   background: color-mix(in srgb, var(--sys-blue) 85%, white);
 }
 
+/* A strict write — money, a public post, a permanent delete — says so in red,
+   title and button both, so a reflexive Enter is less likely to land on it. */
+.agent__action--danger,
+.agent__action--danger:hover {
+  background: var(--danger);
+}
+
+.agent__confirm-title--danger {
+  color: var(--danger);
+}
+
 /* The card a write shows at its gate (components/preview/kit.tsx).
  *
  * Rows on hairlines, the same idiom as the gate around it, rather than a
@@ -1034,6 +1045,118 @@
 
 .preview__more[data-state="open"] .preview__chevron {
   rotate: 90deg;
+}
+
+/* The full-width blocks a layout leads with (components/preview/cards.tsx):
+   the same hairline idiom as a row, without its label column. */
+.preview__lead,
+.preview__text,
+.preview__sample {
+  margin: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--sep);
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.preview__lead:first-child,
+.preview__text:first-child,
+.preview__sample:first-child {
+  padding-top: 0;
+}
+
+.preview__text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* Inside a row, the value column already gives it its place. */
+.preview__value .preview__text {
+  padding: 0;
+  border: 0;
+}
+
+.preview__when--big {
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+
+.preview__lead .preview__money {
+  font-size: 22px;
+}
+
+.preview__origin {
+  padding: 0 6px;
+  border-radius: var(--radius-chip);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.preview__origin--yours {
+  color: var(--origin-yours);
+  background: color-mix(in srgb, var(--origin-yours) 12%, transparent);
+}
+
+.preview__origin--aloud {
+  color: var(--origin-aloud);
+  background: color-mix(in srgb, var(--origin-aloud) 14%, transparent);
+}
+
+.preview__old {
+  color: var(--text2);
+  text-decoration: line-through;
+}
+
+.preview__arrow {
+  margin: 0 6px;
+  color: var(--text2);
+}
+
+.preview__new {
+  color: var(--success);
+}
+
+.preview__sample {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+}
+
+/* A sample, not the list being approved — the count beside it is — so one
+   long subject may clip rather than push the rest off the card. */
+.preview__item {
+  display: grid;
+  grid-template-columns: minmax(0, 110px) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.preview__item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview__risk {
+  margin: 0;
+  padding-top: 7px;
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.preview__risk--danger {
+  color: var(--danger);
+}
+
+/* A finished step's echo of its card: the write already happened, so here a
+   long message may fold to a few lines. */
+.preview--compact .preview__body {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* The Finder search result grid — Option 1, a dense 4-up thumbnail wall. Sits

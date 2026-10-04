@@ -10,7 +10,7 @@ import { commands, type FinderResults, type ShowTarget } from "@/lib/bindings";
 import { Button } from "@/components/ui/button";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import { FallbackCard } from "@/components/preview/kit";
+import { PreviewCard } from "@/components/preview/cards";
 import {
   groupSteps,
   pendingStep,
@@ -19,7 +19,6 @@ import {
 } from "@/lib/agent-steps";
 import {
   askFor,
-  bodyFor,
   editsFor,
   gateFor,
   labelFor,
@@ -94,9 +93,10 @@ export function AgentRun({
                 </span>
                 {step.result?.show && <ShowButton show={step.result.show} />}
               </span>
-              {/* Only what this tool is worth showing, and never for the step
-                  awaiting a decision — the gate below shows that one, and
-                  rendering both put the same draft on screen twice. */}
+              {/* What a write did, as a compact echo of the card it was
+                  approved from — and never for the step awaiting a decision:
+                  the gate below shows that one, and rendering both put the
+                  same draft on screen twice. */}
               {step !== pending &&
                 (step.name === "ALOUD_FINDER_SEARCH" ? (
                   // The search wall renders its own thumbnails once the results
@@ -107,7 +107,11 @@ export function AgentRun({
                     kind={text(step.args, "kind")}
                   />
                 ) : (
-                  <span className="agent__body">{bodyFor(step.name, step.args)}</span>
+                  step.preview && (
+                    <div className="agent__body">
+                      <PreviewCard preview={step.preview} compact />
+                    </div>
+                  )
                 ))}
             </li>
             ),
@@ -292,8 +296,8 @@ function AskGate({ asked }: { asked: { question: string; options: string[] } }) 
  * reaches the contact gate precisely because it could not find an address, so
  * refusing is the only other answer it could give.
  *
- * A tool with no hand-drawn view shows the card Rust built from its schema, so
- * no write is ever approved from a title alone.
+ * Every other write shows the card Rust drew from its real arguments
+ * (`PreviewCard`), so no write is ever approved from a title alone.
  */
 function ConfirmGate({ step }: { step: Step }) {
   const fields = editsFor(step.name);
@@ -302,8 +306,8 @@ function ConfirmGate({ step }: { step: Step }) {
   // Ask first; the fields only appear for someone who said yes.
   const [filling, setFilling] = useState(false);
   const asking = fields.length > 0 && !filling;
-  const body = bodyFor(step.name, draft);
-  const card = fields.length === 0 && body == null ? step.preview : null;
+  const card = fields.length === 0 ? step.preview : null;
+  const strict = card?.tier === "strict";
 
   // Only what the user could have changed. Rust folds it back into the real
   // nested arguments; anything untouched keeps the value the model chose.
@@ -315,7 +319,9 @@ function ConfirmGate({ step }: { step: Step }) {
 
   return (
     <div className="agent__confirm" role="group">
-      <p className="agent__confirm-title">
+      <p
+        className={strict ? "agent__confirm-title agent__confirm-title--danger" : "agent__confirm-title"}
+      >
         {asking && askFor(step.name, draft)
           ? askFor(step.name, draft)
           : gateFor(step.name, draft) ||
@@ -342,10 +348,8 @@ function ConfirmGate({ step }: { step: Step }) {
             </label>
           ))}
         </div>
-      ) : card ? (
-        <FallbackCard preview={card} />
       ) : (
-        <div className="agent__body">{body}</div>
+        card && <PreviewCard preview={card} />
       )}
       <div className="agent__actions">
         <button className="agent__action" onClick={() => confirm(false)}>
@@ -361,8 +365,14 @@ function ConfirmGate({ step }: { step: Step }) {
           </button>
         ) : (
           <button
-            className="agent__action agent__action--go"
-            autoFocus={fields.length === 0}
+            className={
+              strict
+                ? "agent__action agent__action--go agent__action--danger"
+                : "agent__action agent__action--go"
+            }
+            // A strict write takes a click: Enter left on it is a payment or a
+            // permanent delete made by reflex.
+            autoFocus={fields.length === 0 && !strict}
             onClick={() => confirm(true)}
           >
             {card?.verb || "Confirm"}

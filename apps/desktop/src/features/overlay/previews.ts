@@ -1,4 +1,6 @@
+import type { ActionPreview, CardKind, Field, Role } from "@/lib/bindings";
 import type { Run } from "@/lib/agent-steps";
+import type { ToolArgs } from "@/lib/tool-views";
 
 /**
  * A dictation preview, as whisper produces one: each entry is the *whole*
@@ -21,86 +23,492 @@ export const PARTIAL_PREVIEW = [
 /** How fast `partial: "stream"` advances, in ms between revisions. */
 export const PARTIAL_MS = 320;
 
-/** A canned agent run for the tuning page; see PreviewCommand. */
+/** A field as Rust sends it, with only what differs from empty spelled out. */
+function f(
+  role: Role,
+  path: string,
+  label: string,
+  value: string,
+  rest: Partial<Field> = {},
+): Field {
+  return {
+    role,
+    path,
+    label,
+    value,
+    items: [],
+    count: 0,
+    name: null,
+    unresolved: false,
+    before: null,
+    origin: null,
+    editable: false,
+    ...rest,
+  };
+}
+
+type Card = Pick<
+  ActionPreview,
+  "kind" | "verb" | "title" | "fields" | "set" | "total"
+> &
+  Partial<ActionPreview>;
+
+/** A run stopped at one write's gate. */
+function gate(
+  heard: string,
+  name: string,
+  app: string,
+  args: ToolArgs,
+  card: Card,
+): Run {
+  return {
+    heard,
+    steps: [
+      {
+        name,
+        app,
+        args,
+        requiresConfirmation: true,
+        preview: {
+          tier: "confirm",
+          more: [],
+          risks: [],
+          pickedBy: null,
+          recoverable: null,
+          safer: null,
+          autoMs: null,
+          revision: 0,
+          scope: null,
+          ...card,
+        },
+      },
+    ],
+  };
+}
+
+/** Three a read named, then 35 more the same search returned. */
+const DELETE_IDS = [
+  "18c2a",
+  "18c1b",
+  "18c0c",
+  ...Array.from({ length: 35 }, (_, i) => `18b${String(i).padStart(2, "0")}`),
+];
+
+/**
+ * One gate per card kind, so every layout can be checked by eye from the
+ * tuning page. Each preview is what `aloud_agent::preview::render` and
+ * `enrich` made of these arguments against the live schemas in
+ * `crates/agent/src/preview/fixtures` (HubSpot's is a trimmed stand-in), with
+ * the ids an earlier read in the run would have named — so a mismatch with the
+ * design is a real one, not a fixture typo.
+ */
+export const CARD_PREVIEWS: Record<CardKind, Run> = {
+  message: gate(
+    "send hi to the launch channel on slack",
+    "SLACK_CHAT_POST_MESSAGE",
+    "Slack",
+    { channel: "C07LQ2M9K", markdown_text: "hi" },
+    {
+      kind: "message",
+      verb: "Send",
+      title: "Send message to launch",
+      fields: [
+        f("destination", "/channel", "Channel", "C07LQ2M9K", {
+          name: "launch",
+        }),
+        f("text", "/markdown_text", "Message", "hi", {
+          origin: "yours",
+          editable: true,
+        }),
+      ],
+      set: 2,
+      total: 12,
+    },
+  ),
+  email: gate(
+    "reply to priya saying thursday works and attach the q4 plan",
+    "GMAIL_SEND_EMAIL",
+    "Gmail",
+    {
+      attachment: "Q4 plan.pdf",
+      body: "Hi Priya,\n\nThursday works for me. I'll send the agenda tomorrow.\n\nThanks",
+      recipient_email: "priya@acme.co",
+      subject: "Re: Q4 planning",
+    },
+    {
+      kind: "email",
+      verb: "Send",
+      title: "Send email to priya@acme.co",
+      fields: [
+        f("person", "/recipient_email", "To", "priya@acme.co"),
+        f("heading", "/subject", "Subject", "Re: Q4 planning", {
+          editable: true,
+        }),
+        f(
+          "text",
+          "/body",
+          "Body",
+          "Hi Priya,\n\nThursday works for me. I'll send the agenda tomorrow.\n\nThanks",
+          { origin: "aloud", editable: true },
+        ),
+        f("list", "/attachment", "Attached", "Q4 plan.pdf"),
+      ],
+      set: 4,
+      total: 10,
+    },
+  ),
+  event: gate(
+    "lunch with priya friday at 1",
+    "GOOGLECALENDAR_CREATE_EVENT",
+    "Google Calendar",
+    {
+      attendees: ["priya@acme.co"],
+      event_duration_hour: 1,
+      start_datetime: "2026-10-09T13:00:00",
+      summary: "Lunch with Priya",
+      timezone: "Asia/Kolkata",
+    },
+    {
+      kind: "event",
+      verb: "Create",
+      title: "Create event with priya@acme.co",
+      fields: [
+        f("heading", "/summary", "Title", "Lunch with Priya", {
+          editable: true,
+        }),
+        f("when", "/start_datetime", "Starts", "Fri, Oct 9, 2026, 1:00 PM"),
+        f("plain", "/event_duration_hour", "Hours", "1"),
+        f("plain", "/timezone", "Time zone", "Asia/Kolkata"),
+        f("person", "/attendees", "Guests", "priya@acme.co", {
+          items: ["priya@acme.co"],
+          count: 1,
+        }),
+        f("flag", "/create_meeting_room", "Google Meet link", "Yes"),
+      ],
+      set: 5,
+      total: 25,
+      risks: ["Guests get an invite email.", "Adds a Google Meet link."],
+    },
+  ),
+  task: gate(
+    "remind me to call ana at 5",
+    "GOOGLETASKS_INSERT_TASK",
+    "Google Tasks",
+    { due: "2026-10-03T17:00:00", tasklist_id: "@default", title: "Call Ana" },
+    {
+      kind: "task",
+      verb: "Add",
+      title: "Add task",
+      fields: [
+        f("text", "/title", "Task", "Call Ana", {
+          origin: "yours",
+          editable: true,
+        }),
+        f("when", "/due", "Due", "Sat, Oct 3, 2026, 5:00 PM"),
+        f("id", "/tasklist_id", "List", "@default", { unresolved: true }),
+      ],
+      set: 3,
+      total: 12,
+    },
+  ),
+  note: gate(
+    "add a risks page to the launch prd in notion",
+    "NOTION_CREATE_NOTION_PAGE",
+    "Notion",
+    {
+      markdown:
+        "## Risks\n- App Store review could slip the date\n- Payments migration lands the same week",
+      parent_id: "59833787-2cf9-4fdf-8782-e53db20768a5",
+      title: "Risks",
+    },
+    {
+      kind: "note",
+      verb: "Create",
+      title: "Create page",
+      fields: [
+        f("heading", "/title", "Title", "Risks", { editable: true }),
+        f(
+          "id",
+          "/parent_id",
+          "Inside",
+          "59833787-2cf9-4fdf-8782-e53db20768a5",
+          { name: "Launch PRD" },
+        ),
+        f(
+          "text",
+          "/markdown",
+          "Content",
+          "## Risks\n- App Store review could slip the date\n- Payments migration lands the same week",
+          { origin: "aloud", editable: true },
+        ),
+      ],
+      set: 3,
+      total: 5,
+    },
+  ),
+  issue: gate(
+    "file a linear bug, login loops on ios, assign it to priya, high priority",
+    "LINEAR_CREATE_LINEAR_ISSUE",
+    "Linear",
+    {
+      assignee_id: "b86e2b0f-6b1a-4db8-9731-41ef97f5ba8e",
+      description:
+        "After entering the code, sign-in on iOS returns to the login screen.",
+      priority: 2,
+      team_id: "9a7f1e3c-4d5b-6a7f-8e9d-0a1b2c3d4e5f",
+      title: "Login loops on iOS",
+    },
+    {
+      kind: "issue",
+      verb: "Create",
+      title: "Create issue",
+      fields: [
+        f("heading", "/title", "Title", "Login loops on iOS", {
+          editable: true,
+        }),
+        f("id", "/team_id", "Team", "9a7f1e3c-4d5b-6a7f-8e9d-0a1b2c3d4e5f", {
+          name: "Mobile",
+        }),
+        f(
+          "text",
+          "/description",
+          "Description",
+          "After entering the code, sign-in on iOS returns to the login screen.",
+          { origin: "aloud", editable: true },
+        ),
+        f(
+          "id",
+          "/assignee_id",
+          "Assignee",
+          "b86e2b0f-6b1a-4db8-9731-41ef97f5ba8e",
+          { name: "Priya Shah" },
+        ),
+        f("plain", "/priority", "Priority", "2"),
+      ],
+      set: 5,
+      total: 12,
+      risks: ["The assignee gets notified."],
+    },
+  ),
+  row: gate(
+    "log 42 dollars lunch to expenses",
+    "GOOGLESHEETS_SPREADSHEETS_VALUES_APPEND",
+    "Google Sheets",
+    {
+      insertDataOption: "INSERT_ROWS",
+      range: "Expenses!A:D",
+      spreadsheetId: "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+      valueInputOption: "USER_ENTERED",
+      values: [["3 Oct", "Lunch", 42, "Food"]],
+    },
+    {
+      kind: "row",
+      verb: "Add",
+      title: "Add row",
+      fields: [
+        f(
+          "id",
+          "/spreadsheetId",
+          "Sheet",
+          "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+          { name: "Expenses 2026" },
+        ),
+        f("plain", "/range", "Range", "Expenses!A:D"),
+        f("list", "/values", "Rows", "3 Oct, Lunch, 42, Food", {
+          items: ["3 Oct, Lunch, 42, Food"],
+          count: 1,
+        }),
+        f("pill", "/insertDataOption", "Mode", "INSERT_ROWS"),
+      ],
+      more: [
+        f("pill", "/valueInputOption", "Value input option", "USER_ENTERED"),
+      ],
+      set: 5,
+      total: 9,
+    },
+  ),
+  file: gate(
+    "move the tax pdf from downloads to my taxes folder",
+    "ALOUD_COLLECT_FILES",
+    "macOS",
+    {
+      destination: "~/Documents/Taxes",
+      move: true,
+      paths: ["~/Downloads/tax-2025.pdf"],
+    },
+    {
+      kind: "file",
+      verb: "Collect",
+      title: "Collect files",
+      fields: [
+        f("list", "/paths", "Files", "~/Downloads/tax-2025.pdf", {
+          items: ["~/Downloads/tax-2025.pdf"],
+          count: 1,
+        }),
+        f("path", "/destination", "Into", "~/Documents/Taxes"),
+        f("flag", "/move", "Move, not copy", "Yes"),
+      ],
+      set: 3,
+      total: 3,
+      risks: ["Moves the originals out of where they are now."],
+    },
+  ),
+  share: gate(
+    "share the q4 deck with dana at acme so she can edit",
+    "GOOGLEDRIVE_CREATE_PERMISSION",
+    "Google Drive",
+    {
+      email_address: "dana@acme.co",
+      file_id: "1a2b3c4d5e",
+      role: "writer",
+      send_notification_email: true,
+      type: "user",
+    },
+    {
+      kind: "share",
+      verb: "Share",
+      title: "Share file with dana@acme.co",
+      fields: [
+        f("id", "/file_id", "File", "1a2b3c4d5e", { name: "Q4 Deck" }),
+        f("person", "/email_address", "With", "dana@acme.co"),
+        f("pill", "/type", "Who", "user"),
+        f("pill", "/role", "Access", "writer"),
+        f("flag", "/send_notification_email", "Email them", "Yes"),
+      ],
+      set: 5,
+      total: 13,
+    },
+  ),
+  update: gate(
+    "move lunch with priya to 1pm",
+    "GOOGLECALENDAR_UPDATE_EVENT",
+    "Google Calendar",
+    {
+      event_id: "ev1",
+      start_datetime: "2026-10-09T13:00:00",
+      summary: "Lunch with Priya",
+    },
+    {
+      kind: "update",
+      verb: "Update",
+      title: "Update event",
+      fields: [
+        f("id", "/event_id", "Event", "ev1", { name: "Lunch" }),
+        f("heading", "/summary", "Title", "Lunch with Priya", {
+          before: "Lunch",
+          editable: true,
+        }),
+        f("when", "/start_datetime", "Starts", "Fri, Oct 9, 2026, 1:00 PM", {
+          before: "Fri, Oct 9, 2026, 12:00 PM",
+        }),
+        f("flag", "/create_meeting_room", "Google Meet link", "Yes"),
+      ],
+      set: 3,
+      total: 25,
+      risks: ["No guests are listed, so any on the event now are removed."],
+    },
+  ),
+  delete: gate(
+    "delete all the newsletters older than a month",
+    "GMAIL_BATCH_DELETE_MESSAGES",
+    "Gmail",
+    { messageIds: DELETE_IDS },
+    {
+      kind: "delete",
+      verb: "Delete",
+      title: "Delete 38 emails",
+      fields: [
+        f(
+          "list",
+          "/messageIds",
+          "Emails",
+          "Morning Brew · Tuesday's edition, Figma · Config 2026 replays are up, Substack · Weekly digest and 35 more",
+          {
+            items: [
+              "Morning Brew · Tuesday's edition",
+              "Figma · Config 2026 replays are up",
+              "Substack · Weekly digest",
+            ],
+            count: 38,
+          },
+        ),
+      ],
+      set: 1,
+      total: 2,
+      tier: "strict",
+      risks: ["These skip the Trash. Gmail cannot get them back."],
+      pickedBy: "category:promotions older_than:30d",
+      safer: { label: "Move to Trash", tool: "GMAIL_MOVE_TO_TRASH" },
+    },
+  ),
+  money: gate(
+    "charge acme 42 dollars for the extra seats",
+    "STRIPE_CREATE_PAYMENT_INTENT",
+    "Stripe",
+    {
+      amount: 4200,
+      confirm: true,
+      currency: "usd",
+      customer: "cus_Q3f2xY",
+      payment_method: "pm_1NvisaX",
+      receipt_email: "billing@acme.co",
+    },
+    {
+      kind: "money",
+      verb: "Create",
+      title: "Create payment",
+      fields: [
+        f("money", "/amount", "Amount", "42.00 USD"),
+        f("id", "/customer", "Customer", "cus_Q3f2xY", { name: "Acme Inc" }),
+        f("id", "/payment_method", "Card", "pm_1NvisaX", { unresolved: true }),
+        f("flag", "/confirm", "Charge now", "Yes"),
+        f("person", "/receipt_email", "Receipt to", "billing@acme.co"),
+      ],
+      set: 6,
+      total: 18,
+      tier: "strict",
+      risks: ["Charges the card now. A refund is a separate action."],
+    },
+  ),
+  fallback: gate(
+    "add dana lee from acme to hubspot, she runs ops",
+    "HUBSPOT_CREATE_CONTACT",
+    "HubSpot",
+    {
+      company: "Acme",
+      email: "dana@acme.co",
+      firstname: "Dana",
+      hubspot_owner_id: "81234567",
+      jobtitle: "Head of Ops",
+      lastname: "Lee",
+    },
+    {
+      kind: "fallback",
+      verb: "Create",
+      title: "Create contact to dana@acme.co",
+      fields: [
+        f("person", "/email", "Email", "dana@acme.co"),
+        f("id", "/hubspot_owner_id", "Owner", "81234567", { unresolved: true }),
+        f("plain", "/company", "Company", "Acme"),
+        f("plain", "/firstname", "First name", "Dana"),
+        f("plain", "/jobtitle", "Job title", "Head of Ops"),
+        f("plain", "/lastname", "Last name", "Lee"),
+      ],
+      set: 6,
+      total: 8,
+    },
+  ),
+};
+
+/** A canned agent run for the tuning page: one write done, the next at its gate. */
 export const AGENT_PREVIEW: Run = {
-  heard: "Send Priya the release notes and draft a reply to Sam",
+  heard: "Say hi in launch, then tell Priya Thursday works",
   steps: [
     {
-      name: "GMAIL_SEND_EMAIL",
-      app: "Gmail",
-      args: { recipient_email: "priya@example.com", subject: "Release notes" },
-      requiresConfirmation: true,
+      ...CARD_PREVIEWS.message.steps[0],
       confirmed: true,
       result: { success: true, message: "Sent", show: null },
     },
-    {
-      name: "GMAIL_CREATE_EMAIL_DRAFT",
-      app: "Gmail",
-      args: { recipient_email: "sam@example.com", subject: "Re: Thursday" },
-      requiresConfirmation: true,
-    },
-  ],
-};
-
-const slackText = "Standup moves to 10:30 tomorrow.\nSame link as always.";
-
-/**
- * A write no hand view draws, so its gate shows the schema-built card. The
- * preview is what `aloud_agent::preview::build` makes of these arguments
- * against Slack's live chat.postMessage schema (the Rust test fixture).
- */
-export const FALLBACK_PREVIEW: Run = {
-  heard: "Tell general on Slack that standup moves to 10:30",
-  steps: [
-    {
-      name: "SLACK_CHAT_POST_MESSAGE",
-      app: "slack",
-      args: { channel: "general", markdown_text: slackText },
-      requiresConfirmation: true,
-      preview: {
-        kind: "message",
-        tier: "confirm",
-        verb: "Send",
-        title: "Send message to general",
-        fields: [
-          {
-            role: "destination",
-            path: "/channel",
-            label: "Channel",
-            value: "general",
-            items: [],
-            count: 0,
-            name: null,
-            unresolved: false,
-            before: null,
-            origin: null,
-            editable: false,
-          },
-          {
-            role: "text",
-            path: "/markdown_text",
-            label: "Markdown Text",
-            value: slackText,
-            items: [],
-            count: 0,
-            name: null,
-            unresolved: false,
-            before: null,
-            origin: null,
-            editable: false,
-          },
-        ],
-        more: [],
-        set: 2,
-        total: 12,
-        risks: [],
-        pickedBy: null,
-        recoverable: null,
-        safer: null,
-        autoMs: null,
-        revision: 0,
-        scope: null,
-      },
-    },
+    CARD_PREVIEWS.email.steps[0],
   ],
 };
