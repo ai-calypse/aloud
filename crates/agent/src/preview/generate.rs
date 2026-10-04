@@ -23,10 +23,11 @@ use std::time::Duration;
 /// Bump when the prompt or the `map_tool` schema changes: every stored mapping
 /// is then regenerated.
 pub const PROMPT_VERSION: u32 = 1;
-/// One pass's ceiling; the next pass picks up where it stopped.
-const MAX_CALLS: usize = 150;
+/// One pass's ceiling; the next pass picks up where it stopped. Small, because
+/// the pass spends the same keys live commands do and free tiers are thin.
+const MAX_CALLS: usize = 25;
 /// Between calls, so a pass never bursts a per-minute budget.
-const SPACING: Duration = Duration::from_millis(300);
+const SPACING: Duration = Duration::from_secs(2);
 /// A tool the brain could not map is asked again after this, not every launch.
 const RETRY_FAILED_AFTER_S: u64 = 7 * 24 * 60 * 60;
 
@@ -274,7 +275,10 @@ pub async fn warm_previews(brains: &[Brain], composio: &ComposioClient, path: &P
             Err(e) => tracing::warn!(%e, toolkit, "action previews: no tools"),
         }
     }
-    let pass = generate(brains, &tools, path).await;
+    // The last brain, not the first: live commands lean on the first's
+    // per-minute budget (Groq's free tier is about one step a minute), while
+    // the fallback's quota is daily and mostly idle.
+    let pass = generate(&brains[brains.len() - 1..], &tools, path).await;
     tracing::info!(
         asked = pass.asked,
         mapped = pass.mapped.len(),
