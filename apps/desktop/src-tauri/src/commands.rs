@@ -170,13 +170,20 @@ pub async fn installed_apps() -> CmdResult<Vec<aloud_selection::InstalledApp>> {
         .map_err(|e| format!("listing installed apps: {e}"))
 }
 
-/// One file the notch grid draws for a Finder search: its path, display name,
-/// and a Quick Look thumbnail if one could be rendered.
+/// One file the notch draws for a Finder search: its path, display name,
+/// and a Quick Look thumbnail if one could be rendered. A document's row reads
+/// like Finder's list view, so its name, size and date arrive formatted.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FoundFile {
     pub path: String,
     pub name: String,
+    /// The name cut in the middle to fit the list's Name column.
+    pub label: String,
+    /// "4.9 KB"; "--" for a folder.
+    pub size: String,
+    /// "8:02 PM" today, "Yesterday", then the date.
+    pub modified: String,
     /// A `data:image/png;base64,…` preview, or None when Quick Look has none.
     pub thumbnail: Option<String>,
 }
@@ -189,6 +196,8 @@ pub struct FoundFile {
 #[serde(rename_all = "camelCase")]
 pub struct FinderResults {
     pub query: String,
+    /// The list's header: "2025 Tax Returns — 10 items".
+    pub heading: String,
     /// Total matches found, which may exceed `files.len()` when truncated.
     pub count: u32,
     pub files: Vec<FoundFile>,
@@ -216,9 +225,16 @@ pub async fn finder_search(query: String, kind: String) -> CmdResult<FinderResul
                         let path = row["path"].as_str().unwrap_or_default().to_string();
                         let name = row["name"].as_str().unwrap_or_default().to_string();
                         let thumbnail = aloud_native::thumbnail(&path);
+                        // Gone since the search: still listed, with nothing
+                        // to say about its size or age.
+                        let (label, size, modified) = aloud_native::file_row(&path, &name)
+                            .unwrap_or_else(|| (name.clone(), String::new(), String::new()));
                         FoundFile {
                             path,
                             name,
+                            label,
+                            size,
+                            modified,
                             thumbnail,
                         }
                     })
@@ -227,6 +243,7 @@ pub async fn finder_search(query: String, kind: String) -> CmdResult<FinderResul
             .unwrap_or_default();
 
         Ok(FinderResults {
+            heading: aloud_native::search_heading(&query, count),
             query,
             count,
             files,

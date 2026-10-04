@@ -26,6 +26,7 @@ use serde_json::{json, Value};
 pub use catalogue::{editor_project, show};
 pub use contacts::prepare;
 pub use script::ScriptError;
+pub use search::{file_row, heading as search_heading};
 
 /// `args` with what the user was looking at when they spoke, for a native tool
 /// to fall back on: `_front_app` (MENU, PRESS_KEYS, WINDOW_ARRANGE with no

@@ -197,6 +197,7 @@ pub fn show(app: &AppHandle, phase: Phase) {
     // pill is click-through and drives its own dismissal again from here.
     PANEL_OPEN.store(false, Ordering::SeqCst);
     INTERACTIVE.store(false, Ordering::SeqCst);
+    TOAST.store(false, Ordering::SeqCst);
 
     let (style, notch) = style_for(&window, phase);
     if let Err(e) = position_top_center(&window, 0.0) {
@@ -260,6 +261,7 @@ pub fn show_panel(app: &AppHandle) {
 
     HIDE_GENERATION.fetch_add(1, Ordering::SeqCst);
     PANEL_OPEN.store(true, Ordering::SeqCst);
+    TOAST.store(false, Ordering::SeqCst);
     // Interactive from the first frame — the webview confirms via
     // `set_panel_interactive`, but a card must not wait a round-trip to
     // take its first click.
@@ -286,6 +288,49 @@ pub fn show_panel(app: &AppHandle) {
     let _ = window.set_ignore_cursor_events(true);
     let _ = window.set_focus();
     track_cursor(app);
+}
+
+/// True while the window is up for a toast, which a later toast may replace
+/// but a passing run may not take for anything else.
+static TOAST: AtomicBool = AtomicBool::new(false);
+
+/// Puts the window up for a toast; false when it may not have it. A run hands
+/// its own open panel over (`own_panel`); otherwise the toast takes the window
+/// only from nothing or from another toast — never from a panel the user is
+/// in. Unlike [`show_panel`] it takes no focus: a toast is read, not typed into.
+pub fn show_toast(app: &AppHandle, own_panel: bool) -> bool {
+    let open = PANEL_OPEN.load(Ordering::SeqCst);
+    if open && !own_panel && !TOAST.load(Ordering::SeqCst) {
+        return false;
+    }
+    TOAST.store(true, Ordering::SeqCst);
+    if open {
+        return true;
+    }
+    let Some(window) = window(app) else {
+        return false;
+    };
+    HIDE_GENERATION.fetch_add(1, Ordering::SeqCst);
+    // Owned like a panel, so the listening wings coming back after the run
+    // (`listen::Shared::show`) do not take the window out from under it.
+    PANEL_OPEN.store(true, Ordering::SeqCst);
+    let notch = target_notch(&window);
+    if let Err(e) = position_top_center(&window, 0.0) {
+        tracing::warn!(%e, "could not position toast");
+    }
+    let _ = window.set_ignore_cursor_events(true);
+    let _ = window.show();
+    // The toast hangs from the notch like the panel does, whatever the bar's style.
+    let style = OverlayStyleChanged {
+        style: OverlayStyle::DropPill,
+        notch_width: notch.map_or(0.0, |n| n.width),
+        notch_height: notch.map_or(0.0, |n| n.height),
+    };
+    if let Err(e) = style.emit_to(app, LABEL) {
+        tracing::warn!(%e, "could not send overlay style");
+    }
+    track_cursor(app);
+    true
 }
 
 /// How often the pointer is checked against the panel while an answer is up.
@@ -531,6 +576,7 @@ fn reset_to_resting(app: &AppHandle) {
 
 /// Dismisses the panel, letting it collapse back into the notch first.
 pub fn end_panel(app: &AppHandle) {
+    TOAST.store(false, Ordering::SeqCst);
     if !PANEL_OPEN.swap(false, Ordering::SeqCst) {
         return;
     }

@@ -1,4 +1,12 @@
-import type { ActionPreview, CardKind, Field, Role } from "@/lib/bindings";
+import type {
+  ActionPreview,
+  CardKind,
+  Field,
+  FinderResults,
+  FoundFile,
+  Role,
+  Toast,
+} from "@/lib/bindings";
 import type { Run } from "@/lib/agent-steps";
 import type { ToolArgs } from "@/lib/tool-views";
 
@@ -129,34 +137,32 @@ export const CARD_PREVIEWS: Record<CardKind, Run> = {
     },
   ),
   email: gate(
-    "reply to priya saying thursday works and attach the q4 plan",
+    "email david the project update and ask to sync thursday",
     "GMAIL_SEND_EMAIL",
     "Gmail",
     {
-      attachment: "Q4 plan.pdf",
-      body: "Hi Priya,\n\nThursday works for me. I'll send the agenda tomorrow.\n\nThanks",
-      recipient_email: "priya@acme.co",
-      subject: "Re: Q4 planning",
+      body: "Hi David,\n\nThe designs look great. Let's sync Thursday to walk through the rollout.\n\nThanks",
+      recipient_email: "david@company.com",
+      subject: "Project update and Thursday sync",
     },
     {
       kind: "email",
       verb: "Send",
-      title: "Send email to priya@acme.co",
+      title: "Send email to david@company.com",
       fields: [
-        f("person", "/recipient_email", "To", "priya@acme.co"),
-        f("heading", "/subject", "Subject", "Re: Q4 planning", {
+        f("person", "/recipient_email", "To", "david@company.com"),
+        f("heading", "/subject", "Subject", "Project update and Thursday sync", {
           editable: true,
         }),
         f(
           "text",
           "/body",
           "Body",
-          "Hi Priya,\n\nThursday works for me. I'll send the agenda tomorrow.\n\nThanks",
+          "Hi David,\n\nThe designs look great. Let's sync Thursday to walk through the rollout.\n\nThanks",
           { origin: "aloud", editable: true },
         ),
-        f("list", "/attachment", "Attached", "Q4 plan.pdf"),
       ],
-      set: 4,
+      set: 3,
       total: 10,
     },
   ),
@@ -529,7 +535,7 @@ export const CONTACT_PREVIEW: ActionPreview = {
 
 /** A canned agent run for the tuning page: one write done, the next at its gate. */
 export const AGENT_PREVIEW: Run = {
-  heard: "Say hi in launch, then tell Priya Thursday works",
+  heard: "Say hi in launch, then email David the project update",
   steps: [
     {
       ...CARD_PREVIEWS.message.steps[0],
@@ -538,4 +544,104 @@ export const AGENT_PREVIEW: Run = {
     },
     CARD_PREVIEWS.email.steps[0],
   ],
+};
+
+/** `run` with every step wearing `icon`, as the gate would hand it over. */
+export function withIcon(run: Run, icon: string | undefined): Run {
+  return icon ? { ...run, steps: run.steps.map((s) => ({ ...s, icon })) } : run;
+}
+
+/** A found file as `finder_search` reports one: label, size and date formatted in Rust. */
+function found(
+  name: string,
+  size: string,
+  modified: string,
+  label = name,
+  thumbnail: string | null = null,
+): FoundFile {
+  return { path: `/Users/y/Documents/Taxes/${name}`, name, label, size, modified, thumbnail };
+}
+
+/** A flat swatch standing in for a Quick Look thumbnail, which needs a Mac. */
+const swatch = (hue: number) =>
+  `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="hsl(${hue} 45% 55%)"/></svg>`,
+  )}`;
+
+const TAX_RETURNS: FinderResults = {
+  query: "2025 Tax Returns",
+  heading: "2025 Tax Returns — 10 items",
+  count: 10,
+  files: [
+    found("2025 California Resident Income Tax Return.pdf", "4.9 KB", "8:02 PM", "2025 California…Tax Return.pdf"),
+    found("2025 Federal Return 1040.pdf", "212 KB", "8:02 PM"),
+    found("2025 Schedule C — Consulting.pdf", "88 KB", "Yesterday"),
+    found("W-2 Acme Inc 2025.pdf", "61 KB", "Feb 12"),
+    found("1099-NEC Contoso 2025.pdf", "44 KB", "Feb 3"),
+    found("Charitable receipts 2025.xlsx", "19 KB", "Jan 28"),
+  ],
+};
+
+/**
+ * A finished Finder search, as the list documents get and as the image grid —
+ * the results riding on the step, since the tuner has no Mac to search.
+ */
+export const FINDER_PREVIEWS: Record<"list" | "grid", Run> = {
+  list: {
+    heard: "Can you list last year's tax returns?",
+    steps: [
+      {
+        name: "ALOUD_FINDER_SEARCH",
+        app: "macOS",
+        args: { query: "2025 Tax Returns", kind: "document" },
+        requiresConfirmation: false,
+        result: { success: true, message: "done", show: null, note: null, tidied: null },
+        found: TAX_RETURNS,
+      },
+    ],
+    finished: "Found 10 of your 2025 tax returns.",
+  },
+  grid: {
+    heard: "Find my screenshots from the offsite",
+    steps: [
+      {
+        name: "ALOUD_FINDER_SEARCH",
+        app: "macOS",
+        args: { query: "offsite", kind: "image" },
+        requiresConfirmation: false,
+        result: { success: true, message: "done", show: null, note: null, tidied: null },
+        found: {
+          query: "offsite",
+          heading: "offsite — 6 items",
+          count: 6,
+          files: [20, 60, 120, 200, 260, 320].map((hue, i) =>
+            found(`Offsite ${i + 1}.png`, "1.2 MB", "Oct 2", undefined, swatch(hue)),
+          ),
+        },
+      },
+    ],
+    finished: "Found 6 screenshots from the offsite.",
+  },
+};
+
+/** The chips a run of writes ends on, one per action a toast can offer. */
+export const TOAST_PREVIEWS: Record<"show" | "undo" | "plain", Toast> = {
+  show: {
+    text: "Reminder: Send Maya the deck",
+    app: "Reminders",
+    icon: null,
+    action: { kind: "show", app: "Reminders", target: "x-apple-reminder://r1" },
+  },
+  undo: {
+    text: "Sorted 24 files in Downloads",
+    app: "macOS",
+    icon: null,
+    action: { kind: "undo", folder: "Downloads" },
+  },
+  plain: {
+    text: "Sent the email to David",
+    app: "Gmail",
+    icon: null,
+    action: null,
+  },
 };

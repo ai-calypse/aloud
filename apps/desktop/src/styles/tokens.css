@@ -47,6 +47,15 @@
   /* Whose words an approval card's text is: the user's, or Aloud's own. */
   --origin-yours: var(--sys-teal);
   --origin-aloud: var(--sys-purple);
+  /* An approval card is drawn as the acting app's own window, so its primary
+     button is the system blue those apps use — not Aloud's accent, which is
+     teal on the floating surfaces. The sent-message bubble is the same blue. */
+  --app-action: var(--sys-blue);
+  --app-action-fg: #ffffff;
+  --bubble: var(--sys-blue);
+  --bubble-fg: #ffffff;
+  /* Finder's folder tint, for the folder a search or a move names. */
+  --folder: var(--sys-teal);
 
   /* --- Radii ------------------------------------------------------------- */
   /* Named for what they wrap, because macOS radii are not a linear scale. */

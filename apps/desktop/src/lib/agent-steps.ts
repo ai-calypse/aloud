@@ -1,4 +1,10 @@
-import type { ActionPreview, PlannedCall, ToolCall, ToolResult } from "./bindings";
+import type {
+  ActionPreview,
+  FinderResults,
+  PlannedCall,
+  ToolCall,
+  ToolResult,
+} from "./bindings";
 import type { ToolArgs } from "./tool-views";
 
 /**
@@ -11,7 +17,10 @@ export type Step = {
   /** The loop's id for the call; absent on the fast path's single row. */
   id?: number | null;
   name: string;
+  /** Once its gate is up, the app as its permission names it: "Notes", not "macOS". */
   app: string;
+  /** That app's icon as a data URI; absent draws a neutral glyph. */
+  icon?: string | null;
   /** The tool's own argument object; views pick the fields worth showing. */
   args: ToolArgs;
   requiresConfirmation: boolean;
@@ -23,6 +32,11 @@ export type Step = {
   confirmed?: boolean;
   /** Kept whole: its `show` is what the finished row's Show button brings back. */
   result?: ToolResult;
+  /**
+   * A Finder search's results already in hand, so its list draws without
+   * searching again — the tuning page's, which has no Mac to search.
+   */
+  found?: FinderResults;
 };
 
 export type Run = {
@@ -76,6 +90,10 @@ export function withCall(steps: Step[], call: ToolCall): Step[] {
       i === at
         ? {
             ...open,
+            // The gate names the app as its permission does; the start event
+            // only guessed from the tool's name.
+            app: call.preview ? call.app : open.app,
+            icon: call.icon ?? open.icon,
             args: asArgs(call.args),
             requiresConfirmation: open.requiresConfirmation || call.requiresConfirmation,
             // Only the gate event carries one; whichever of the pair lands
@@ -92,6 +110,7 @@ export function withCall(steps: Step[], call: ToolCall): Step[] {
       id: call.id,
       name: call.name,
       app: call.app,
+      icon: call.icon,
       args: asArgs(call.args),
       requiresConfirmation: call.requiresConfirmation,
       preview: call.preview,

@@ -34,6 +34,18 @@ export type PreviewCommand = {
     | "close";
   /** A run stopped on the gate of one card kind; see `CARD_PREVIEWS`. */
   card?: CardKind;
+  /** A finished Finder search, as documents or as images; see `FINDER_PREVIEWS`. */
+  finder?: "list" | "grid";
+  /**
+   * The chip a run of writes ends on. Sent with a run's panel open, it plays
+   * the collapse into the chip; sent at rest, the chip growing out of the notch.
+   */
+  toast?: "show" | "undo" | "plain";
+  /**
+   * The app icon a `card` or `toast` wears: the tuner runs in a browser, which
+   * can read no app's icon, so one is handed in (a `data:` URI) to check the slot.
+   */
+  icon?: string;
   dismissing?: boolean;
   /** Rebuilds the panel's springs, which is how a changed --panel-* applies. */
   restart?: boolean;

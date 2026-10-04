@@ -1,5 +1,6 @@
 import React, { useEffect, useState, type CSSProperties } from "react";
 import {
+  ArrowUpRightIcon,
   CheckIcon,
   CircleDashedIcon,
   LoaderCircleIcon,
@@ -16,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { PreviewCard } from "@/components/preview/cards";
-import { CardEditsContext } from "@/components/preview/kit";
+import { CardEditsContext, FileGlyph } from "@/components/preview/kit";
 import {
   groupSteps,
   pendingStep,
@@ -112,11 +113,17 @@ export function AgentRun({
                   <FinderGrid
                     query={text(step.args, "query")}
                     kind={text(step.args, "kind")}
+                    found={step.found}
                   />
                 ) : (
                   step.preview && (
                     <div className="agent__body">
-                      <PreviewCard preview={step.preview} compact />
+                      <PreviewCard
+                        preview={step.preview}
+                        app={step.app}
+                        icon={step.icon}
+                        compact
+                      />
                     </div>
                   )
                 ))}
@@ -175,19 +182,30 @@ export function AgentRun({
  * run rather than retrying into the same wall.
  */
 /**
- * The Finder search result wall — Option 1, a 4-up thumbnail grid under a
- * "find my …" step. The model runs the search tool itself and speaks the count;
- * this fetches the same query again for thumbnails, so the panel shows the files
- * without the tool payload being piped back through the loop.
+ * A Finder search's results under its "find my …" step: images as a 4-up
+ * thumbnail wall, anything else as Finder's own list view. The model runs the
+ * search tool itself and speaks the count; this fetches the same query again
+ * for thumbnails and sizes, so the panel shows the files without the tool
+ * payload being piped back through the loop.
  *
- * Fetches once per (query, kind). A click reveals the file in Finder. Renders
- * nothing until results land — the panel's own height animation covers the gap,
- * and an empty grid flashing before the fill would fight it.
+ * Fetches once per (query, kind), unless the results came with the step. A
+ * click reveals the file in Finder; a press drags it out. Renders nothing
+ * until results land — the panel's own height animation covers the gap, and
+ * an empty list flashing before the fill would fight it.
  */
-function FinderGrid({ query, kind }: { query: string; kind: string }) {
-  const [results, setResults] = useState<FinderResults | null>(null);
+function FinderGrid({
+  query,
+  kind,
+  found,
+}: {
+  query: string;
+  kind: string;
+  found?: FinderResults;
+}) {
+  const [results, setResults] = useState<FinderResults | null>(found ?? null);
 
   useEffect(() => {
+    if (found) return;
     let live = true;
     void commands.finderSearch(query, kind || "any").then((res) => {
       // The command returns Result; ignore the error arm — a failed search
@@ -197,17 +215,14 @@ function FinderGrid({ query, kind }: { query: string; kind: string }) {
     return () => {
       live = false;
     };
-  }, [query, kind]);
+  }, [query, kind, found]);
 
   if (!results || results.files.length === 0) return null;
+  if (kind !== "image" && kind !== "screenshot") return <FinderList results={results} />;
 
-  const noun = kind === "image" ? "image" : "file";
   return (
     <div className="finder">
-      <p className="finder-grid__count">
-        {results.count} {noun}
-        {results.count === 1 ? "" : "s"}
-      </p>
+      <p className="finder-grid__count">{results.heading}</p>
       <div className="finder-grid" role="list">
         {results.files.map((file, i) => (
           <button
@@ -216,13 +231,7 @@ function FinderGrid({ query, kind }: { query: string; kind: string }) {
             role="listitem"
             title={file.name}
             style={{ ["--i" as string]: i }}
-            // Arm the native drag on mousedown: a real system file drag can only
-            // start from the live mouse event, which a JS click cannot supply,
-            // so Rust stashes the path and the native monitor drags it. See
-            // crates/drag. Cleared on mouseup so a plain click stays a click.
-            onMouseDown={() => void commands.armFileDrag(file.path)}
-            onMouseUp={() => void commands.disarmFileDrag()}
-            onClick={() => void commands.finderReveal(file.path)}
+            {...dragAndReveal(file.path)}
           >
             {file.thumbnail ? (
               // draggable=false so the img's own image-bytes drag never
@@ -231,6 +240,80 @@ function FinderGrid({ query, kind }: { query: string; kind: string }) {
             ) : (
               <span className="finder-tile__name">{file.name}</span>
             )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A found file's press, release and click. The native drag is armed on
+ * mousedown: a real system file drag can only start from the live mouse event,
+ * which a JS click cannot supply, so Rust stashes the path and the native
+ * monitor drags it (crates/drag). Cleared on mouseup so a plain click stays a
+ * click, which reveals the file in Finder.
+ */
+function dragAndReveal(path: string) {
+  return {
+    onMouseDown: () => void commands.armFileDrag(path),
+    onMouseUp: () => void commands.disarmFileDrag(),
+    onClick: () => void commands.finderReveal(path),
+  };
+}
+
+/**
+ * Documents as Finder's list view: what was searched and how many matched,
+ * then Name, Size and Date Modified. ↗ opens the folder in Finder with the
+ * first file selected; × closes the panel, as Finder's window close would.
+ */
+function FinderList({ results }: { results: FinderResults }) {
+  const first = results.files[0].path;
+  return (
+    <div className="finder-list">
+      <div className="finder-list__bar">
+        <FileGlyph name="" folder />
+        <span className="finder-list__title">{results.heading}</span>
+        <button
+          className="finder-list__button"
+          aria-label="Show in Finder"
+          title="Show in Finder"
+          onClick={() => void commands.finderReveal(first)}
+        >
+          <ArrowUpRightIcon size={13} />
+        </button>
+        <button
+          className="finder-list__button finder-list__button--close"
+          aria-label="Close"
+          onClick={() => void commands.closeAgent()}
+        >
+          <XIcon size={11} />
+        </button>
+      </div>
+      <div className="finder-list__row finder-list__row--head" aria-hidden>
+        <span />
+        <span>Name</span>
+        <span>Size</span>
+        <span>Date Modified</span>
+      </div>
+      <div role="list">
+        {results.files.map((file, i) => (
+          <button
+            key={file.path}
+            className="finder-list__row"
+            role="listitem"
+            title={file.name}
+            style={{ ["--i" as string]: i }}
+            {...dragAndReveal(file.path)}
+          >
+            {file.thumbnail ? (
+              <img className="finder-list__thumb" src={file.thumbnail} alt="" draggable={false} />
+            ) : (
+              <FileGlyph name={file.name} />
+            )}
+            <span className="finder-list__name">{file.label}</span>
+            <span className="finder-list__meta">{file.size}</span>
+            <span className="finder-list__meta">{file.modified}</span>
           </button>
         ))}
       </div>
@@ -373,6 +456,48 @@ function ConfirmGate({
     return () => window.removeEventListener("keydown", onKey, true);
   });
 
+  // The card is the app's own window, so its title bar says what this is; a
+  // line above it only where a yes covers more than the card shows (screen
+  // control's one yes for the run), or where there is no card at all.
+  const title =
+    gateFor(step.name, step.args) ||
+    (!preview && `${labelFor(step.name, step.args)} — this writes to ${step.app}.`);
+
+  // Allow once is the app's own blue pill at the window's foot; declining and
+  // Always allow sit quieter beside it, Always the quietest — it is the
+  // highest commitment, so never the easy default.
+  const actions = (
+    <>
+      <button
+        className="gate__quiet"
+        autoFocus={strict}
+        onClick={() => decide("decline")}
+      >
+        {/* On a card that counts down, declining is taking it back before it
+            goes. Still "Undo" once held: reaching for it is what holds it,
+            and a label changing under the pointer is a misclick. */}
+        {autoMs !== null ? "Undo" : "Don't allow"} <span className="btn__k">esc</span>
+      </button>
+      {step.canAlways && !strict && (
+        <button className="gate__quiet" onClick={() => decide("allowAlways")}>
+          Always allow
+        </button>
+      )}
+      <button
+        // The exact-words countdown drains across the pill it ends by pressing.
+        className={autoMs !== null ? "app-pill motion-countdown" : "app-pill"}
+        data-danger={strict || undefined}
+        data-held={held || undefined}
+        style={autoMs !== null ? ({ "--auto-ms": `${autoMs}ms` } as CSSProperties) : undefined}
+        autoFocus={!strict && !missing}
+        onClick={() => decide("allowOnce")}
+      >
+        {preview?.verb || "Allow"}
+        {!strict && <span className="btn__k">⏎</span>}
+      </button>
+    </>
+  );
+
   return (
     <div
       className="agent__confirm"
@@ -382,15 +507,14 @@ function ConfirmGate({
       // means to read it, or to stop it.
       onPointerMove={hold}
     >
-      <p
-        className={strict ? "agent__confirm-title agent__confirm-title--danger" : "agent__confirm-title"}
-      >
-        {gateFor(step.name, step.args) ||
-          preview?.title ||
-          `${labelFor(step.name, step.args)} — this writes to ${step.app}.`}
-      </p>
-      {preview?.scope && <p className="agent__scope">{preview.scope}</p>}
-      {preview && (
+      {title && (
+        <p
+          className={strict ? "agent__confirm-title agent__confirm-title--danger" : "agent__confirm-title"}
+        >
+          {title}
+        </p>
+      )}
+      {preview ? (
         <CardEditsContext.Provider
           value={{
             draft,
@@ -401,42 +525,13 @@ function ConfirmGate({
             hold,
           }}
         >
-          <PreviewCard preview={preview} />
+          <PreviewCard preview={preview} app={step.app} icon={step.icon} actions={actions} />
         </CardEditsContext.Provider>
+      ) : (
+        <div className="preview__actions">{actions}</div>
       )}
-      {autoMs !== null && (
-        <div
-          className="countdown motion-countdown"
-          data-held={held || undefined}
-          aria-hidden
-          style={{ "--auto-ms": `${autoMs}ms` } as CSSProperties}
-        />
-      )}
-      <div className="perm__acts">
-        <button
-          className="btn btn--allow"
-          autoFocus={!strict && !missing}
-          onClick={() => decide("allowOnce")}
-        >
-          {preview?.verb || "Allow"} once
-          {!strict && <span className="btn__k">⏎</span>}
-        </button>
-        {step.canAlways && !strict && (
-          <button className="btn btn--always" onClick={() => decide("allowAlways")}>
-            Always allow
-          </button>
-        )}
-        <button
-          className="btn btn--deny"
-          autoFocus={strict}
-          onClick={() => decide("decline")}
-        >
-          {/* On a card that counts down, declining is taking it back before it
-              goes. Still "Undo" once held: reaching for it is what holds it,
-              and a label changing under the pointer is a misclick. */}
-          {autoMs !== null ? "Undo" : "Don't allow"} <span className="btn__k">esc</span>
-        </button>
-      </div>
+      {/* What an Always allow would cover, under the window it would skip. */}
+      {preview?.scope && <p className="agent__scope">{preview.scope}</p>}
     </div>
   );
 }

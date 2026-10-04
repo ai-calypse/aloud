@@ -15,6 +15,7 @@ import {
   type ApprovalReply,
   type OverlayStyle,
   type Phase,
+  type Toast,
 } from "./lib/bindings";
 import {
   withCall,
@@ -30,6 +31,7 @@ import { CatSettingsProvider } from "./lib/cat-settings";
 import { listen } from "@tauri-apps/api/event";
 import { AgentList, AgentDetail } from "./features/overlay/AgentList";
 import { AgentRun } from "./features/overlay/AgentRun";
+import { NotchToast } from "./features/overlay/NotchToast";
 import { CodingAgentComposer } from "./features/overlay/CodingAgentComposer";
 import {
   ListeningCat,
@@ -50,6 +52,9 @@ import {
   AGENT_PREVIEW,
   CARD_PREVIEWS,
   CONTACT_PREVIEW,
+  FINDER_PREVIEWS,
+  TOAST_PREVIEWS,
+  withIcon,
 } from "./features/overlay/previews";
 import { useNotchPanel } from "./features/overlay/useNotchPanel";
 // Streamdown styles the agent's answer with Tailwind utilities — see the
@@ -111,6 +116,14 @@ function Overlay() {
   // Latched once a run has produced words; see `effectiveStyle`.
   const [droppedDown, setDroppedDown] = useState(false);
   const [agent, setAgent] = useState<Run | null>(null);
+  // The confirmation chip a run of writes ends on. Not a panel: it holds no
+  // focus and takes no keys, and it stays mounted through its own exit — it
+  // is cleared only once the collapse has played (the dismissing timer).
+  // Keyed, so a toast replacing another restarts its clock.
+  const [toast, setToast] = useState<{ value: Toast; key: number } | null>(null);
+  const toastKey = useRef(0);
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
   // The notch opened by clicking it rather than by speaking. Its own state
   // because it belongs to no dictation and must survive `run` changing.
   const [browsing, setBrowsing] = useState(false);
@@ -421,6 +434,7 @@ function Overlay() {
     catImages &&
     catImagesDictation &&
     !panelOpen &&
+    toast === null &&
     (phase === "recording" || phase === "transcribing");
 
   /**
@@ -431,14 +445,14 @@ function Overlay() {
    * tab there would undo the drop just watched.
    */
   const effectiveStyle: OverlayStyle =
-    style === "wings" && (droppedDown || panelOpen) ? "dropPill" : style;
+    style === "wings" && (droppedDown || panelOpen || toast !== null) ? "dropPill" : style;
 
   /**
    * Nothing is being said and no panel is up: the notch is just sitting there.
    * This is the state that did not exist before — the window used to be hidden
    * entirely between dictations.
    */
-  const resting = !panelOpen && phase === "idle" && !dismissing;
+  const resting = !panelOpen && phase === "idle" && !dismissing && toast === null;
   const busyCount = sessions.filter((s) => s.busy).length;
   // The ambient sign: what the resting notch shows *without* a hover — a small
   // strip of stage cats left of the camera while agents are busy, or an
@@ -503,7 +517,7 @@ function Overlay() {
   // judging by the body's measured width instead was wrong twice (a
   // `display: none` pill measures 0 with content, an empty body measures its
   // padding without any), so the decision is state, never pixels.
-  const populated = panelOpen || phase !== "idle" || (resting && hovering);
+  const populated = panelOpen || toast !== null || phase !== "idle" || (resting && hovering);
   // The strip owns the click-box only while it is the thing on screen — i.e. at
   // rest, NOT once a hover has grown the notch. Passing bare `ambient` here left
   // the strip's small resting box reported after the panel grew, so the cursor
@@ -575,9 +589,10 @@ function Overlay() {
       if (e.payload === "recording") {
         setError(null);
         // A dictation started over the top of an answer takes the panel back —
-        // including from the agents surface, or the pill and the panel fight
-        // over the same strip.
+        // including from the agents surface and a toast, or the pill and the
+        // panel fight over the same strip.
         setAgent(null);
+        setToast(null);
         setBrowsing(false);
         setSelected(null);
         setPartial("");
@@ -676,7 +691,7 @@ function Overlay() {
           ...AGENT_PREVIEW,
           steps: [AGENT_PREVIEW.steps[0]],
           finished:
-            "Said hi in #launch. The reply to Priya is ready whenever you are.",
+            "Said hi in #launch. The email to David is ready whenever you are.",
         });
       }
       if (command.agent === "pending") {
@@ -791,7 +806,17 @@ function Overlay() {
           },
         });
       }
-      if (command.card) setAgent(CARD_PREVIEWS[command.card]);
+      if (command.card) setAgent(withIcon(CARD_PREVIEWS[command.card], command.icon));
+      if (command.finder) setAgent(FINDER_PREVIEWS[command.finder]);
+      if (command.toast) {
+        const value = TOAST_PREVIEWS[command.toast];
+        setToast({
+          value: command.icon ? { ...value, icon: command.icon } : value,
+          key: ++toastKey.current,
+        });
+        setAgent(null);
+        setDismissing(false);
+      }
       if (command.agent === "close") setAgent(null);
       if (command.partial === "clear") {
         clearInterval(typing);
@@ -816,6 +841,18 @@ function Overlay() {
         case "runStarted":
           // A new run resets the panel; it is reused, not recreated.
           setAgent({ heard: payload.value, steps: [] });
+          setToast(null);
+          break;
+        case "toast":
+          // The run's own panel collapses into it — the notch panel's spring
+          // retargets from the panel's size to the chip's — and a quiet run's
+          // grows out of the cutout. Rust only sends one where no other panel
+          // is being read.
+          setToast({ value: payload.value, key: ++toastKey.current });
+          setAgent(null);
+          setBrowsing(false);
+          setSelected(null);
+          setDismissing(false);
           break;
         case "planned":
           setAgent((r) => r && { ...r, planned: payload.value });
@@ -917,14 +954,34 @@ function Overlay() {
   // cut a no-speech run off dead), so the last real phase is still latched —
   // and a resting notch that re-opens onto a stale "Transcribing…" pill is
   // that latch showing. Collapse settled = the run is over = idle.
+  //
+  // A toast is torn down here too, after its collapse has played and not
+  // before — then Rust is told, which hands the window back (to the listening
+  // wings, or to rest). Told the other way round, a listening bar would swap
+  // its style back under the toast mid-exit and cut it dead.
   useEffect(() => {
     if (!dismissing) return;
     const timer = setTimeout(() => {
       setDismissing(false);
       setPhase("idle");
+      if (toastRef.current) {
+        setToast(null);
+        // The browse close is exactly the toast's: end the panel, nothing
+        // more. `closeAgent` would also decline a gate a newer run has open.
+        try {
+          void commands.closeBrowse();
+        } catch {
+          /* browser preview: no Tauri */
+        }
+      }
     }, 600);
     return () => clearTimeout(timer);
   }, [dismissing]);
+
+  // The toast leaving, by its clock or its ×: the panel collapses into the
+  // notch on its close spring while the chip fades, then the timer above
+  // takes it away.
+  const leaveToast = useCallback(() => setDismissing(true), []);
 
   // Follow the words down as they arrive: past the height cap in overlay.css
   // this is the only thing keeping the newest ones on screen.
@@ -1001,7 +1058,9 @@ function Overlay() {
       // measured cutout height. Never `--idle` while an answer is up, whatever
       // the phase says — `--idle` is `display: none`.
       <div
-        className={`drop-pill drop-pill--${panelOpen ? "answering" : resting ? "resting" : phase}`}
+        className={`drop-pill drop-pill--${
+          panelOpen ? "answering" : toast ? "toast" : resting ? "resting" : phase
+        }`}
         data-hover={resting && hovering ? "" : undefined}
         ref={panel.surface}
         // Only ever reaches the DOM while the pointer is over the panel — Rust
@@ -1025,7 +1084,9 @@ function Overlay() {
           className={`drop-pill__body${
             panelOpen
               ? " drop-pill__body--ask"
-              : resting && hovering
+              : toast
+                ? " drop-pill__body--toast"
+                : resting && hovering
                 ? " drop-pill__body--agents"
                 : transcript
                   ? " drop-pill__body--transcript"
@@ -1124,6 +1185,13 @@ function Overlay() {
                 />
               ) : null}
             </>
+          ) : toast ? (
+            <NotchToast
+              key={toast.key}
+              toast={toast.value}
+              hovering={hovering}
+              onLeave={leaveToast}
+            />
           ) : (
             <>
               {/* The meme is listening while the app is. See ListeningCat. */}
