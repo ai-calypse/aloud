@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notch Styles</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* One panel, five skins. Every variant renders the same markup and the same
+   state; only the theme block changes. Compare like with like. */
+:root {
+  color-scheme: dark;
+  --spring: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --spring: linear(0, 0.0439, 0.1421, 0.2607, 0.3804, 0.4912, 0.5887, 0.6716, 0.7404, 0.7964, 0.8415, 0.8773, 0.9055, 0.9276, 0.9447, 0.9579, 0.9681, 0.9758, 0.9818, 0.9863, 0.9897, 0.9923, 0.9942, 0.9957, 0.9968, 0.9976, 0.9982, 0.9987, 1);
+  --orange: #ff9f0a; --green: #30d158; --red: #ff453a; --teal: #64d2ff;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #0b0b0d; color: #f5f5f7; font: 14px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+button:focus-visible { outline: 2px solid #0a84ff; outline-offset: 2px; }
+
+/* ---- Page chrome ------------------------------------------------------- */
+.top { position: sticky; top: 0; z-index: 50; display: flex; gap: 18px; align-items: center; padding: 12px 20px; background: rgb(11 11 13 / 0.92); border-bottom: 1px solid #1d1d21; }
+.top b { font-weight: 600; }
+.top nav { display: flex; gap: 4px; flex-wrap: wrap; }
+.top a { color: #a1a1a6; text-decoration: none; padding: 5px 10px; border-radius: 7px; font-size: 13px; }
+.top a:hover { color: #fff; background: #1c1c1f; }
+.top .note { margin-left: auto; color: #7c7c82; font-size: 12px; }
+.variant { padding: 34px 20px 10px; max-width: 1140px; margin: 0 auto; scroll-margin-top: 48px; }
+.v-head { display: grid; grid-template-columns: 1fr 1.4fr; gap: 24px; align-items: end; margin-bottom: 14px; }
+.v-head h2 { margin: 0; font: 600 22px/1.2 -apple-system, system-ui; letter-spacing: -0.01em; }
+.v-head h2 span { color: #7c7c82; font-weight: 400; font-size: 14px; margin-left: 8px; }
+.v-head ul { margin: 0; padding: 0; list-style: none; color: #a1a1a6; font-size: 13px; display: grid; gap: 3px; }
+.v-head li b { color: #e5e5ea; font-weight: 500; }
+.desk { position: relative; height: 520px; border-radius: 14px; overflow: hidden;
+  background: radial-gradient(120% 90% at 20% 120%, #3a2f2a 0%, transparent 60%), radial-gradient(90% 80% at 90% 0%, #23303d 0%, transparent 55%), #2a2b30; }
+.menubar { position: absolute; inset: 0 0 auto 0; height: 30px; display: flex; justify-content: space-between; align-items: center; padding: 0 16px; font-size: 13px; color: rgb(255 255 255 / 0.9); background: rgb(0 0 0 / 0.2); }
+.menubar > span { display: flex; gap: 16px; }
+
+/* ---- The panel: shared structure ---------------------------------------- */
+.panel {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: min(780px, calc(100% - 24px)); height: 470px;
+  /* minmax(0,1fr): without it the tab row's min-content widens the panel. */
+  display: grid; grid-template-rows: auto auto 1fr auto; grid-template-columns: minmax(0, 1fr);
+  padding-top: 36px; background: var(--bg); color: var(--fg); font-family: var(--font);
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-shadow: var(--panel-shadow, none);
+}
+/* Welded to the menu bar like the hardware cutout: concave shoulders. */
+.panel::before, .panel::after { content: ""; position: absolute; top: 0; width: 12px; height: 12px; background: radial-gradient(circle at var(--sx) 100%, transparent 11.5px, var(--bg) 12px); }
+.panel::before { left: -12px; --sx: 0; } .panel::after { right: -12px; --sx: 100%; }
+.cutout { position: absolute; top: 0; left: 50%; width: 196px; height: 30px; transform: translateX(-50%); background: #000; border-radius: 0 0 10px 10px; }
+.p-top { display: flex; align-items: center; gap: 8px; padding: 0 14px; }
+.tabs { position: relative; display: flex; gap: var(--tab-gap, 2px); flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--text2); transition: color 160ms ease-out; }
+.tab:hover, .tab[aria-selected="true"] { color: var(--fg); }
+.tab svg { width: 14px; height: 14px; flex: none; display: var(--icon, none); }
+.tab .count, .tab .kbd { display: none; }
+.ind, .sind { position: absolute; left: 0; width: 0; will-change: transform, width; pointer-events: none; }
+.tools { display: flex; gap: 4px; align-items: center; color: var(--text2); }
+.tools button { height: 26px; padding: 0 8px; border-radius: 6px; display: inline-flex; gap: 6px; align-items: center; }
+.tools button:hover { background: var(--field); color: var(--fg); }
+.k { font: 500 11px/1 var(--mono, var(--font)); padding: 3px 5px; border-radius: 4px; background: var(--field); color: var(--text2); }
+.p-sub { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px 0; }
+.subs { position: relative; display: inline-flex; gap: 2px; }
+.sub { position: relative; z-index: 1; white-space: nowrap; color: var(--text2); transition: color 160ms ease-out; }
+.sub:hover, .sub[aria-selected="true"] { color: var(--fg); }
+.status { color: var(--text3); font-size: 12px; white-space: nowrap; font-family: var(--meta-font, var(--font)); }
+.p-body { position: relative; overflow: hidden; padding: 14px 16px 0; }
+.view { position: absolute; inset: 14px 16px 0; overflow: auto; scrollbar-width: none; }
+.view::-webkit-scrollbar { display: none; }
+.p-foot { display: flex; justify-content: space-between; gap: 12px; padding: 9px 16px 11px; color: var(--text3); font-size: 11.5px; border-top: 1px solid var(--sep); font-family: var(--meta-font, var(--font)); }
+.p-foot span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Shared content vocabulary (the views use these). Themes restyle them. */
+.cols { display: grid; grid-template-columns: 1.15fr 1fr; gap: 18px; height: 100%; }
+.lead { font: 600 30px/1.1 var(--display, var(--font)); letter-spacing: var(--lead-track, -0.02em); font-variant-numeric: tabular-nums; }
+.lead-sub { color: var(--text2); margin-top: 4px; font-size: 13px; }
+.label { color: var(--text3); font: 500 11.5px/1.3 var(--meta-font, var(--font)); margin: 0 0 6px; letter-spacing: var(--label-track, 0); }
+.rows { list-style: none; margin: 0; padding: 0; border: var(--rows-border, 0); border-radius: var(--rows-radius, 0); }
+.row { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px var(--row-pad, 2px); border-bottom: 1px solid var(--row-sep, var(--sep)); border-radius: var(--row-radius, 0); }
+.row:last-child { border-bottom: 0; }
+.row:hover { background: var(--row-hover, transparent); }
+.row .grow { flex: 1; min-width: 0; }
+.row .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.row .s { color: var(--text2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .v { color: var(--text2); font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 13px; font-family: var(--num-font, inherit); }
+.ico { width: 26px; height: 26px; border-radius: var(--ico-radius, 7px); display: grid; place-items: center; flex: none; font: 600 11px/1 var(--font); color: #fff; }
+.chip { display: inline-flex; align-items: center; height: var(--chip-h, 22px); padding: 0 9px; border-radius: var(--chip-radius, 999px); background: var(--chip-bg, var(--field)); border: var(--chip-border, 0); color: var(--text2); font: var(--chip-font, 12px/1 var(--font)); white-space: nowrap; }
+.chip--go { background: var(--primary); color: var(--primary-fg); border-color: transparent; font-weight: 600; }
+.chip--ok { color: var(--green); } .chip--warn { color: var(--orange); }
+.btn-quiet { height: 26px; padding: 0 10px; border-radius: var(--btn-radius, 8px); color: var(--text2); font-size: 13px; }
+.btn-quiet:hover { background: var(--field); color: var(--fg); }
+.bar { height: 6px; border-radius: 3px; background: var(--field-hi); overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 3px; background: var(--bar, var(--fg)); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+.tile { display: grid; gap: 6px; justify-items: center; padding: 10px 6px; border-radius: 12px; text-align: center; }
+.tile:hover { background: var(--field); }
+.tile .thumb { width: 54px; height: 54px; border-radius: var(--thumb-radius, 10px); display: grid; place-items: center; font: 600 12px/1 var(--font); color: #fff; }
+.tile span { font-size: 12px; color: var(--text2); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mono { font: 12px/1.55 var(--mono, ui-monospace), monospace; color: var(--fg); white-space: pre; }
+.ring { width: 150px; height: 150px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--ring, var(--orange)) 0 62%, var(--field-hi) 62% 100%); }
+.ring > div { width: 132px; height: 132px; border-radius: 50%; background: var(--bg); display: grid; place-items: center; text-align: center; }
+.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--seg-radius, 999px); background: var(--seg-bg, var(--field)); border: var(--seg-border, 0); }
+.seg span { padding: 4px 11px; border-radius: var(--seg-radius, 999px); color: var(--text2); font-size: 12px; }
+.seg span.on { background: var(--seg-on, var(--field-hi)); color: var(--fg); box-shadow: var(--seg-on-shadow, none); }
+.toggle { width: 34px; height: 20px; border-radius: 10px; background: var(--toggle-off, var(--field-hi)); position: relative; flex: none; }
+.toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--knob, #fff); }
+.toggle.on { background: var(--toggle-on, var(--green)); }
+.toggle.on::after { transform: translateX(14px); background: var(--knob-on, #fff); }
+.slider { flex: 1; height: 4px; border-radius: 2px; background: var(--field-hi); position: relative; }
+.slider i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--fg); }
+.slider i::after { content: ""; display: var(--thumb, none); position: absolute; right: -7px; top: -5px; width: 14px; height: 14px; border-radius: 50%; background: var(--fg); border: 2px solid var(--primary-ring, var(--fg)); }
+.editor { width: 100%; height: 100%; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: 14px/1.6 var(--font); }
+.zone-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.zone { height: 56px; border-radius: 8px; border: 1.5px dashed var(--sep); display: grid; place-items: center; color: var(--text2); font-size: 11.5px; }
+.zone.on { border-style: solid; border-color: var(--primary); background: var(--field-hi); color: var(--fg); }
+.ctls { display: flex; align-items: center; gap: 18px; flex: 1; justify-content: center; }
+.ctl { position: relative; font-size: 15px; color: var(--text3); line-height: 1; }
+.ctl--big { font-size: 20px; color: var(--fg); }
+.ctl[aria-pressed="true"] { color: var(--fg); }
+.ctl[aria-pressed="true"]::after { content: ""; position: absolute; left: 50%; bottom: -7px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--fg); }
+.ctl sup { font-size: 8px; }
+.appvol { display: flex; align-items: center; gap: 8px; width: 120px; color: var(--text2); }
+.fav { width: 30px; height: 30px; border-radius: 50%; background: var(--field); color: var(--text2); font-size: 15px; flex: none; }
+.fav[aria-pressed="true"] { color: #fa586a; background: rgb(250 88 106 / 0.14); }
+.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; height: 92px; }
+.day { display: grid; grid-template-rows: 1fr auto; gap: 5px; justify-items: center; }
+.day .col { width: 100%; max-width: 22px; display: flex; align-items: flex-end; border-radius: 5px; background: var(--field); overflow: hidden; }
+.day .col i { display: block; width: 100%; border-radius: 5px; background: var(--text3); }
+.day span { font-size: 10.5px; color: var(--text3); }
+.day--today .col i { background: var(--ring, var(--orange)); } .day--today span { color: var(--fg); }
+.row--stack { position: relative; margin-bottom: 8px; background: var(--field); border-radius: 10px; padding: 8px 10px; border-bottom: 0; }
+.check { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--text3); flex: none; }
+.check--done { border-color: var(--ring, var(--orange)); background: var(--ring, var(--orange)); }
+.art { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #ff7a59, #a33ea1); flex: none; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--orange); display: inline-block; }
+.eq { display: flex; gap: 2px; align-items: flex-end; height: 12px; }
+.eq i { width: 2px; height: 8px; border-radius: 1px; background: var(--fg); }
+kbd { font: 500 11px/1 var(--mono, var(--font)); color: var(--text2); padding: 3px 5px; border-radius: 4px; background: var(--field); }
+
+/* ======================================================================
+ * 1. Apple system — the current prototype, as the baseline.
+ * ==================================================================== */
+[data-theme="apple"] {
+  --font: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --bg: #000; --fg: #f5f5f7; --text2: #a1a1a6; --text3: #8a8a90;
+  --sep: rgb(255 255 255 / 0.1); --field: rgb(255 255 255 / 0.07); --field-hi: rgb(255 255 255 / 0.13);
+  --primary: #0a84ff; --primary-fg: #fff; --radius: 26px;
+}
+[data-theme="apple"] .p-top { border-bottom: 1px solid var(--sep); }
+[data-theme="apple"] .tab { height: 38px; padding: 0 11px; font-size: 13px; font-weight: 500; }
+[data-theme="apple"] .ind { bottom: 0; height: 2px; border-radius: 2px 2px 0 0; background: var(--fg); }
+[data-theme="apple"] .subs { padding: 3px; border-radius: 999px; background: var(--field); }
+[data-theme="apple"] .sub { height: 26px; padding: 0 12px; border-radius: 999px; font-size: 13px; font-weight: 500; }
+[data-theme="apple"] .sind { top: 3px; height: 26px; border-radius: 999px; background: var(--field-hi); }
+
+/* ======================================================================
+ * 2. Vercel — Geist, pure black, hairlines, inverted buttons, mono meta.
+ * ==================================================================== */
+[data-theme="vercel"] {
+  --font: "Geist", -apple-system, system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
+  --meta-font: var(--mono); --num-font: var(--mono);
+  --bg: #000; --fg: #ededed; --text2: #a1a1a1; --text3: #8f8f8f;
+  --sep: #1f1f1f; --field: #111; --field-hi: #1f1f1f;
+  --primary: #ededed; --primary-fg: #0a0a0a; --radius: 14px;
+  --lead-track: -0.04em; --display: var(--font);
+  --chip-radius: 6px; --chip-bg: transparent; --chip-border: 1px solid #2e2e2e; --chip-font: 500 12px/1 var(--mono); --chip-h: 24px;
+  --btn-radius: 6px; --seg-radius: 6px; --seg-bg: transparent; --seg-border: 1px solid #2e2e2e; --seg-on: #1f1f1f;
+  --toggle-on: #ededed; --knob-on: #0a0a0a; --ring: #ededed; --bar: #ededed;
+  --ico-radius: 6px; --thumb-radius: 8px;
+  --panel-shadow: 0 0 0 1px #1f1f1f;
+}
+[data-theme="vercel"] .p-top { border-bottom: 1px solid var(--sep); }
+[data-theme="vercel"] .tab { height: 40px; padding: 0 10px; font-size: 14px; }
+/* Vercel's nav: a quiet grey hover pill, a white underline for the page you're on. */
+[data-theme="vercel"] .tab::before { content: ""; position: absolute; inset: 7px 1px; border-radius: 6px; background: transparent; transition: background 120ms ease-out; z-index: -1; }
+[data-theme="vercel"] .tab:hover::before { background: #1a1a1a; }
+[data-theme="vercel"] .ind { bottom: -1px; height: 2px; background: var(--fg); }
+[data-theme="vercel"] .subs { border: 1px solid #2e2e2e; border-radius: 6px; padding: 2px; }
+[data-theme="vercel"] .sub { height: 26px; padding: 0 11px; border-radius: 4px; font-size: 13px; }
+[data-theme="vercel"] .sind { top: 2px; height: 26px; border-radius: 4px; background: #1f1f1f; }
+[data-theme="vercel"] .label { text-transform: none; }
+
+/* ======================================================================
+ * 3. Linear — Inter, icon tabs, counts and shortcuts, indigo, quiet rows.
+ * ==================================================================== */
+[data-theme="linear"] {
+  --font: "Inter", -apple-system, system-ui, sans-serif;
+  --bg: #0f1011; --fg: #f7f8f8; --text2: #8a8f98; --text3: #6b7079;
+  --sep: rgb(255 255 255 / 0.06); --field: rgb(255 255 255 / 0.04); --field-hi: rgb(255 255 255 / 0.08);
+  --primary: #5e6ad2; --primary-fg: #fff; --radius: 18px;
+  --icon: block; --tab-gap: 1px;
+  --row-sep: transparent; --row-hover: rgb(255 255 255 / 0.03); --row-radius: 6px; --row-pad: 8px;
+  --chip-radius: 5px; --chip-bg: rgb(255 255 255 / 0.05); --chip-h: 22px; --btn-radius: 6px;
+  --seg-radius: 6px; --toggle-on: #5e6ad2; --ring: #5e6ad2; --bar: #5e6ad2; --lead-track: -0.022em;
+  --panel-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(255 255 255 / 0.05);
+}
+[data-theme="linear"] .p-top { padding-bottom: 2px; }
+[data-theme="linear"] .tab { height: 28px; padding: 0 6px; gap: 5px; border-radius: 6px; font-size: 13px; font-weight: 500; letter-spacing: -0.01em; }
+[data-theme="linear"] .tab .count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 4px; background: var(--primary); color: #fff; font-size: 10.5px; font-weight: 600; }
+[data-theme="linear"] .ind { top: 0; height: 28px; border-radius: 6px; background: var(--field-hi); }
+[data-theme="linear"] .p-sub { padding-top: 8px; }
+[data-theme="linear"] .subs { gap: 4px; }
+[data-theme="linear"] .sub { height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; font-weight: 500; border: 1px solid var(--sep); }
+[data-theme="linear"] .sind { top: 0; height: 24px; border-radius: 6px; background: var(--field-hi); }
+[data-theme="linear"] .p-foot { border-top-color: var(--sep); }
+
+/* ======================================================================
+ * 4. Pure shadcn — zinc, the stock Tabs / ToggleGroup / Badge / Button /
+ *    Switch / Slider, bordered list container.
+ * ==================================================================== */
+[data-theme="shadcn"] {
+  --font: "Geist", -apple-system, system-ui, sans-serif;
+  --bg: #09090b; --fg: #fafafa; --text2: #a1a1aa; --text3: #8b8b94;
+  --sep: #27272a; --field: #18181b; --field-hi: #27272a;
+  --primary: #fafafa; --primary-fg: #18181b; --radius: 16px;
+  --rows-border: 1px solid #27272a; --rows-radius: 10px; --row-pad: 12px;
+  --chip-radius: 6px; --chip-bg: transparent; --chip-border: 1px solid #27272a; --chip-font: 600 12px/1 var(--font); --chip-h: 22px;
+  --btn-radius: 6px; --seg-radius: 6px; --seg-bg: #27272a; --seg-on: #09090b; --seg-on-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  --toggle-off: #27272a; --toggle-on: #fafafa; --knob-on: #09090b; --knob: #09090b;
+  --ring: #fafafa; --bar: #fafafa; --thumb: block; --primary-ring: #fafafa; --lead-track: -0.025em;
+  --panel-shadow: 0 0 0 1px #27272a;
+}
+/* Tabs: a muted track, the active trigger lifted onto the background. */
+[data-theme="shadcn"] .tabs { flex: none; padding: 3px; border-radius: 10px; background: #27272a; }
+[data-theme="shadcn"] .tab { height: 28px; padding: 0 10px; border-radius: 7px; font-size: 13.5px; font-weight: 500; }
+[data-theme="shadcn"] .ind { top: 3px; height: 28px; border-radius: 7px; background: #09090b; border: 1px solid #3f3f46; box-shadow: 0 1px 2px rgb(0 0 0 / 0.4); }
+[data-theme="shadcn"] .p-top { justify-content: space-between; }
+/* ToggleGroup, outline variant: joined buttons with dividers. */
+[data-theme="shadcn"] .subs { gap: 0; border: 1px solid #27272a; border-radius: 8px; overflow: hidden; }
+[data-theme="shadcn"] .sub { height: 30px; padding: 0 12px; font-size: 13px; font-weight: 500; border-left: 1px solid #27272a; }
+[data-theme="shadcn"] .sub:first-of-type { border-left: 0; }
+[data-theme="shadcn"] .sind { top: 0; height: 30px; background: #27272a; }
+[data-theme="shadcn"] .chip--go { height: 30px; padding: 0 12px; border-radius: 6px; font: 500 13px/1 var(--font); }
+[data-theme="shadcn"] .row--stack { border-radius: 0; }
+
+/* ======================================================================
+ * 5. Mix — Vercel's black, hairlines and Geist; Linear's icon tabs, counts
+ *    and shortcuts; shadcn's controls; Apple's springs and the notch weld.
+ * ==================================================================== */
+[data-theme="mix"] {
+  --font: "Geist", -apple-system, system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
+  --meta-font: var(--font); --num-font: var(--mono);
+  --bg: #000; --fg: #f2f2f2; --text2: #a1a1a1; --text3: #8a8a8a;
+  --sep: #1c1c1c; --field: #121212; --field-hi: #222;
+  --primary: #f2f2f2; --primary-fg: #0a0a0a; --radius: 24px;
+  --icon: block; --tab-gap: 2px; --lead-track: -0.035em;
+  --row-hover: #0d0d0d; --row-radius: 8px; --row-pad: 8px;
+  --chip-radius: 6px; --chip-bg: #121212; --chip-border: 1px solid #222; --chip-h: 24px;
+  --btn-radius: 7px; --seg-radius: 7px; --seg-bg: #121212; --seg-border: 1px solid #222; --seg-on: #262626;
+  --toggle-off: #262626; --toggle-on: #f2f2f2; --knob-on: #0a0a0a; --ring: #f2f2f2; --bar: #f2f2f2; --thumb: block; --primary-ring: #000;
+  --ico-radius: 7px; --panel-shadow: 0 0 0 1px #161616;
+}
+[data-theme="mix"] .p-top { border-bottom: 1px solid var(--sep); }
+[data-theme="mix"] .tab { height: 40px; padding: 0 6px; gap: 5px; font-size: 13px; font-weight: 500; }
+[data-theme="mix"] .tab svg { opacity: 0.85; }
+[data-theme="mix"] .tab .count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 4px; background: #f2f2f2; color: #000; font: 600 10.5px/1 var(--mono); }
+[data-theme="mix"] .ind { bottom: -1px; height: 2px; background: var(--fg); }
+[data-theme="mix"] .subs { padding: 3px; border-radius: 9px; background: #121212; border: 1px solid #1f1f1f; }
+[data-theme="mix"] .sub { height: 26px; padding: 0 11px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+[data-theme="mix"] .sind { top: 3px; height: 26px; border-radius: 6px; background: #262626; }
+
+@media (max-width: 860px) { .v-head { grid-template-columns: 1fr; } .cols { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .tab, .sub, .toggle::after { transition: none; } }
+</style>
+</head>
+<body>
+<div class="top">
+  <b>Notch styles</b>
+  <nav><a href="#apple">Apple</a><a href="#vercel">Vercel</a><a href="#linear">Linear</a><a href="#shadcn">shadcn</a><a href="#mix">Mix</a></nav>
+  <span class="note">All five share one state: click a tab in any panel and every panel follows. <kbd>⌘1–9</kbd> <kbd>⇥</kbd></span>
+</div>
+<div id="variants"></div>
+
+<script>
+const SECTIONS = [
+  { id: "now", name: "Now", blurb: "the glance", status: "3 live · Design sync in 25 min", subs: [
+    { id: "overview", name: "Overview", f: [["Multiple Live Activities","M",1]], view: "overview" },
+    { id: "activity", name: "Activity", f: [["Shell Activity","S"],["Developer API","S",1]], view: "activity" },
+  ]},
+  { id: "agents", name: "Agents", blurb: "voice + coding agents", status: "1 waiting for you", subs: [
+    { id: "voice", name: "Voice", f: [["Aloud commands (ours)","—",1]], view: "voice" },
+    { id: "coding", name: "Coding", f: [["Agent Activity","S",1],["Agent Approvals","S",1]], view: "coding" },
+    { id: "usage", name: "Usage", f: [["AI Usage Tracker","S",1]], view: "usage" },
+    { id: "prs", name: "Pull requests", f: [["GitHub PRs","S",1]], view: "prs" },
+    { id: "terminal", name: "Terminal", f: [["Notch Terminal","M"]], view: "terminal" },
+  ]},
+  { id: "media", name: "Media", blurb: "what's playing", status: "Apple Music · AirPods Pro", subs: [
+    { id: "playing", name: "Now Playing", f: [["Now Playing","M",1],["Live Audio Spectrum","M"],["Peek on Hover","S",1]], view: "playing" },
+    { id: "lyrics", name: "Lyrics", f: [["Synced Lyrics","S"]], view: "lyrics" },
+    { id: "sound", name: "Sound", f: [["Audio Switcher","S",1],["Sound Mixer","L"],["Mic Mute","S",1]], view: "sound" },
+    { id: "devices", name: "Devices", f: [["AirPods Manager","M"],["Device Battery","S"]], view: "devices" },
+  ]},
+  { id: "focus", name: "Focus", blurb: "deep work", status: "Focus: Work", subs: [
+    { id: "timer", name: "Timer", f: [["Pomodoro Timer","M"],["Drift-free Stopwatch","S"],["Timer Mascots","S",1]], view: "timer" },
+    { id: "awake", name: "Keep Awake", f: [["Keep Awake","S"],["Focus Mode","M"]], view: "awake" },
+    { id: "notes", name: "Notes", f: [["Quick Notes","S",1]], view: "notes" },
+    { id: "call", name: "Call prep", f: [["Zoom Teleprompter","S"],["Camera Mirror","S"]], view: "call" },
+  ]},
+  { id: "shelf", name: "Shelf", blurb: "files in flight", status: "4 items", subs: [
+    { id: "files", name: "Files", f: [["File Shelf","M",1],["AirDrop from the Shelf","S"],["Image Converter","S"],["Zip & Unzip","S"]], view: "files" },
+    { id: "shots", name: "Screenshots", f: [["Screenshot Shelf","S"],["Screen Capture","S"]], view: "shots" },
+    { id: "downloads", name: "Downloads", f: [["Download Alerts","S"]], view: "downloads" },
+    { id: "drives", name: "Drives", f: [["Drive Eject","S"]], view: "drives" },
+  ]},
+  { id: "clip", name: "Clipboard", blurb: "everything you copied", status: "128 clips · 3 pinned", subs: [
+    { id: "history", name: "History", f: [["Clipboard History","M",1],["Clipboard Smart Actions","S"],["OCR & Search","M"]], view: "history" },
+    { id: "snippets", name: "Snippets", f: [["Text Snippets","S"]], view: "snippets" },
+    { id: "colors", name: "Colors", f: [["Color Eyedropper","S"]], view: "colors" },
+  ]},
+  { id: "today", name: "Today", blurb: "time and the world", status: "21° · 3 events", subs: [
+    { id: "calendar", name: "Calendar", f: [["Menu Bar Calendar","S"]], view: "calendar" },
+    { id: "reminders", name: "Reminders", f: [["Apple Reminders","S",1]], view: "reminders" },
+    { id: "weather", name: "Weather", f: [["Live Weather","S"]], view: "weather" },
+    { id: "stocks", name: "Stocks", f: [["Stocks Ticker","S"]], view: "stocks" },
+    { id: "inbox", name: "Inbox", f: [["Notification Mirror","M"]], view: "inbox" },
+  ]},
+  { id: "mac", name: "Mac", blurb: "the machine", status: "CPU 18% · 82%", subs: [
+    { id: "stats", name: "Stats", f: [["System Stats","S"]], view: "stats" },
+    { id: "power", name: "Power", f: [["Full Charge Island","S"]], view: "power" },
+    { id: "privacy", name: "Privacy", f: [["Privacy Indicator","S"]], view: "privacy" },
+    { id: "windows", name: "Windows", f: [["Window Snapping","M",1]], view: "windows" },
+    { id: "display", name: "Display", f: [["Keyboard Backlight","M"],["External Display Control","L"]], view: "display" },
+    { id: "menubar", name: "Menu bar", f: [["Menu Bar Icon Hiding","M"],["Menu Bar Detach","M"]], view: "menubar" },
+  ]},
+  { id: "launch", name: "Launch", blurb: "start anything", status: "", subs: [
+    { id: "apps", name: "Apps", f: [["App Launcher","S",1]], view: "apps" },
+    { id: "shortcuts", name: "Shortcuts", f: [["Apple Shortcuts","S",1]], view: "shortcuts" },
+    { id: "search", name: "Search", f: [["Search & Translate","S"],["Command Palette","M"]], view: "search" },
+  ]},
+];
+
+const ic = (bg, t) => `<span class="ico" style="background:${bg}">${t}</span>`;
+const row = (lead, t, s, v) => `<li class="row">${lead || ""}<div class="grow"><div class="t">${t}</div>${s ? `<div class="s">${s}</div>` : ""}</div>${v || ""}</li>`;
+const VIEWS = {
+  overview: () => `<div class="cols"><div><p class="label">Live now</p><ul class="rows">
+      ${row('<span class="art" style="width:26px;height:26px;border-radius:7px"></span>', "Blinding Lights", "The Weeknd · Spotify", '<span class="v">1:42 / 3:20</span>')}
+      ${row(ic("#ff9f0a", "◷"), "Focus session", "2 of 4 · ends 10:24", '<span class="v">18:42</span>')}
+      ${row(ic("#1c1c1e;border:1px solid var(--sep)", "C"), "Claude · aloud-tauri", "Wants to run cargo test", '<span class="chip chip--go">Review</span>')}
+      ${row(ic("#30d158", "↓"), "report-q3.pdf", "Downloading · 74%", '<span class="v">12 MB</span>')}
+    </ul></div><div><p class="label">Next</p><div class="lead">2:30 PM</div><div class="lead-sub">Design sync · in 25 min · Zoom</div>
+    <ul class="rows" style="margin-top:14px">${row(ic("#64d2ff", "☀"), "21° Partly cloudy", "High 24° · rain at 6 PM")}${row(ic("#30d158", "⚡"), "Battery 82%", "About 6 hrs left")}</ul></div></div>`,
+  activity: () => `<p class="label">Long-running, from your shell and scripts</p><ul class="rows">
+      ${row(ic("#2c2c2e", "$"), "pnpm build", "aloud-tauri · 1m 12s", '<span class="chip">Running</span>')}
+      ${row(ic("#2c2c2e", "$"), "cargo test --workspace", "Finished · 544 passed", '<span class="chip chip--ok">Done</span>')}
+      ${row(ic("#5e5ce6", "API"), "deploy.sh → Developer API", "Posted “Deploy finished” 4m ago", '<span class="v">4m</span>')}</ul>`,
+  voice: () => `<div class="cols"><div><p class="label">Last command</p><div style="font-size:15px;font-weight:500">“email david the project update and ask to sync thursday”</div>
+      <ul class="rows" style="margin-top:10px">${row('<span style="color:var(--green)">✓</span>', "Drafted an email to david@company.com")}${row('<span style="color:var(--orange)">!</span>', "Sending an email to david", "", '<span class="chip">Needs approval</span>')}</ul></div>
+      <div><p class="label">Earlier</p><ul class="rows">${row("", "Took 3 photos", "Photo Booth · 9:12 AM")}${row("", "Created note Groceries", "Notes · 9:03 AM")}${row("", "Opened aloud-tauri in Cursor", "8:51 AM")}</ul></div></div>`,
+  coding: () => `<ul class="rows">
+      ${row(ic("#d97757", "C"), "Claude · aloud-tauri", "Wants to run: cargo test --workspace", '<span style="display:flex;gap:6px"><button class="btn-quiet">Deny</button><span class="chip chip--go">Allow</span></span>')}
+      ${row(ic("#10a37f", "X"), "Codex · website", "Editing faq.tsx · turn 6 · $0.42", '<span class="chip">Working</span>')}
+      ${row(ic("#d97757", "C"), "Claude · evals", "Finished · 12 turns · $1.10", '<span class="chip chip--ok">Done</span>')}</ul>`,
+  usage: () => `<div class="cols"><div><p class="label">Claude · 5-hour window</p><div class="lead">42%</div><div class="lead-sub">Resets 11:40 AM</div><div class="bar" style="margin-top:10px"><i style="width:42%"></i></div></div>
+      <div><ul class="rows">${row("", "Weekly", "Resets Mon", '<span class="v">61%</span>')}${row("", "Codex", "Plus plan", '<span class="v">18%</span>')}${row("", "Cursor", "Pro · fast requests", '<span class="v">203 / 500</span>')}</ul></div></div>`,
+  prs: () => `<ul class="rows">${row(ic("#2c2c2e", "#61"), "Gate replies: revisioned answers", "ai-calypse/aloud · checks passing", '<span class="chip chip--ok">Ready</span>')}${row(ic("#2c2c2e", "#62"), "Parallel steps in a round", "1 review requested", '<span class="chip chip--warn">Review</span>')}${row(ic("#2c2c2e", "#63"), "App-style previews", "Checks failing: clippy", '<span class="chip" style="color:var(--red)">Failing</span>')}</ul>`,
+  terminal: () => `<div class="mono">~/aloud-tauri on main
+❯ cargo test -p aloud-agent preview
+   Compiling aloud-agent v0.1.0
+    Finished test profile in 6.2s
+test result: ok. 42 passed; 0 failed
+❯ <span style="background:var(--fg);color:#000"> </span></div>`,
+  playing: () => `<div style="display:flex;gap:18px">
+      <div style="width:132px;height:132px;border-radius:14px;background:linear-gradient(135deg,#fa233b,#fb5c74);flex:none"></div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:flex-start;gap:10px"><div style="flex:1;min-width:0"><div class="lead" style="font-size:24px">Blinding Lights</div><div class="lead-sub">The Weeknd · After Hours · <span style="color:#fa586a">Apple Music</span></div></div>
+          <button class="fav" aria-pressed="true" aria-label="Favorite in Apple Music" title="Favorite in Apple Music">♥</button></div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px"><span class="v" style="color:var(--text2);font-size:12px">1:42</span><div class="slider"><i style="width:51%"></i></div><span class="v" style="color:var(--text2);font-size:12px">−1:38</span></div>
+        <div style="display:flex;align-items:center;margin-top:10px">
+          <div class="ctls"><button class="ctl" aria-pressed="true" aria-label="Shuffle" title="Shuffle">⤮</button><button class="ctl ctl--big" aria-label="Previous">⏮</button><button class="ctl ctl--big" aria-label="Pause">⏸</button><button class="ctl ctl--big" aria-label="Next">⏭</button><button class="ctl" aria-pressed="true" aria-label="Repeat one" title="Repeat one">↻<sup>1</sup></button></div>
+          <div class="appvol" title="Apple Music's own volume, not the system's"><span aria-hidden="true">🔈</span><div class="slider"><i style="width:64%"></i></div></div>
+        </div>
+      </div></div>
+      <ul class="rows" style="margin-top:12px;border-top:1px solid var(--sep)">${row(ic("#fb542b", "▶"), "Rust ownership in 10 minutes", "Brave · YouTube · 4:12 / 10:03", '<div class="seg" role="group" aria-label="Playback speed"><span>1×</span><span>1.25×</span><span class="on">1.5×</span><span>2×</span></div>')}</ul>`,
+  lyrics: () => `<div style="display:grid;gap:10px;font:600 20px/1.3 -apple-system,system-ui;letter-spacing:-0.01em">
+      <div style="color:var(--text3)">I've been tryna call</div><div style="color:var(--text3)">I've been on my own for long enough</div><div>Maybe you can show me how to love, maybe</div><div style="color:var(--text3)">I'm going through withdrawals</div></div><p class="label" style="margin-top:14px">Synced · LRCLIB</p>`,
+  sound: () => `<div class="cols"><div><p class="label">Output</p><ul class="rows">${row("", "AirPods Pro", "Connected", '<span style="color:var(--action)">●</span>')}${row("", "MacBook Pro Speakers", "")}${row("", "Studio Display", "")}</ul>
+      <ul class="rows" style="margin-top:8px">${row("", "Mute microphone", "Every meeting app at once", '<span class="toggle"></span>')}</ul></div>
+      <div><p class="label">Per app</p><ul class="rows">${row("", "Spotify", "", '<div class="slider" style="max-width:120px"><i style="width:70%"></i></div>')}${row("", "Zoom", "", '<div class="slider" style="max-width:120px"><i style="width:90%"></i></div>')}${row("", "Chrome", "", '<div class="slider" style="max-width:120px"><i style="width:35%"></i></div>')}</ul></div></div>`,
+  devices: () => `<div class="cols"><div><p class="label">AirPods Pro</p><div style="display:flex;gap:22px"><div><div class="lead">88%</div><div class="lead-sub">Left</div></div><div><div class="lead">91%</div><div class="lead-sub">Right</div></div><div><div class="lead">54%</div><div class="lead-sub">Case</div></div></div></div>
+      <div><ul class="rows">${row("", "Magic Keyboard", "", '<span class="v">76%</span>')}${row("", "Magic Mouse", "Charge soon", '<span class="v" style="color:var(--orange)">12%</span>')}${row("", "Sony WH-1000XM5", "", '<span class="v">63%</span>')}</ul></div></div>`,
+  timer: () => `<div style="display:flex;gap:26px;align-items:center;height:100%"><div class="ring"><div><div class="lead">18:42</div><div class="lead-sub">Focus 2 of 4</div></div></div>
+      <div style="flex:1;min-width:0"><div class="seg"><span class="on">Pomodoro</span><span>Stopwatch</span></div>
+      <p class="label" style="margin-top:14px">Last 7 days · 🔥 5-day streak</p>
+      <div class="week" role="img" aria-label="Focus minutes, last 7 days">${[["Sun",40],["Mon",95],["Tue",120],["Wed",70],["Thu",150],["Fri",110],["Sat",75,1]].map(([d,m,today])=>`<div class="day${today?" day--today":""}"><div class="col"><i style="height:${Math.round(m/150*100)}%" title="${m} min"></i></div><span>${d}</span></div>`).join("")}</div>
+      <div style="display:flex;gap:8px;margin-top:10px"><span class="chip chip--go">Pause</span><button class="btn-quiet">Skip</button><button class="btn-quiet">Reset</button></div></div></div>`,
+  awake: () => `<div class="lead">Awake</div><div class="lead-sub">Until 11:30 AM · display stays on</div><div class="seg" style="margin-top:14px"><span>Off</span><span>30 min</span><span class="on">2 hrs</span><span>Until…</span><span>Always</span></div>
+      <ul class="rows" style="margin-top:14px">${row("", "Focus", "Work · silences low-priority islands", '<span class="toggle on"></span>')}</ul>`,
+  notes: () => `<textarea class="editor" aria-label="Quick note">Ship checklist
+- push main
+- tag v0.4
+- tell Maya the deck is in Drive</textarea>`,
+  call: () => `<div class="cols"><div><p class="label">Teleprompter · under the camera</p><div style="font:500 17px/1.6 -apple-system,system-ui">Thanks everyone. Quick update: approvals now count down, and voice replies work on every card…</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap"><div class="seg"><span>Slow</span><span class="on">Medium</span><span>Fast</span></div><button class="btn-quiet" data-detach>⇱ Detach to menu bar</button></div></div>
+      <div><p class="label">Camera mirror</p><div style="aspect-ratio:4/3;border-radius:12px;background:linear-gradient(160deg,#3b3b40,#1d1d20);display:grid;place-items:center;color:var(--text3)">Camera preview</div></div></div>`,
+  files: () => `<div class="tiles">${[["#64d2ff","PDF","deck.pdf"],["#30d158","XLS","budget.xlsx"],["#bf5af2","PNG","hero@2x.png"],["#ff9f0a","ZIP","assets.zip"]].map(([c,k,n])=>`<div class="tile"><div class="thumb" style="background:${c}">${k}</div><span>${n}</span></div>`).join("")}</div>
+      <div style="display:flex;gap:8px;margin-top:12px"><span class="chip">AirDrop</span><span class="chip">Convert to JPEG</span><span class="chip">Zip</span><span class="chip">Clear</span></div>`,
+  shots: () => `<div class="tiles">${["9:31","9:18","Yesterday","Yesterday"].map(t=>`<div class="tile"><div class="thumb" style="background:linear-gradient(135deg,#2f3540,#1c1d22);width:84px">▭</div><span>Screenshot ${t}</span></div>`).join("")}</div><div style="margin-top:10px"><span class="chip">Capture region</span></div>`,
+  downloads: () => `<ul class="rows">${row(ic("#30d158", "↓"), "report-q3.pdf", "Chrome · 74%", '<div class="bar" style="width:110px"><i style="width:74%"></i></div>')}${row(ic("#64d2ff", "✓"), "invoice-0912.pdf", "Safari · just now", '<button class="btn-quiet">Reveal</button>')}${row(ic("#64d2ff", "✓"), "Figma.dmg", "Brave · 2h ago", '<button class="btn-quiet">Reveal</button>')}</ul>`,
+  drives: () => `<ul class="rows">${row(ic("#8e8e93", "⏏"), "Backup SSD", "512 GB · 41% used", '<span class="chip chip--go">Eject</span>')}${row(ic("#8e8e93", "⏏"), "SD Card", "Safe to disconnect", '<span class="chip chip--ok">Ejected</span>')}</ul>`,
+  history: () => `<input class="chip" style="width:100%;height:30px;border:0;outline:0;color:var(--fg);font-size:13px;margin-bottom:6px" placeholder="Search clips, including text inside images" aria-label="Search clips">
+      <ul class="rows">${row("", "Auto-paste into the front app", "Pick a clip and it lands in Cursor, no ⌘V", '<span class="toggle on"></span>')}
+      <li class="row row--stack">${ic("#5e5ce6", "3")}<div class="grow"><div class="t">3 clips, copied in a burst</div><div class="s">221B Baker St · +44 20 7946 0958 · sherlock@bakerst.co</div></div><span style="display:flex;gap:6px"><button class="btn-quiet">Expand</button><span class="chip chip--go">Paste all</span></span></li>
+      ${row(ic("#0a84ff", "↗"), "https://notchy.dev/#features", "Link · 2m", '<span class="chip">Open</span>')}${row('<span class="ico" style="background:#ff7a59"></span>', "#FF7A59", "Color · 6m", '<span class="chip">Copy hex</span>')}${row(ic("#2c2c2e", "T"), "Screenshot 9:31 · “Q3 revenue grew 12%”", "Image · text found", '<span class="v">📌</span>')}</ul>`,
+  snippets: () => `<ul class="rows">${row("", "Address", "221B Baker Street, London", '<kbd>;addr</kbd>')}${row("", "Thanks reply", "Thanks! I'll take a look today.", '<kbd>;ty</kbd>')}${row("", "PR template", "## What · ## Verified · ## Not verified", '<kbd>;pr</kbd>')}</ul>`,
+  colors: () => `<div style="display:flex;gap:10px;flex-wrap:wrap">${["#FF7A59","#0A84FF","#30D158","#1C1C1E","#F5F5F7","#BF5AF2"].map(c=>`<div style="display:grid;gap:6px;justify-items:center"><div style="width:52px;height:52px;border-radius:12px;background:${c};border:1px solid var(--sep)"></div><span style="font-size:11.5px;color:var(--text2)">${c}</span></div>`).join("")}</div><div style="margin-top:12px"><span class="chip chip--go">Pick a color</span></div>`,
+  calendar: () => `<ul class="rows">${row('<span class="v" style="width:62px">9:30 AM</span>', "Standup", "Google Meet")}${row('<span class="v" style="width:62px;color:var(--fg)">2:30 PM</span>', "Design sync", "Zoom · in 25 min", '<span class="chip chip--go">Join</span>')}${row('<span class="v" style="width:62px">5:00 PM</span>', "Gym", "")}</ul>`,
+  reminders: () => `<ul class="rows">${row('<span class="check"></span>', "Send Maya the deck", '<span style="color:var(--orange)">Due now</span>', '<span style="display:flex;gap:6px"><button class="btn-quiet">Done</button><span class="chip chip--go">Snooze 10 min</span></span>')}${row('<span class="check"></span>', "Renew passport", "Friday", '<button class="btn-quiet">Snooze</button>')}${row('<span class="check check--done"></span>', "Book flights", "Done", "")}</ul>`,
+  weather: () => `<div style="display:flex;gap:24px;align-items:flex-end"><div><div class="lead" style="font-size:44px">21°</div><div class="lead-sub">Partly cloudy · Toronto</div></div>
+      <div style="display:flex;gap:16px;color:var(--text2);font-size:12px;text-align:center">${[["Now","21°"],["11","22°"],["12","23°"],["1","24°"],["2","23°"],["6","☂ 18°"]].map(([h,t])=>`<div><div>${h}</div><div style="color:var(--fg);font-weight:600;margin-top:4px">${t}</div></div>`).join("")}</div></div>`,
+  stocks: () => `<ul class="rows">${row("", "AAPL", "Apple · pre-market", '<span class="v">232.14 <span style="color:var(--green)">+0.8%</span></span>')}${row("", "NVDA", "NVIDIA", '<span class="v">141.02 <span style="color:var(--red)">−1.2%</span></span>')}${row("", "BTC", "Bitcoin", '<span class="v">68,210 <span style="color:var(--green)">+2.1%</span></span>')}</ul>`,
+  inbox: () => `<ul class="rows">${row(ic("#30d158", "✉"), "Suhani", "Messages · “on my way!”", '<button class="btn-quiet">Reply</button>')}${row(ic("#4a154b", "#"), "#launch", "Slack · Alex: shipping at 3")}${row(ic("#0a84ff", "↓"), "Download finished", "invoice-0912.pdf")}</ul>`,
+  stats: () => `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">${[["CPU","18%",18],["Memory","11.2 GB",62],["Network","↓ 4.1 MB/s",34]].map(([k,v,p])=>`<div><p class="label">${k}</p><div class="lead" style="font-size:24px">${v}</div><div class="bar" style="margin-top:8px"><i style="width:${p}%"></i></div></div>`).join("")}</div>`,
+  power: () => `<div class="lead">82%</div><div class="lead-sub">On battery · about 6 hrs left</div><ul class="rows" style="margin-top:12px">${row("", "Full-charge island at", "Tells you when to unplug", '<div class="seg"><span>80%</span><span class="on">90%</span><span>100%</span></div>')}${row("", "Low-battery sound", "", '<span class="toggle on"></span>')}</ul>`,
+  privacy: () => `<ul class="rows">${row('<span class="dot" style="background:var(--orange)"></span>', "Microphone in use", "Zoom · 12 min")}${row('<span class="dot" style="background:var(--field-hi)"></span>', "Camera off", "")}</ul>`,
+  windows: () => `<p class="label">Drag a window to the notch, release on a zone</p><div class="zone-grid"><div class="zone">Left half</div><div class="zone on">Right half</div><div class="zone">Full</div><div class="zone">Center</div><div class="zone">Top left</div><div class="zone">Top right</div><div class="zone">Bottom left</div><div class="zone">Bottom right</div></div>`,
+  display: () => `<ul class="rows">${row("", "Built-in display", "", '<div class="slider" style="max-width:160px"><i style="width:70%"></i></div>')}${row("", "Studio Display", "DDC/CI", '<div class="slider" style="max-width:160px"><i style="width:55%"></i></div>')}${row("", "Keyboard backlight", "", '<div class="slider" style="max-width:160px"><i style="width:30%"></i></div>')}</ul>`,
+  menubar: () => `<ul class="rows">${row("", "Hide menu bar icons", "⌘-drag icons past the divider", '<span class="toggle on"></span>')}${row("", "Detach Clipboard to the menu bar", "", '<span class="toggle"></span>')}${row("", "Detach Timer to the menu bar", "", '<span class="toggle on"></span>')}</ul>`,
+  apps: () => `<div class="tiles">${[["#0a84ff","Cursor"],["#30d158","Messages"],["#ff9f0a","Notes"],["#5e5ce6","Linear"],["#1db954","Spotify"],["#e01e5a","Slack"]].map(([c,n])=>`<div class="tile"><div class="thumb" style="background:${c}">${n[0]}</div><span>${n}</span></div>`).join("")}</div>`,
+  shortcuts: () => `<div style="display:flex;gap:8px;flex-wrap:wrap">${["Start my day","Log water","Focus 25","Resize images","Share Wi-Fi"].map((s,i)=>`<span class="chip" style="height:30px;padding:0 12px;${i===2?"color:var(--fg)":""}">${i===2?"◌ ":""}${s}</span>`).join("")}</div>`,
+  search: () => `<input class="chip" style="width:100%;height:34px;border:0;outline:0;color:var(--fg);font-size:14px" placeholder="Search, translate, calculate or paste a video link" aria-label="Search">
+      <ul class="rows" style="margin-top:6px">${row("", "15% of 80", "Calculator", '<span class="v" style="color:var(--fg)">12</span>')}${row("", "“good morning” in Japanese", "Translate", '<span class="v" style="color:var(--fg)">おはようございます</span>')}${row(ic("#ff0033", "▶"), "youtu.be/dQw4w9WgXcQ", "Video link · saves with yt-dlp, opt-in in Settings", '<span style="display:flex;gap:6px;align-items:center"><div class="seg"><span class="on">MP4 1080p</span><span>Audio</span></div><span class="chip chip--go">Save</span></span>')}${row("", "Search Kagi for “tauri overlay”", "Search", '<kbd>↩</kbd>')}</ul>`,
+};
+
+
+const VARIANTS = [
+  { id: "apple", name: "Apple system", tag: "current prototype", traits: [
+    ["Feel", "shipped with macOS: system font, Control Center calm"],
+    ["Navigation", "underline tabs, rounded segmented subsections"],
+    ["Colour", "black, white selection, system blue on actions"],
+    ["Risk", "the least distinctive; it's the platform's look"]] },
+  { id: "vercel", name: "Vercel", tag: "Geist · stark", traits: [
+    ["Feel", "precise and editorial: Geist, pure black, 1px hairlines"],
+    ["Navigation", "text tabs with a grey hover pill and a white underline"],
+    ["Colour", "monochrome; primary buttons are inverted white"],
+    ["Risk", "mono meta text everywhere can read as a dev dashboard"]] },
+  { id: "linear", name: "Linear", tag: "Inter · dense", traits: [
+    ["Feel", "fast, keyboard-first, quietly premium"],
+    ["Navigation", "icon + label pills, counts on tabs that need you"],
+    ["Colour", "near-black with a lit top edge, indigo as the one accent"],
+    ["Risk", "indigo competes with app icons; rows lose their hairlines"]] },
+  { id: "shadcn", name: "Pure shadcn", tag: "zinc · stock components", traits: [
+    ["Feel", "familiar web-app: the components a React dev already knows"],
+    ["Navigation", "Tabs on a muted track; ToggleGroup for subsections"],
+    ["Colour", "zinc greys, white primary, bordered list containers"],
+    ["Risk", "reads as a website in a notch, not part of macOS"]] },
+  { id: "mix", name: "Mix", tag: "recommended", traits: [
+    ["From Vercel", "pure black, hairlines, Geist, white primary"],
+    ["From Linear", "icon tabs, and counts on the tabs that need you"],
+    ["From shadcn", "Switch, Slider thumb, bordered segmented control"],
+    ["From Apple", "the notch weld, springs, system-calm spacing"]] },
+];
+const ICONS = {
+  now: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  agents: '<rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4M8 16h.01M16 16h.01"/>',
+  media: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  focus: '<path d="M10 2h4M12 14l3-3"/><circle cx="12" cy="14" r="8"/>',
+  shelf: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  clip: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+  today: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  mac: '<path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"/>',
+  launch: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
+};
+const COUNTS = { agents: 1, shelf: 4 };
+
+/* A live spring per indicator: a retarget mid-flight keeps its velocity. */
+const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+function spring(apply, response = 0.31) {
+  const k = (2 * Math.PI / response) ** 2, c = 2 * Math.sqrt(k);
+  let x = null, v = null, target = null, raf = 0, last = 0;
+  const step = (now) => {
+    const dt = Math.min(0.032, (now - last) / 1000); last = now;
+    let moving = false;
+    for (let i = 0; i < x.length; i++) {
+      v[i] += (-k * (x[i] - target[i]) - c * v[i]) * dt; x[i] += v[i] * dt;
+      if (Math.abs(v[i]) > 0.05 || Math.abs(x[i] - target[i]) > 0.05) moving = true;
+    }
+    if (!moving) { x = target.slice(); v = v.map(() => 0); }
+    apply(x); raf = moving ? requestAnimationFrame(step) : 0;
+  };
+  return (to, jump) => {
+    target = to.slice();
+    if (x === null || jump || reduce.matches) { x = to.slice(); v = to.map(() => 0); apply(x); return; }
+    if (!raf) { last = performance.now(); raf = requestAnimationFrame(step); }
+  };
+}
+
+let sec = 2, subs = SECTIONS.map(() => 0);
+const panels = [];
+const root = document.getElementById("variants");
+for (const v of VARIANTS) {
+  const el = document.createElement("section");
+  el.className = "variant"; el.id = v.id;
+  el.innerHTML = `<div class="v-head"><h2>${v.name}<span>${v.tag}</span></h2><ul>${v.traits.map(([k, t]) => `<li><b>${k}:</b> ${t}</li>`).join("")}</ul></div>
+    <div class="desk"><div class="menubar"><span><b>Cursor</b><span>File</span><span>Edit</span><span>View</span></span><span><span>82%</span><span>Sat 9:41 AM</span></span></div>
+      <div class="panel" data-theme="${v.id}">
+        <div class="p-top"><nav class="tabs" role="tablist"><span class="ind"></span>${SECTIONS.map((s, i) => `<button class="tab" role="tab" data-i="${i}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[s.id]}</svg>${s.name}${COUNTS[s.id] ? `<span class="count">${COUNTS[s.id]}</span>` : ""}<span class="kbd">⌘${i + 1}</span></button>`).join("")}</nav>
+          <div class="tools"><button aria-label="Search">⌕ <span class="k">⌘K</span></button></div></div>
+        <div class="p-sub"><div class="subs" role="tablist"><span class="sind"></span></div><span class="status"></span></div>
+        <div class="p-body"></div>
+        <div class="p-foot"><span class="inc"></span><span><kbd>⌘1–9</kbd> sections · <kbd>⇥</kbd> next · <kbd>esc</kbd> close</span></div>
+      </div><div class="cutout"></div></div>`;
+  root.appendChild(el);
+  const p = {
+    el, tabs: el.querySelector(".tabs"), subs: el.querySelector(".subs"), body: el.querySelector(".p-body"),
+    status: el.querySelector(".status"), inc: el.querySelector(".inc"),
+  };
+  p.ind = spring(([x, w]) => { const n = el.querySelector(".ind"); n.style.transform = `translateX(${x}px)`; n.style.width = `${w}px`; });
+  p.sind = spring(([x, w]) => { const n = el.querySelector(".sind"); n.style.transform = `translateX(${x}px)`; n.style.width = `${w}px`; });
+  p.tabs.addEventListener("click", (e) => { const b = e.target.closest(".tab"); if (b) go(+b.dataset.i); });
+  p.subs.addEventListener("click", (e) => { const b = e.target.closest(".sub"); if (b) goSub(+b.dataset.j); });
+  panels.push(p);
+}
+
+function place(p, jump) {
+  const tab = p.tabs.querySelector(`.tab[data-i="${sec}"]`);
+  // Underline themes inset the bar from the label; pill themes cover the tab.
+  const theme = p.el.querySelector(".panel").dataset.theme;
+  const inset = theme === "apple" ? 10 : theme === "vercel" ? 8 : theme === "mix" ? 5 : 0;
+  p.ind([tab.offsetLeft + inset, tab.offsetWidth - inset * 2], jump);
+  const sub = p.subs.querySelector(".sub[aria-selected='true']");
+  if (sub) p.sind([sub.offsetLeft, sub.offsetWidth], jump);
+}
+function render(jump) {
+  const s = SECTIONS[sec], sub = s.subs[subs[sec]];
+  for (const p of panels) {
+    p.tabs.querySelectorAll(".tab").forEach((b) => b.setAttribute("aria-selected", +b.dataset.i === sec));
+    p.subs.querySelectorAll(".sub").forEach((n) => n.remove());
+    s.subs.forEach((x, j) => p.subs.insertAdjacentHTML("beforeend", `<button class="sub" role="tab" data-j="${j}" aria-selected="${j === subs[sec]}">${x.name}</button>`));
+    p.status.textContent = s.status;
+    p.inc.textContent = "Includes: " + sub.f.map((f) => f[0]).join(" · ");
+    const view = document.createElement("div");
+    view.className = "view"; view.innerHTML = VIEWS[sub.view]();
+    const old = p.body.querySelector(".view");
+    p.body.appendChild(view);
+    if (old) old.remove();
+    if (!jump && !reduce.matches) view.animate([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], { duration: 220, easing: "cubic-bezier(0.22,0.61,0.36,1)" });
+  }
+  requestAnimationFrame(() => panels.forEach((p) => place(p, jump)));
+}
+function go(i) { sec = (i + SECTIONS.length) % SECTIONS.length; render(false); }
+function goSub(j) { const n = SECTIONS[sec].subs.length; subs[sec] = (j + n) % n; render(false); }
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) { e.preventDefault(); go(+e.key - 1); }
+  else if (e.key === "Tab" && !e.target.closest("input, textarea")) { e.preventDefault(); goSub(subs[sec] + (e.shiftKey ? -1 : 1)); }
+});
+document.fonts.ready.then(() => render(true));
+render(true);
+addEventListener("resize", () => panels.forEach((p) => place(p, true)));
+</script>
+</body>
+</html>
