@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import { NOTCH_FOCUS } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +40,7 @@ export function Row({
   onClick,
   selected,
   className,
+  pointer,
 }: {
   lead?: ReactNode;
   title: ReactNode;
@@ -48,6 +49,8 @@ export function Row({
   onClick?: () => void;
   selected?: boolean;
   className?: string;
+  /** Pointer handlers for the whole row — what arms a drag out of it. */
+  pointer?: Pick<HTMLAttributes<HTMLLIElement>, "onMouseDown" | "onMouseUp">;
 }) {
   const body = (
     <>
@@ -69,7 +72,7 @@ export function Row({
   return (
     // The hairline is the item's own border, not a divider element, so a
     // conditional row leaves no stray line behind (as in ui/rows).
-    <li className={cn("border-b border-notch-sep last:border-b-0", className)}>
+    <li className={cn("border-b border-notch-sep last:border-b-0", className)} {...pointer}>
       {onClick ? (
         <button
           type="button"

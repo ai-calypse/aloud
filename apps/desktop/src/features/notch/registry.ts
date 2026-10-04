@@ -12,6 +12,7 @@ import {
 import { readySections, type Section } from "./sections";
 import { AgentsCoding, AgentsUsage, AgentsVoice } from "./views/Agents";
 import { NowOverview } from "./views/Now";
+import { ShelfDownloads, ShelfDrives, ShelfFiles, ShelfShots } from "./views/Shelf";
 
 /**
  * Every section of the notch panel and every subsection in it, in tab order —
@@ -94,10 +95,22 @@ export const SECTIONS: Section[] = [
     name: "Shelf",
     icon: InboxIcon,
     subsections: [
-      { id: "files", name: "Files", features: ["File shelf", "AirDrop", "Image converter", "Zip"], ready: false },
-      { id: "shots", name: "Screenshots", features: ["Screenshot shelf", "Screen capture"], ready: false },
-      { id: "downloads", name: "Downloads", features: ["Download alerts"], ready: false },
-      { id: "drives", name: "Drives", features: ["Drive eject"], ready: false },
+      {
+        id: "files",
+        name: "Files",
+        features: ["File shelf", "AirDrop", "Image converter", "Zip"],
+        ready: true,
+        view: ShelfFiles,
+      },
+      {
+        id: "shots",
+        name: "Screenshots",
+        features: ["Screenshot shelf", "Screen capture"],
+        ready: true,
+        view: ShelfShots,
+      },
+      { id: "downloads", name: "Downloads", features: ["Download alerts"], ready: true, view: ShelfDownloads },
+      { id: "drives", name: "Drives", features: ["Drive eject"], ready: true, view: ShelfDrives },
     ],
   },
   {
