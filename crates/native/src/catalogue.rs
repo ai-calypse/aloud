@@ -58,7 +58,7 @@ fn frontmost_is(bundle: &Path) -> bool {
 ///
 /// ponytail: an underscored key riding in the model's arguments; a `Context`
 /// parameter on `Action::run` is the upgrade.
-fn target_app(args: &Value) -> Option<&str> {
+pub(crate) fn target_app(args: &Value) -> Option<&str> {
     ["app", "_front_app"].into_iter().find_map(|key| {
         args.get(key)
             .and_then(Value::as_str)

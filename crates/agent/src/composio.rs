@@ -169,13 +169,22 @@ const TOOLKIT_WORDS: &[(&str, &[&str])] = &[
 /// toolkit with no entry is assumed relevant: offering it costs tokens, hiding
 /// it costs the command.
 pub fn concerns(toolkit: &str, command: &str) -> bool {
-    let Some((_, words)) = TOOLKIT_WORDS.iter().find(|(slug, _)| *slug == toolkit) else {
-        return true;
-    };
-    command
-        .split(|c: char| !c.is_alphanumeric())
-        .map(str::to_lowercase)
-        .any(|said| words.contains(&said.as_str()))
+    !TOOLKIT_WORDS.iter().any(|(slug, _)| *slug == toolkit) || mentions(toolkit, command)
+}
+
+/// Whether `command` says one of `toolkit`'s [`TOOLKIT_WORDS`]. Unlike
+/// [`concerns`], a toolkit with no entry is never assumed: this decides whether
+/// the user named an app, which is trust, not what to offer.
+pub fn mentions(toolkit: &str, command: &str) -> bool {
+    TOOLKIT_WORDS
+        .iter()
+        .find(|(slug, _)| *slug == toolkit)
+        .is_some_and(|(_, words)| {
+            command
+                .split(|c: char| !c.is_alphanumeric())
+                .map(str::to_lowercase)
+                .any(|said| words.contains(&said.as_str()))
+        })
 }
 
 /// Context budget per connected toolkit for one command. Uncapped, three
@@ -210,12 +219,18 @@ pub struct ToolDef {
     /// Carried, not derived: 96 of Composio's 500 toolkit slugs contain an `_`
     /// (`microsoft_teams`, `google_maps`), so splitting cannot recover it.
     pub toolkit: String,
+    /// The app a permission names. Composio's tool items carry only
+    /// `toolkit.name`, which is the slug again ("slack"), so that is what it is.
+    pub app: String,
     pub description: String,
     /// JSON-schema object for the function's `parameters`.
     pub parameters: Value,
     /// Composio's `readOnlyHint`. Anything else — including no annotation at
     /// all — counts as a write and must be confirmed before it runs.
     pub read_only: bool,
+    /// Every MCP annotation tag on the tool (`destructiveHint`, `updateHint`…),
+    /// mixed in Composio's `tags` with categories like `important` and `chat`.
+    pub hints: Vec<String>,
 }
 
 /// One connectable service. `connected` is filled from the account list, so a
@@ -1214,22 +1229,28 @@ fn relevance(item: &Value, words: &[String]) -> usize {
         .sum()
 }
 
-/// Whether a raw tool object carries `tag`.
-fn has_tag(item: &Value, tag: &str) -> bool {
-    item["tags"]
-        .as_array()
-        .is_some_and(|tags| tags.iter().filter_map(Value::as_str).any(|t| t == tag))
-}
-
 /// One raw tool object to a model-facing definition.
 fn tool_def(item: &Value) -> Option<ToolDef> {
     let name = item["slug"].as_str()?.to_string();
+    // Composio reports this on every tool; the split is for malformed items.
+    let toolkit = item["toolkit"]["slug"]
+        .as_str()
+        .map(str::to_lowercase)
+        .unwrap_or_else(|| toolkit_of_slug(&name));
+    let hints: Vec<String> = item["tags"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|tag| tag.ends_with("Hint"))
+        .map(str::to_string)
+        .collect();
     Some(ToolDef {
-        // Composio reports this on every tool; the split is for malformed items.
-        toolkit: item["toolkit"]["slug"]
+        app: item["toolkit"]["name"]
             .as_str()
-            .map(str::to_lowercase)
-            .unwrap_or_else(|| toolkit_of_slug(&name)),
+            .filter(|n| !n.trim().is_empty())
+            .map_or_else(|| toolkit.clone(), str::to_string),
+        toolkit,
         name,
         description: item["description"]
             .as_str()
@@ -1238,7 +1259,8 @@ fn tool_def(item: &Value) -> Option<ToolDef> {
             .take(300)
             .collect(),
         parameters: slim_schema(item.get("input_parameters")?),
-        read_only: has_tag(item, READ_ONLY_TAG),
+        read_only: hints.iter().any(|h| h == READ_ONLY_TAG),
+        hints,
     })
 }
 
@@ -1250,6 +1272,26 @@ fn error_json(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shape `/tools` returned live on 2026-10-03: hints mixed in with
+    /// category tags, and `toolkit.name` just the slug again.
+    #[test]
+    fn hints_are_the_tags_ending_in_hint() {
+        let item = json!({
+            "slug": "GMAIL_MOVE_TO_TRASH",
+            "toolkit": { "slug": "gmail", "name": "gmail" },
+            "tags": ["important", "openWorldHint", "updateHint"],
+            "input_parameters": { "type": "object", "properties": {} }
+        });
+        let tool = tool_def(&item).unwrap();
+        assert_eq!(tool.hints, ["openWorldHint", "updateHint"]);
+        assert_eq!(tool.app, "gmail");
+        assert!(!tool.read_only);
+
+        let mut read = item.clone();
+        read["tags"] = json!(["readOnlyHint", "chat"]);
+        assert!(tool_def(&read).unwrap().read_only);
+    }
 
     #[test]
     fn only_toolkits_the_command_is_about_are_offered() {
