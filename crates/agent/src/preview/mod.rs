@@ -11,15 +11,20 @@
 //! [`build`], the schema layer every tool gets for free — with ids named from
 //! the run's earlier reads ([`Names`]). [`enrich`] then makes the reads a
 //! mapping asks for, each bounded in time.
+//!
+//! What comes back from a card — a spoken reply, typed edits, the exact-words
+//! countdown — is [`gate_reply`], [`apply_edits`] and [`countdown`].
 
 mod fallback;
 mod generate;
 mod hand;
+mod reply;
 mod resolve;
 
 pub use fallback::build;
 pub use generate::{generate, layer, load_generated, warm_previews, Layer, Pass, PROMPT_VERSION};
 pub use hand::{check_hand, hand_tools, render, Context};
+pub use reply::{apply_edits, countdown, gate_reply, replace_text, GateReply, AUTO_MS};
 pub use resolve::{enrich, Names};
 
 use serde::{Deserialize, Serialize};

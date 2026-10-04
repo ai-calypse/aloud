@@ -1159,6 +1159,68 @@
   color: var(--danger);
 }
 
+/* A field the open card lets you correct before saying yes. It reads as the
+   value it replaces — same type, same place — and only shows it is a field on
+   hover and focus, so a card with editable text is still a card, not a form.
+   Unlayered, so it wins over the shadcn input's utilities. */
+.preview__input {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  margin: -3px 0 -3px -6px;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-row);
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  /* Not the `font` shorthand: a message keeps `.preview__body`'s leading. */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  resize: none;
+  outline: none;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+input.preview__input {
+  line-height: inherit;
+}
+
+.preview__input:hover {
+  background: var(--field);
+}
+
+.preview__input:focus,
+.preview__input:focus-visible {
+  border-color: var(--sep);
+  background: var(--field);
+  box-shadow: none;
+}
+
+.preview__input::placeholder {
+  color: var(--text2);
+}
+
+/* The exact-words countdown's track; the fill and its timing are
+   `.motion-countdown` in motion.css. */
+.countdown {
+  height: 2px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--field);
+}
+
+.countdown::after {
+  content: "";
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left;
+}
+
 /* A finished step's echo of its card: the write already happened, so here a
    long message may fold to a few lines. */
 .preview--compact .preview__body {

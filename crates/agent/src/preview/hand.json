@@ -342,6 +342,20 @@
     ],
     "recoverable": "In Calendar's Trash for 30 days."
   },
+  "GOOGLECONTACTS_CREATE_CONTACT": {
+    "kind": "fallback", "verb": "Save", "noun": "contact",
+    "slots": [
+      { "role": "plain", "path": "/names/0/displayName", "label": "Name" },
+      { "role": "plain", "path": "/names/0/givenName", "label": "First name" },
+      { "role": "plain", "path": "/names/0/familyName", "label": "Last name" },
+      { "role": "person", "path": "/emailAddresses/0/value", "label": "Email" },
+      { "role": "person", "path": "/phoneNumbers/0/value", "label": "Phone" }
+    ],
+    "editable": [
+      "/names/0/displayName", "/names/0/givenName", "/names/0/familyName",
+      "/emailAddresses/0/value"
+    ]
+  },
   "GOOGLETASKS_INSERT_TASK": {
     "kind": "task", "verb": "Add",
     "slots": [

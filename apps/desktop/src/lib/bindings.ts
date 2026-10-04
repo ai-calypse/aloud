@@ -255,12 +255,22 @@ export const commands = {
 	 */
 	agentQuota: () => typedError<Quota, string>(__TAURI_INVOKE("agent_quota")),
 	/**
-	 *  Resolves the pending confirmation. Called by the gate's buttons; `edits`
-	 *  carries any field the user filled in or corrected before approving, in the
-	 *  same flattened form the panel was given. "Always allow" also saves the
-	 *  grant, so the next call like it runs with no card.
+	 *  The gate's buttons. `edits` carries the fields the user changed, keyed by
+	 *  the pointer each card field names; `revision` is the card's own, so a click
+	 *  meant for one gate can never answer the next.
 	 */
-	confirmAgent: (decision: GateDecision, edits: { [key in string]: string } | null) => __TAURI_INVOKE<void>("confirm_agent", { decision, edits }),
+	confirmAgent: (decision: GateDecision, edits: { [key in string]: string } | null, revision: number) => __TAURI_INVOKE<void>("confirm_agent", { decision, edits, revision }),
+	/**
+	 *  Starts an exact-words card's countdown once the card is on screen, so the
+	 *  bar the user watches and the deadline that sends run together. At the
+	 *  deadline it is "Allow once" — unless the user reached for the card first.
+	 */
+	armAgent: (revision: number) => __TAURI_INVOKE<void>("arm_agent", { revision }),
+	/**
+	 *  Stops a card's countdown for good: the pointer is on it, a field has focus,
+	 *  or the user is typing. It then waits for a click or a reply.
+	 */
+	holdAgent: (revision: number) => __TAURI_INVOKE<void>("hold_agent", { revision }),
 	/**
 	 *  Resolves the pending question. `None` is the user dismissing it, which the
 	 *  loop reports to the model as unanswered rather than as an error.
@@ -273,6 +283,11 @@ export const commands = {
 	 *  opened folder — from its row's Show button.
 	 */
 	showResult: (appName: string, target: string) => typedError<null, string>(__TAURI_INVOKE("show_result", { appName, target })),
+	/**
+	 *  Puts a tidied folder back as it was, from its finished row's Undo. The
+	 *  click is the yes, so no card: it reverses what the user already approved.
+	 */
+	undoTidy: (folder: string) => typedError<null, string>(__TAURI_INVOKE("undo_tidy", { folder })),
 };
 
 /** Events */
@@ -340,7 +355,13 @@ export type AgentEvent =
  */
 { kind: "planned"; value: PlannedCall[] } | 
 /**  A parsed action awaiting dispatch. A write pauses here for confirmation. */
-{ kind: "toolCall"; value: ToolCall } | { kind: "toolResult"; value: ToolResult } | 
+{ kind: "toolCall"; value: ToolCall } | 
+/**
+ *  The open gate was answered other than by its own buttons — the
+ *  countdown, or a spoken reply — so the panel can stop asking. `false` is
+ *  a decline.
+ */
+{ kind: "decided"; value: boolean } | { kind: "toolResult"; value: ToolResult } | 
 /**
  *  The model needs something only the user can give. The run is suspended
  *  until `answer_agent`; the panel shows an input rather than a gate.
@@ -1211,6 +1232,13 @@ export type ToolResult = {
 	message: string,
 	/**  What the row's Show button brings back, when the step made something. */
 	show: ShowTarget | null,
+	/**
+	 *  A line the row keeps under it: why a saved grant refused the step. A
+	 *  status line would be wiped by this very result.
+	 */
+	note: string | null,
+	/**  The folder a tidy-up sorted, which the row's Undo puts back. */
+	tidied: string | null,
 };
 
 /* Tauri Specta runtime */

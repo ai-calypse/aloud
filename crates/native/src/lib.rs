@@ -86,6 +86,22 @@ pub fn show_target(name: &str, args: &Value, result: &Value) -> Option<(String, 
     }
 }
 
+/// The folder a tidy-up sorted, for the Undo on its finished row: the one write
+/// here with a reverse already built (`ALOUD_UNDO_ORGANIZE`). None for anything
+/// else, and for a tidy-up that moved nothing and so left no receipt.
+// ponytail: one reverse, one field. A general "undo call" on the result is the
+// upgrade when a second write gets a reverse.
+pub fn tidied(name: &str, args: &Value, result: &Value) -> Option<String> {
+    let moved = result.get("organized").and_then(Value::as_u64).unwrap_or(0);
+    (name == "ALOUD_ORGANIZE_FOLDER" && moved > 0).then(|| {
+        args.get("folder")
+            .and_then(Value::as_str)
+            .filter(|f| !f.trim().is_empty())
+            .unwrap_or("Downloads")
+            .to_string()
+    })
+}
+
 /// A file preview for the notch grid — a base64 `data:` URI, or None when Quick
 /// Look has no preview. The command layer maps search paths through this.
 pub fn thumbnail(path: &str) -> Option<String> {
@@ -659,6 +675,29 @@ mod tests {
             repeated("ALOUD_PRESS_KEYS", json!({ "keys": "tab", "times": 3 })).as_deref(),
             Some("Pressed tab 3 times.")
         );
+    }
+
+    /// Undo replays the tidy-up's receipt, and a tidy-up that moved nothing
+    /// wrote none: offering Undo there would only fail.
+    #[test]
+    fn only_a_tidy_up_that_moved_files_offers_undo() {
+        let moved = json!({ "organized": 12, "folder": "/Users/me/Desktop" });
+        assert_eq!(
+            tidied(
+                "ALOUD_ORGANIZE_FOLDER",
+                &json!({ "folder": "Desktop" }),
+                &moved
+            ),
+            Some("Desktop".into())
+        );
+        assert_eq!(
+            tidied("ALOUD_ORGANIZE_FOLDER", &json!({ "rules": {} }), &moved),
+            Some("Downloads".into()),
+            "the tool's own default folder"
+        );
+        let nothing = json!({ "organized": 0, "note": "nothing to sort" });
+        assert_eq!(tidied("ALOUD_ORGANIZE_FOLDER", &json!({}), &nothing), None);
+        assert_eq!(tidied("ALOUD_COLLECT_FILES", &json!({}), &moved), None);
     }
 
     #[test]

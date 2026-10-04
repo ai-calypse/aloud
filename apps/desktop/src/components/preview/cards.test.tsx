@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ActionPreview, CardKind } from "@/lib/bindings";
 import { CARD_PREVIEWS } from "@/features/overlay/previews";
 import { PreviewCard, layoutFor } from "./cards";
+import { CardEditsContext } from "./kit";
 
 const card = (kind: CardKind) =>
   CARD_PREVIEWS[kind].steps[0].preview as ActionPreview;
@@ -46,6 +47,27 @@ describe("PreviewCard", () => {
   it("says whose words a message is", () => {
     expect(html("message")).toContain("your words");
     expect(html("email")).toContain("written by Aloud");
+  });
+
+  /**
+   * Only the card waiting on a yes takes edits, and only in the fields Rust
+   * offered: the finished echo of the same card, or its channel, stays text.
+   */
+  it("edits the open card's offered fields in place, and nothing else", () => {
+    const draft = { "/markdown_text": "hey team" };
+    const open = renderToStaticMarkup(
+      <CardEditsContext.Provider value={{ draft, edit: () => {}, hold: () => {} }}>
+        <PreviewCard preview={card("message")} />
+      </CardEditsContext.Provider>,
+    );
+    expect(open).toContain("<textarea");
+    expect(open).toContain("hey team");
+    expect(open).not.toContain("<input");
+    expect(open).toContain("launch");
+
+    const echo = html("message", true);
+    expect(echo).not.toContain("<textarea");
+    expect(echo).toContain('<p class="preview__body">hi</p>');
   });
 
   it("keeps warnings, folded fields and the schema count off the compact echo", () => {

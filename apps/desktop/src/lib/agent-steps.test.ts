@@ -18,7 +18,7 @@ const call = (name: string, requiresConfirmation: boolean): ToolCall => ({
   preview: null,
   canAlways: false,
 });
-const ok: ToolResult = { success: true, message: "done", show: null };
+const ok: ToolResult = { success: true, message: "done", show: null, note: null, tidied: null };
 
 /** Rust emits the call, then — for a write — the same call again with the gate. */
 function startAndGate(steps: Step[], name: string): Step[] {
@@ -55,7 +55,7 @@ describe("agent panel step folding", () => {
     let steps = startAndGate([], "A");
     steps = withResult(steps, ok);
     steps = withCall(steps, call("B", false));
-    steps = withResult(steps, { success: false, message: "boom", show: null });
+    steps = withResult(steps, { success: false, message: "boom", show: null, note: null, tidied: null });
 
     expect(steps[0].result).toEqual(ok);
     expect(steps[1].result?.success).toBe(false);
@@ -65,7 +65,7 @@ describe("agent panel step folding", () => {
   it("keeps what a finished step can show", () => {
     const show = { app: "Notes", target: "x-coredata://note/p1" };
     let steps = withCall([], call("ALOUD_NOTES_CREATE", false));
-    steps = withResult(steps, { success: true, message: "done", show });
+    steps = withResult(steps, { ...ok, show });
     steps = withCall(steps, call("GMAIL_SEND_EMAIL", false));
     steps = withResult(steps, ok);
 
@@ -121,13 +121,13 @@ describe("agent panel step folding", () => {
   it("reads a declined gate as cancelled, not failed", () => {
     let steps = startAndGate([], "SLACK_SEND_MESSAGE");
     steps = withDecision(steps, false);
-    steps = withResult(steps, { success: false, message: "failed", show: null });
+    steps = withResult(steps, { success: false, message: "failed", show: null, note: null, tidied: null });
     expect(stepStatus(steps[0], false)).toBe("cancelled");
     expect(pendingStep({ heard: "", steps })).toBeUndefined();
 
     // A real failure after a yes still reads as one.
     let approved = withDecision(startAndGate([], "SLACK_SEND_MESSAGE"), true);
-    approved = withResult(approved, { success: false, message: "failed", show: null });
+    approved = withResult(approved, { success: false, message: "failed", show: null, note: null, tidied: null });
     expect(stepStatus(approved[0], false)).toBe("failed");
   });
 
@@ -151,7 +151,7 @@ describe("groupSteps", () => {
     app: "Gmail",
     args: {},
     requiresConfirmation: false,
-    result: result === undefined ? undefined : { success: result, message: "", show: null },
+    result: result === undefined ? undefined : { success: result, message: "", show: null, note: null, tidied: null },
   });
   // Stands in for the panel's row text: label plus rendered status.
   const key = (s: Step) => `${s.name}:${s.result ? s.result.success : "running"}`;

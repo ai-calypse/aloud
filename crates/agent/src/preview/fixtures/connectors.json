@@ -520,6 +520,924 @@
   ],
   "type": "object"
  },
+ "GOOGLECONTACTS_CREATE_CONTACT": {
+  "properties": {
+   "addresses": {
+    "items": {
+     "properties": {
+      "city": {
+       "type": "string"
+      },
+      "country": {
+       "type": "string"
+      },
+      "countryCode": {
+       "type": "string"
+      },
+      "extendedAddress": {
+       "type": "string"
+      },
+      "formattedType": {
+       "type": "string"
+      },
+      "formattedValue": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "poBox": {
+       "type": "string"
+      },
+      "postalCode": {
+       "type": "string"
+      },
+      "region": {
+       "type": "string"
+      },
+      "streetAddress": {
+       "type": "string"
+      },
+      "type": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "biographies": {
+    "items": {
+     "properties": {
+      "contentType": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "birthdays": {
+    "items": {
+     "properties": {
+      "date": {
+       "properties": {
+        "day": {
+         "type": "integer"
+        },
+        "month": {
+         "type": "integer"
+        },
+        "year": {
+         "type": "integer"
+        }
+       },
+       "type": "object"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "text": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "calendarUrls": {
+    "items": {
+     "properties": {
+      "formattedType": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "type": {
+       "type": "string"
+      },
+      "url": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "clientData": {
+    "items": {
+     "properties": {
+      "key": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "emailAddresses": {
+    "items": {
+     "properties": {
+      "displayName": {
+       "type": "string"
+      },
+      "formattedType": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "type": {
+       "type": "string"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "events": {
+    "items": {
+     "properties": {
+      "date": {
+       "properties": {
+        "day": {
+         "type": "integer"
+        },
+        "month": {
+         "type": "integer"
+        },
+        "year": {
+         "type": "integer"
+        }
+       },
+       "type": "object"
+      },
+      "formattedType": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "type": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "externalIds": {
+    "items": {
+     "properties": {
+      "formattedType": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "type": {
+       "type": "string"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "fileAses": {
+    "items": {
+     "properties": {
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "genders": {
+    "items": {
+     "properties": {
+      "addressMeAs": {
+       "type": "string"
+      },
+      "formattedValue": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "imClients": {
+    "items": {
+     "properties": {
+      "formattedProtocol": {
+       "type": "string"
+      },
+      "formattedType": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "protocol": {
+       "type": "string"
+      },
+      "type": {
+       "type": "string"
+      },
+      "username": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "interests": {
+    "items": {
+     "properties": {
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "locales": {
+    "items": {
+     "properties": {
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "locations": {
+    "items": {
+     "properties": {
+      "buildingId": {
+       "type": "string"
+      },
+      "current": {
+       "type": "string"
+      },
+      "deskCode": {
+       "type": "string"
+      },
+      "floor": {
+       "type": "string"
+      },
+      "floorSection": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "type": {
+       "type": "string"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "memberships": {
+    "items": {
+     "properties": {
+      "contactGroupMembership": {
+       "properties": {
+        "contactGroupResourceName": {
+         "type": "string"
+        }
+       },
+       "type": "object"
+      },
+      "domainMembership": {
+       "properties": {
+        "domain": {
+         "type": "string"
+        }
+       },
+       "type": "object"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "miscKeywords": {
+    "items": {
+     "properties": {
+      "formattedType": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "type": {
+       "type": "string"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "names": {
+    "items": {
+     "properties": {
+      "displayName": {
+       "type": "string"
+      },
+      "displayNameLastFirst": {
+       "type": "string"
+      },
+      "familyName": {
+       "type": "string"
+      },
+      "givenName": {
+       "type": "string"
+      },
+      "honorificPrefix": {
+       "type": "string"
+      },
+      "honorificSuffix": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "middleName": {
+       "type": "string"
+      },
+      "phoneticFamilyName": {
+       "type": "string"
+      },
+      "phoneticFullName": {
+       "type": "string"
+      },
+      "phoneticGivenName": {
+       "type": "string"
+      },
+      "phoneticMiddleName": {
+       "type": "string"
+      },
+      "unstructuredName": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "nicknames": {
+    "items": {
+     "properties": {
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "type": {
+       "type": "string"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "occupations": {
+    "items": {
+     "properties": {
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "organizations": {
+    "items": {
+     "properties": {
+      "costCenter": {
+       "type": "string"
+      },
+      "current": {
+       "type": "string"
+      },
+      "department": {
+       "type": "string"
+      },
+      "domain": {
+       "type": "string"
+      },
+      "endDate": {
+       "type": "string"
+      },
+      "formattedType": {
+       "type": "string"
+      },
+      "fullTimeEquivalentMillipercent": {
+       "type": "integer"
+      },
+      "jobDescription": {
+       "type": "string"
+      },
+      "location": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "name": {
+       "type": "string"
+      },
+      "phoneticName": {
+       "type": "string"
+      },
+      "startDate": {
+       "type": "string"
+      },
+      "symbol": {
+       "type": "string"
+      },
+      "title": {
+       "type": "string"
+      },
+      "type": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "personFields": {
+    "type": "string"
+   },
+   "phoneNumbers": {
+    "items": {
+     "properties": {
+      "canonicalForm": {
+       "type": "string"
+      },
+      "formattedType": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "type": {
+       "type": "string"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "relations": {
+    "items": {
+     "properties": {
+      "formattedType": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "person": {
+       "type": "string"
+      },
+      "type": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "sipAddresses": {
+    "items": {
+     "properties": {
+      "formattedType": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "type": {
+       "type": "string"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "skills": {
+    "items": {
+     "properties": {
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "sources": {
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "urls": {
+    "items": {
+     "properties": {
+      "formattedType": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "type": {
+       "type": "string"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "userDefined": {
+    "items": {
+     "properties": {
+      "key": {
+       "type": "string"
+      },
+      "metadata": {
+       "properties": {
+        "primary": {
+         "type": "boolean"
+        },
+        "sourcePrimary": {
+         "type": "boolean"
+        },
+        "verified": {
+         "type": "boolean"
+        }
+       },
+       "type": "object"
+      },
+      "value": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "type": "array"
+   }
+  },
+  "required": [
+   "personFields"
+  ],
+  "type": "object"
+ },
  "GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE": {
   "properties": {
    "domain": {

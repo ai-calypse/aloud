@@ -146,6 +146,11 @@ pub enum LoopEvent {
         name: String,
         success: bool,
         show: Option<(String, String)>,
+        /// Why a saved grant refused the call without a card.
+        note: Option<String>,
+        /// The folder a tidy-up sorted, which the row's Undo puts back; see
+        /// `aloud_native::tidied`.
+        tidied: Option<String>,
     },
     /// The model needs something only the user has; the loop is suspended until
     /// the panel answers. `options` non-empty means the answer is one of them —
@@ -516,6 +521,9 @@ pub struct ProposedCall {
 pub enum Verdict {
     Run(serde_json::Value),
     Decline,
+    /// Refused without a card by a saved grant. The reason stays on the step
+    /// and goes to the model, which would otherwise say the user declined.
+    Blocked(String),
 }
 
 /// Stands in for every tool when a run is evaluated: the canned result for a
@@ -850,6 +858,8 @@ where
                     name: name.clone(),
                     success: true,
                     show: None,
+                    note: None,
+                    tidied: None,
                 });
                 messages.push(Message::tool_result(&call.id, result));
                 continue;
@@ -946,6 +956,7 @@ where
                 && (!aloud_screen::is_screen_write(&name) || screen_gate(&mut screen_approved));
 
             let mut args = args;
+            let mut blocked = None;
             let declined = if gate_needed {
                 // A yes to what outside content asked for names that app for
                 // the rest of the run.
@@ -972,11 +983,14 @@ where
                         }
                         false
                     }
-                    Verdict::Decline => {
+                    verdict @ (Verdict::Decline | Verdict::Blocked(_)) => {
                         // A no re-arms the screen gate rather than leaving the
                         // run approved for the next click.
                         if aloud_screen::is_screen_write(&name) {
                             screen_approved = false;
+                        }
+                        if let Verdict::Blocked(why) = verdict {
+                            blocked = Some(why);
                         }
                         true
                     }
@@ -987,12 +1001,18 @@ where
 
             round_native_ok &= !declined;
             let result = if declined {
+                let result = match &blocked {
+                    Some(why) => serde_json::json!({ "error": why }).to_string(),
+                    None => r#"{"error":"user declined this action"}"#.to_string(),
+                };
                 on_event(LoopEvent::ToolCallResult {
                     name: name.clone(),
                     success: false,
                     show: None,
+                    note: blocked,
+                    tidied: None,
                 });
-                r#"{"error":"user declined this action"}"#.to_string()
+                result
             } else {
                 let span = tracing::info_span!(
                     "tool_exec",
@@ -1031,17 +1051,22 @@ where
                 );
                 any_failed |= !success;
                 round_native_ok &= success;
-                let show = if success {
+                let (show, tidied) = if success {
                     let parsed = serde_json::from_str(&result).unwrap_or_default();
                     confirmations.push(aloud_native::confirmation(&name, &args, &parsed));
-                    aloud_native::show_target(&name, &args, &parsed)
+                    (
+                        aloud_native::show_target(&name, &args, &parsed),
+                        aloud_native::tidied(&name, &args, &parsed),
+                    )
                 } else {
-                    None
+                    (None, None)
                 };
                 on_event(LoopEvent::ToolCallResult {
                     name: name.clone(),
                     success,
                     show,
+                    note: None,
+                    tidied,
                 });
                 result
             };
@@ -1652,6 +1677,55 @@ mod tests {
             !gates[1].as_ref().unwrap().named_rule,
             "a yes cleared Slack"
         );
+    }
+
+    /// "Blocked in Settings" used to go out as a status line that the failed
+    /// result after it wiped at once, and the model was told the user said no.
+    /// The refusal itself now carries the reason, to the step and the model.
+    #[tokio::test]
+    async fn a_call_a_saved_never_refuses_says_why_on_its_result() {
+        let why = "Blocked in Settings: Slack · send and share";
+        let (brain, sent) = fake_brain(vec![
+            calls(&["SLACK_SEND_MESSAGE"]),
+            content("Slack sends are blocked."),
+            content("FINISHED"),
+        ]);
+        let mock = |_: &str, _: &serde_json::Value| r#"{"successful":true}"#.to_string();
+        let notes = std::sync::Mutex::new(Vec::new());
+        run(
+            &[brain],
+            &ComposioClient::new("").unwrap(),
+            Command {
+                said: "send hi on slack",
+                prompt: "send hi on slack",
+                tools: &[tool("SLACK_SEND_MESSAGE", false)],
+                more: &[],
+                front: None,
+                document: None,
+                project: None,
+                selection: false,
+            },
+            Callbacks {
+                on_event: |event| {
+                    if let LoopEvent::ToolCallResult { success, note, .. } = event {
+                        notes.lock().unwrap().push((success, note));
+                    }
+                },
+                confirm: |_: ProposedCall| async move { Verdict::Blocked(why.to_string()) },
+                ask: |_: String| async { None },
+                cancelled: || false,
+                mock: Some(&mock),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            notes.into_inner().unwrap(),
+            [(false, Some(why.to_string()))]
+        );
+        let second = &sent.lock().unwrap()[1];
+        assert!(second.contains("Blocked in Settings"), "{second}");
+        assert!(!second.contains("user declined"), "{second}");
     }
 
     #[tokio::test]

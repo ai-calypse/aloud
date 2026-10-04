@@ -49,6 +49,7 @@ import {
   PARTIAL_MS,
   AGENT_PREVIEW,
   CARD_PREVIEWS,
+  CONTACT_PREVIEW,
 } from "./features/overlay/previews";
 import { useNotchPanel } from "./features/overlay/useNotchPanel";
 // Streamdown styles the agent's answer with Tailwind utilities — see the
@@ -705,21 +706,21 @@ function Overlay() {
               app: "Google Contacts",
               args: { query: "Genghis Khan" },
               requiresConfirmation: false,
-              result: { success: true, message: "no results", show: null },
+              result: { success: true, message: "no results", show: null, note: null, tidied: null },
             },
             {
               name: "GMAIL_FETCH_EMAILS",
               app: "Gmail",
               args: { query: "Genghis Khan" },
               requiresConfirmation: false,
-              result: { success: true, message: "no results", show: null },
+              result: { success: true, message: "no results", show: null, note: null, tidied: null },
             },
             {
               name: "GMAIL_FETCH_EMAILS",
               app: "Gmail",
               args: { query: "from:Genghis" },
               requiresConfirmation: false,
-              result: { success: true, message: "no results", show: null },
+              result: { success: true, message: "no results", show: null, note: null, tidied: null },
             },
             {
               name: "GOOGLECONTACTS_CREATE_CONTACT",
@@ -734,6 +735,7 @@ function Overlay() {
                 personFields: "names,emailAddresses",
               },
               requiresConfirmation: true,
+              preview: CONTACT_PREVIEW,
             },
           ],
         });
@@ -749,14 +751,14 @@ function Overlay() {
               app: "Google Contacts",
               args: { query: "Charlie Yang" },
               requiresConfirmation: false,
-              result: { success: true, message: "no results", show: null },
+              result: { success: true, message: "no results", show: null, note: null, tidied: null },
             },
             {
               name: "GMAIL_FETCH_EMAILS",
               app: "Gmail",
               args: { query: "Charlie Yang" },
               requiresConfirmation: false,
-              result: { success: true, message: "no results", show: null },
+              result: { success: true, message: "no results", show: null, note: null, tidied: null },
             },
           ],
           question: {
@@ -776,7 +778,7 @@ function Overlay() {
               app: "Google Contacts",
               args: { query: "Sam" },
               requiresConfirmation: false,
-              result: { success: true, message: "3 results", show: null },
+              result: { success: true, message: "3 results", show: null, note: null, tidied: null },
             },
           ],
           question: {
@@ -829,6 +831,11 @@ function Overlay() {
                 question: undefined,
               },
           );
+          break;
+        case "decided":
+          // The countdown or a spoken reply answered the gate; its own buttons
+          // already said so through `onDecide`.
+          setAgent((r) => r && { ...r, steps: withDecision(r.steps, payload.value) });
           break;
         case "toolResult":
           setAgent((r) => r && { ...r, steps: withResult(r.steps, payload.value), status: undefined });

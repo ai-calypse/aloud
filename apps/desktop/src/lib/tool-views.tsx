@@ -2,7 +2,8 @@
  * What the agent panel draws for each tool. A registry rather than a switch:
  * any of Composio's 800+ toolkits can be connected, so a service's custom UI
  * is one entry. Anything unregistered falls back to a humanised label. What a
- * write's approval card shows is Rust's (`aloud_agent::preview`), not this.
+ * write's approval card shows, and which of its fields can be edited, is
+ * Rust's (`aloud_agent::preview` and `hand.json`), not this.
  */
 
 /** A tool call's arguments. Unknown shape — every read must be defensive. */
@@ -12,34 +13,10 @@ export type ToolView = {
   /** Present tense, what is happening: "Drafting an email to Ana". */
   label: (args: ToolArgs) => string;
   /**
-   * Fields the approval gate lets the user fill in before confirming, in place
-   * of its card. Only worth declaring where the model routinely cannot know
-   * the value — an address it never found. Everywhere else an editable gate is
-   * a form standing between the user and the thing they asked for.
-   */
-  edits?: Editable[];
-  /**
-   * The question the gate asks before showing `edits`. Only meaningful with
-   * them: an editable gate is the agent proposing work of its own, so it asks
-   * before putting a form in front of someone who never wanted one.
-   */
-  ask?: (args: ToolArgs) => string;
-  /**
    * The approval gate's title, where "<label> — this writes to <app>" would
    * misstate what a yes covers.
    */
   gate?: (args: ToolArgs) => string;
-};
-
-/** One field in an editable approval gate. */
-export type Editable = {
-  /** Stable across renders; also the React key. */
-  key: string;
-  label: string;
-  placeholder?: string;
-  get: (args: ToolArgs) => string;
-  /** Returns the whole argument object with this field replaced. */
-  set: (args: ToolArgs, value: string) => ToolArgs;
 };
 
 /** A string field, or "" when absent or not a string. */
@@ -115,45 +92,13 @@ const VIEWS: Record<string, ToolView> = {
   GOOGLECONTACTS_SEARCH_CONTACTS: {
     label: (a) => lookingFor(text(a, "query")),
   },
-  // The People API takes names and addresses as arrays of objects, not the flat
-  // strings every other tool here uses, so both readers dig rather than `text`.
+  // The People API takes names as arrays of objects, not the flat strings
+  // every other tool here uses, so the reader digs rather than `text`.
   GOOGLECONTACTS_CREATE_CONTACT: {
     label: (a) => {
       const name = contactName(a);
       return name ? `Saving ${name} to your contacts` : "Saving a contact";
     },
-    ask: (a) => {
-      const name = contactName(a);
-      return name
-        ? `I could not find ${name}. Save them as a contact?`
-        : "Save this person as a contact?";
-    },
-    // The one gate worth making editable: the agent reaches it precisely when
-    // it could not find an address, so the field it most needs is the one field
-    // it cannot fill. Both write back the People API's nested shape, stringified
-    // the way `display_args` delivers it, so Rust parses it straight back.
-    edits: [
-      {
-        key: "name",
-        label: "Name",
-        placeholder: "Their name",
-        get: contactName,
-        set: (args, value) => ({
-          ...args,
-          names: JSON.stringify([{ givenName: value, displayName: value }]),
-        }),
-      },
-      {
-        key: "email",
-        label: "Email",
-        placeholder: "name@example.com",
-        get: contactEmail,
-        set: (args, value) => ({
-          ...args,
-          emailAddresses: JSON.stringify([{ value }]),
-        }),
-      },
-    ],
   },
 
   // Native macOS actions (aloud-native). Registered for real labels; the
@@ -180,25 +125,12 @@ const VIEWS: Record<string, ToolView> = {
       return title ? `Adding to "${title}"` : "Adding to the open note";
     },
   },
-  // The one with real blast radius: the recipient is editable so a name that
-  // resolved to nothing — or to the wrong person — is fixable before it sends.
   ALOUD_MESSAGES_SEND: {
     label: (a) => {
       // `to_name` is who Rust resolved a spoken name to; `to` is then the handle.
       const to = text(a, "to_name") || text(a, "to");
       return to ? `Messaging ${to}` : "Sending a message";
     },
-    edits: [
-      {
-        key: "to",
-        label: "To",
-        placeholder: "+1 555 123 4567 or email",
-        get: (a) => text(a, "to"),
-        // A new handle is no longer the resolved person. Emptied, not deleted:
-        // Rust keeps any key the edits leave out.
-        set: (args, value) => ({ ...args, to: value, to_name: "" }),
-      },
-    ],
   },
   ALOUD_MAIL_SEND: {
     label: (a) => {
@@ -217,15 +149,6 @@ const VIEWS: Record<string, ToolView> = {
       const to = text(a, "to");
       return to ? `Messaging ${to} on Discord` : "Sending a Discord message";
     },
-    edits: [
-      {
-        key: "to",
-        label: "To",
-        placeholder: "Name as it appears in Discord",
-        get: (a) => text(a, "to"),
-        set: (args, value) => ({ ...args, to: value }),
-      },
-    ],
   },
   ALOUD_PHOTO_BOOTH_TAKE_PHOTO: { label: () => "Taking a photo in Photo Booth" },
   ALOUD_PRESS_KEYS: {
@@ -383,11 +306,6 @@ function mediaLabel(app: string, a: Record<string, unknown>): string {
   }
 }
 
-/** The gate's editable fields for a tool; empty for the yes/no majority. */
-export function editsFor(name: string): Editable[] {
-  return viewFor(name).edits ?? [];
-}
-
 /**
  * A nested argument, back as a value.
  *
@@ -430,10 +348,6 @@ function contactName(args: ToolArgs): string {
     .join(" ");
 }
 
-function contactEmail(args: ToolArgs): string {
-  return firstOf(args, "emailAddresses", "value");
-}
-
 /** "SLACK_SEND_MESSAGE" → "Slack: send message"; the unregistered fallback. */
 export function humanise(slug: string): string {
   const [toolkit, ...rest] = slug.split("_");
@@ -463,22 +377,4 @@ export function gateFor(name: string, args: ToolArgs): string {
   } catch {
     return "";
   }
-}
-
-/** The question an editable gate opens with, or "" when it has none. */
-export function askFor(name: string, args: ToolArgs): string {
-  try {
-    return viewFor(name).ask?.(args) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-/**
- * Whether a gate opens on a question before its fields. Only a tool with an
- * `ask` — the agent offering to save a contact it could not find — does; a send
- * with an editable recipient shows its fields and the permission buttons at once.
- */
-export function asksFirst(name: string, args: ToolArgs): boolean {
-  return editsFor(name).length > 0 && askFor(name, args) !== "";
 }

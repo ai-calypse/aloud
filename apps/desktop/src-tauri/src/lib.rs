@@ -148,9 +148,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sessions::read_agent_transcript,
             quota::agent_quota,
             agent::confirm_agent,
+            agent::arm_agent,
+            agent::hold_agent,
             agent::answer_agent,
             agent::close_agent,
             agent::show_result,
+            agent::undo_tidy,
         ])
         .events(collect_events![
             pipeline::Phase,
