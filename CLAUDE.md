@@ -29,6 +29,7 @@ crates/
   store/               settings, history, stats, migrations, timings
   transcribe/          local whisper.cpp + cloud whisper + Deepgram streaming
 engine/                browser tasks in the user's browser (TypeScript + axd)
+evals/                 the evals dashboard: eval runs beside real-use traces
 ```
 
 ## Commands
@@ -114,7 +115,15 @@ interpolated). Routing changes are checked against the eval, not by feel:
 ```sh
 cargo run -p aloud-agent --example command_eval            # every brain with a key
 cargo run -p aloud-native --example demo -- fast "<said>"  # what the fast path does
+pnpm evals                                                 # the dashboard, 127.0.0.1:8091
 ```
+
+Each eval run is saved to `<app-data>/evals/`, shared by every worktree, so
+the dashboard lines a branch's run up against the brain's previous one. It
+reads real use from the same folder (`timings.sqlite`, `history.sqlite`,
+`engine/log.jsonl`) and shows it apart from the eval, never blended. A
+command's words are deliberately not in the timings DB, so a real command
+shows its route, tools and rounds but not what was said.
 
 Screen control is the last tier, on trycua's Cua Driver (`crates/screen`, which
 shells out to `cua-driver call`): read an app's accessibility tree as numbered

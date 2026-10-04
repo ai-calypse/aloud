@@ -91,6 +91,7 @@ dependencies = [
  "aloud-engine",
  "aloud-llm",
  "aloud-native",
+ "aloud-notes",
  "aloud-screen",
  "aloud-selection",
  "aloud-store",

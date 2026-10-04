@@ -26,5 +26,6 @@ tracing.workspace = true
 tokio = { version = "1", features = ["time", "macros"] }
 
 [dev-dependencies]
+aloud-notes = { path = "../notes" }
 aloud-store = { path = "../store" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "test-util"] }
