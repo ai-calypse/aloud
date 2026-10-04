@@ -1,0 +1,63 @@
+/* The notch system's few rules a utility cannot express: browser
+ * pseudo-elements, and the seams where the new panel hosts older surfaces.
+ * Everything else lives on the primitives in components/notch as utilities.
+ * Tokens only — colours from tokens.css, motion from motion.css.
+ */
+
+/* --- Slider (components/notch/controls.tsx) ------------------------------
+ * A native range input. WebKit's pseudo-elements, because the overlay is a
+ * WKWebView; the Chromium the tune page runs in reads the same ones. */
+.notch-slider {
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.notch-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    to right,
+    var(--notch-ink) var(--fill, 0%),
+    var(--notch-track) var(--fill, 0%)
+  );
+}
+
+/* shadcn's thumb: the ink, ringed in the panel's own black so it reads as
+   lifted off the fill without a shadow. */
+.notch-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 2px solid var(--notch-fill);
+  border-radius: 50%;
+  background: var(--notch-ink);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.notch-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+.notch-slider:active::-webkit-slider-thumb {
+  transform: scale(1.3);
+}
+
+.notch-slider:focus-visible {
+  outline: 2px solid var(--notch-focus);
+  outline-offset: 3px;
+  border-radius: var(--radius-pill);
+}
+
+.notch-slider:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.notch-slider:disabled::-webkit-slider-thumb {
+  transform: none;
+}

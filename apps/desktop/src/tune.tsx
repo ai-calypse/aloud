@@ -7,6 +7,7 @@ import { CARD_PREVIEWS } from "./features/overlay/previews";
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "./index.css";
+import "./styles/notch.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
 

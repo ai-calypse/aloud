@@ -64,6 +64,7 @@ import "@fontsource-variable/geist-mono";
 // `@source` note in index.css.
 import "./index.css";
 import "./styles/overlay.css";
+import "./styles/notch.css";
 
 const LABEL: Record<Phase, string> = {
   idle: "",
