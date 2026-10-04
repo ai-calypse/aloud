@@ -439,39 +439,83 @@ pub async fn first_turn(
         .await
 }
 
-/// Runs the loop for `command`. Returns the model's final answer.
+/// What the loop is asked to do: the user's words, the prompt built from them
+/// and their context, and the tools on offer.
+pub struct Command<'a> {
+    /// The user's words only, never the context lines — what is checked for
+    /// several actions or named apps, which a pasted selection must not sway.
+    pub said: &'a str,
+    /// `with_context(said, …)`: what the model is given.
+    pub prompt: &'a str,
+    pub tools: &'a [ToolDef],
+    /// Connected services left out of `tools`, loadable via ALOUD_MORE_TOOLS.
+    pub more: &'a [String],
+}
+
+/// A write the gate is asked about: the call as the model made it, and the
+/// offered tool it names — from the run's own list, so a service loaded
+/// mid-run is described by its own toolkit rather than a guess from the slug.
+pub struct ProposedCall {
+    pub name: String,
+    pub args: serde_json::Value,
+    pub tool: Option<ToolDef>,
+}
+
+/// The gate's answer: run with these arguments (the user may have edited
+/// them), or don't.
+pub enum Verdict {
+    Run(serde_json::Value),
+    Decline,
+}
+
+/// Stands in for every tool when a run is evaluated: the canned result for a
+/// name and its arguments, so a whole run can be scored with nothing executed.
+pub type Mock = dyn Fn(&str, &serde_json::Value) -> String + Sync;
+
+/// How the loop reaches the outside world.
 ///
 /// `on_event` fires for each tool call so the panel can show progress.
-/// `confirm` is awaited before any write tool runs. It resolves to `None` when
-/// the user declines, or to the arguments to run with — which are not
-/// necessarily the ones passed in, because the gate lets a field be filled in
-/// or corrected before approving.
-///
-/// `cancelled` is polled at the top of each round and between individual tool
-/// dispatches, so Escape during a six-tool round stops after the tool in
-/// flight rather than running the other five.
-// ponytail: nine arguments, five of them the run's inputs and four its
-// callbacks — the fourth the previous comment here said would justify a
-// `Callbacks { on_event, confirm, ask, cancelled }` struct. Left as-is because
-// there is still exactly one real construction site (the Tauri command; the
-// example is the other) and a struct would be ceremony around the same tuple.
-// Worth doing the moment a second caller has to assemble this list.
-#[allow(clippy::too_many_arguments)]
-pub async fn run<F, A>(
+/// `confirm` is awaited before any write runs. `ask` waits on the user's reply
+/// to a question. `cancelled` is polled at the top of each round and between
+/// individual tool dispatches, so Escape during a six-tool round stops after
+/// the tool in flight rather than running the other five.
+pub struct Callbacks<'a, E, C, A, X> {
+    pub on_event: E,
+    pub confirm: C,
+    pub ask: A,
+    pub cancelled: X,
+    /// Eval only; see [`Mock`].
+    pub mock: Option<&'a Mock>,
+}
+
+/// Runs the loop for `command`. Returns the model's final answer.
+pub async fn run<E, C, F, A, Q, X>(
     brains: &[Brain],
     composio: &ComposioClient,
-    command: &str,
-    tools: &[ToolDef],
-    more: &[String],
-    mut on_event: impl FnMut(LoopEvent),
-    confirm: impl Fn(String, serde_json::Value) -> F,
-    ask: impl Fn(String) -> A,
-    cancelled: impl Fn() -> bool,
+    command: Command<'_>,
+    callbacks: Callbacks<'_, E, C, A, X>,
 ) -> Result<String>
 where
-    F: Future<Output = Option<serde_json::Value>>,
-    A: Future<Output = Option<String>>,
+    E: FnMut(LoopEvent),
+    C: Fn(ProposedCall) -> F,
+    F: Future<Output = Verdict>,
+    A: Fn(String) -> Q,
+    Q: Future<Output = Option<String>>,
+    X: Fn() -> bool,
 {
+    let Callbacks {
+        mut on_event,
+        confirm,
+        ask,
+        cancelled,
+        mock,
+    } = callbacks;
+    let Command {
+        prompt: command,
+        tools,
+        more,
+        ..
+    } = command;
     let (mut schemas, mut messages) = opening(command, tools, more);
     // Owned: a service loaded mid-run adds to it.
     let mut tools = tools.to_vec();
@@ -817,7 +861,8 @@ where
             if aloud_screen::is_screen_tool(&name) && max_rounds == MAX_ROUNDS {
                 tracing::info!("screen control engaged; raising the round budget");
                 max_rounds = MAX_SCREEN_ROUNDS;
-                screen.0 = true;
+                // A mocked run drove no screen, so there is no session to end.
+                screen.0 = mock.is_none();
             }
             let gate_needed = if aloud_screen::is_screen_write(&name) {
                 screen_gate(&mut screen_approved)
@@ -829,15 +874,20 @@ where
 
             let mut args = args;
             let declined = if gate_needed {
-                match confirm(name.clone(), args.clone())
+                let proposed = ProposedCall {
+                    name: name.clone(),
+                    args: args.clone(),
+                    tool: tools.iter().find(|t| t.name == name).cloned(),
+                };
+                match confirm(proposed)
                     .instrument(tracing::info_span!("confirm", tool = %name, toolkit))
                     .await
                 {
-                    Some(approved) => {
+                    Verdict::Run(approved) => {
                         args = approved;
                         false
                     }
-                    None => {
+                    Verdict::Decline => {
                         // A no re-arms the screen gate rather than leaving the
                         // run approved for the next click.
                         if aloud_screen::is_screen_write(&name) {
@@ -864,30 +914,17 @@ where
                     toolkit,
                     ok = tracing::field::Empty
                 );
-                // Native macOS tools are ours; a Composio slug is not, so
-                // `aloud_native::execute` returns None and we fall through. This
-                // is the whole second execution path — one branch, because the
-                // gate, dedup, and budgets above all key off the tool name.
-                // osascript blocks, so it runs on a blocking thread rather than
-                // stalling the runtime.
-                let result = if aloud_engine::is_engine_tool(&name) {
-                    run_engine(&name, &args, &mut on_event, &ask, &cancelled)
-                        .instrument(span.clone())
-                        .await
-                } else {
-                    match run_native(&name, &args).instrument(span.clone()).await {
-                        Some(native) => native,
-                        None => match run_screen(&name, &args).instrument(span.clone()).await {
-                            Some(screen) => screen,
-                            None => {
-                                composio
-                                    .execute(&name, &args)
-                                    .instrument(span.clone())
-                                    .await
-                            }
-                        },
-                    }
-                };
+                let result = dispatch(
+                    &name,
+                    &args,
+                    composio,
+                    mock,
+                    &mut on_event,
+                    &ask,
+                    &cancelled,
+                )
+                .instrument(span.clone())
+                .await;
                 let success = tool_succeeded(&result);
                 span.record("ok", success);
                 any_failed |= !success;
@@ -963,6 +1000,36 @@ async fn run_screen(name: &str, args: &serde_json::Value) -> Option<String> {
         .await
         .unwrap_or_else(|e| Some(serde_json::json!({ "error": e.to_string() })))?;
     Some(outcome.to_string())
+}
+
+/// Runs one tool. Native macOS tools are ours; a Composio slug is not, so each
+/// "is it mine?" returns None and the call falls through to the next. One
+/// chain, because the gate, dedup and budgets above all key off the tool name.
+async fn dispatch<A>(
+    name: &str,
+    args: &serde_json::Value,
+    composio: &ComposioClient,
+    mock: Option<&Mock>,
+    on_event: &mut impl FnMut(LoopEvent),
+    ask: &impl Fn(String) -> A,
+    cancelled: &impl Fn() -> bool,
+) -> String
+where
+    A: Future<Output = Option<String>>,
+{
+    if let Some(mock) = mock {
+        return mock(name, args);
+    }
+    if aloud_engine::is_engine_tool(name) {
+        return run_engine(name, args, on_event, ask, cancelled).await;
+    }
+    if let Some(native) = run_native(name, args).await {
+        return native;
+    }
+    if let Some(screen) = run_screen(name, args).await {
+        return screen;
+    }
+    composio.execute(name, args).await
 }
 
 /// Runs a native macOS tool, returning `Some(json_string)` in the same shape

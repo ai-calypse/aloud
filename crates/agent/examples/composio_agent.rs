@@ -52,41 +52,47 @@ async fn main() -> anyhow::Result<()> {
     let answer = run_tool_loop(
         &brains,
         &composio,
-        &command,
-        &tools,
-        &more,
-        |event| match event {
-            LoopEvent::Planned { names } => {
-                println!("  [plan] {}", names.join(" → "));
-            }
-            LoopEvent::ToolCallStart { name, args } => {
-                println!("  [tool] {name}({args})");
-            }
-            LoopEvent::ToolCallResult { name, success } => {
-                println!("  [{}] {name}", if success { "ok" } else { "ERR" });
-            }
-            LoopEvent::Asked { question, options } => {
-                println!("  [ask] {question} {options:?}");
-            }
-            LoopEvent::RateLimited { seconds } => {
-                println!("  [rate-limited] retrying in {seconds}s");
-            }
-            LoopEvent::Progress { text, .. } => println!("    · {text}"),
+        aloud_agent::Command {
+            said: &command,
+            prompt: &command,
+            tools: &tools,
+            more: &more,
         },
-        // No panel here: auto-approve writes with the arguments as-is. Reads
-        // dominate the test commands.
-        |name, args: serde_json::Value| async move {
-            println!("  [auto-confirm write] {name}");
-            Some(args)
+        aloud_agent::Callbacks {
+            on_event: |event| match event {
+                LoopEvent::Planned { names } => {
+                    println!("  [plan] {}", names.join(" → "));
+                }
+                LoopEvent::ToolCallStart { name, args } => {
+                    println!("  [tool] {name}({args})");
+                }
+                LoopEvent::ToolCallResult { name, success } => {
+                    println!("  [{}] {name}", if success { "ok" } else { "ERR" });
+                }
+                LoopEvent::Asked { question, options } => {
+                    println!("  [ask] {question} {options:?}");
+                }
+                LoopEvent::RateLimited { seconds } => {
+                    println!("  [rate-limited] retrying in {seconds}s");
+                }
+                LoopEvent::Progress { text, .. } => println!("    · {text}"),
+            },
+            // No panel here: auto-approve writes with the arguments as-is. Reads
+            // dominate the test commands.
+            confirm: |call: aloud_agent::ProposedCall| async move {
+                println!("  [auto-confirm write] {}", call.name);
+                aloud_agent::Verdict::Run(call.args)
+            },
+            // No panel to type into: every question goes unanswered, which the
+            // loop reports to the model so it closes the run rather than hanging.
+            ask: |question: String| async move {
+                println!("  [asked, unanswered] {question}");
+                None
+            },
+            // Nothing to cancel from here: the example runs to completion or errors.
+            cancelled: || false,
+            mock: None,
         },
-        // No panel to type into: every question goes unanswered, which the loop
-        // reports to the model so it closes the run rather than hanging.
-        |question: String| async move {
-            println!("  [asked, unanswered] {question}");
-            None
-        },
-        // Nothing to cancel from here: the example runs to completion or errors.
-        || false,
     )
     .await?;
 

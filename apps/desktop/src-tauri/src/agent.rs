@@ -348,35 +348,47 @@ async fn execute(
     aloud_agent::run_tool_loop(
         &brains,
         &composio,
-        &command,
-        &tools,
-        &more,
-        |event| {
-            match &event {
-                aloud_agent::LoopEvent::ToolCallStart { .. } => {
-                    run.acted.store(true, Ordering::SeqCst)
+        aloud_agent::Command {
+            said: transcript,
+            prompt: &command,
+            tools: &tools,
+            more: &more,
+        },
+        aloud_agent::Callbacks {
+            on_event: |event| {
+                match &event {
+                    aloud_agent::LoopEvent::ToolCallStart { .. } => {
+                        run.acted.store(true, Ordering::SeqCst)
+                    }
+                    // The question goes out through this event before the loop waits on the reply, so
+                    // the panel has to be up first.
+                    aloud_agent::LoopEvent::Asked { .. } => run.surface(app),
+                    _ => {}
                 }
-                // The question goes out through this event before the loop waits on the reply, so
-                // the panel has to be up first.
-                aloud_agent::LoopEvent::Asked { .. } => run.surface(app),
-                _ => {}
-            }
-            run.emit(app, event_of(event))
+                run.emit(app, event_of(event))
+            },
+            // The safety gate. The call carries its tool from the run's own list,
+            // so it names the real app — a service loaded mid-run included —
+            // rather than deriving one from the slug.
+            confirm: |call: aloud_agent::ProposedCall| {
+                let toolkit = call
+                    .tool
+                    .as_ref()
+                    .map(|t| t.toolkit.clone())
+                    .unwrap_or_else(|| tool_app(&call.name));
+                async move {
+                    match confirm_write(app, run, call.name, toolkit, call.args).await {
+                        Some(args) => aloud_agent::Verdict::Run(args),
+                        None => aloud_agent::Verdict::Decline,
+                    }
+                }
+            },
+            // The question itself already went out through `on_event`; this only
+            // opens the reply channel and waits on it.
+            ask: |_question| await_answer(app, run),
+            cancelled,
+            mock: None,
         },
-        // The safety gate. The offered tools carry their toolkit, so it names
-        // the real app rather than deriving one from the slug.
-        |name, args| {
-            let toolkit = tools
-                .iter()
-                .find(|t| t.name == name)
-                .map(|t| t.toolkit.clone())
-                .unwrap_or_else(|| tool_app(&name));
-            confirm_write(app, run, name, toolkit, args)
-        },
-        // The question itself already went out through `on_event`; this only
-        // opens the reply channel and waits on it.
-        |_question| await_answer(app, run),
-        cancelled,
     )
     .await
 }
