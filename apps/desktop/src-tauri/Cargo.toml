@@ -30,6 +30,8 @@ aloud-islands = { path = "../../../crates/islands" }
 aloud-launcher = { path = "../../../crates/launcher" }
 aloud-llm = { path = "../../../crates/llm" }
 aloud-media = { path = "../../../crates/media" }
+# notch-mac
+aloud-mac = { path = "../../../crates/mac" }
 aloud-notes = { path = "../../../crates/notes" }
 aloud-quota = { path = "../../../crates/quota" }
 aloud-sessions = { path = "../../../crates/sessions" }

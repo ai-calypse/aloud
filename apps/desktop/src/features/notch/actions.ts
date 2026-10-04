@@ -1,5 +1,6 @@
 import { commands, type Player, type Transport } from "@/lib/bindings";
 import type { SectionId } from "./sections";
+import { SNAPS } from "./snaps";
 
 /** What an action may do to the notch itself. */
 export type ActionContext = {
@@ -228,6 +229,65 @@ export const ACTIONS: NotchAction[] = [
       return true;
     },
   },
+  // notch-mac: actions begin
+  {
+    id: "mac.stats",
+    title: "Show CPU, memory and network",
+    keywords: ["system", "stats", "cpu", "memory", "ram", "disk", "network", "temperature"],
+    section: "mac",
+    subsection: "stats",
+    run: (ctx) => {
+      ctx.open("mac", "stats");
+      return true;
+    },
+  },
+  {
+    // Also what the battery islands' Show button names.
+    id: "mac.power",
+    title: "Show battery",
+    keywords: ["battery", "charge", "power", "cycles", "health"],
+    section: "mac",
+    subsection: "power",
+    run: (ctx) => {
+      ctx.open("mac", "power");
+      return true;
+    },
+  },
+  {
+    // Also what the privacy island's Show button names.
+    id: "mac.privacy",
+    title: "Show mic and camera use",
+    keywords: ["privacy", "microphone", "mic", "camera", "recording", "in use"],
+    section: "mac",
+    subsection: "privacy",
+    run: (ctx) => {
+      ctx.open("mac", "privacy");
+      return true;
+    },
+  },
+  {
+    id: "mac.windows",
+    title: "Show window snapping",
+    keywords: ["snap", "tile", "window", "halves", "quarters", "maximize"],
+    section: "mac",
+    subsection: "windows",
+    run: (ctx) => {
+      ctx.open("mac", "windows");
+      return true;
+    },
+  },
+  // One per position, so ⌘K reads "Snap window left" and Enter does it.
+  ...SNAPS.map(
+    (snap): NotchAction => ({
+      id: `mac.snap.${snap.id}`,
+      title: `Snap window: ${snap.label.toLowerCase()}`,
+      keywords: ["window", "snap", "tile", "move", snap.group.toLowerCase()],
+      section: "mac",
+      subsection: "windows",
+      run: async () => (await commands.macSnap(snap.id)).status === "ok",
+    }),
+  ),
+  // notch-mac: actions end
   {
     // What a finished row's Show does: bring back what a write made.
     id: "result.show",

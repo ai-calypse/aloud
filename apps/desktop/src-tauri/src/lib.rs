@@ -5,6 +5,9 @@ mod islands;
 mod launcher;
 mod listen;
 mod media; // notch-media
+// notch-mac: wiring begins
+mod mac;
+// notch-mac: wiring ends
 mod meeting;
 mod notch;
 mod overlay;
@@ -197,6 +200,15 @@ fn specta_builder() -> Builder<tauri::Wry> {
             launcher::launcher_recent_files,
             launcher::launcher_open_path,
             // -- end notch Launch section --
+            // notch-mac: wiring begins
+            mac::mac_stats,
+            mac::mac_battery,
+            mac::mac_privacy,
+            mac::mac_front_window,
+            mac::mac_snap,
+            mac::mac_watchers,
+            mac::set_mac_watcher,
+            // notch-mac: wiring ends
             agent::confirm_agent,
             agent::arm_agent,
             agent::hold_agent,
@@ -353,6 +365,9 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
 
             // notch Launch section: pins and recents.
             launcher::start(app.handle());
+            // notch-mac: wiring begins
+            mac::start(app.handle());
+            // notch-mac: wiring ends
 
             tray::init(app)?;
 

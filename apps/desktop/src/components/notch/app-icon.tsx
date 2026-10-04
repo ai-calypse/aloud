@@ -1,6 +1,7 @@
 import {
   AppWindowIcon,
   ArrowDownToLineIcon,
+  BatteryIcon,
   BellIcon,
   BotIcon,
   BluetoothIcon,
@@ -12,6 +13,8 @@ import {
   HeadphonesIcon,
   KeyboardIcon,
   MouseIcon,
+  CameraIcon,
+  MicIcon,
   MusicIcon,
   TimerIcon,
   TouchpadIcon,
@@ -27,6 +30,8 @@ import { cn } from "@/lib/utils";
 export const GLYPHS: Record<string, LucideIcon> = {
   agents: BotIcon,
   alert: BellIcon,
+  battery: BatteryIcon,
+  camera: CameraIcon,
   done: CheckIcon,
   bluetooth: BluetoothIcon,
   download: ArrowDownToLineIcon,
@@ -37,6 +42,7 @@ export const GLYPHS: Record<string, LucideIcon> = {
   headphones: HeadphonesIcon,
   keyboard: KeyboardIcon,
   mouse: MouseIcon,
+  mic: MicIcon,
   music: MusicIcon,
   timer: TimerIcon,
   trackpad: TouchpadIcon,

@@ -17,6 +17,10 @@ import { MediaSound } from "./views/MediaSound";
 import { MediaPlaying } from "./views/MediaPlaying";
 import { ClipboardColors, ClipboardHistory, ClipboardSnippets } from "./views/Clipboard";
 import { LaunchApps, LaunchSearch, LaunchShortcuts } from "./views/Launch";
+import { MacPower } from "./views/MacPower";
+import { MacPrivacy } from "./views/MacPrivacy";
+import { MacStats } from "./views/MacStats";
+import { MacWindows } from "./views/MacWindows";
 import { NowOverview } from "./views/Now";
 import { ShelfDownloads, ShelfDrives, ShelfFiles, ShelfShots } from "./views/Shelf";
 
@@ -177,10 +181,10 @@ export const SECTIONS: Section[] = [
     name: "Mac",
     icon: LaptopIcon,
     subsections: [
-      { id: "stats", name: "Stats", features: ["System stats"], ready: false },
-      { id: "power", name: "Power", features: ["Battery", "Full charge"], ready: false },
-      { id: "privacy", name: "Privacy", features: ["Privacy indicator"], ready: false },
-      { id: "windows", name: "Windows", features: ["Window snapping"], ready: false },
+      { id: "stats", name: "Stats", features: ["System stats"], ready: true, view: MacStats },
+      { id: "power", name: "Power", features: ["Battery", "Full charge"], ready: true, view: MacPower },
+      { id: "privacy", name: "Privacy", features: ["Privacy indicator"], ready: true, view: MacPrivacy },
+      { id: "windows", name: "Windows", features: ["Window snapping"], ready: true, view: MacWindows },
       { id: "display", name: "Display", features: ["Keyboard backlight", "External display"], ready: false },
       { id: "menubar", name: "Menu bar", features: ["Menu bar icon hiding", "Menu bar detach"], ready: false },
     ],

@@ -23,6 +23,7 @@ crates/
   islands/             the notch's live activities: ranking, dedupe, expiry
   launcher/            notch launch: pinned/recent apps, Apple Shortcuts, file search
   llm/                 OpenAI-compatible chat, prompts, rate limits
+  mac/                 the notch's Mac section: stats, battery, mic/camera use, window snapping
   meeting/             meeting transcript assembly, note composition
   native/              Mac app actions (AppleScript/JXA) + the no-model fast path
   notes/               markdown notes + search, app data paths

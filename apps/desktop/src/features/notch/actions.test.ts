@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ACTIONS, runAction, type NotchAction } from "./actions";
+import { SNAPS } from "./snaps";
 
 const ctx = { open: vi.fn() };
 
@@ -41,5 +42,13 @@ describe("ACTIONS", () => {
     const ids = ACTIONS.map((a) => a.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ["agents.open", "result.show", "files.undoTidy", "media.toggle"]) expect(ids).toContain(id);
+  });
+
+  // aloud-mac names these in its islands' Show buttons, and the view's
+  // buttons and ⌘K must agree on which positions exist.
+  it("has the Mac actions Rust sends and one snap per position", () => {
+    const ids = ACTIONS.map((a) => a.id);
+    for (const id of ["mac.power", "mac.privacy"]) expect(ids).toContain(id);
+    for (const snap of SNAPS) expect(ids).toContain(`mac.snap.${snap.id}`);
   });
 });
