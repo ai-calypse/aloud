@@ -42,6 +42,7 @@ dependencies = [
 name = "aloud"
 version = "0.1.0"
 dependencies = [
+ "aloud-agenda",
  "aloud-agent",
  "aloud-agent-spawn",
  "aloud-audio",
@@ -49,6 +50,7 @@ dependencies = [
  "aloud-clipboard",
  "aloud-drag",
  "aloud-engine",
+ "aloud-focus",
  "aloud-hotkey",
  "aloud-islands",
  "aloud-launcher",
@@ -64,6 +66,7 @@ dependencies = [
  "aloud-sessions",
  "aloud-shelf",
  "aloud-store",
+ "aloud-today",
  "aloud-transcribe",
  "aloud-volume",
  "anyhow",
@@ -87,6 +90,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "window-vibrancy 0.5.3",
+]
+
+[[package]]
+name = "aloud-agenda"
+version = "0.1.0"
+dependencies = [
+ "aloud-islands",
+ "aloud-native",
+ "chrono",
+ "serde",
+ "serde_json",
+ "specta",
+ "specta-typescript",
 ]
 
 [[package]]
@@ -187,6 +203,17 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "aloud-focus"
+version = "0.1.0"
+dependencies = [
+ "aloud-islands",
+ "serde",
+ "specta",
+ "specta-typescript",
  "tracing",
 ]
 
@@ -412,6 +439,23 @@ dependencies = [
  "tempfile",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "aloud-today"
+version = "0.1.0"
+dependencies = [
+ "aloud-notes",
+ "anyhow",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "specta",
+ "specta-typescript",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

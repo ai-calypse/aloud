@@ -18,6 +18,7 @@ tauri-build = { version = "2", features = [] }
 chrono = "0.4"
 
 [dependencies]
+aloud-agenda = { path = "../../../crates/agenda" }
 aloud-agent = { path = "../../../crates/agent" }
 aloud-agent-spawn = { path = "../../../crates/agent-spawn" }
 aloud-audio = { path = "../../../crates/audio" }
@@ -26,6 +27,7 @@ aloud-meeting = { path = "../../../crates/meeting" }
 aloud-engine = { path = "../../../crates/engine" }
 aloud-native = { path = "../../../crates/native" }
 aloud-hotkey = { path = "../../../crates/hotkey" }
+aloud-focus = { path = "../../../crates/focus" }
 aloud-islands = { path = "../../../crates/islands" }
 aloud-launcher = { path = "../../../crates/launcher" }
 aloud-llm = { path = "../../../crates/llm" }
@@ -43,6 +45,7 @@ aloud-volume = { path = "../../../crates/volume" }
 aloud-selection = { path = "../../../crates/selection" }
 aloud-shelf = { path = "../../../crates/shelf" }
 aloud-store = { path = "../../../crates/store" }
+aloud-today = { path = "../../../crates/today" }
 aloud-transcribe = { path = "../../../crates/transcribe" }
 anyhow.workspace = true
 chrono = "0.4"

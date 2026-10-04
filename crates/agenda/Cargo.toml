@@ -1,0 +1,15 @@
+[package]
+name = "aloud-agenda"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Today's calendar events and reminders, read through Calendar.app and Reminders.app"
+
+[dependencies]
+aloud-islands = { path = "../islands" }
+aloud-native = { path = "../native" }
+chrono = "0.4"
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+specta-typescript = "0.0.12"

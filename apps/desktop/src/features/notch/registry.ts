@@ -21,6 +21,8 @@ import { MacPower } from "./views/MacPower";
 import { MacPrivacy } from "./views/MacPrivacy";
 import { MacStats } from "./views/MacStats";
 import { MacWindows } from "./views/MacWindows";
+import { FocusAwake, FocusNotes, FocusTimer } from "./views/Focus";
+import { TodayCalendar, TodayReminders, TodayStocks, TodayWeather } from "./views/Today";
 import { NowOverview } from "./views/Now";
 import { ShelfDownloads, ShelfDrives, ShelfFiles, ShelfShots } from "./views/Shelf";
 
@@ -107,9 +109,9 @@ export const SECTIONS: Section[] = [
     name: "Focus",
     icon: TimerIcon,
     subsections: [
-      { id: "timer", name: "Timer", features: ["Pomodoro", "Stopwatch"], ready: false },
-      { id: "awake", name: "Keep Awake", features: ["Keep awake", "Focus mode"], ready: false },
-      { id: "notes", name: "Notes", features: ["Quick notes"], ready: false },
+      { id: "timer", name: "Timer", features: ["Pomodoro", "Stopwatch"], ready: true, view: FocusTimer },
+      { id: "awake", name: "Keep Awake", features: ["Keep awake", "Focus mode"], ready: true, view: FocusAwake },
+      { id: "notes", name: "Notes", features: ["Quick notes"], ready: true, view: FocusNotes },
       { id: "call", name: "Call prep", features: ["Teleprompter", "Camera mirror"], ready: false },
     ],
   },
@@ -169,10 +171,10 @@ export const SECTIONS: Section[] = [
     name: "Today",
     icon: CalendarIcon,
     subsections: [
-      { id: "calendar", name: "Calendar", features: ["Calendar"], ready: false },
-      { id: "reminders", name: "Reminders", features: ["Reminders"], ready: false },
-      { id: "weather", name: "Weather", features: ["Weather"], ready: false },
-      { id: "stocks", name: "Stocks", features: ["Stocks ticker"], ready: false },
+      { id: "calendar", name: "Calendar", features: ["Calendar"], ready: true, view: TodayCalendar },
+      { id: "reminders", name: "Reminders", features: ["Reminders"], ready: true, view: TodayReminders },
+      { id: "weather", name: "Weather", features: ["Weather"], ready: true, view: TodayWeather },
+      { id: "stocks", name: "Stocks", features: ["Stocks ticker"], ready: true, view: TodayStocks },
       { id: "inbox", name: "Inbox", features: ["Notification mirror"], ready: false },
     ],
   },

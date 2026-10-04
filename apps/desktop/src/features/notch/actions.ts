@@ -288,6 +288,153 @@ export const ACTIONS: NotchAction[] = [
     }),
   ),
   // notch-mac: actions end
+  // notch-today-focus: Focus actions begin
+  {
+    id: "focus.start",
+    title: "Start a focus timer",
+    keywords: ["pomodoro", "timer", "focus", "work"],
+    section: "focus",
+    subsection: "timer",
+    run: async (ctx) => {
+      ctx.open("focus", "timer");
+      await commands.focusStart("pomodoro", { focus: 25, rest: 5 });
+      return true;
+    },
+  },
+  {
+    id: "focus.stopwatch",
+    title: "Start the stopwatch",
+    keywords: ["timer", "count up", "time"],
+    section: "focus",
+    subsection: "timer",
+    run: async (ctx) => {
+      ctx.open("focus", "timer");
+      await commands.focusStart("stopwatch", { focus: 25, rest: 5 });
+      return true;
+    },
+  },
+  // Island buttons: Pause on a running timer, Resume on a paused one or a
+  // phase that is waiting to start.
+  {
+    id: "focus.pause",
+    title: "Pause the timer",
+    section: "focus",
+    subsection: "timer",
+    run: async () => {
+      await commands.focusPause();
+      return true;
+    },
+  },
+  {
+    id: "focus.resume",
+    title: "Resume the timer",
+    keywords: ["start break", "continue"],
+    section: "focus",
+    subsection: "timer",
+    run: async () => {
+      await commands.focusResume();
+      return true;
+    },
+  },
+  {
+    id: "focus.stop",
+    title: "Stop the timer",
+    keywords: ["end", "reset", "cancel"],
+    section: "focus",
+    subsection: "timer",
+    run: async () => {
+      await commands.focusStop();
+      return true;
+    },
+  },
+  {
+    id: "focus.awake",
+    title: "Keep my Mac awake for 2 hours",
+    keywords: ["caffeinate", "sleep", "awake", "display"],
+    section: "focus",
+    subsection: "awake",
+    run: async (ctx) => {
+      ctx.open("focus", "awake");
+      return (await commands.awakeStart(120)).status === "ok";
+    },
+  },
+  // Island button on the keep-awake island.
+  {
+    id: "focus.awakeOff",
+    title: "Let my Mac sleep again",
+    keywords: ["caffeinate", "stop", "awake"],
+    section: "focus",
+    subsection: "awake",
+    run: async () => {
+      await commands.awakeStop();
+      return true;
+    },
+  },
+  {
+    id: "focus.note",
+    title: "Write a quick note",
+    keywords: ["note", "jot", "write"],
+    section: "focus",
+    subsection: "notes",
+    run: (ctx) => {
+      ctx.open("focus", "notes");
+      return true;
+    },
+  },
+  // notch-today-focus: Focus actions end
+  // notch-today-focus: Today actions begin
+  {
+    id: "today.calendar",
+    title: "Show today's calendar",
+    keywords: ["events", "meetings", "schedule", "agenda"],
+    section: "today",
+    subsection: "calendar",
+    run: (ctx) => {
+      ctx.open("today", "calendar");
+      return true;
+    },
+  },
+  {
+    id: "today.reminders",
+    title: "Show today's reminders",
+    keywords: ["todo", "tasks", "due"],
+    section: "today",
+    subsection: "reminders",
+    run: (ctx) => {
+      ctx.open("today", "reminders");
+      return true;
+    },
+  },
+  {
+    id: "today.weather",
+    title: "Show the weather",
+    keywords: ["forecast", "temperature", "rain"],
+    section: "today",
+    subsection: "weather",
+    run: (ctx) => {
+      ctx.open("today", "weather");
+      return true;
+    },
+  },
+  {
+    id: "today.stocks",
+    title: "Show my stocks",
+    keywords: ["ticker", "prices", "market"],
+    section: "today",
+    subsection: "stocks",
+    run: (ctx) => {
+      ctx.open("today", "stocks");
+      return true;
+    },
+  },
+  // The next-event island's Join button.
+  {
+    id: "calendar.join",
+    title: "Join the call",
+    args: ["url"],
+    run: async (_, { url }) => (await commands.openMeetingLink(url)).status === "ok",
+  },
+  // notch-today-focus: Today actions end
   {
     // What a finished row's Show does: bring back what a write made.
     id: "result.show",

@@ -1,6 +1,10 @@
 mod agent;
 mod clipboard;
 mod commands;
+// notch-today-focus: wiring begins
+mod focus;
+mod today;
+// notch-today-focus: wiring ends
 mod islands;
 mod launcher;
 mod listen;
@@ -148,6 +152,29 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::close_browse,
             islands::islands,
             islands::dismiss_island,
+            // notch-today-focus: commands begin
+            focus::focus_state,
+            focus::focus_start,
+            focus::focus_pause,
+            focus::focus_resume,
+            focus::focus_skip,
+            focus::focus_stop,
+            focus::focus_stats,
+            focus::awake_start,
+            focus::awake_stop,
+            focus::quick_notes,
+            focus::save_quick_note,
+            today::weather,
+            today::set_weather_city,
+            today::clear_weather_city,
+            today::stock_quotes,
+            today::add_stock,
+            today::remove_stock,
+            today::calendar_events,
+            today::reminders_due,
+            today::complete_reminder,
+            today::open_meeting_link,
+            // notch-today-focus: commands end
             sessions::agent_hook_status,
             sessions::install_agent_hooks,
             sessions::uninstall_agent_hooks,
@@ -249,6 +276,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::NotchHover,
             islands::IslandChanged,
             shelf::ShelfChanged,
+            // notch-today-focus: events begin
+            focus::FocusSnapshot,
+            // notch-today-focus: events end
             sessions::AgentSessions,
             sessions::AgentPermission,
             sessions::AgentPermissionResolved,
@@ -368,6 +398,11 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             // notch-mac: wiring begins
             mac::start(app.handle());
             // notch-mac: wiring ends
+
+            // notch-today-focus: setup begin
+            focus::init(app.handle());
+            today::init(app.handle());
+            // notch-today-focus: setup end
 
             tray::init(app)?;
 

@@ -2,6 +2,7 @@
 //! `history.sqlite` in the app data directory.
 
 pub mod audit;
+pub mod focus;
 pub mod grants;
 pub mod history;
 pub mod macros;
@@ -11,6 +12,7 @@ pub mod settings;
 pub mod stats;
 pub mod timings;
 
+pub use focus::{FocusLog, FocusStats};
 pub use grants::{Decision, Grant, Grants, SavedGrant};
 pub use history::History;
 pub use macros::Macro;

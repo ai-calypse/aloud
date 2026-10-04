@@ -41,7 +41,7 @@ describe("ACTIONS", () => {
   it("has every action Rust sends, with unique ids", () => {
     const ids = ACTIONS.map((a) => a.id);
     expect(new Set(ids).size).toBe(ids.length);
-    for (const id of ["agents.open", "result.show", "files.undoTidy", "media.toggle"]) expect(ids).toContain(id);
+    for (const id of ["agents.open", "result.show", "files.undoTidy", "media.toggle", "focus.pause", "focus.resume", "focus.awakeOff", "calendar.join"]) expect(ids).toContain(id);
   });
 
   // aloud-mac names these in its islands' Show buttons, and the view's
