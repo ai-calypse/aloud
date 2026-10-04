@@ -227,3 +227,13 @@
 .motion-countdown[data-held]::after {
   animation-play-state: paused;
 }
+
+/* Reduced motion collapses every animation to 1ms, which would show this
+   clock already run out while Rust still waits the full time. It steps once a
+   second instead: the time left stays true, with no travel. */
+@media (prefers-reduced-motion: reduce) {
+  .motion-countdown::after {
+    animation-duration: var(--auto-ms) !important;
+    animation-timing-function: steps(3, end);
+  }
+}

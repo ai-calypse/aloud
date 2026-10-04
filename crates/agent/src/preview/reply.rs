@@ -346,6 +346,30 @@ mod tests {
         assert_eq!(countdown(&p, true), Some(AUTO_MS));
     }
 
+    /// Mail and FaceTime had no mapping, so their cards fell back to the
+    /// schema and showed the number `prepare` found, not the person.
+    #[test]
+    fn mail_and_facetime_cards_name_the_contact_and_never_count_down() {
+        let names = launch();
+        let mail = card(
+            "ALOUD_MAIL_SEND",
+            &json!({ "to": "suhani@example.com", "to_name": "Suhani Shah", "subject": "Hi", "body": "on my way" }),
+            "email suhani on my way",
+            &names,
+        );
+        assert_eq!(mail.title, "Send email to Suhani Shah");
+        assert_eq!(countdown(&mail, true), None, "only a message counts down");
+
+        let call = card(
+            "ALOUD_FACETIME_CALL",
+            &json!({ "to": "+15550001111", "to_name": "Suhani Shah" }),
+            "facetime suhani",
+            &names,
+        );
+        assert_eq!(call.title, "Call Suhani Shah");
+        assert_eq!(countdown(&call, true), None, "a call carries no words");
+    }
+
     #[test]
     fn a_message_aloud_wrote_waits_for_a_click() {
         let names = launch();

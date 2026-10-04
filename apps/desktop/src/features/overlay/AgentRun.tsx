@@ -390,11 +390,6 @@ function ConfirmGate({
           `${labelFor(step.name, step.args)} — this writes to ${step.app}.`}
       </p>
       {preview?.scope && <p className="agent__scope">{preview.scope}</p>}
-      {preview?.risks.map((risk) => (
-        <p className="agent__reason" key={risk}>
-          {risk}
-        </p>
-      ))}
       {preview && (
         <CardEditsContext.Provider
           value={{

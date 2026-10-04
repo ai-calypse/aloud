@@ -710,6 +710,8 @@ pub(super) mod tests {
             "Photo Booth",
             "Discord",
             "Messages",
+            "Mail",
+            "FaceTime",
         ]
         .into_iter()
         .map(|name| aloud_selection::InstalledApp {
