@@ -370,7 +370,10 @@
       { "role": "id", "path": "/team_id", "label": "Team" },
       { "role": "text", "path": "/description", "label": "Description" },
       { "role": "id", "path": "/assignee_id", "label": "Assignee" },
-      { "role": "plain", "path": "/priority", "label": "Priority" },
+      {
+        "role": "plain", "path": "/priority", "label": "Priority",
+        "labels": { "0": "No priority", "1": "Urgent", "2": "High", "3": "Medium", "4": "Low" }
+      },
       { "role": "list", "path": "/label_ids", "label": "Labels" },
       { "role": "when", "path": "/due_date", "label": "Due" },
       { "role": "id", "path": "/project_id", "label": "Project" },
@@ -451,7 +454,7 @@
     "risks": [{ "path": "/line_items", "text": "Anyone with the link can pay it." }]
   },
   "STRIPE_CREATE_CHARGE": {
-    "kind": "money", "verb": "Charge", "noun": "card", "tier": "strict",
+    "kind": "money", "verb": "Charge", "noun": "card", "to": "", "tier": "strict",
     "slots": [
       { "role": "money", "path": "/amount", "label": "Amount" },
       { "role": "id", "path": "/customer", "label": "Customer" },
@@ -466,7 +469,7 @@
     ]
   },
   "STRIPE_CREATE_PAYMENT_INTENT": {
-    "kind": "money", "verb": "Create", "noun": "payment", "tier": "strict",
+    "kind": "money", "verb": "Charge", "noun": "card", "to": "", "tier": "strict",
     "slots": [
       { "role": "money", "path": "/amount", "label": "Amount" },
       { "role": "id", "path": "/customer", "label": "Customer" },

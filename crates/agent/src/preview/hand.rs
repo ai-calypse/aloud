@@ -21,8 +21,10 @@ pub(super) struct Mapping {
     #[serde(default)]
     pub(super) noun: Option<String>,
     /// The word before the target in the title: "to", "with", "in", or empty
-    /// for none. Absent, messages and email go "to" someone, events and shares
-    /// are "with" someone, and every other kind names no target.
+    /// for a direct object, which takes the noun's place once it has a name
+    /// ("Charge Acme Inc", else "Charge card"). Absent, messages and email go
+    /// "to" someone, events and shares are "with" someone, and every other
+    /// kind names no target.
     #[serde(default)]
     pub(super) to: Option<String>,
     #[serde(default)]
@@ -57,6 +59,10 @@ pub(super) struct Slot {
     pub(super) path: String,
     #[serde(default)]
     pub(super) label: Option<String>,
+    /// What a coded value means, for an API that takes a number where people
+    /// say a word: Linear's priority `2` is "High".
+    #[serde(default)]
+    pub(super) labels: BTreeMap<String, String>,
 }
 
 /// A sentence the card adds when the argument at `path` equals `equals`, or,
@@ -163,19 +169,126 @@ pub fn render(name: &str, args: &Value, schema: Option<&Value>, ctx: &Context) -
         Some(mapping) => mapped(mapping, name, args, schema, ctx.names),
         None => {
             let mut preview = build(name, args, schema);
-            let had_target = target(&preview.fields, "to").is_some();
+            let to = fallback::preposition(preview.kind, &preview.verb);
+            let had_target = target(&preview.fields, to).is_some();
             name_ids(&mut preview, ctx.names);
-            if let Some(target) = target(&preview.fields, "to").filter(|_| !had_target) {
+            if let Some(target) = target(&preview.fields, to).filter(|_| !had_target) {
                 preview.title = format!("{} {target}", preview.title);
             }
             preview
         }
     };
     tag_origins(&mut preview, ctx.said);
-    if preview.kind == CardKind::Delete {
-        preview.picked_by = picked_by(&preview, args, ctx.names);
+    match preview.kind {
+        CardKind::Delete => preview.picked_by = picked_by(&preview, args, ctx.names),
+        CardKind::Event => under_the_time(&mut preview),
+        CardKind::Row => sheet(&mut preview, args),
+        _ => {}
     }
     preview
+}
+
+/// An event's time zone and length as one line under its start, the way a
+/// calendar shows them, rather than two more rows to read past.
+fn under_the_time(preview: &mut ActionPreview) {
+    let Some(start) = preview.fields.iter().find(|f| f.role == Role::When) else {
+        return;
+    };
+    let start = start.path.clone();
+    let mut zone = Vec::new();
+    let mut length = Vec::new();
+    for list in [&mut preview.fields, &mut preview.more] {
+        list.retain(|f| {
+            let words = fallback::words(top(&f.path));
+            let has = |list: &[&str]| words.iter().any(|w| list.contains(&w.as_str()));
+            if f.role != Role::When && has(&["timezone", "zone", "tz"]) {
+                if !zone.contains(&f.value) {
+                    zone.push(f.value.clone());
+                }
+            } else if has(&["duration", "length"]) && f.value.parse::<f64>().is_ok() {
+                let unit = if has(&["hour", "hours"]) {
+                    "hr"
+                } else if has(&["minute", "minutes", "min", "mins"]) {
+                    "min"
+                } else {
+                    return true;
+                };
+                length.push(format!("{} {unit}", f.value));
+            } else {
+                return true;
+            }
+            false
+        });
+    }
+    let line = [zone.join(" "), length.join(" ")]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    if let Some(field) = preview.fields.iter_mut().find(|f| f.path == start) {
+        field.items = (!line.is_empty()).then_some(line).into_iter().collect();
+    }
+}
+
+/// Rows of cells drawn as the sheet draws them: column letters, counted from
+/// where the range starts, over the first few rows.
+// ponytail: letters, not the sheet's own header row — reading row 1 of the
+// range is the upgrade, and the design's.
+fn sheet(preview: &mut ActionPreview, args: &Value) {
+    let start = args
+        .get("range")
+        .and_then(Value::as_str)
+        .map_or(0, first_column);
+    let Some((field, rows)) = preview
+        .fields
+        .iter_mut()
+        .chain(preview.more.iter_mut())
+        .filter(|f| f.role == Role::List)
+        .find_map(|f| {
+            let rows = args.pointer(&f.path)?.as_array()?;
+            let rows: Option<Vec<&Vec<Value>>> = rows.iter().map(Value::as_array).collect();
+            Some(f).zip(rows.filter(|r| !r.is_empty()))
+        })
+    else {
+        return;
+    };
+    let width = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    field.cells = std::iter::once((start..start + width).map(column).collect())
+        .chain(rows.iter().take(fallback::SAMPLE).map(|row| {
+            (0..width)
+                .map(|i| row.get(i).map(fallback::inline).unwrap_or_default())
+                .collect()
+        }))
+        .collect();
+}
+
+/// The column a range starts in, 0 for A: `Expenses!C2:F` is 2. A bare sheet
+/// name (`Sheet1`) starts at A.
+fn first_column(range: &str) -> usize {
+    let cells = range.rsplit('!').next().unwrap_or_default();
+    let letters = cells.bytes().take_while(u8::is_ascii_uppercase).count();
+    let rest = &cells[letters..];
+    if !(1..=3).contains(&letters) || rest.starts_with(|c: char| c != ':' && !c.is_ascii_digit()) {
+        return 0;
+    }
+    cells
+        .bytes()
+        .take(letters)
+        .fold(0, |n, b| n * 26 + usize::from(b - b'A') + 1)
+        - 1
+}
+
+/// A column's letters: 0 is A, 26 is AA.
+fn column(index: usize) -> String {
+    let mut out = Vec::new();
+    let mut n = index + 1;
+    while n > 0 {
+        n -= 1;
+        out.push(b'A' + u8::try_from(n % 26).unwrap_or(0));
+        n /= 26;
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap_or_default()
 }
 
 fn mapped(
@@ -207,6 +320,9 @@ fn mapped(
                 fallback::shape(slot.role, slot.path.clone(), &key, value, prop, currency);
             if let Some(label) = &slot.label {
                 field.label.clone_from(label);
+            }
+            if let Some(word) = slot.labels.get(&field.value) {
+                field.value.clone_from(word);
             }
             field.editable = m.editable.contains(&slot.path);
             Some(field)
@@ -294,20 +410,34 @@ pub(super) fn title(m: &Mapping, fields: &[Field]) -> String {
         return format!("{} {n} {noun}s", m.verb);
     }
     let to = m.to.as_deref().or(match m.kind {
-        CardKind::Message | CardKind::Email => Some("to"),
-        CardKind::Event | CardKind::Share => Some("with"),
+        CardKind::Message | CardKind::Email | CardKind::Event | CardKind::Share => {
+            Some(fallback::preposition(m.kind, &m.verb))
+        }
         _ => None,
     });
-    [
-        Some(m.verb.clone()),
-        Some(noun.to_string()),
-        to.and_then(|to| target(fields, to)),
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|part| !part.is_empty())
-    .collect::<Vec<_>>()
-    .join(" ")
+    let target = match to {
+        // A direct object is the first person, place or record the call
+        // names, an id a read named included; one nobody named yet leaves the
+        // noun standing rather than falling through to a receipt address.
+        Some("") => fields
+            .iter()
+            .find(|f| matches!(f.role, Role::Id | Role::Person | Role::Destination))
+            .filter(|f| !f.unresolved)
+            .map(fallback::who),
+        Some(to) => target(fields, to),
+        None => None,
+    };
+    let noun = if to == Some("") && target.is_some() {
+        ""
+    } else {
+        noun
+    };
+    [Some(m.verb.clone()), Some(noun.to_string()), target]
+        .into_iter()
+        .flatten()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The first person or destination with a name to show, after `to`.
@@ -315,13 +445,7 @@ fn target(fields: &[Field], to: &str) -> Option<String> {
     let field = fields
         .iter()
         .find(|f| matches!(f.role, Role::Destination | Role::Person) && !f.unresolved)?;
-    let who = match (&field.name, field.items.first()) {
-        (Some(name), _) => name.clone(),
-        (None, Some(first)) if field.count > 1 => {
-            format!("{first} and {} more", field.count - 1)
-        }
-        _ => field.value.clone(),
-    };
+    let who = fallback::who(field);
     Some(if to.is_empty() {
         who
     } else {
@@ -813,6 +937,92 @@ pub(super) mod tests {
             find(&p, "/message_id").name.as_deref(),
             Some("Tuesday's edition")
         );
+    }
+
+    #[test]
+    fn a_charge_is_titled_by_who_pays_not_the_api_call() {
+        let mut names = Names::default();
+        let args = || {
+            json!({ "amount": 4200, "currency": "usd", "customer": "cus_Q3f2xY",
+                    "confirm": true, "receipt_email": "billing@acme.co" })
+        };
+        let p = card("STRIPE_CREATE_PAYMENT_INTENT", args(), "", &names);
+        assert_eq!(
+            (p.verb.as_str(), p.title.as_str()),
+            ("Charge", "Charge card"),
+            "an unnamed customer is not swapped for the receipt address"
+        );
+        names.harvest(&json!([{ "id": "cus_Q3f2xY", "name": "Acme Inc" }]), "x");
+        let p = card("STRIPE_CREATE_PAYMENT_INTENT", args(), "", &names);
+        assert_eq!(p.title, "Charge Acme Inc");
+        assert_eq!(find(&p, "/amount").value, "42.00 USD");
+    }
+
+    #[test]
+    fn an_issue_priority_shows_its_word_not_its_number() {
+        let names = Names::default();
+        for (priority, word) in [(0, "No priority"), (1, "Urgent"), (2, "High"), (4, "Low")] {
+            let p = card(
+                "LINEAR_CREATE_LINEAR_ISSUE",
+                json!({ "title": "Login loops", "team_id": "t1", "priority": priority }),
+                "",
+                &names,
+            );
+            assert_eq!(find(&p, "/priority").value, word);
+        }
+    }
+
+    #[test]
+    fn an_event_shows_its_zone_and_length_on_one_line_under_the_time() {
+        let names = Names::default();
+        let p = card(
+            "GOOGLECALENDAR_CREATE_EVENT",
+            json!({ "summary": "Lunch", "start_datetime": "2026-10-09T13:00:00",
+                    "event_duration_hour": 1, "event_duration_minutes": 30,
+                    "timezone": "Asia/Kolkata" }),
+            "",
+            &names,
+        );
+        assert_eq!(
+            find(&p, "/start_datetime").items,
+            ["Asia/Kolkata · 1 hr 30 min"]
+        );
+        for gone in [
+            "/timezone",
+            "/event_duration_hour",
+            "/event_duration_minutes",
+        ] {
+            assert!(all(&p).all(|f| f.path != gone), "{gone} is still a row");
+        }
+    }
+
+    #[test]
+    fn a_sheet_append_shows_its_cells_under_column_letters() {
+        let names = Names::default();
+        let p = card(
+            "GOOGLESHEETS_SPREADSHEETS_VALUES_APPEND",
+            json!({ "spreadsheetId": "1Bx", "range": "Expenses!C:F",
+                    "values": [["3 Oct", "Lunch", 42, "Food"], ["4 Oct", "Taxi"]] }),
+            "",
+            &names,
+        );
+        assert_eq!(
+            find(&p, "/values").cells,
+            [
+                vec!["C", "D", "E", "F"],
+                vec!["3 Oct", "Lunch", "42", "Food"],
+                vec!["4 Oct", "Taxi", "", ""],
+            ]
+        );
+        assert_eq!(
+            [
+                first_column("Sheet1"),
+                first_column("A1:D4"),
+                first_column("'Q4'!AA2")
+            ],
+            [0, 0, 26]
+        );
+        assert_eq!([column(0), column(25), column(26)], ["A", "Z", "AA"]);
     }
 
     #[test]

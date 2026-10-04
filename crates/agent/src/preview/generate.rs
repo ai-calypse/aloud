@@ -167,6 +167,7 @@ fn to_mapping(g: &Generated) -> Mapping {
                 role: s.role,
                 path: s.path.clone(),
                 label: None,
+                labels: Default::default(),
             })
             .collect(),
         editable: Vec::new(),

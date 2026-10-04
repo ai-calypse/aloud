@@ -62,7 +62,8 @@ pub enum Role {
     /// Who it goes to: an address or attendee list.
     Person,
     Heading,
-    /// A date or time, already formatted.
+    /// A date or time, already formatted. On an event, `items[0]` is the line
+    /// under it: time zone and length.
     When,
     /// Body text, shown in full and never truncated.
     Text,
@@ -144,4 +145,7 @@ pub struct Field {
     pub before: Option<String>,
     pub origin: Option<Origin>,
     pub editable: bool,
+    /// A sheet's rows as the sheet draws them: column letters first, then the
+    /// first few rows' cells. Empty for anything that is not rows of cells.
+    pub cells: Vec<Vec<String>>,
 }

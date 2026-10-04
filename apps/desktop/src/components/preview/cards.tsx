@@ -8,6 +8,8 @@ import {
   MoreFields,
   PathMove,
   RiskLine,
+  SaferLine,
+  SheetTable,
   TextBlock,
   WhenBlock,
 } from "./kit";
@@ -28,23 +30,27 @@ function split(fields: Field[], ...roles: Role[]): [Field[], Field[]] {
   ];
 }
 
+/** Text, and rows of sheet cells: too wide for a row's value column. */
+const wide = (field: Field) => field.role === "text" || field.cells.length > 0;
+
 /**
- * Fields in order: text full width with whose words it is, everything else on
- * rows. Text inside an 84px-label row reads as a value; a message is the
- * thing being approved.
+ * Fields in order: text full width with whose words it is, a sheet's rows as
+ * a table, everything else on rows. Text inside an 84px-label row reads as a
+ * value; a message is the thing being approved.
  */
 function Flow({ fields }: { fields: Field[] }) {
   const runs: Field[][] = [];
   for (const field of fields) {
     const last = runs[runs.length - 1];
-    if (field.role !== "text" && last && last[0].role !== "text")
-      last.push(field);
+    if (!wide(field) && last && !wide(last[0])) last.push(field);
     else runs.push([field]);
   }
   return (
     <>
       {runs.map((run) =>
-        run[0].role === "text" ? (
+        run[0].cells.length > 0 ? (
+          <SheetTable key={run[0].path} field={run[0]} />
+        ) : run[0].role === "text" ? (
           <TextBlock key={run[0].path} field={run[0]} />
         ) : (
           <FieldRows key={run[0].path} fields={run} />
@@ -104,7 +110,7 @@ function Event({ preview }: { preview: ActionPreview }) {
       <Heading fields={heading} />
       {when && (
         <p className="preview__lead">
-          <WhenBlock big when={when.value} />
+          <WhenBlock big when={when.value} under={when.items[0]} />
         </p>
       )}
       <Flow fields={other.filter((f) => f !== when)} />
@@ -234,6 +240,7 @@ export function PreviewCard({
               danger={preview.tier === "strict"}
             />
           ))}
+          {preview.safer && <SaferLine label={preview.safer.label} />}
           {preview.kind === "fallback" && preview.total > 0 && (
             <p className="preview__foot">
               {preview.set} of {preview.total} fields set
