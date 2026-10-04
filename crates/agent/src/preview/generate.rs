@@ -276,9 +276,8 @@ pub async fn warm_previews(brains: &[Brain], composio: &ComposioClient, path: &P
             Err(e) => tracing::warn!(%e, toolkit, "action previews: no tools"),
         }
     }
-    // The last brain, not the first: live commands lean on the first's
-    // per-minute budget (Groq's free tier is about one step a minute), while
-    // the fallback's quota is daily and mostly idle.
+    // The last brain, not the first: live commands spend the earlier ones'
+    // budgets (Groq's per minute, Gemini's per day), and the last sits idle.
     let pass = generate(&brains[brains.len() - 1..], &tools, path).await;
     tracing::info!(
         asked = pass.asked,
