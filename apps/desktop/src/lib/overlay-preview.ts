@@ -22,9 +22,17 @@ export type PreviewCommand = {
   /**
    * An agent run. `pending` stops on the approval gate; `contact` stops on the
    * editable one, which is otherwise only reachable by asking the agent for
-   * someone it cannot find.
+   * someone it cannot find; `fallback` on a gate drawn from the tool's schema.
    */
-  agent?: "run" | "pending" | "planned" | "contact" | "asked" | "choose" | "close";
+  agent?:
+    | "run"
+    | "pending"
+    | "planned"
+    | "contact"
+    | "asked"
+    | "choose"
+    | "fallback"
+    | "close";
   dismissing?: boolean;
   /** Rebuilds the panel's springs, which is how a changed --panel-* applies. */
   restart?: boolean;

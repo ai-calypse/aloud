@@ -9,6 +9,7 @@ import {
 import { commands, type FinderResults } from "@/lib/bindings";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { FallbackCard } from "@/components/preview/kit";
 import {
   groupSteps,
   pendingStep,
@@ -288,6 +289,9 @@ function AskGate({ asked }: { asked: { question: string; options: string[] } }) 
  * editable fields (`edits` in tool-views) and show inputs instead — the agent
  * reaches the contact gate precisely because it could not find an address, so
  * refusing is the only other answer it could give.
+ *
+ * A tool with no hand-drawn view shows the card Rust built from its schema, so
+ * no write is ever approved from a title alone.
  */
 function ConfirmGate({ step }: { step: Step }) {
   const fields = editsFor(step.name);
@@ -296,6 +300,8 @@ function ConfirmGate({ step }: { step: Step }) {
   // Ask first; the fields only appear for someone who said yes.
   const [filling, setFilling] = useState(false);
   const asking = fields.length > 0 && !filling;
+  const body = bodyFor(step.name, draft);
+  const card = fields.length === 0 && body == null ? step.preview : null;
 
   // Only what the user could have changed. Rust folds it back into the real
   // nested arguments; anything untouched keeps the value the model chose.
@@ -311,6 +317,7 @@ function ConfirmGate({ step }: { step: Step }) {
         {asking && askFor(step.name, draft)
           ? askFor(step.name, draft)
           : gateFor(step.name, draft) ||
+            card?.title ||
             `${labelFor(step.name, draft)} — this writes to ${step.app}.`}
       </p>
       {/* Approving a write without seeing what it will do is not a gate, so the
@@ -333,8 +340,10 @@ function ConfirmGate({ step }: { step: Step }) {
             </label>
           ))}
         </div>
+      ) : card ? (
+        <FallbackCard preview={card} />
       ) : (
-        <div className="agent__body">{bodyFor(step.name, draft)}</div>
+        <div className="agent__body">{body}</div>
       )}
       <div className="agent__actions">
         <button className="agent__action" onClick={() => confirm(false)}>
@@ -354,7 +363,7 @@ function ConfirmGate({ step }: { step: Step }) {
             autoFocus={fields.length === 0}
             onClick={() => confirm(true)}
           >
-            Confirm
+            {card?.verb || "Confirm"}
           </button>
         )}
       </div>

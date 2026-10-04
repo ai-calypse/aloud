@@ -43,7 +43,12 @@ import {
   MAX_TABS,
   TabStrip,
 } from "./features/overlay/TabStrip";
-import { PARTIAL_PREVIEW, PARTIAL_MS, AGENT_PREVIEW } from "./features/overlay/previews";
+import {
+  PARTIAL_PREVIEW,
+  PARTIAL_MS,
+  AGENT_PREVIEW,
+  FALLBACK_PREVIEW,
+} from "./features/overlay/previews";
 import { useNotchPanel } from "./features/overlay/useNotchPanel";
 // Streamdown styles the agent's answer with Tailwind utilities — see the
 // `@source` note in index.css.
@@ -783,6 +788,7 @@ function Overlay() {
           },
         });
       }
+      if (command.agent === "fallback") setAgent(FALLBACK_PREVIEW);
       if (command.agent === "close") setAgent(null);
       if (command.partial === "clear") {
         clearInterval(typing);

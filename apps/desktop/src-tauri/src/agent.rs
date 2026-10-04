@@ -166,6 +166,10 @@ pub struct ToolCall {
     pub args: std::collections::BTreeMap<String, String>,
     /// Whether this call pauses for confirmation before it runs (every write).
     pub requires_confirmation: bool,
+    /// What the gate's card shows, read from the real arguments. Only on the
+    /// gate event; the start event and reads carry none. Boxed so every other
+    /// event is not sized to the card.
+    pub preview: Option<Box<aloud_agent::preview::ActionPreview>>,
 }
 
 /// A question put to the user mid-run. `options` non-empty means the answer is
@@ -376,8 +380,9 @@ async fn execute(
                     .as_ref()
                     .map(|t| t.toolkit.clone())
                     .unwrap_or_else(|| tool_app(&call.name));
+                let schema = call.tool.map(|t| t.parameters);
                 async move {
-                    match confirm_write(app, run, call.name, toolkit, call.args).await {
+                    match confirm_write(app, run, call.name, toolkit, schema, call.args).await {
                         Some(args) => aloud_agent::Verdict::Run(args),
                         None => aloud_agent::Verdict::Decline,
                     }
@@ -411,11 +416,22 @@ async fn run_fast(
                 name: name.to_string(),
                 args: display_args(&args),
                 requires_confirmation: false,
+                preview: None,
             }),
         );
         args
     } else {
-        match confirm_write(app, run, name.to_string(), "macOS".to_string(), args).await {
+        let schema = aloud_native::params(name);
+        match confirm_write(
+            app,
+            run,
+            name.to_string(),
+            "macOS".to_string(),
+            schema,
+            args,
+        )
+        .await
+        {
             Some(approved) => approved,
             None => return Ok("Cancelled.".to_string()),
         }
@@ -456,6 +472,7 @@ async fn run_direct(
             name: name.clone(),
             args: [("goal".to_string(), transcript.to_string())].into(),
             requires_confirmation: false,
+            preview: None,
         }),
     );
     loop {
@@ -553,11 +570,13 @@ pub fn answer_agent(app: AppHandle, answer: Option<String>) {
 
 /// Surfaces a write tool for confirmation and awaits the panel's decision. Takes
 /// owned args so the returned future doesn't borrow the loop's transient data.
+/// `schema` is the tool's JSON schema, which the card reads its fields against.
 async fn confirm_write(
     app: &AppHandle,
     run: &Run,
     name: String,
     toolkit: String,
+    schema: Option<serde_json::Value>,
     args: serde_json::Value,
 ) -> Option<serde_json::Value> {
     // A superseded run must not open a gate: its prompt would appear over the
@@ -571,14 +590,25 @@ async fn confirm_write(
     run.surface(app);
     run.emit(
         app,
-        AgentEvent::ToolCall(ToolCall {
-            app: toolkit,
-            name,
-            args: display_args(&args),
-            requires_confirmation: true,
-        }),
+        AgentEvent::ToolCall(gate_call(name, toolkit, &args, schema.as_ref())),
     );
     await_confirmation(app, args).await
+}
+
+/// The gate event for a write: the call plus the card that previews it.
+fn gate_call(
+    name: String,
+    toolkit: String,
+    args: &serde_json::Value,
+    schema: Option<&serde_json::Value>,
+) -> ToolCall {
+    ToolCall {
+        preview: Some(Box::new(aloud_agent::preview::build(&name, args, schema))),
+        app: toolkit,
+        name,
+        args: display_args(args),
+        requires_confirmation: true,
+    }
 }
 
 /// Flattens a tool's argument object into displayable string fields.
@@ -621,6 +651,7 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
             args: display_args(&args),
             // The gate is enforced in the loop; the panel just shows the call.
             requires_confirmation: false,
+            preview: None,
         }),
         aloud_agent::LoopEvent::ToolCallResult { name, success } => {
             AgentEvent::ToolResult(ToolResult {
@@ -826,6 +857,48 @@ mod tests {
             Some(" a@b.c ".to_string()).filter(|t| !t.trim().is_empty()),
             Some(" a@b.c ".to_string())
         );
+    }
+
+    /// A gate without its preview is the blank approval card this exists to
+    /// end: the panel can only draw what the event carries, and it reads the
+    /// card's fields by their camelCase names.
+    #[test]
+    fn a_gate_event_carries_its_preview() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "channel": { "type": "string", "title": "Channel" },
+                "markdown_text": { "type": "string" },
+            }
+        });
+        let args = json!({ "channel": "general", "markdown_text": "Standup moves to 10:30" });
+        let call = gate_call(
+            "SLACK_CHAT_POST_MESSAGE".into(),
+            "slack".into(),
+            &args,
+            Some(&schema),
+        );
+        assert!(call.requires_confirmation);
+        let sent = serde_json::to_value(&call).expect("serialises");
+        assert_eq!(sent["preview"]["title"], "Send message to general");
+        assert_eq!(sent["preview"]["fields"][0]["label"], "Channel");
+        assert_eq!(
+            sent["preview"]["fields"][1]["value"],
+            "Standup moves to 10:30"
+        );
+
+        // The fast path has no model and so no tool list; its schema comes from
+        // the native catalogue instead.
+        let schema = aloud_native::params("ALOUD_QUIT_APP").expect("a native write");
+        let call = gate_call(
+            "ALOUD_QUIT_APP".into(),
+            "macOS".into(),
+            &json!({ "name": "Safari" }),
+            Some(&schema),
+        );
+        let preview = call.preview.expect("a preview");
+        assert_eq!(preview.title, "Quit app");
+        assert_eq!(preview.fields[0].value, "Safari");
     }
 
     #[test]
