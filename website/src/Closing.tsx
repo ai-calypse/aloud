@@ -1,5 +1,7 @@
 import timeCat from "./assets/memes/time-cat.webp";
 import footerArt from "./assets/footer.webp";
+import scubaaCat from "./assets/scubaa-cat.webp";
+import scubaaCatStill from "./assets/scubaa-cat-still.webp";
 import { GlossyButton } from "./components/ds";
 import Sticker from "./components/Sticker";
 import SmartLink from "./components/SmartLink";
@@ -46,14 +48,30 @@ export default function Closing() {
       {/* The wall of tvs spells the name, so it replaces the pixel wordmark. It fades into the page
           at the top; the links sit on its dark floor. */}
       <footer className="relative isolate overflow-hidden text-neutral-0">
-        <img
-          src={footerArt}
-          alt="A wall of vintage televisions whose screens spell SpeakOS, with a large wooden tv in front"
-          width={2400}
-          height={1339}
-          loading="lazy"
-          className="block w-full object-cover [mask-image:linear-gradient(to_bottom,transparent,black_16%)] md:aspect-[16/8] md:object-[50%_40%]"
-        />
+        {/* Natural shape at every width, so the cat can be placed in % of the picture and stay
+            on the same TV screen: the big wooden set at the front, standing on the glass. */}
+        <div className="relative">
+          <img
+            src={footerArt}
+            alt="A wall of vintage televisions whose screens spell SpeakOS, with a large wooden tv in front"
+            width={2400}
+            height={1339}
+            loading="lazy"
+            className="block w-full [mask-image:linear-gradient(to_bottom,transparent,black_16%)]"
+          />
+          <picture>
+            {/* reduced motion gets the first frame */}
+            <source media="(prefers-reduced-motion: reduce)" srcSet={scubaaCatStill} />
+            <img
+              src={scubaaCat}
+              alt="A tiny kitten dancing inside the big television"
+              width={192}
+              height={206}
+              loading="lazy"
+              className="pointer-events-none absolute left-[42.4%] top-[58.2%] w-[11%] [filter:drop-shadow(0_2px_5px_rgb(0_0_60/0.45))]"
+            />
+          </picture>
+        </div>
         <div className="bg-blue-950 px-5 pb-20 pt-5 md:absolute md:inset-x-0 md:bottom-0 md:bg-transparent md:bg-gradient-to-t md:from-blue-950 md:via-blue-950/70 md:to-transparent md:pb-6 md:pt-24">
           <p className="flex flex-wrap justify-center gap-x-3 text-[13px]">
             <span>SpeakOS</span>·<span>{c.closing.madeFor}</span>·
