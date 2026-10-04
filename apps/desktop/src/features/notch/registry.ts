@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { readySections, type Section } from "./sections";
 import { AgentsCoding, AgentsUsage, AgentsVoice } from "./views/Agents";
+import { MediaLyrics } from "./views/MediaLyrics";
 import { MediaPlaying } from "./views/MediaPlaying";
 import { NowOverview } from "./views/Now";
 
@@ -80,7 +81,7 @@ export const SECTIONS: Section[] = [
         ready: true,
         view: MediaPlaying,
       },
-      { id: "lyrics", name: "Lyrics", features: ["Synced lyrics"], ready: false },
+      { id: "lyrics", name: "Lyrics", features: ["Synced lyrics"], ready: true, view: MediaLyrics },
       { id: "sound", name: "Sound", features: ["Audio switcher", "Sound mixer", "Mic mute"], ready: false },
       { id: "devices", name: "Devices", features: ["AirPods", "Device battery"], ready: false },
     ],

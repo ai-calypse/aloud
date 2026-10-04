@@ -119,6 +119,17 @@ export const ACTIONS: NotchAction[] = [
     },
   },
   {
+    id: "media.lyrics",
+    title: "Show lyrics",
+    keywords: ["song", "words", "sing", "karaoke"],
+    section: "media",
+    subsection: "lyrics",
+    run: (ctx) => {
+      ctx.open("media", "lyrics");
+      return true;
+    },
+  },
+  {
     // What a finished row's Show does: bring back what a write made.
     id: "result.show",
     title: "Show what was made",
