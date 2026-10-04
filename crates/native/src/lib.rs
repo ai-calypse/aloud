@@ -35,6 +35,10 @@ pub fn thumbnail(path: &str) -> Option<String> {
 /// most machines.
 const RUN_SHORTCUT: &str = "ALOUD_RUN_SHORTCUT";
 
+/// The most times one call runs a repeatable tool, so a misheard "two hundred"
+/// is a short burst rather than minutes of shutter.
+const MAX_TIMES: u32 = 20;
+
 /// A native tool offered to the model. Deliberately *not* `aloud_agent::ToolDef`:
 /// `aloud_agent` depends on this crate to dispatch, so depending back would
 /// cycle. The caller maps this into `ToolDef` at the concat site — a three-field
@@ -64,11 +68,22 @@ pub fn tools(installed: &[aloud_selection::InstalledApp]) -> Vec<NativeTool> {
         let mut tools: Vec<NativeTool> = catalogue::ACTIONS
             .iter()
             .filter(|action| app_installed(action.app, installed))
-            .map(|action| NativeTool {
-                name: action.name.to_string(),
-                description: action.description.to_string(),
-                parameters: (action.params)(),
-                read_only: action.read_only,
+            .map(|action| {
+                let mut parameters = (action.params)();
+                if action.repeatable {
+                    parameters["properties"]["times"] = json!({
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_TIMES,
+                        "description": "How many times to do it; default 1"
+                    });
+                }
+                NativeTool {
+                    name: action.name.to_string(),
+                    description: action.description.to_string(),
+                    parameters,
+                    read_only: action.read_only,
+                }
             })
             .collect();
 
@@ -195,6 +210,22 @@ pub fn confirmation(name: &str, args: &Value, result: &Value) -> Option<String> 
         }),
         _ => None,
     };
+    // A repeat's result is `{done, times, last}`, and only a whole run gets here.
+    if let Some(n) = result.get("times").and_then(Value::as_u64) {
+        return Some(match name {
+            "ALOUD_PHOTO_BOOTH_TAKE_PHOTO" => format!("Took {n} photos."),
+            "ALOUD_MUSIC" | "ALOUD_SPOTIFY" if arg("action") == Some("previous") => {
+                format!("Went back {n} tracks.")
+            }
+            "ALOUD_MUSIC" | "ALOUD_SPOTIFY" => format!("Skipped {n} tracks."),
+            "ALOUD_PRESS_KEYS" => format!("Pressed {} {n} times.", arg("keys")?),
+            "ALOUD_MENU" => format!(
+                "Chose {} {n} times.",
+                result.pointer("/last/clicked")?.as_str()?
+            ),
+            _ => return None,
+        });
+    }
     Some(match name {
         "ALOUD_NOTES_CREATE" => format!("Created the note “{}”.", got("title").or(arg("title"))?),
         "ALOUD_NOTES_APPEND" if result.get("created").is_some() => {
@@ -214,7 +245,7 @@ pub fn confirmation(name: &str, args: &Value, result: &Value) -> Option<String> 
         "ALOUD_SYSTEM_VOLUME" => format!("Volume at {}%.", result.get("volume")?),
         "ALOUD_WINDOW_ARRANGE" => format!("Moved the window {}.", arg("position")?),
         "ALOUD_CLIPBOARD" if arg("action") == Some("write") => "Copied to the clipboard.".into(),
-        "ALOUD_PHOTO_BOOTH_TAKE_PHOTO" => "Taking a photo in Photo Booth.".into(),
+        "ALOUD_PHOTO_BOOTH_TAKE_PHOTO" => "Took a photo in Photo Booth.".into(),
         "ALOUD_BROWSER_TAB" if arg("action") == Some("open") => format!("Opened {}.", arg("url")?),
         "ALOUD_WRITE_FILE" => format!("Saved {}.", got("wrote")?),
         "ALOUD_PRESS_KEYS" => format!("Pressed {}.", arg("keys")?),
@@ -237,7 +268,48 @@ pub fn execute(name: &str, args: &Value) -> Option<Result<Value, ScriptError>> {
     }
     let action = catalogue::ACTIONS.iter().find(|a| a.name == name)?;
     tracing::info!(tool = name, "running native tool");
-    Some((action.run)(args))
+    let times = times(action, args);
+    if times == 1 {
+        return Some((action.run)(args));
+    }
+    Some(match repeat(times, || (action.run)(args)) {
+        Ok(last) => Ok(json!({ "done": times, "times": times, "last": last })),
+        // Nothing ran yet: the error as it came, so a permission denial still reads as one.
+        Err((0, e)) => Err(e),
+        // An Err, not a result with an `error` field, so no caller can read it as done.
+        Err((done, e)) => Err(ScriptError::Failed(format!(
+            "stopped after {done} of {times}: {e}"
+        ))),
+    })
+}
+
+/// How many times to run `action`: the model's `times` clamped to 1..=MAX_TIMES.
+/// Once for a tool that is not repeatable, and for a player action other than
+/// next/previous — the only repeatable tools with an `action` — since a second
+/// pause changes nothing and a second play restarts the song.
+fn times(action: &catalogue::Action, args: &Value) -> u32 {
+    let player_once = args
+        .get("action")
+        .and_then(Value::as_str)
+        .is_some_and(|a| a != "next" && a != "previous");
+    if !action.repeatable || player_once {
+        return 1;
+    }
+    // As f64 so a `3.0` from the model still counts; the cast saturates.
+    args.get("times")
+        .and_then(Value::as_f64)
+        .map_or(1, |n| n.clamp(1.0, f64::from(MAX_TIMES)) as u32)
+}
+
+/// Runs `f` `times` times, at least once, stopping at the first error. The
+/// error carries how many runs finished before it, so a burst that failed
+/// partway can say how far it got.
+fn repeat<T, E>(times: u32, mut f: impl FnMut() -> Result<T, E>) -> Result<T, (u32, E)> {
+    let mut last = f().map_err(|e| (0, e))?;
+    for done in 1..times {
+        last = f().map_err(|e| (done, e))?;
+    }
+    Ok(last)
 }
 
 /// Sentinel `app` for tools backed by macOS itself, not a bundled app —
@@ -317,6 +389,79 @@ mod tests {
             ),
             None
         );
+        let repeated = |name, args| {
+            let result = json!({ "done": 3, "times": 3, "last": {} });
+            confirmation(name, &args, &result)
+        };
+        assert_eq!(
+            repeated("ALOUD_PHOTO_BOOTH_TAKE_PHOTO", json!({ "times": 3 })).as_deref(),
+            Some("Took 3 photos.")
+        );
+        assert_eq!(
+            repeated("ALOUD_MUSIC", json!({ "action": "next", "times": 3 })).as_deref(),
+            Some("Skipped 3 tracks.")
+        );
+        assert_eq!(
+            repeated("ALOUD_PRESS_KEYS", json!({ "keys": "tab", "times": 3 })).as_deref(),
+            Some("Pressed tab 3 times.")
+        );
+    }
+
+    #[test]
+    fn a_repeat_stops_at_the_first_failure_and_reports_progress() {
+        let mut calls = 0;
+        let outcome = repeat(5, || {
+            calls += 1;
+            if calls == 3 {
+                Err("camera busy")
+            } else {
+                Ok(calls)
+            }
+        });
+        assert_eq!(outcome, Err((2, "camera busy")));
+        assert_eq!(calls, 3, "nothing may run after the failure");
+        assert_eq!(repeat(3, || Ok::<_, ()>("shot")), Ok("shot"));
+    }
+
+    #[test]
+    fn times_is_clamped_to_twenty() {
+        let action = |name| catalogue::ACTIONS.iter().find(|a| a.name == name).unwrap();
+        let photo = action("ALOUD_PHOTO_BOOTH_TAKE_PHOTO");
+        assert_eq!(times(photo, &json!({ "times": 500 })), 20);
+        assert_eq!(times(photo, &json!({ "times": 0 })), 1);
+        assert_eq!(times(photo, &json!({ "times": -4 })), 1);
+        assert_eq!(times(photo, &json!({ "times": 3.0 })), 3);
+        assert_eq!(times(photo, &json!({})), 1);
+        // A tool that is not repeatable, and a pause, run once whatever is asked.
+        assert_eq!(times(action("ALOUD_OPEN_APP"), &json!({ "times": 3 })), 1);
+        let music = action("ALOUD_MUSIC");
+        assert_eq!(times(music, &json!({ "action": "pause", "times": 3 })), 1);
+        assert_eq!(times(music, &json!({ "action": "next", "times": 3 })), 3);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn times_is_offered_only_on_repeatable_tools() {
+        const REPEATABLE: &[&str] = &[
+            "ALOUD_PHOTO_BOOTH_TAKE_PHOTO",
+            "ALOUD_PRESS_KEYS",
+            "ALOUD_MENU",
+            "ALOUD_MUSIC",
+            "ALOUD_SPOTIFY",
+        ];
+        let offered = tools(&[app("Music"), app("Spotify"), app("Photo Booth")]);
+        for name in REPEATABLE {
+            assert!(offered.iter().any(|t| t.name == *name), "{name} missing");
+        }
+        for tool in offered {
+            let has_times = tool.parameters["properties"].get("times").is_some();
+            assert_eq!(
+                has_times,
+                REPEATABLE.contains(&tool.name.as_str()),
+                "{}",
+                tool.name
+            );
+        }
     }
 
     #[test]
