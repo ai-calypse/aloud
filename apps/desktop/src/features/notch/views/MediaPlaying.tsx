@@ -39,7 +39,7 @@ const PLAYER_NAME = {
 /** What the transport buttons send. Errors surface as the next reading not changing. */
 function send(now: NowPlaying, transport: Transport) {
   try {
-    void commands.mediaControl(now.player, transport);
+    void commands.mediaControl(now.player, transport, null);
   } catch {
     /* browser preview */
   }

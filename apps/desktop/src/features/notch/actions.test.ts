@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { ACTIONS, runAction, type NotchAction } from "./actions";
+import { commands } from "@/lib/bindings";
+import { ACTIONS, mediaTarget, runAction, type NotchAction } from "./actions";
 import { SNAPS } from "./snaps";
+
+vi.mock("@/lib/bindings", () => ({
+  commands: {
+    mediaControl: vi.fn(async () => ({ status: "ok", data: null })),
+    mediaNowPlaying: vi.fn(async () => ({ now: { player: "spotify" } })),
+  },
+}));
 
 const ctx = { open: vi.fn() };
 
@@ -50,5 +58,30 @@ describe("ACTIONS", () => {
     const ids = ACTIONS.map((a) => a.id);
     for (const id of ["mac.power", "mac.privacy"]) expect(ids).toContain(id);
     for (const snap of SNAPS) expect(ids).toContain(`mac.snap.${snap.id}`);
+  });
+});
+
+describe("media island buttons", () => {
+  // The failure: every media island pausing whichever source the Media view
+  // was showing. Rust puts the source in the button's args; this must use it.
+  it("drives the browser tab the island names, not the chosen one", async () => {
+    const tab = { player: "Brave Browser", tab: "2/3", host: "youtube.com" };
+    await runAction("media.toggle", ctx, tab);
+    expect(commands.mediaControl).toHaveBeenLastCalledWith("browser", "toggle", {
+      app: "Brave Browser",
+      bundleId: null,
+      host: "youtube.com",
+      tab: "2/3",
+    });
+  });
+
+  it("names no tab for a player, the any-app source or ⌘K", async () => {
+    expect(mediaTarget({ player: "Spotify" })).toBeNull();
+    await runAction("media.toggle", ctx, { player: "Spotify" });
+    expect(commands.mediaControl).toHaveBeenLastCalledWith("spotify", "toggle", null);
+    await runAction("media.toggle", ctx, { player: "mediaRemote" });
+    expect(commands.mediaControl).toHaveBeenLastCalledWith("mediaRemote", "toggle", null);
+    await runAction("media.toggle", ctx, {});
+    expect(commands.mediaControl).toHaveBeenLastCalledWith("spotify", "toggle", null);
   });
 });

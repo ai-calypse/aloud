@@ -290,6 +290,16 @@ short version:
   `cargo run -p aloud-media --example mediaremote -- watch`, compare against
   upstream's issues and newest commit, re-vendor and rebuild, or ship with the
   switch defaulted off.
+- **Media islands:** one island per source that is playing (`aloud_media::island`,
+  ids `media:spotify`, `media:music`, `media:browser:<app>:<w>:<t>`,
+  `media:mediaremote:<bundle>`), at most four, most recently started kept,
+  priority Low. `Reading.playing` lists them; `Reading.now` is still the one
+  source the Now Playing view shows. Each island's Pause names its source in
+  its args (`player`, and `tab`/`host` for a browser) and `media_control` takes
+  that tab as `target`, so it never pauses the view's source instead. Because
+  MediaRemote names only one app, `read` now also asks Spotify, Music and the
+  browsers while it plays (the same reads the fallback path always did); with
+  nothing playing the cadence and gates are unchanged.
 - **Clipboard history:** off until the user flips it, local only (SQLite and
   PNGs under `<data>/clipboard`), never logged or shown to a model. It polls
   `changeCount`, skips `org.nspasteboard.ConcealedType` and friends, and skips

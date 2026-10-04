@@ -299,6 +299,7 @@ dependencies = [
 name = "aloud-media"
 version = "0.1.0"
 dependencies = [
+ "aloud-islands",
  "aloud-native",
  "aloud-notes",
  "aloud-selection",

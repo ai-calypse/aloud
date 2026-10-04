@@ -150,6 +150,11 @@ pub enum Transport {
 #[serde(rename_all = "camelCase")]
 pub struct Reading {
     pub now: Option<NowPlaying>,
+    /// Every distinct source that is playing, most recently started first,
+    /// `now` among them when it plays. The view shows only `now`; the notch
+    /// draws an island for each of these.
+    #[serde(default)]
+    pub playing: Vec<NowPlaying>,
     pub denied: Option<Player>,
     pub browsers: Vec<BrowserIssue>,
 }
@@ -251,20 +256,15 @@ fn choose(mr: Option<NowPlaying>, fallback: Option<NowPlaying>) -> Option<NowPla
 }
 
 /// Reads what is playing and picks the one the user means. MediaRemote answers
-/// first (any app, no setup). When it is not playing, every running player
-/// (and, with `browsers`, every browser tab) is read too, minus the app
-/// MediaRemote already reported: playing beats paused, the one that started
-/// most recently beats an older one, and Spotify beats Music on a tie (Music
-/// ships with every Mac and is often left open, so it is the likelier idle
-/// one).
+/// first (any app, no setup), and every running player (and, with `browsers`,
+/// every browser tab) is read too, minus the app MediaRemote already reported:
+/// MediaRemote names one app, so the others playing alongside it can only be
+/// found by asking them. Playing beats paused, the one that started most
+/// recently beats an older one, and Spotify beats Music on a tie (Music ships
+/// with every Mac and is often left open, so it is the likelier idle one).
 pub fn read(browsers: bool) -> Reading {
     let mut readings = Reading::default();
     let mr = mediaremote::current();
-    if mr.as_ref().is_some_and(|n| n.state == PlayState::Playing) {
-        *PICKED.lock().unwrap_or_else(PoisonError::into_inner) = None;
-        readings.now = mr;
-        return readings;
-    }
     let mut found = Vec::new();
     for player in [Player::Spotify, Player::Music] {
         if !running(player) {
@@ -281,14 +281,13 @@ pub fn read(browsers: bool) -> Reading {
         found.extend(tabs);
         readings.browsers = issues;
     }
-    if let Some(mr) = &mr {
-        found.retain(|n| !mediaremote::same_app(mr, n));
-    }
+    drop_mediaremote_twins(mr.as_ref(), &mut found);
     RECENCY
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get_or_insert_default()
         .order(&mut found);
+    readings.playing = playing(mr.as_ref(), &found);
     let fallback = pick(found);
     mediaremote::observe(
         fallback.as_ref().filter(|n| n.state == PlayState::Playing),
@@ -303,6 +302,26 @@ pub fn read(browsers: bool) -> Reading {
     *PICKED.lock().unwrap_or_else(PoisonError::into_inner) =
         readings.now.as_ref().map(|n| n.source.clone());
     readings
+}
+
+/// MediaRemote and the AppleScript reads can describe one app (Brave in both,
+/// Spotify in both): MediaRemote is the source of truth for the apps it
+/// reports, so the fallback's reading of the same app goes.
+fn drop_mediaremote_twins(mr: Option<&NowPlaying>, found: &mut Vec<NowPlaying>) {
+    if let Some(mr) = mr {
+        found.retain(|n| !mediaremote::same_app(mr, n));
+    }
+}
+
+/// Everything playing: MediaRemote's app first (macOS already decided it is
+/// the current one), then the fallbacks in `Recency` order. `found` has had
+/// MediaRemote's app taken out, so one app is one entry.
+fn playing(mr: Option<&NowPlaying>, found: &[NowPlaying]) -> Vec<NowPlaying> {
+    mr.into_iter()
+        .chain(found)
+        .filter(|n| n.state == PlayState::Playing)
+        .cloned()
+        .collect()
 }
 
 /// The player's JSON as a track, or None when it is stopped or not yet
@@ -354,6 +373,17 @@ fn pick(found: Vec<NowPlaying>) -> Option<NowPlaying> {
         .max_by_key(|n| n.state == PlayState::Playing)
 }
 
+/// The tab a browser button means: the one an island names, else the one the
+/// last reading chose. An island's tab comes back from the webview, so it must
+/// be a browser Aloud scans — this cannot be turned into scripting any app.
+fn tab_for(target: Option<Source>) -> Result<Source, ScriptError> {
+    match target {
+        Some(s) if s.tab.is_some() && browser::Browser::from_app(&s.app).is_some() => Ok(s),
+        Some(_) => Err(ScriptError::Failed("not a browser tab Aloud reads".into())),
+        None => picked_tab(),
+    }
+}
+
 /// The tab the last reading chose, which is what a browser button means.
 fn picked_tab() -> Result<Source, ScriptError> {
     PICKED
@@ -364,7 +394,14 @@ fn picked_tab() -> Result<Source, ScriptError> {
         .ok_or_else(|| ScriptError::Failed("no browser tab is playing".into()))
 }
 
-pub fn control(player: Player, transport: Transport) -> Result<(), ScriptError> {
+/// Sends `transport` to `player`. `target` names the browser tab an island is
+/// about; without it a browser button means whichever tab the last reading
+/// chose.
+pub fn control(
+    player: Player,
+    transport: Transport,
+    target: Option<Source>,
+) -> Result<(), ScriptError> {
     if player == Player::MediaRemote {
         return mediaremote::send(transport);
     }
@@ -383,7 +420,7 @@ pub fn control(player: Player, transport: Transport) -> Result<(), ScriptError> 
             Transport::Next => Cmd::Next,
             Transport::Previous => Cmd::Previous,
         };
-        return browser::control(&picked_tab()?, cmd);
+        return browser::control(&tab_for(target)?, cmd);
     }
     run_jxa(
         player.app(),
@@ -660,6 +697,39 @@ mod tests {
             &any_app("org.videolan.vlc", PlayState::Playing),
             &track(Player::Music, PlayState::Playing)
         ));
+    }
+
+    /// Guards: `Reading::playing` listing one app twice (so two islands), or
+    /// leaving out a source MediaRemote does not name.
+    #[test]
+    fn everything_playing_is_listed_once_with_mediaremotes_app_first() {
+        let brave = any_app("com.brave.Browser", PlayState::Playing);
+        let mut found = vec![
+            track(Player::Spotify, PlayState::Playing),
+            tab("1/1", PlayState::Playing),
+            tab("1/2", PlayState::Paused),
+            track(Player::Music, PlayState::Paused),
+        ];
+        drop_mediaremote_twins(Some(&brave), &mut found);
+        let playing = playing(Some(&brave), &found);
+        let who: Vec<_> = playing.iter().map(|n| n.player).collect();
+        assert_eq!(who, [Player::MediaRemote, Player::Spotify]);
+
+        // Spotify reported by both: MediaRemote's wins, once.
+        let mr_spotify = any_app("com.spotify.client", PlayState::Playing);
+        let mut found = vec![track(Player::Spotify, PlayState::Playing)];
+        drop_mediaremote_twins(Some(&mr_spotify), &mut found);
+        assert_eq!(playing_len(Some(&mr_spotify), &found), 1);
+
+        // A paused MediaRemote track adds nothing; the fallbacks speak alone.
+        let paused = any_app("org.videolan.vlc", PlayState::Paused);
+        let found = vec![track(Player::Spotify, PlayState::Playing)];
+        assert_eq!(playing_len(Some(&paused), &found), 1);
+        assert_eq!(playing_len(None, &[]), 0);
+    }
+
+    fn playing_len(mr: Option<&NowPlaying>, found: &[NowPlaying]) -> usize {
+        playing(mr, found).len()
     }
 
     #[test]

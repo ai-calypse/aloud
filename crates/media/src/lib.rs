@@ -8,6 +8,7 @@
 pub mod artwork;
 pub mod browser;
 pub mod devices;
+pub mod island;
 pub mod lyrics;
 pub mod mediaremote;
 pub mod now_playing;

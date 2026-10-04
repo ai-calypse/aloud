@@ -328,7 +328,13 @@ export const commands = {
 	mediaNowPlaying: () => __TAURI_INVOKE<Reading>("media_now_playing"),
 	/**  A Media view mounted (`true`) or went away (`false`). */
 	mediaWatch: (on: boolean) => __TAURI_INVOKE<void>("media_watch", { on }),
-	mediaControl: (player: Player, transport: Transport) => typedError<null, string>(__TAURI_INVOKE("media_control", { player, transport })),
+	mediaControl: (player: Player, transport: Transport, target: {
+	app: string,
+	/**  Known for what MediaRemote reports. */
+	bundleId: string | null,
+	host: string | null,
+	tab: string | null,
+} | null) => typedError<null, string>(__TAURI_INVOKE("media_control", { player, transport, target })),
 	mediaSeek: (player: Player, positionMs: number) => typedError<null, string>(__TAURI_INVOKE("media_seek", { player, positionMs })),
 	/**  Playback speed of the browser tab on screen, in percent (100 is normal). */
 	mediaSetSpeed: (player: Player, speedPct: number) => typedError<null, string>(__TAURI_INVOKE("media_set_speed", { player, speedPct })),
@@ -1541,6 +1547,12 @@ export type QuotaWindow = {
  */
 export type Reading = {
 	now: NowPlaying | null,
+	/**
+	 *  Every distinct source that is playing, most recently started first,
+	 *  `now` among them when it plays. The view shows only `now`; the notch
+	 *  draws an island for each of these.
+	 */
+	playing?: NowPlaying[],
 	denied: Player | null,
 	browsers: BrowserIssue[],
 };

@@ -1,8 +1,8 @@
 //! Wiring the Media section (`aloud-media`) to the notch.
 //!
 //! Orchestration only: one poller that reads the players (and browser tabs)
-//! and keeps the
-//! closed-notch island honest, and a command per thing the views can do. What
+//! and keeps the closed-notch islands honest (one per playing source,
+//! `aloud_media::island`), and a command per thing the views can do. What
 //! a player reports, how lyrics are parsed and how devices are listed are the
 //! crate's.
 
@@ -10,18 +10,17 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority};
 use aloud_media::devices::BtDevice;
+use aloud_media::island::{self, Shown};
 use aloud_media::lyrics::Lyrics;
 use aloud_media::sound::{Direction, SoundState};
-use aloud_media::{NowPlaying, PlayState, Player, Reading, Transport};
+use aloud_media::{NowPlaying, Player, Reading, Source, Transport};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 use tokio::sync::Notify;
 
 const LABEL: &str = "overlay";
-const ISLAND: &str = "media";
 
 /// The players, as of the last poll. Pushed whenever the track or state
 /// changes, and on every poll while a Media view is on screen (the position
@@ -85,7 +84,7 @@ pub fn start(app: &AppHandle) {
     // A change MediaRemote reports is shown at once, not at the next tick.
     aloud_media::mediaremote::start(poll_now);
     tauri::async_runtime::spawn(async move {
-        let mut shown: Option<NowPlaying> = None;
+        let mut shown = Shown::default();
         loop {
             let watched = WATCHERS.load(Ordering::Relaxed) > 0;
             let browsers = browsers_on(&app);
@@ -101,10 +100,7 @@ pub fn start(app: &AppHandle) {
             } else {
                 Reading::default()
             };
-            let playing = reading
-                .now
-                .as_ref()
-                .is_some_and(|n| n.state == PlayState::Playing);
+            let playing = !reading.playing.is_empty();
             publish(&app, reading, watched, &mut shown);
 
             let period = match (watched, playing) {
@@ -123,7 +119,7 @@ pub fn start(app: &AppHandle) {
 
 /// Sends `reading` if it differs from the last in anything but the position
 /// (or at all, while watched), and keeps the island in step with it.
-fn publish(app: &AppHandle, reading: Reading, watched: bool, shown: &mut Option<NowPlaying>) {
+fn publish(app: &AppHandle, reading: Reading, watched: bool, shown: &mut Shown) {
     let changed = {
         let mut last = last();
         let same_shape = last.as_ref().is_some_and(|l| same_shape(l, &reading));
@@ -136,14 +132,15 @@ fn publish(app: &AppHandle, reading: Reading, watched: bool, shown: &mut Option<
             tracing::warn!(%e, "could not send now playing");
         }
     }
-    sync_island(app, reading.now, shown);
+    sync_islands(app, &reading.playing, shown);
 }
 
 /// Equal but for where in the track it is.
 fn same_shape(a: &Reading, b: &Reading) -> bool {
     let strip = |r: &Reading| {
         let mut r = r.clone();
-        if let Some(n) = r.now.as_mut() {
+        // The islands' sources move too: a position is not a change.
+        for n in r.now.iter_mut().chain(r.playing.iter_mut()) {
             n.position_ms = 0;
         }
         r
@@ -151,80 +148,40 @@ fn same_shape(a: &Reading, b: &Reading) -> bool {
     strip(a) == strip(b)
 }
 
-/// The island is the track while it is playing; paused or gone, it is not
-/// there (the closed notch is not a place to park a song).
-fn sync_island(app: &AppHandle, now: Option<NowPlaying>, shown: &mut Option<NowPlaying>) {
-    let Some(now) = now.filter(|n| n.state == PlayState::Playing) else {
-        if shown.take().is_some() {
-            crate::islands::remove(app, ISLAND);
-        }
-        return;
-    };
-    let same_track = shown.as_ref().is_some_and(|s| s.key() == now.key());
-    // A MediaRemote cover arrives after the title: same track, new cover.
-    let same_cover = shown
-        .as_ref()
-        .is_some_and(|s| s.artwork_url == now.artwork_url);
-    if same_track && same_cover {
-        return;
+/// One island per source that is playing; paused or gone, a source's island
+/// is not there (the closed notch is not a place to park a song).
+fn sync_islands(app: &AppHandle, playing: &[NowPlaying], shown: &mut Shown) {
+    let sync = shown.sync(playing);
+    for id in &sync.remove {
+        crate::islands::remove(app, id);
     }
-    if !same_track {
-        crate::islands::push(app, island(&now, None));
+    for island in sync.push {
+        crate::islands::push(app, island);
     }
-    *shown = Some(now.clone());
-    // The cover can take a network round trip; the island is up without it
-    // and takes it when it arrives.
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        // A page with no cover shows the browser's own icon: a web video's
-        // island is otherwise a blank tile. Any other app shows its own.
-        let art = match aloud_media::artwork(&now).await {
-            Some(art) => Some(art),
-            None if matches!(now.player, Player::Browser | Player::MediaRemote) => {
-                let name = now.source.app.clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    aloud_media::now_playing::app_icon(&name)
-                })
-                .await
-                .ok()
-                .flatten()
+    for now in sync.art {
+        // The cover can take a network round trip; the island is up without
+        // it and takes it when it arrives.
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            // A page with no cover shows the browser's own icon: a web video's
+            // island is otherwise a blank tile. Any other app shows its own.
+            let art = match aloud_media::artwork(&now).await {
+                Some(art) => Some(art),
+                None if matches!(now.player, Player::Browser | Player::MediaRemote) => {
+                    let name = now.source.app.clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        aloud_media::now_playing::app_icon(&name)
+                    })
+                    .await
+                    .ok()
+                    .flatten()
+                }
+                None => None,
+            };
+            if let Some(art) = art {
+                crate::islands::push(&app, island::island(&now, Some(art)));
             }
-            None => None,
-        };
-        if let Some(art) = art {
-            crate::islands::push(&app, island(&now, Some(art)));
-        }
-    });
-}
-
-/// What the island's button tells `actions.ts` to drive: the app's name for the
-/// players and browsers (the way it always has), `mediaRemote` for the rest.
-fn action_player(now: &NowPlaying) -> &str {
-    match now.player {
-        Player::MediaRemote => "mediaRemote",
-        _ => &now.source.app,
-    }
-}
-
-fn island(now: &NowPlaying, art: Option<String>) -> Island {
-    Island {
-        id: ISLAND.into(),
-        kind: IslandKind::Live,
-        priority: IslandPriority::Low,
-        icon: art.or_else(|| {
-            matches!(now.player, Player::Spotify | Player::Music).then(|| "music".into())
-        }),
-        // The row in Now › Overview reads artist over song; the pill, which
-        // has one short value, shows the song.
-        title: if now.artist.is_empty() {
-            now.title.clone()
-        } else {
-            now.artist.clone()
-        },
-        detail: Some(now.title.clone()),
-        actions: vec![IslandAction::new("Pause", "media.toggle").arg("player", action_player(now))],
-        expires: None,
-        dismissible: false,
+        });
     }
 }
 
@@ -261,9 +218,13 @@ pub fn media_watch(on: bool) {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn media_control(player: Player, transport: Transport) -> Result<(), String> {
+pub async fn media_control(
+    player: Player,
+    transport: Transport,
+    target: Option<Source>,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        aloud_media::now_playing::control(player, transport)
+        aloud_media::now_playing::control(player, transport, target)
     })
     .await
     .map_err(|e| e.to_string())?

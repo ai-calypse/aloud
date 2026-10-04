@@ -1,4 +1,4 @@
-import { commands, type Player, type Transport } from "@/lib/bindings";
+import { commands, type Player, type Source, type Transport } from "@/lib/bindings";
 import type { SectionId } from "./sections";
 import { SNAPS } from "./snaps";
 
@@ -46,10 +46,22 @@ async function mediaPlayer(args: Record<string, string>): Promise<Player | null>
   return (await commands.mediaNowPlaying()).now?.player ?? null;
 }
 
+/**
+ * The browser tab an island names. One island per playing source means its
+ * button drives that tab, not whichever one the Media view happens to show.
+ */
+export function mediaTarget(args: Record<string, string>): Source | null {
+  if (!args.tab || !args.player) return null;
+  return { app: args.player, bundleId: null, host: args.host ?? null, tab: args.tab };
+}
+
 /** Sends a transport command to the player. False when nothing is playing or the player refuses. */
 async function transport(args: Record<string, string>, command: Transport): Promise<boolean> {
   const player = await mediaPlayer(args);
-  return player !== null && (await commands.mediaControl(player, command)).status === "ok";
+  return (
+    player !== null &&
+    (await commands.mediaControl(player, command, mediaTarget(args))).status === "ok"
+  );
 }
 
 export const ACTIONS: NotchAction[] = [
