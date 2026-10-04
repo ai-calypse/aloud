@@ -115,4 +115,39 @@
   --text-row: var(--text-row);
   --text-ui: var(--text-ui);
   --text-hint: var(--text-hint);
+
+  /* The notch panel (tokens.css, floating surface). Prefixed so a notch
+     primitive can never pick up the main window's palette by accident. */
+  --color-notch: var(--notch-fill);
+  --color-notch-ink: var(--notch-ink);
+  --color-notch-ink-2: var(--notch-ink-2);
+  --color-notch-ink-3: var(--notch-ink-3);
+  --color-notch-sep: var(--notch-sep);
+  --color-notch-well: var(--notch-well);
+  --color-notch-edge: var(--notch-edge);
+  --color-notch-track: var(--notch-track);
+  --color-notch-raised: var(--notch-raised);
+  --color-notch-hover: var(--notch-hover);
+  --color-notch-primary: var(--notch-primary);
+  --color-notch-primary-ink: var(--notch-primary-ink);
+  --color-notch-focus: var(--notch-focus);
+  --color-notch-ok: var(--notch-ok);
+  --color-notch-warn: var(--notch-warn);
+  --color-notch-danger: var(--notch-danger);
+
+  --font-notch: var(--font-notch);
+  --font-notch-mono: var(--font-notch-mono);
+
+  --text-notch-lead: var(--text-notch-lead);
+  --text-notch-body: var(--text-notch-body);
+  --text-notch-meta: var(--text-notch-meta);
+  --text-notch-label: var(--text-notch-label);
+  --text-notch-micro: var(--text-notch-micro);
+
+  --radius-notch-key: var(--radius-notch-key);
+  --radius-notch-chip: var(--radius-notch-chip);
+  --radius-notch-control: var(--radius-notch-control);
+  --radius-notch-row: var(--radius-notch-row);
+  --radius-notch-track: var(--radius-notch-track);
+  --radius-notch-panel: var(--radius-notch-panel);
 }

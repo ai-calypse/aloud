@@ -57,6 +57,9 @@ import {
   withIcon,
 } from "./features/overlay/previews";
 import { useNotchPanel } from "./features/overlay/useNotchPanel";
+// The notch panel's faces, bundled: the CSP allows no font host.
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 // Streamdown styles the agent's answer with Tailwind utilities — see the
 // `@source` note in index.css.
 import "./index.css";

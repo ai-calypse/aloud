@@ -144,6 +144,55 @@
   --pill-ink: #f5f5f7;
   --notch-fill: #000;
 
+  /* --- The notch panel: the "Mix" style ----------------------------------
+     Vercel's pure black, hairlines and Geist; shadcn's controls; Linear's
+     counts (docs/design/notch-styles.html, [data-theme="mix"]). Raw greys
+     first, then what each is for — components read only the second group.
+     Greys and not white-at-alpha: everything here sits on the opaque #000
+     fill, where a translucent white would only ever resolve to these. */
+  --gray-50: #0a0a0a;
+  --gray-100: #0d0d0d;
+  --gray-150: #121212;
+  --gray-250: #1c1c1c;
+  --gray-350: #222222;
+  --gray-400: #262626;
+  --gray-600: #8a8a8a; /* 6.0:1 on black — AA for the smallest meta text */
+  --gray-700: #a1a1a1;
+  --gray-900: #f2f2f2;
+
+  --notch-ink: var(--gray-900); /* titles, selected labels, values */
+  --notch-ink-2: var(--gray-700); /* subtitles, idle tabs, quiet buttons */
+  --notch-ink-3: var(--gray-600); /* labels, status line, footer hints */
+  --notch-sep: var(--gray-250); /* hairlines between rows and regions */
+  --notch-well: var(--gray-150); /* a control's ground: track, chip, key */
+  --notch-edge: var(--gray-350); /* the 1px border a control draws */
+  --notch-track: var(--gray-350); /* the unfilled part of a bar or slider */
+  --notch-raised: var(--gray-400); /* the selected segment, a switch at rest */
+  --notch-hover: var(--gray-100); /* a row under the pointer */
+  --notch-primary: var(--gray-900); /* the one inverted button per view */
+  --notch-primary-ink: var(--gray-50);
+  /* Keyboard focus is the system's accent ring, as everywhere on macOS. */
+  --notch-focus: var(--sys-blue);
+  --notch-ok: var(--sys-green);
+  --notch-warn: var(--sys-orange);
+  --notch-danger: var(--sys-red);
+
+  /* Type. Bundled, not Google Fonts: the CSP is default-src 'self'. */
+  --font-notch: "Geist Variable", -apple-system, system-ui, sans-serif;
+  --font-notch-mono: "Geist Mono Variable", ui-monospace, monospace;
+  --text-notch-lead: 30px; /* the one fact a view leads with */
+  --text-notch-body: 13px; /* tabs, rows, buttons */
+  --text-notch-meta: 12px; /* subtitles, chips, the status line */
+  --text-notch-label: 11.5px; /* section labels, footer hints */
+  --text-notch-micro: 10.5px; /* counts on tabs */
+
+  /* Radii, named for what they wrap (not a linear scale, as above). */
+  --radius-notch-key: 4px; /* a count, a keycap */
+  --radius-notch-chip: 6px; /* a chip; a segment's thumb */
+  --radius-notch-control: 7px; /* a button, an icon tile */
+  --radius-notch-row: 8px; /* a row's hover fill */
+  --radius-notch-track: 9px; /* a segmented control's outer track */
+  --radius-notch-panel: 24px; /* the panel's bottom corners, fully open */
 }
 
 /* macOS Accessibility → "Reduce transparency". Handled in the palette so any

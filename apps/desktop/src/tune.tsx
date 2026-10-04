@@ -4,6 +4,8 @@ import { overshoot, springCurve } from "./lib/spring-curve";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import type { CardKind } from "./lib/bindings";
 import { CARD_PREVIEWS } from "./features/overlay/previews";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "./index.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];

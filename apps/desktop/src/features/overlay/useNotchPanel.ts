@@ -3,8 +3,11 @@ import type { OverlayStyle } from "@/lib/bindings";
 import { notchPath } from "@/lib/notch-shape";
 import { createSpring } from "@/lib/spring";
 
-/** Only for a stylesheet that has not applied yet; motion.css owns the real values. */
-const PANEL_FALLBACK = { damping: 0.77, open: 0.45, close: 0.55 };
+/**
+ * Only for a stylesheet that has not applied yet; motion.css owns the springs
+ * and tokens.css the fully open corner radius.
+ */
+const PANEL_FALLBACK = { damping: 0.77, open: 0.45, close: 0.55, radius: 24 };
 
 function readPanelSpring(element: Element) {
   const computed = getComputedStyle(element);
@@ -16,6 +19,7 @@ function readPanelSpring(element: Element) {
     damping: read("--panel-damping", PANEL_FALLBACK.damping),
     open: read("--panel-open", PANEL_FALLBACK.open),
     close: read("--panel-close", PANEL_FALLBACK.close),
+    radius: read("--radius-notch-panel", PANEL_FALLBACK.radius),
   };
 }
 
@@ -24,7 +28,7 @@ function readPanelSpring(element: Element) {
  * the *current* height, not the target, so they interpolate with the box rather
  * than jumping to their final value on the first frame.
  */
-const RADIUS = { topGrowth: 0.12, topMax: 16, bottomGrowth: 0.14, bottomMax: 22 };
+const RADIUS = { topGrowth: 0.12, topMax: 16, bottomGrowth: 0.14 };
 
 /** Only for the `?style=pill` browser preview, where no notch is measured. */
 const NOTCH_FALLBACK = { width: 200, height: 32 };
@@ -194,7 +198,7 @@ export function useNotchPanel(
 
       const grown = height - base.height;
       const bottomRadius = Math.min(
-        RADIUS.bottomMax,
+        PANEL.radius,
         baseRadius + grown * RADIUS.bottomGrowth,
       );
 
