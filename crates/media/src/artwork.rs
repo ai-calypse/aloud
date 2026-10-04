@@ -26,7 +26,7 @@ pub async fn artwork(now: &NowPlaying) -> Option<String> {
         }
     }
     let uri = match (now.player, &now.artwork_url) {
-        (Player::Spotify, Some(url)) => fetch(url).await,
+        (Player::Spotify | Player::Browser, Some(url)) => fetch(url).await,
         (Player::Music, _) => tokio::task::spawn_blocking(music_artwork)
             .await
             .ok()
@@ -41,9 +41,9 @@ pub async fn artwork(now: &NowPlaying) -> Option<String> {
 }
 
 async fn fetch(url: &str) -> Option<String> {
-    // Only Spotify's own https CDN: the URL came out of another app's
-    // scripting reply, and this must not become a fetch-anything primitive.
-    if !url.starts_with("https://") {
+    // The URL came out of another app's scripting reply (for a browser, out of
+    // a web page), and this must not become a fetch-anything primitive.
+    if !public_https(url) {
         return None;
     }
     let response = reqwest::Client::new()
@@ -56,6 +56,22 @@ async fn fetch(url: &str) -> Option<String> {
         .ok()?;
     let bytes = response.bytes().await.ok()?;
     data_uri(&bytes)
+}
+
+/// An https URL whose host is a name, not an address or a local machine: a page
+/// could otherwise point `og:image` at the router or a service on this Mac.
+fn public_https(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    // A userinfo part is how "https://cdn.example.com@127.0.0.1/" lies about its host.
+    if authority.contains('@') {
+        return false;
+    }
+    let host = authority.rsplit_once(':').map_or(authority, |(h, _)| h);
+    let numeric = host.chars().all(|c| c.is_ascii_digit() || c == '.') || host.starts_with('[');
+    host.contains('.') && !numeric && !host.ends_with(".local") && !host.ends_with(".localhost")
 }
 
 /// `bytes` as an image `data:` URI. The type comes from the file's first
@@ -81,6 +97,25 @@ fn data_uri(bytes: &[u8]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Guards: a page pointing its cover at a machine on the user's own network.
+    #[test]
+    fn covers_are_fetched_from_public_https_hosts_only() {
+        assert!(public_https("https://i.ytimg.com/vi/x/hqdefault.jpg"));
+        assert!(public_https("https://i.scdn.co:443/image/ab67"));
+        for bad in [
+            "http://i.ytimg.com/x.jpg",
+            "https://127.0.0.1/x.jpg",
+            "https://192.168.1.1:8080/x.jpg",
+            "https://localhost/x.jpg",
+            "https://[::1]/x.jpg",
+            "https://printer.local/x.jpg",
+            "https://cdn.example.com@127.0.0.1/x.jpg",
+            "file:///etc/passwd",
+        ] {
+            assert!(!public_https(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn only_png_and_jpeg_bodies_become_uris() {

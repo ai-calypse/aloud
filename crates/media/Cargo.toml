@@ -9,6 +9,7 @@ description = "The notch's Media section: now playing, lyrics, audio devices and
 anyhow.workspace = true
 aloud-native = { path = "../native" }
 aloud-notes = { path = "../notes" }
+aloud-selection = { path = "../selection" }
 base64 = "0.22"
 # rustls, like aloud-llm and aloud-quota: the same TLS on macOS and Windows.
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
