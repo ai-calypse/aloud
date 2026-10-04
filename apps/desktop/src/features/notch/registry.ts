@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { readySections, type Section } from "./sections";
 import { AgentsCoding, AgentsUsage, AgentsVoice } from "./views/Agents";
+import { MacStats } from "./views/MacStats";
 import { NowOverview } from "./views/Now";
 
 /**
@@ -127,7 +128,7 @@ export const SECTIONS: Section[] = [
     name: "Mac",
     icon: LaptopIcon,
     subsections: [
-      { id: "stats", name: "Stats", features: ["System stats"], ready: false },
+      { id: "stats", name: "Stats", features: ["System stats"], ready: true, view: MacStats },
       { id: "power", name: "Power", features: ["Battery", "Full charge"], ready: false },
       { id: "privacy", name: "Privacy", features: ["Privacy indicator"], ready: false },
       { id: "windows", name: "Windows", features: ["Window snapping"], ready: false },

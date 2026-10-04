@@ -66,6 +66,19 @@ export const ACTIONS: NotchAction[] = [
       return true;
     },
   },
+  // notch-mac: actions begin
+  {
+    id: "mac.stats",
+    title: "Show CPU, memory and network",
+    keywords: ["system", "stats", "cpu", "memory", "ram", "disk", "network", "temperature"],
+    section: "mac",
+    subsection: "stats",
+    run: (ctx) => {
+      ctx.open("mac", "stats");
+      return true;
+    },
+  },
+  // notch-mac: actions end
   {
     // What a finished row's Show does: bring back what a write made.
     id: "result.show",
