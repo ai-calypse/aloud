@@ -447,15 +447,54 @@ fn flagged_scheme(target: &str) -> Option<&str> {
 /// The file or folder a bare name means, best first: one path, several when the
 /// best are tied (the model asks between them), or none.
 ///
-/// `near` is the front window's document. While the user is in a repo, "open
-/// components" means that repo's components, so its root — walked up to the
-/// `.git`, never home or above — wins when it has that name, then an exact match
-/// inside it. Only then home, ranked by [`best_named`].
-pub(crate) fn resolve_named(name: &str, near: Option<&Path>) -> Vec<PathBuf> {
-    match home_dir() {
-        Ok(home) => resolve_named_in(name, near, &home, spotlight_named),
-        Err(_) => Vec::new(),
+/// `document` is the front window's file, else the folder of the `project` an
+/// editor's title names (see [`editor_project`]). While the user is in a repo,
+/// "open components" means that repo's components, so its root — walked up to
+/// the `.git`, never home or above — wins when it has that name, then an exact
+/// match inside it. Only then home, ranked by [`best_named`].
+pub(crate) fn resolve_named(
+    name: &str,
+    document: Option<&Path>,
+    project: Option<&str>,
+) -> Vec<PathBuf> {
+    let Ok(home) = home_dir() else {
+        return Vec::new();
+    };
+    let near = document
+        .map(Path::to_path_buf)
+        .or_else(|| project.and_then(|p| project_root(p, &home, spotlight_folders)));
+    resolve_named_in(name, near.as_deref(), &home, spotlight_named)
+}
+
+/// The project an editor window shows, from its title. Cursor titles a window
+/// "main.rs — aloud-tauri" and gives no `AXDocument` (checked), so the title's
+/// last part is the only sign of which repo is on screen.
+///
+/// ponytail: four editors by name, each assumed to end its title with the
+/// project; a per-editor title format is the upgrade when one doesn't.
+pub fn editor_project<'a>(app: &str, title: &'a str) -> Option<&'a str> {
+    const EDITORS: &[&str] = &["Cursor", "Visual Studio Code", "Zed", "Xcode"];
+    if !EDITORS.iter().any(|e| e.eq_ignore_ascii_case(app)) {
+        return None;
     }
+    title
+        .rsplit(" — ")
+        .next()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+}
+
+/// The repo under home named `project`, shallowest first: a second clone tucked
+/// deeper — a backup, a vendored copy — is the less likely one to be open.
+fn project_root(
+    project: &str,
+    home: &Path,
+    find: impl Fn(&Path, &str) -> Vec<PathBuf>,
+) -> Option<PathBuf> {
+    find(home, project)
+        .into_iter()
+        .filter(|p| name_tier(p, project) == 0 && p.join(".git").exists())
+        .min_by_key(|p| p.components().count())
 }
 
 /// [`resolve_named`] with home and the search passed in, so a test can run it
@@ -537,13 +576,28 @@ fn best_named(hits: Vec<PathBuf>, name: &str) -> Vec<PathBuf> {
 /// Files and folders under `root` whose name is `name` or starts with it,
 /// without the build output and caches that match any common name.
 fn spotlight_named(root: &Path, name: &str) -> Vec<PathBuf> {
+    spotlight(
+        root,
+        &format!("kMDItemFSName == '{}*'c", search::escape_mdfind(name)),
+    )
+}
+
+/// Folders under `root` named exactly `name`.
+fn spotlight_folders(root: &Path, name: &str) -> Vec<PathBuf> {
+    spotlight(
+        root,
+        &format!(
+            "kMDItemFSName == '{}'c && kMDItemContentType == 'public.folder'",
+            search::escape_mdfind(name)
+        ),
+    )
+}
+
+fn spotlight(root: &Path, query: &str) -> Vec<PathBuf> {
     let Ok(out) = std::process::Command::new("mdfind")
         .arg("-onlyin")
         .arg(root)
-        .arg(format!(
-            "kMDItemFSName == '{}*'c",
-            search::escape_mdfind(name)
-        ))
+        .arg(query)
         .output()
     else {
         return Vec::new();
@@ -588,6 +642,29 @@ const NOTES_APPEND_JS: &str = r#"const Notes = Application("Notes");
         || (old.endsWith("</ul>") && ARG.html.startsWith("<ol>"));
     note.body = old + (clash ? "<div><br></div>" : "") + ARG.html;
     return JSON.stringify({ appended: true, title: note.name(), id: note.id() });"#;
+
+/// The one Notes script that brings Notes forward: the user pressed Show.
+const NOTES_SHOW_JS: &str = r#"const Notes = Application("Notes");
+    Notes.show(Notes.notes.byId(ARG.id));
+    Notes.activate();"#;
+
+/// Brings back what a finished write made, from `show_target`: the note by its
+/// id, a saved file revealed in Finder, anything else opened in the app named.
+pub fn show(app: &str, target: &str) -> Result<(), ScriptError> {
+    match app {
+        "Notes" => script::run_jxa("Notes", NOTES_SHOW_JS, &json!({ "id": target })).map(drop),
+        "Finder" => {
+            let revealed = std::process::Command::new("/usr/bin/open")
+                .args(["-R", target])
+                .status()
+                .is_ok_and(|s| s.success());
+            revealed
+                .then_some(())
+                .ok_or_else(|| ScriptError::Failed(format!("could not reveal {target}")))
+        }
+        _ => open_with(Some(&bundle_path(app)?), Some(target)),
+    }
+}
 
 /// One native action. `params` is the JSON-schema object handed to the model;
 /// `run` is called with the model's (already gate-approved, for writes)
@@ -1229,11 +1306,9 @@ pub const ACTIONS: &[Action] = &[
                     })
                 }
                 Some(name) => {
-                    let near = args
-                        .get("_front_document")
-                        .and_then(Value::as_str)
-                        .map(Path::new);
-                    match resolve_named(name, near).as_slice() {
+                    let front = |key| args.get(key).and_then(Value::as_str);
+                    let document = front("_front_document").map(Path::new);
+                    match resolve_named(name, document, front("_front_project")).as_slice() {
                         [] => {
                             return Err(ScriptError::Failed(format!(
                                 "found no file or folder named {name:?}"
@@ -2033,6 +2108,42 @@ mod tests {
         // never the answer.
         let home_name = home.file_name().unwrap().to_string_lossy().into_owned();
         assert!(named(home_name.as_str(), Some(&home.join("old/components"))).is_empty());
+
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// Cursor gives no AXDocument, only "main.rs — aloud-tauri": that title's
+    /// project is where "open components" looks before the rest of home.
+    #[test]
+    fn an_editor_title_names_the_project_to_search_first() {
+        assert_eq!(
+            editor_project("Cursor", "main.rs — aloud-tauri"),
+            Some("aloud-tauri")
+        );
+        assert_eq!(
+            editor_project("Visual Studio Code", "● lib.rs — src — aloud-tauri"),
+            Some("aloud-tauri")
+        );
+        assert_eq!(editor_project("Safari", "Docs — Example"), None);
+
+        let home = scratch_home("editor");
+        for dir in [
+            "old/components",
+            "notes/aloud-tauri",
+            "Dev/aloud-tauri/.git",
+            "Dev/aloud-tauri/apps/src/components",
+            "backup/deeper/aloud-tauri/.git",
+        ] {
+            std::fs::create_dir_all(home.join(dir)).unwrap();
+        }
+        // Not the same-depth folder that is no repo, nor the deeper clone.
+        let root = project_root("aloud-tauri", &home, walk);
+        assert_eq!(root, Some(home.join("Dev/aloud-tauri")));
+        assert_eq!(
+            resolve_named_in("components", root.as_deref(), &home, walk),
+            vec![home.join("Dev/aloud-tauri/apps/src/components")]
+        );
+        assert_eq!(project_root("nowhere", &home, walk), None);
 
         std::fs::remove_dir_all(&home).unwrap();
     }

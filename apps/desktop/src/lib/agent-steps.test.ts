@@ -14,7 +14,7 @@ const call = (name: string, requiresConfirmation: boolean): ToolCall => ({
   args: { subject: name, body: "hello", user_id: "me" },
   requiresConfirmation,
 });
-const ok: ToolResult = { success: true, message: "done" };
+const ok: ToolResult = { success: true, message: "done", show: null };
 
 /** Rust emits the call, then — for a write — the same call again with the gate. */
 function startAndGate(steps: Step[], name: string): Step[] {
@@ -51,10 +51,22 @@ describe("agent panel step folding", () => {
     let steps = startAndGate([], "A");
     steps = withResult(steps, ok);
     steps = withCall(steps, call("B", false));
-    steps = withResult(steps, { success: false, message: "boom" });
+    steps = withResult(steps, { success: false, message: "boom", show: null });
 
     expect(steps[0].result).toEqual(ok);
     expect(steps[1].result?.success).toBe(false);
+  });
+
+  /** The finished row's Show button reads this off the step's result. */
+  it("keeps what a finished step can show", () => {
+    const show = { app: "Notes", target: "x-coredata://note/p1" };
+    let steps = withCall([], call("ALOUD_NOTES_CREATE", false));
+    steps = withResult(steps, { success: true, message: "done", show });
+    steps = withCall(steps, call("GMAIL_SEND_EMAIL", false));
+    steps = withResult(steps, ok);
+
+    expect(steps[0].result?.show).toEqual(show);
+    expect(steps[1].result?.show).toBeNull();
   });
 
   it("treats a declined step as settled so it cannot re-open the gate", () => {
@@ -75,7 +87,7 @@ describe("groupSteps", () => {
     app: "Gmail",
     args: {},
     requiresConfirmation: false,
-    result: result === undefined ? undefined : { success: result, message: "" },
+    result: result === undefined ? undefined : { success: result, message: "", show: null },
   });
   // Stands in for the panel's row text: label plus rendered status.
   const key = (s: Step) => `${s.name}:${s.result ? s.result.success : "running"}`;

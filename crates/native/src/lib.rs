@@ -23,7 +23,67 @@ mod thumbnail;
 
 use serde_json::{json, Value};
 
+pub use catalogue::{editor_project, show};
 pub use script::ScriptError;
+
+/// `args` with what the user was looking at when they spoke, for a native tool
+/// to fall back on: `_front_app` (MENU, PRESS_KEYS, WINDOW_ARRANGE with no
+/// `app`), `_front_document` and `_front_project` (OPEN_APP's bare names). The
+/// caller merges them after the gate, so neither the model nor the confirmation
+/// ever sees them.
+///
+/// ponytail: underscored keys riding in the model's arguments; a `Context`
+/// parameter on `Action::run` is the upgrade.
+pub fn with_front(
+    args: &Value,
+    app: Option<&str>,
+    document: Option<&str>,
+    project: Option<&str>,
+) -> Value {
+    let mut args = args.clone();
+    if let Some(map) = args.as_object_mut() {
+        let front = [
+            ("_front_app", app),
+            ("_front_document", document),
+            ("_front_project", project),
+        ];
+        for (key, value) in front {
+            if let Some(value) = value {
+                map.insert(key.to_string(), json!(value));
+            }
+        }
+    }
+    args
+}
+
+/// What a finished write's Show button brings back, as (app, target) for
+/// [`show`]: the note it made, the file it saved, the thing it opened. The tools
+/// work in the background, so this is how the user goes and looks.
+pub fn show_target(name: &str, args: &Value, result: &Value) -> Option<(String, String)> {
+    let got = |key: &str| {
+        result
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    match name {
+        "ALOUD_NOTES_CREATE" | "ALOUD_NOTES_APPEND" => Some(("Notes".into(), got("id")?)),
+        "ALOUD_WRITE_FILE" => {
+            let app = match args.get("open_with").and_then(Value::as_str) {
+                Some("cursor") => "Cursor",
+                Some("vscode") => "Visual Studio Code",
+                _ => "Finder",
+            };
+            Some((app.into(), got("wrote")?))
+        }
+        "ALOUD_OPEN_APP" => {
+            let app = result["opened"].as_array()?.last()?.as_str()?;
+            Some((app.into(), got("target")?))
+        }
+        _ => None,
+    }
+}
 
 /// A file preview for the notch grid — a base64 `data:` URI, or None when Quick
 /// Look has no preview. The command layer maps search paths through this.
@@ -446,6 +506,62 @@ mod tests {
             repeated("ALOUD_PRESS_KEYS", json!({ "keys": "tab", "times": 3 })).as_deref(),
             Some("Pressed tab 3 times.")
         );
+    }
+
+    #[test]
+    fn show_brings_back_the_note_the_file_and_what_was_opened() {
+        let show = |name, args, result| show_target(name, &args, &result);
+        let pair = |app: &str, target: &str| Some((app.to_string(), target.to_string()));
+        assert_eq!(
+            show(
+                "ALOUD_NOTES_CREATE",
+                json!({ "title": "Cake" }),
+                json!({ "created": true, "id": "x-coredata://n/p1" })
+            ),
+            pair("Notes", "x-coredata://n/p1")
+        );
+        assert_eq!(
+            show(
+                "ALOUD_WRITE_FILE",
+                json!({ "path": "Desktop/a.md" }),
+                json!({ "wrote": "/Users/me/Desktop/a.md" })
+            ),
+            pair("Finder", "/Users/me/Desktop/a.md")
+        );
+        assert_eq!(
+            show(
+                "ALOUD_WRITE_FILE",
+                json!({ "open_with": "cursor" }),
+                json!({ "wrote": "/Users/me/a.md" })
+            ),
+            pair("Cursor", "/Users/me/a.md")
+        );
+        assert_eq!(
+            show(
+                "ALOUD_OPEN_APP",
+                json!({ "names": ["Cursor"], "open": "components" }),
+                json!({ "opened": ["Cursor"], "target": "/x/components" })
+            ),
+            pair("Cursor", "/x/components")
+        );
+        // A bare open, a question between candidates, a read: nothing to come back to.
+        assert_eq!(
+            show(
+                "ALOUD_OPEN_APP",
+                json!({ "names": ["Notes"] }),
+                json!({ "opened": ["Notes"] })
+            ),
+            None
+        );
+        assert_eq!(
+            show(
+                "ALOUD_OPEN_APP",
+                json!({}),
+                json!({ "opened": false, "candidates": ["/a", "/b"] })
+            ),
+            None
+        );
+        assert_eq!(show("ALOUD_FINDER_SEARCH", json!({}), json!({})), None);
     }
 
     #[test]

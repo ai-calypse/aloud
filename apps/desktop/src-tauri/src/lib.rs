@@ -148,6 +148,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             agent::confirm_agent,
             agent::answer_agent,
             agent::close_agent,
+            agent::show_result,
         ])
         .events(collect_events![
             pipeline::Phase,

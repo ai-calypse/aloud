@@ -6,7 +6,8 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
-import { commands, type FinderResults } from "@/lib/bindings";
+import { commands, type FinderResults, type ShowTarget } from "@/lib/bindings";
+import { Button } from "@/components/ui/button";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
@@ -90,6 +91,7 @@ export function AgentRun({
                 <span className="agent__state">
                   {stepStatus(step, step === pending)}
                 </span>
+                {step.result?.show && <ShowButton show={step.result.show} />}
               </span>
               {/* Only what this tool is worth showing, and never for the step
                   awaiting a decision — the gate below shows that one, and
@@ -369,6 +371,23 @@ function asStrings(args: ToolArgs): Record<string, string> {
       key,
       typeof value === "string" ? value : JSON.stringify(value),
     ]),
+  );
+}
+
+/**
+ * Brings back what a finished step made — the note, the saved file, the opened
+ * folder. The tools that made it stayed in the background, so this is the way
+ * to go and look.
+ */
+function ShowButton({ show }: { show: ShowTarget }) {
+  return (
+    <Button
+      variant="plain"
+      size="text"
+      onClick={() => void commands.showResult(show.app, show.target)}
+    >
+      Show
+    </Button>
   );
 }
 

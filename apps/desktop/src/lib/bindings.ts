@@ -260,6 +260,11 @@ export const commands = {
 	answerAgent: (answer: string | null) => __TAURI_INVOKE<void>("answer_agent", { answer }),
 	/**  Lets the panel dismiss itself on Escape or after showing a result. */
 	closeAgent: () => __TAURI_INVOKE<void>("close_agent"),
+	/**
+	 *  Brings back what a finished step made — the note, the saved file, the
+	 *  opened folder — from its row's Show button.
+	 */
+	showResult: (appName: string, target: string) => typedError<null, string>(__TAURI_INVOKE("show_result", { appName, target })),
 };
 
 /** Events */
@@ -1010,6 +1015,15 @@ export type Settings = {
 	catImagesAgents?: boolean,
 };
 
+/**
+ *  A note id in Notes, a saved file, a folder in the app that opened it — for
+ *  [`show_result`]. The tools work in the background, so this is the way back.
+ */
+export type ShowTarget = {
+	app: string,
+	target: string,
+};
+
 /**  One closed span. */
 export type Span = {
 	/**  Groups the stages of one dictation; monotonic, so it orders by time. */
@@ -1067,6 +1081,8 @@ export type ToolCall = {
 export type ToolResult = {
 	success: boolean,
 	message: string,
+	/**  What the row's Show button brings back, when the step made something. */
+	show: ShowTarget | null,
 };
 
 /* Tauri Specta runtime */

@@ -57,6 +57,9 @@ async fn main() -> anyhow::Result<()> {
             prompt: &command,
             tools: &tools,
             more: &more,
+            front: None,
+            document: None,
+            project: None,
         },
         aloud_agent::Callbacks {
             on_event: |event| match event {
@@ -66,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
                 LoopEvent::ToolCallStart { name, args } => {
                     println!("  [tool] {name}({args})");
                 }
-                LoopEvent::ToolCallResult { name, success } => {
+                LoopEvent::ToolCallResult { name, success, .. } => {
                     println!("  [{}] {name}", if success { "ok" } else { "ERR" });
                 }
                 LoopEvent::Asked { question, options } => {

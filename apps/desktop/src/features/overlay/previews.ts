@@ -31,7 +31,7 @@ export const AGENT_PREVIEW: Run = {
       args: { recipient_email: "priya@example.com", subject: "Release notes" },
       requiresConfirmation: true,
       confirmed: true,
-      result: { success: true, message: "Sent" },
+      result: { success: true, message: "Sent", show: null },
     },
     {
       name: "GMAIL_CREATE_EMAIL_DRAFT",
