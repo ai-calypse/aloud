@@ -150,6 +150,12 @@ async fn take_turns(
             }
             continue;
         }
+        // A reply to the card on screen answers it now: queued, it would wait
+        // behind the very run the card is holding up.
+        if crate::agent::answer_by_voice(&shared.app, text) {
+            finish(&shared);
+            continue;
+        }
         tracing::info!(request = %text, "always-listening request");
         let _ = requests.send((shared.generation.load(Ordering::SeqCst), text.to_string()));
     }

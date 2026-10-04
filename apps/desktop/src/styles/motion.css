@@ -205,3 +205,25 @@
 .motion-shimmer {
   animation: shimmer 2s linear infinite;
 }
+
+/* The exact-words countdown on an agent gate: a bar that empties over
+ * `--auto-ms`, the duration Rust chose. A duration and not a spring, and
+ * `linear`, because it is a clock — any easing would tell the time wrong.
+ * Paused, not removed, once the user reaches for the card: Rust stops the
+ * deadline at the same moment. */
+@keyframes countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.motion-countdown::after {
+  animation: countdown var(--auto-ms) linear both;
+}
+
+.motion-countdown[data-held]::after {
+  animation-play-state: paused;
+}

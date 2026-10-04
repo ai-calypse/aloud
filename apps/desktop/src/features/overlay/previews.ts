@@ -123,6 +123,8 @@ export const CARD_PREVIEWS: Record<CardKind, Run> = {
       ],
       set: 2,
       total: 12,
+      // The user's own words to a channel a read named: it counts down.
+      autoMs: 3000,
     },
   ),
   email: gate(
@@ -500,6 +502,26 @@ export const CARD_PREVIEWS: Record<CardKind, Run> = {
   ),
 };
 
+/**
+ * The contact card `hand.json` draws once both lookups came back empty: a
+ * name and an empty, editable Email — the one field the agent could not fill.
+ */
+export const CONTACT_PREVIEW: ActionPreview = {
+  ...(gate("", "GOOGLECONTACTS_CREATE_CONTACT", "Google Contacts", {}, {
+    kind: "fallback",
+    verb: "Save",
+    title: "Save contact",
+    fields: [
+      f("plain", "/names/0/displayName", "Name", "Genghis Khan", { editable: true }),
+      f("plain", "/names/0/givenName", "First name", "Genghis Khan", { editable: true }),
+      f("person", "/emailAddresses/0/value", "Email", "", { editable: true }),
+    ],
+    set: 3,
+    total: 28,
+  }).steps[0].preview as ActionPreview),
+  more: [f("plain", "/personFields", "Person Fields", "names,emailAddresses")],
+};
+
 /** A canned agent run for the tuning page: one write done, the next at its gate. */
 export const AGENT_PREVIEW: Run = {
   heard: "Say hi in launch, then tell Priya Thursday works",
@@ -507,7 +529,7 @@ export const AGENT_PREVIEW: Run = {
     {
       ...CARD_PREVIEWS.message.steps[0],
       confirmed: true,
-      result: { success: true, message: "Sent", show: null },
+      result: { success: true, message: "Sent", show: null, note: null, tidied: null },
     },
     CARD_PREVIEWS.email.steps[0],
   ],

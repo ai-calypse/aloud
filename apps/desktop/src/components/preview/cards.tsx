@@ -3,6 +3,7 @@ import type { ActionPreview, CardKind, Field, Role } from "@/lib/bindings";
 import {
   DiffRow,
   FieldRows,
+  HeadingText,
   ItemSample,
   MoneyLine,
   MoreFields,
@@ -60,7 +61,7 @@ function Heading({ fields }: { fields: Field[] }) {
     <>
       {fields.map((f) => (
         <p className="preview__lead preview__heading" key={f.path}>
-          {f.value}
+          <HeadingText field={f} />
         </p>
       ))}
     </>

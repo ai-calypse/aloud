@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, type CSSProperties } from "react";
 import {
   CheckIcon,
   CircleDashedIcon,
@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { PreviewCard } from "@/components/preview/cards";
+import { CardEditsContext } from "@/components/preview/kit";
 import {
   groupSteps,
   pendingStep,
@@ -23,15 +24,7 @@ import {
   type Run,
   type Step,
 } from "@/lib/agent-steps";
-import {
-  askFor,
-  asksFirst,
-  editsFor,
-  gateFor,
-  labelFor,
-  text,
-  type ToolArgs,
-} from "@/lib/tool-views";
+import { gateFor, labelFor, text } from "@/lib/tool-views";
 import { Panel } from "./Panel";
 
 /**
@@ -102,7 +95,11 @@ export function AgentRun({
                   {stepStatus(step, step === pending)}
                 </span>
                 {step.result?.show && <ShowButton show={step.result.show} />}
+                {step.result?.tidied && <UndoButton folder={step.result.tidied} />}
               </span>
+              {/* Why a saved grant refused it — kept on the row, where the
+                  status line it used to be was wiped by this very result. */}
+              {step.result?.note && <p className="agent__reason">{step.result.note}</p>}
               {/* What a write did, as a compact echo of the card it was
                   approved from — and never for the step awaiting a decision:
                   the gate below shows that one, and rendering both put the
@@ -141,11 +138,11 @@ export function AgentRun({
         </ul>
       )}
 
-      {/* Keyed on the step, so a second gate in one run starts from its own
-          arguments instead of inheriting the first one's draft. */}
+      {/* Keyed on the card's revision, so a second gate — or the same card
+          redrawn by "make it …" — starts from its own draft and countdown. */}
       {pending && (
         <ConfirmGate
-          key={`${pending.name}-${run.steps.length}`}
+          key={`${pending.name}-${pending.preview?.revision ?? run.steps.length}`}
           step={pending}
           onDecide={onDecide}
         />
@@ -305,15 +302,13 @@ function AskGate({ asked }: { asked: { question: string; options: string[] } }) 
 }
 
 /**
- * The gate a write passes before it runs.
+ * The gate a write passes before it runs: the card Rust drew from its real
+ * arguments (`PreviewCard`), so no write is ever approved from a title alone.
+ * Fields Rust marked editable are edited in place, and an exact-words message
+ * counts itself down — sent at the deadline unless the user reaches for it.
  *
- * Most tools show what they are about to do and take a yes. A few declare
- * editable fields (`edits` in tool-views) and show inputs instead — the agent
- * reaches the contact gate precisely because it could not find an address, so
- * refusing is the only other answer it could give.
- *
- * Every other write shows the card Rust drew from its real arguments
- * (`PreviewCard`), so no write is ever approved from a title alone.
+ * Every answer carries the card's revision, so one meant for this card can
+ * never answer the next.
  */
 function ConfirmGate({
   step,
@@ -322,129 +317,152 @@ function ConfirmGate({
   step: Step;
   onDecide?: (confirmed: boolean) => void;
 }) {
-  const fields = editsFor(step.name);
-  const [draft, setDraft] = useState<ToolArgs>(step.args);
-  // A form is a demand, and the agent reaches the contact one on its own
-  // initiative. Ask first; the fields only appear for someone who said yes.
-  // A send with an editable recipient has no question and shows them at once.
-  const [filling, setFilling] = useState(false);
-  const asking = asksFirst(step.name, draft) && !filling;
-  const card = fields.length === 0 ? step.preview : null;
+  const preview = step.preview;
+  const revision = preview?.revision ?? 0;
+  const autoMs = preview?.autoMs ?? null;
   // Strict cards take a click: no Enter, focus on Don't allow, no Always.
-  const strict = step.preview?.tier === "strict";
+  const strict = preview?.tier === "strict";
+  // Only what the user changed, by pointer. Rust writes it into the real
+  // arguments; anything untouched keeps the value the model chose.
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [held, setHeld] = useState(false);
+  const counting = autoMs !== null && !held;
+  // An editable field the model left empty is the one to fill, so it takes
+  // focus rather than the allow button.
+  const missing = [...(preview?.fields ?? []), ...(preview?.more ?? [])].some(
+    (f) => f.editable && f.value === "",
+  );
 
-  // Only what the user could have changed. Rust folds it back into the real
-  // nested arguments; anything untouched keeps the value the model chose.
+  // Armed from here, once the card is on screen, so the bar the user watches
+  // and the deadline in Rust start together.
+  useEffect(() => {
+    if (autoMs !== null) void commands.armAgent(revision);
+  }, [autoMs, revision]);
+
+  const hold = () => {
+    if (!counting) return;
+    setHeld(true);
+    void commands.holdAgent(revision);
+  };
+
   const decide = (decision: GateDecision) => {
     const approved = decision !== "decline";
-    void commands.confirmAgent(
-      decision,
-      approved && fields.length > 0 ? asStrings(draft) : null,
-    );
+    const edits = approved && Object.keys(draft).length > 0 ? draft : null;
+    void commands.confirmAgent(decision, edits, revision);
     onDecide?.(approved);
   };
 
   // ApprovalCard's keys: Enter allows once, Escape declines. Capture phase so
-  // the panel's own Escape does not also fire; a form keeps its own Enter.
+  // the panel's own Escape does not also fire.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
         decide("decline");
-      } else if (e.key === "Enter" && !strict && !asking && fields.length === 0) {
-        // Not also the focused button's own click.
-        e.preventDefault();
-        decide("allowOnce");
+        return;
       }
+      if (e.key !== "Enter" || strict) return;
+      // A focused button answers for itself; a message keeps Enter for new
+      // lines, and ⌘↩ sends it.
+      if (e.target instanceof HTMLButtonElement) return;
+      if (e.target instanceof HTMLTextAreaElement && !e.metaKey) return;
+      e.preventDefault();
+      decide("allowOnce");
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   });
 
   return (
-    <div className="agent__confirm" role="group" data-danger={strict || undefined}>
+    <div
+      className="agent__confirm"
+      role="group"
+      data-danger={strict || undefined}
+      // Reaching for the card stops the countdown: whoever moves toward it
+      // means to read it, or to stop it.
+      onPointerMove={hold}
+    >
       <p
         className={strict ? "agent__confirm-title agent__confirm-title--danger" : "agent__confirm-title"}
       >
-        {asking
-          ? askFor(step.name, draft)
-          : gateFor(step.name, draft) ||
-            card?.title ||
-            `${labelFor(step.name, draft)} — this writes to ${step.app}.`}
+        {gateFor(step.name, step.args) ||
+          preview?.title ||
+          `${labelFor(step.name, step.args)} — this writes to ${step.app}.`}
       </p>
-      {step.preview?.scope && <p className="agent__scope">{step.preview.scope}</p>}
-      {step.preview?.risks.map((risk) => (
+      {preview?.scope && <p className="agent__scope">{preview.scope}</p>}
+      {preview?.risks.map((risk) => (
         <p className="agent__reason" key={risk}>
           {risk}
         </p>
       ))}
-      {/* Approving a write without seeing what it will do is not a gate, so the
-          body shows here even though the step list is otherwise quiet. */}
-      {asking ? null : fields.length > 0 ? (
-        <div className="agent__fields">
-          {fields.map((field) => (
-            <label className="agent__field" key={field.key}>
-              <span className="agent__field-label">{field.label}</span>
-              <input
-                className="ask__input"
-                value={field.get(draft)}
-                placeholder={field.placeholder}
-                // The first empty field is the one the agent could not fill.
-                autoFocus={!field.get(draft)}
-                onChange={(e) =>
-                  setDraft((current) => field.set(current, e.target.value))
-                }
-              />
-            </label>
-          ))}
-        </div>
-      ) : (
-        card && <PreviewCard preview={card} />
+      {preview && (
+        <CardEditsContext.Provider
+          value={{
+            draft,
+            edit: (path, value) => {
+              hold();
+              setDraft((current) => ({ ...current, [path]: value }));
+            },
+            hold,
+          }}
+        >
+          <PreviewCard preview={preview} />
+        </CardEditsContext.Provider>
       )}
-      {asking ? (
-        <div className="perm__acts">
-          <button className="btn btn--allow" autoFocus onClick={() => setFilling(true)}>
-            Save contact
-          </button>
-          <button className="btn btn--deny" onClick={() => decide("decline")}>
-            No thanks
-          </button>
-        </div>
-      ) : (
-        <div className="perm__acts">
-          <button
-            className="btn btn--allow"
-            autoFocus={fields.length === 0 && !strict}
-            onClick={() => decide("allowOnce")}
-          >
-            {step.preview?.verb || "Allow"} once
-            {!strict && fields.length === 0 && <span className="btn__k">⏎</span>}
-          </button>
-          {step.canAlways && !strict && (
-            <button className="btn btn--always" onClick={() => decide("allowAlways")}>
-              Always allow
-            </button>
-          )}
-          <button
-            className="btn btn--deny"
-            autoFocus={strict}
-            onClick={() => decide("decline")}
-          >
-            Don't allow <span className="btn__k">esc</span>
-          </button>
-        </div>
+      {autoMs !== null && (
+        <div
+          className="countdown motion-countdown"
+          data-held={held || undefined}
+          aria-hidden
+          style={{ "--auto-ms": `${autoMs}ms` } as CSSProperties}
+        />
       )}
+      <div className="perm__acts">
+        <button
+          className="btn btn--allow"
+          autoFocus={!strict && !missing}
+          onClick={() => decide("allowOnce")}
+        >
+          {preview?.verb || "Allow"} once
+          {!strict && <span className="btn__k">⏎</span>}
+        </button>
+        {step.canAlways && !strict && (
+          <button className="btn btn--always" onClick={() => decide("allowAlways")}>
+            Always allow
+          </button>
+        )}
+        <button
+          className="btn btn--deny"
+          autoFocus={strict}
+          onClick={() => decide("decline")}
+        >
+          {/* On a card that counts down, declining is taking it back before it
+              goes. Still "Undo" once held: reaching for it is what holds it,
+              and a label changing under the pointer is a misclick. */}
+          {autoMs !== null ? "Undo" : "Don't allow"} <span className="btn__k">esc</span>
+        </button>
+      </div>
     </div>
   );
 }
 
-/** The flat string map the confirm command takes; see `display_args` in agent.rs. */
-function asStrings(args: ToolArgs): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(args).map(([key, value]) => [
-      key,
-      typeof value === "string" ? value : JSON.stringify(value),
-    ]),
+/**
+ * Puts a tidied folder back as it was. The only write with a reverse already
+ * built, so the only row with an Undo.
+ */
+function UndoButton({ folder }: { folder: string }) {
+  const [undone, setUndone] = useState(false);
+  return (
+    <Button
+      variant="plain"
+      size="text"
+      disabled={undone}
+      onClick={() =>
+        void commands.undoTidy(folder).then((res) => setUndone(res.status === "ok"))
+      }
+    >
+      {undone ? "Undone" : "Undo"}
+    </Button>
   );
 }
 

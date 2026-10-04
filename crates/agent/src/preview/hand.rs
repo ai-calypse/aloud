@@ -193,12 +193,16 @@ fn mapped(
         .iter()
         .filter_map(|slot| {
             let prop = prop_at(schema, &slot.path);
+            let editable = m.editable.contains(&slot.path);
             // An unset flag shows its default: a Meet link nobody asked for is
-            // still a Meet link.
-            let value = given(args, &slot.path).or_else(|| {
-                prop.and_then(|p| p.get("default"))
-                    .filter(|d| d.is_boolean())
-            })?;
+            // still a Meet link. An editable address shows empty, so the card
+            // can take the one thing the model could not find.
+            let value = given(args, &slot.path)
+                .or_else(|| {
+                    prop.and_then(|p| p.get("default"))
+                        .filter(|d| d.is_boolean())
+                })
+                .or_else(|| (editable && is_address(slot.role)).then_some(&EMPTY))?;
             let currency = (slot.role == Role::Money)
                 .then(|| sibling(args, &slot.path, "currency"))
                 .flatten();
@@ -208,11 +212,20 @@ fn mapped(
             if let Some(label) = &slot.label {
                 field.label.clone_from(label);
             }
-            field.editable = m.editable.contains(&slot.path);
+            field.editable = editable;
+            if is_address(slot.role) {
+                field.name = given(args, &name_of(&slot.path))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+            }
             Some(field)
         })
         .collect();
-    let covered = |path: &str| m.slots.iter().any(|s| top(&s.path) == top(path));
+    let covered = |path: &str| {
+        m.slots
+            .iter()
+            .any(|s| top(&s.path) == top(path) || name_of(&s.path) == path)
+    };
     let mut more = fields.split_off(MAIN_FIELDS.min(fields.len()));
     more.extend(
         base.fields
@@ -247,7 +260,7 @@ fn mapped(
             preview.tier = Tier::Strict;
         }
     }
-    let addressed = all(&preview).any(|f| matches!(f.role, Role::Person | Role::Destination));
+    let addressed = all(&preview).any(|f| is_address(f.role) && !f.value.is_empty());
     if let Some(ask) = m.ask.as_ref().filter(|_| !addressed) {
         preview.risks.insert(0, ask.clone());
     }
@@ -314,7 +327,7 @@ pub(super) fn title(m: &Mapping, fields: &[Field]) -> String {
 fn target(fields: &[Field], to: &str) -> Option<String> {
     let field = fields
         .iter()
-        .find(|f| matches!(f.role, Role::Destination | Role::Person) && !f.unresolved)?;
+        .find(|f| is_address(f.role) && !f.unresolved && !f.value.is_empty())?;
     let who = match (&field.name, field.items.first()) {
         (Some(name), _) => name.clone(),
         (None, Some(first)) if field.count > 1 => {
@@ -386,6 +399,20 @@ fn all(preview: &ActionPreview) -> impl Iterator<Item = &Field> {
     preview.fields.iter().chain(&preview.more)
 }
 
+/// What an editable address with nothing in it shows.
+static EMPTY: Value = Value::String(String::new());
+
+fn is_address(role: Role) -> bool {
+    matches!(role, Role::Person | Role::Destination)
+}
+
+/// Where a call carries the name its address at `pointer` resolved to: `to`
+/// beside `to_name`, as `aloud_native::prepare` writes them. A new address
+/// clears it ([`super::apply_edits`]).
+pub(super) fn name_of(pointer: &str) -> String {
+    format!("{pointer}_name")
+}
+
 /// The argument at `pointer`, when it holds anything.
 fn given<'a>(args: &'a Value, pointer: &str) -> Option<&'a Value> {
     args.pointer(pointer).filter(|v| !fallback::is_empty(v))
@@ -412,7 +439,7 @@ pub(super) fn prop_at<'a>(schema: Option<&'a Value>, pointer: &str) -> Option<&'
     Some(at)
 }
 
-fn unescape(segment: &str) -> String {
+pub(super) fn unescape(segment: &str) -> String {
     segment.replace("~1", "/").replace("~0", "~")
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asksFirst, humanise, labelFor } from "./tool-views";
+import { humanise, labelFor } from "./tool-views";
 
 describe("tool views", () => {
   it("says what the tool is doing, not what it is called", () => {
@@ -71,8 +71,8 @@ describe("tool views", () => {
   /**
    * The People API nests names and addresses in arrays of objects rather than
    * the flat strings every other tool here uses, so this reader digs two levels
-   * and has two levels to get wrong. The gate that approves writing a contact
-   * shows what these return.
+   * and has two levels to get wrong. The row for a contact write shows what
+   * these return.
    */
   describe("saving a contact", () => {
     const dad = {
@@ -85,18 +85,6 @@ describe("tool views", () => {
       expect(labelFor("GOOGLECONTACTS_CREATE_CONTACT", dad)).toBe(
         "Saving Dad to your contacts",
       );
-    });
-
-    /**
-     * The ask-first flow is the agent offering to save someone it could not
-     * find. A text with an editable recipient used to open on "Save contact".
-     */
-    it("is the only editable gate that asks before showing its fields", () => {
-      expect(asksFirst("GOOGLECONTACTS_CREATE_CONTACT", dad)).toBe(true);
-      expect(asksFirst("ALOUD_MESSAGES_SEND", { to: "+15551234567", text: "hi" })).toBe(
-        false,
-      );
-      expect(asksFirst("ALOUD_DISCORD_MESSAGE", { to: "sam", text: "hi" })).toBe(false);
     });
 
     /**

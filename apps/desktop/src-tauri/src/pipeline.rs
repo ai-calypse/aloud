@@ -218,7 +218,12 @@ impl Pipeline {
         }
 
         match phase {
-            Phase::Recording => crate::overlay::show(&self.app, phase),
+            Phase::Recording => {
+                // Over an open card this may be the user about to say
+                // "cancel": its countdown must not send while they do.
+                crate::agent::hold_open(&self.app);
+                crate::overlay::show(&self.app, phase)
+            }
             // The transcript panel stays up through transcription: the last
             // preview pass is the only place the end of the sentence is
             // readable.
@@ -1097,6 +1102,9 @@ impl Pipeline {
         let (command, settings, _) = self.capture(captured, false).await?;
 
         if command.trim().is_empty() {
+            // The press took an open card off screen, and its gate is still
+            // waiting: put it back.
+            crate::agent::answer_by_voice(&self.app, "");
             return Ok(());
         }
         // Tolerate a trigger phrase said out of habit while holding the key —

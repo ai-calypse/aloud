@@ -1,3 +1,4 @@
+import { createContext, useContext } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import type { Field, Origin } from "@/lib/bindings";
 import {
@@ -5,6 +6,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 /**
  * The pieces an approval card is made of. Every string arrives formatted from
@@ -13,6 +16,44 @@ import {
  * card that rendered them as markdown or loaded an image URL from them would
  * show something other than what is about to be sent.
  */
+
+/**
+ * The open gate's draft, keyed by each field's pointer. Provided only around
+ * the card waiting on a yes, so a finished step's echo — and any card Rust did
+ * not mark `editable` — stays plain text.
+ */
+export type CardEdits = {
+  draft: Record<string, string>;
+  edit: (path: string, value: string) => void;
+  /** Focus on a field holds the countdown: the user is reading or changing it. */
+  hold: () => void;
+};
+
+export const CardEditsContext = createContext<CardEdits | null>(null);
+
+/** The draft to edit `field` in, or null where it is shown as text. */
+function useEditing(field: Field): CardEdits | null {
+  const edits = useContext(CardEditsContext);
+  return field.editable ? edits : null;
+}
+
+/**
+ * A field taken as typed: a single line in its row. An empty one is what the
+ * model could not fill — an address it never found — so it takes focus.
+ */
+function FieldInput({ field, edits }: { field: Field; edits: CardEdits }) {
+  return (
+    <Input
+      className="preview__input"
+      value={edits.draft[field.path] ?? field.value}
+      aria-label={field.label}
+      placeholder={field.label}
+      autoFocus={field.value === ""}
+      onFocus={edits.hold}
+      onChange={(e) => edits.edit(field.path, e.target.value)}
+    />
+  );
+}
 
 /** Where a message goes, by name. An id nothing has named is flagged, not shown as one. */
 export function DestinationChip({ field }: { field: Field }) {
@@ -25,9 +66,22 @@ export function PersonChip({ address }: { address: string }) {
   return <span className="preview__chip">{address}</span>;
 }
 
-/** The text being sent, whole. Never truncated: it is the thing being approved. */
-export function MessageBody({ text }: { text: string }) {
-  return <p className="preview__body">{text}</p>;
+/**
+ * The text being sent, whole. Never truncated: it is the thing being approved.
+ * On the open card it is the field itself — fix a word in place, ⌘↩ to send.
+ */
+export function MessageBody({ field }: { field: Field }) {
+  const edits = useEditing(field);
+  if (!edits) return <p className="preview__body">{field.value}</p>;
+  return (
+    <Textarea
+      className="preview__body preview__input"
+      value={edits.draft[field.path] ?? field.value}
+      aria-label={field.label}
+      onFocus={edits.hold}
+      onChange={(e) => edits.edit(field.path, e.target.value)}
+    />
+  );
 }
 
 /**
@@ -47,10 +101,16 @@ export function OriginTag({ origin }: { origin: Origin }) {
 export function TextBlock({ field }: { field: Field }) {
   return (
     <div className="preview__text">
-      <MessageBody text={field.value} />
+      <MessageBody field={field} />
       {field.origin && <OriginTag origin={field.origin} />}
     </div>
   );
+}
+
+/** A record's own name: its title or subject, editable on the open card. */
+export function HeadingText({ field }: { field: Field }) {
+  const edits = useEditing(field);
+  return edits ? <FieldInput field={field} edits={edits} /> : <>{field.value}</>;
 }
 
 export function WhenBlock({ when, big }: { when: string; big?: boolean }) {
@@ -145,12 +205,22 @@ export function UnresolvedId({ value }: { value: string }) {
 }
 
 function Value({ field }: { field: Field }) {
+  const edits = useEditing(field);
+  if (edits && field.role !== "text") return <FieldInput field={field} edits={edits} />;
   switch (field.role) {
     case "destination":
       return <DestinationChip field={field} />;
     case "id":
       return field.name ? <>{field.name}</> : <UnresolvedId value={field.value} />;
     case "person": {
+      // Who Contacts resolved a spoken name to, then the address it sends to.
+      if (field.name)
+        return (
+          <span className="preview__chips">
+            <PersonChip address={field.name} />
+            <span className="preview__faint">{field.value}</span>
+          </span>
+        );
       const people = field.items.length > 0 ? field.items : [field.value];
       const rest = field.count - field.items.length;
       return (
