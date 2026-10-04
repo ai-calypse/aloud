@@ -181,7 +181,7 @@ struct ChatRequest<'a> {
 fn reasoning_for(model: &str) -> (Option<&'static str>, Option<bool>) {
     match model {
         "openai/gpt-oss-20b" | "openai/gpt-oss-120b" => (Some("low"), Some(false)),
-        "qwen/qwen3.6-27b" | "qwen/qwen3-32b" => (Some("none"), Some(false)),
+        "qwen/qwen3.8-27b" | "qwen/qwen3.6-27b" | "qwen/qwen3-32b" => (Some("none"), Some(false)),
         // Cerebras: picking a tool needs no thinking — 0.13s server time with
         // it off against 0.3–0.4s on, same choice. `include_reasoning` is
         // Groq's field, not theirs.
@@ -531,7 +531,7 @@ mod tests {
             (Some("low"), Some(false))
         );
         assert_eq!(
-            reasoning_for("qwen/qwen3.6-27b"),
+            reasoning_for("qwen/qwen3.8-27b"),
             (Some("none"), Some(false))
         );
         assert_eq!(reasoning_for("qwen-3.8-27b"), (Some("none"), None));

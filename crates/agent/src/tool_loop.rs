@@ -329,6 +329,23 @@ fn fails_over(error: &LlmError) -> bool {
         )
 }
 
+/// Gemini 3 rejects a history holding tool calls without its thought
+/// signatures, which another model's calls never have. Its documented
+/// placeholder tells it to skip the check for those turns (LiteLLM does the
+/// same on a model switch); the cost is the reasoning context they never had.
+fn sign_for_gemini(messages: &mut [Message]) {
+    for call in messages
+        .iter_mut()
+        .filter_map(|m| m.tool_calls.as_mut())
+        .flatten()
+        .filter(|c| c.extra_content.is_none())
+    {
+        call.extra_content = Some(serde_json::json!({
+            "google": { "thought_signature": "skip_thought_signature_validator" }
+        }));
+    }
+}
+
 /// How long to wait before retry attempt `attempt`. A server-sent `retry-after`
 /// outranks the schedule — it knows the real budget — but is capped so a
 /// "come back in an hour" cannot strand a spoken command; past the cap we would
@@ -577,12 +594,22 @@ where
             anyhow::bail!("cancelled");
         }
         let is_last = round + 1 == max_rounds;
-        // By index: a `&Brain` parameter makes the returned future's borrow a
-        // closure-local lifetime the compiler will not infer.
-        let chat = |index: usize| {
-            let current = &brains[index];
+        // Per round, not per run: a run that survived a 429 in round one still
+        // deserves a full ladder if round three trips a different limit.
+        let mut attempts = 0usize;
+
+        // Overload and transient 5xx are retried on a backoff ladder: the loop
+        // makes several calls in a row, so a per-minute budget can trip between
+        // rounds and a single bad upstream box can end a command that was
+        // otherwise going fine. Here rather than in the llm crate so the panel
+        // can show the wait instead of looking hung.
+        let turn = loop {
+            // Inline rather than a closure: the request borrows the history
+            // only until it returns, so a mid-run failover can sign it for
+            // Gemini between two calls.
+            let current = &brains[brain];
             let model = current.model;
-            current
+            let reply = current
                 .client
                 .chat_with_tools(
                     model,
@@ -598,31 +625,20 @@ where
                     round,
                     usage = tracing::field::Empty
                 ))
-        };
-
-        // Per round, not per run: a run that survived a 429 in round one still
-        // deserves a full ladder if round three trips a different limit.
-        let mut attempts = 0usize;
-
-        // Overload and transient 5xx are retried on a backoff ladder: the loop
-        // makes several calls in a row, so a per-minute budget can trip between
-        // rounds and a single bad upstream box can end a command that was
-        // otherwise going fine. Here rather than in the llm crate so the panel
-        // can show the wait instead of looking hung.
-        let turn = loop {
-            let error = match chat(brain).await {
+                .await;
+            let error = match reply {
                 Ok(turn) => break turn,
                 Err(e) => e,
             };
-            // Another brain beats waiting out this one's budget. Only before
-            // anything has run: Gemini 3 rejects a history holding another
-            // model's tool calls, which lack its thought signatures.
-            if round == 0
-                && brain + 1 < brains.len()
-                && error.downcast_ref::<LlmError>().is_some_and(fails_over)
+            // Another brain beats waiting out this one's budget — mid-run too:
+            // Groq's free tier trips on a command's second step.
+            if brain + 1 < brains.len() && error.downcast_ref::<LlmError>().is_some_and(fails_over)
             {
-                tracing::warn!(%error, from = brains[brain].model, to = brains[brain + 1].model, "failing over");
+                tracing::warn!(%error, from = brains[brain].model, to = brains[brain + 1].model, round, "failing over");
                 brain += 1;
+                if brains[brain].model.starts_with("gemini") {
+                    sign_for_gemini(&mut messages);
+                }
                 continue;
             }
             let Some(schedule) = error.downcast_ref::<LlmError>().and_then(backoff) else {
@@ -1534,6 +1550,39 @@ mod tests {
         );
         approved = false;
         assert!(screen_gate(&mut approved), "a no asks again next time");
+    }
+
+    /// Groq's free tier trips on a command's second step; Gemini takes over,
+    /// but only if the calls Groq made carry a signature Gemini accepts. One it
+    /// signed itself must be left as it is.
+    #[test]
+    fn a_switch_to_gemini_mid_run_signs_the_calls_it_never_made() {
+        let call = |id: &str, extra: Option<serde_json::Value>| aloud_llm::ToolCall {
+            id: id.to_string(),
+            kind: "function".to_string(),
+            function: aloud_llm::FunctionCall {
+                name: "ALOUD_NOTES_CREATE".to_string(),
+                arguments: "{}".to_string(),
+            },
+            extra_content: extra,
+        };
+        let own = serde_json::json!({ "google": { "thought_signature": "real" } });
+        let mut messages = vec![
+            Message::user("make a note"),
+            Message {
+                role: aloud_llm::Role::Assistant,
+                content: None,
+                tool_calls: Some(vec![call("groq", None), call("gemini", Some(own.clone()))]),
+                tool_call_id: None,
+            },
+        ];
+        sign_for_gemini(&mut messages);
+        let calls = messages[1].tool_calls.as_ref().unwrap();
+        assert_eq!(
+            calls[0].extra_content.as_ref().unwrap()["google"]["thought_signature"],
+            "skip_thought_signature_validator"
+        );
+        assert_eq!(calls[1].extra_content.as_ref(), Some(&own));
     }
 
     /// "take 5 photos" ended after one: the round's single write confirmed

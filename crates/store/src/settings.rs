@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
 const DEFAULT_CLEANUP_MODEL: &str = "openai/gpt-oss-20b";
-const DEFAULT_FALLBACK_MODEL: &str = "qwen/qwen3.6-27b";
+const DEFAULT_FALLBACK_MODEL: &str = "qwen/qwen3.8-27b";
 
 /// Longest vocabulary term accepted from the clipboard. Every term is re-sent
 /// with every cleanup request, so a stray copied paragraph is paid for forever.
@@ -254,7 +254,11 @@ impl Settings {
         if self.post_processing_model == "llama-3.3-70b-versatile" {
             self.post_processing_model = DEFAULT_CLEANUP_MODEL.into();
         }
-        if self.fallback_model == "llama-3.1-8b-instant" {
+        // qwen3.6-27b left Groq's model list: a cleanup falling back to it 404s.
+        if matches!(
+            self.fallback_model.as_str(),
+            "llama-3.1-8b-instant" | "qwen/qwen3.6-27b"
+        ) {
             self.fallback_model = DEFAULT_FALLBACK_MODEL.into();
         }
     }
