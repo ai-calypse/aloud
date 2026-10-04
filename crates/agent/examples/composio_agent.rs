@@ -22,9 +22,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let settings = Settings::load();
-    let brains = aloud_agent::brains(&settings.cerebras_api_key, &settings.gemini_api_key)?;
+    let brains = aloud_agent::brains(&settings.groq_api_key, &settings.gemini_api_key)?;
     if brains.is_empty() {
-        anyhow::bail!("no CEREBRAS_API_KEY or GEMINI_API_KEY (settings or .env)");
+        anyhow::bail!("no GROQ_API_KEY or GEMINI_API_KEY (settings or .env)");
     }
     if settings.composio_api_key.trim().is_empty() {
         anyhow::bail!("no COMPOSIO_API_KEY (settings or .env)");

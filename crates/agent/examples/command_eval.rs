@@ -80,15 +80,21 @@ async fn main() -> anyhow::Result<()> {
         .max(1);
     let mut brains: Vec<(&str, Brain)> = Vec::new();
     for (name, key) in [
-        ("cerebras", &settings.cerebras_api_key),
+        ("groq", &settings.groq_api_key),
         ("gemini", &settings.gemini_api_key),
+        // Only when asked for by name: off the default list while it returns 402.
+        ("cerebras", &settings.cerebras_api_key),
     ] {
-        if !key.trim().is_empty() && only.as_deref().is_none_or(|o| o == name) {
+        let wanted = match only.as_deref() {
+            Some(asked) => asked == name,
+            None => name != "cerebras",
+        };
+        if !key.trim().is_empty() && wanted {
             brains.push((name, aloud_agent::brain(name, key)?));
         }
     }
     if brains.is_empty() {
-        anyhow::bail!("no brain to evaluate: set CEREBRAS_API_KEY or GEMINI_API_KEY");
+        anyhow::bail!("no brain to evaluate: set GROQ_API_KEY or GEMINI_API_KEY");
     }
 
     let cases: Vec<Case> = include_str!("../evals/commands.jsonl")
