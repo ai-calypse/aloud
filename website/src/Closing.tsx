@@ -1,5 +1,5 @@
 import timeCat from "./assets/memes/time-cat.webp";
-import tvWall from "./assets/tv-wall.webp";
+import footerArt from "./assets/footer.webp";
 import { GlossyButton } from "./components/ds";
 import Sticker from "./components/Sticker";
 import SmartLink from "./components/SmartLink";
@@ -43,13 +43,12 @@ export default function Closing() {
         </div>
       </section>
 
-      {/* The wall of tvs replaces the pixel wordmark. It fades into the page at the top; the
-          links sit on its dark floor. ponytail: the picture still spells "ALOUD", the old name;
-          regenerate it before launch. */}
+      {/* The wall of tvs spells the name, so it replaces the pixel wordmark. It fades into the page
+          at the top; the links sit on its dark floor. */}
       <footer className="relative isolate overflow-hidden text-neutral-0">
         <img
-          src={tvWall}
-          alt="A wall of blue retro televisions with a Windows Media Player style tv in front"
+          src={footerArt}
+          alt="A wall of vintage televisions whose screens spell SpeakOS, with a large wooden tv in front"
           width={2400}
           height={1339}
           loading="lazy"
