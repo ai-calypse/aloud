@@ -1,0 +1,139 @@
+{
+  "type": "object",
+  "title": "SendMessageRequest",
+  "required": [
+    "channel"
+  ],
+  "properties": {
+    "text": {
+      "type": "string",
+      "title": "Text",
+      "examples": [
+        "Hello from your friendly bot!",
+        "Reminder: Team meeting at 3 PM today."
+      ],
+      "description": "DEPRECATED: This sends raw text only, use markdown_text field. Primary textual content. Recommended fallback if using `blocks` or `attachments`. Supports mrkdwn unless `mrkdwn` is `false`.",
+      "human_parameter_name": "Plain Text (Deprecated)",
+      "human_parameter_description": "Plain-text version of your message. Prefer markdown_text for formatting; use this only as a simple fallback."
+    },
+    "parse": {
+      "type": "string",
+      "const": "full",
+      "title": "Parse",
+      "examples": [
+        "full"
+      ],
+      "description": "Message text parsing behavior. Set to 'full' to parse as user-typed (auto-links @mentions, #channels). Omit for default behavior (no special parsing).",
+      "human_parameter_name": "Parse Mode",
+      "human_parameter_description": "Control how Slack interprets your text. Use 'full' to auto-link mentions and channels; otherwise leave as 'none' for no special parsing."
+    },
+    "blocks": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      ],
+      "title": "Blocks",
+      "examples": [
+        "%5B%7B%22type%22%3A%20%22section%22%2C%20%22text%22%3A%20%7B%22type%22%3A%20%22mrkdwn%22%2C%20%22text%22%3A%20%22Hello%2C%20world%21%22%7D%7D%5D",
+        [
+          {
+            "text": {
+              "text": "Hello, world!",
+              "type": "mrkdwn"
+            },
+            "type": "section"
+          }
+        ]
+      ],
+      "description": "DEPRECATED: Use `markdown_text` field instead. Block Kit layout blocks for rich/interactive messages. Accepts either a URL-encoded JSON string or a list of block dictionaries. See Slack API Block Kit docs for structure.",
+      "human_parameter_name": "Blocks (Deprecated)",
+      "human_parameter_description": "A Block Kit layout for advanced formatting. Accepts URL-encoded JSON string or a list of block objects. Use this only if you already have a blocks payload; otherwise prefer markdown_text."
+    },
+    "mrkdwn": {
+      "type": "boolean",
+      "title": "Mrkdwn",
+      "description": "Controls Slack mrkdwn formatting for the top-level `text` field ONLY. Set to `false` to disable formatting (text appears as-is with literal asterisks, underscores, etc.). Default `true` enables mrkdwn formatting (*bold*, _italic_, etc.). NOTE: This parameter has NO effect on `blocks` or `markdown_text` - block content always uses its own formatting rules.",
+      "human_parameter_name": "Enable Markdown",
+      "human_parameter_description": "Controls formatting for the plain text field only. Set to false to show text exactly as typed (e.g., *word* appears literally instead of bold). Has no effect when using markdown_text or blocks."
+    },
+    "channel": {
+      "type": "string",
+      "title": "Channel",
+      "examples": [
+        "C1234567890",
+        "general"
+      ],
+      "description": "ID or name of the channel, private group, or IM channel to send the message to. Can be specified as either 'channel' or 'channel_id'. Do NOT include the '#' prefix (e.g., use 'general' not '#general') - any leading '#' will be automatically stripped. For DMs, use the channel ID returned by SLACK_OPEN_DM (starts with 'D'); usernames, emails, and user IDs are not valid DM targets. IMPORTANT: org-wide (Enterprise Grid) tokens cannot resolve channel names — Slack returns `team_not_found`. Pass the channel ID (e.g., 'C0ABC12345') instead; use SLACK_LIST_ALL_CHANNELS to find IDs.",
+      "human_parameter_name": "Channel",
+      "human_parameter_description": "Where to send the message—enter a channel name (like general) or a channel ID (like C1234567890). You can also use a DM or private group. Do not include the '#' prefix; it will be automatically removed if provided."
+    },
+    "thread_ts": {
+      "type": "string",
+      "title": "Thread Ts",
+      "examples": [
+        "1618033790.001500"
+      ],
+      "description": "Timestamp (`ts`) of an existing message to make this a threaded reply. Use `ts` of the parent message, not another reply. Example: '1476746824.000004'.",
+      "human_parameter_name": "Thread Timestamp",
+      "human_parameter_description": "Paste the timestamp of the message you want to reply to in a thread (for example 1618033790.001500)."
+    },
+    "link_names": {
+      "type": "boolean",
+      "title": "Link Names",
+      "description": "Automatically hyperlink channel names (e.g., #channel) and usernames (e.g., @user) in message text. Defaults to `false` for bot messages.",
+      "human_parameter_name": "Auto-Link Names",
+      "human_parameter_description": "Automatically turn #channel and @user mentions in your text into clickable links."
+    },
+    "attachments": {
+      "type": "string",
+      "title": "Attachments",
+      "examples": [
+        "[{\"fallback\": \"Summary text\", \"color\": \"#36a64f\", \"title\": \"Title\", \"text\": \"Attachment content\", \"fields\": [{\"title\": \"Field\", \"value\": \"Value\", \"short\": true}]}]"
+      ],
+      "description": "This is Slack's legacy 'secondary attachments' field for adding rich formatting elements like colored sidebars, structured fields, and author info to messages. Pass as a JSON string array. NOT for file/image uploads. To send a message with attachments of files or images, use the 'SLACK_UPLOAD_OR_CREATE_A_FILE_IN_SLACK' instead.",
+      "human_parameter_name": "Rich Message Formatting (Legacy)",
+      "human_parameter_description": "NOT for uploading files or images. This adds rich formatting elements like colored sidebars and structured fields to your message. To share actual files, images, or documents, use the 'Upload or create a file in Slack' action instead. Most users should use markdown_text for formatting."
+    },
+    "unfurl_links": {
+      "type": "boolean",
+      "title": "Unfurl Links",
+      "description": "Enable unfurling of text-based URLs. Defaults `false` for bots, `true` if `as_user` is `true`.",
+      "human_parameter_name": "Unfurl Links",
+      "human_parameter_description": "Show previews for regular links you include in the message. Turn on to expand links; turn off to keep them compact."
+    },
+    "unfurl_media": {
+      "type": "boolean",
+      "title": "Unfurl Media",
+      "description": "Enable media previews (images, videos) from URLs. Set to `true` (default) to show media previews, `false` to hide them.",
+      "human_parameter_name": "Show Media Previews",
+      "human_parameter_description": "Show image and video previews from links in your message. Enabled by default. Set to false to hide media previews."
+    },
+    "markdown_text": {
+      "type": "string",
+      "title": "Markdown Text",
+      "examples": [
+        "# Status Update\n\nSystem is **running smoothly** with *excellent* performance.\n\n```bash\nkubectl get pods\n```\n\n> All services operational ✅",
+        "## Daily Report\n\n- **Deployments**: 5 successful\n- *Issues*: 0 critical\n- ~~Maintenance~~: **Completed**\n\n---\n\n**Next**: Monitor for 24h"
+      ],
+      "description": "PREFERRED: Write your message in markdown for nicely formatted display. Supports: headers (# ## ###), bold (**text** or __text__), italic (*text* or _text_), strikethrough (~~text~~), inline code (`code`), code blocks (```), links ([text](url)), block quotes (>), lists (- item, 1. item), dividers (--- or ***), context blocks (:::context with images), and section buttons (:::section-button). IMPORTANT: Use \\n for line breaks (e.g., 'Line 1\\nLine 2'), not actual newlines. USER MENTIONS: To tag users, use their user ID with <@USER_ID> format (e.g., <@U1234567890>), not username. NOTE: Slack enforces a 50-block limit per message. Very long messages with extensive formatting may exceed this limit. If your message is very long, consider splitting it into multiple shorter messages or using simpler formatting.",
+      "human_parameter_name": "Message Content (Markdown)",
+      "human_parameter_description": "Write the message you want to send, using Markdown for formatting. We'll automatically format it for Slack and convert it to the right blocks."
+    },
+    "reply_broadcast": {
+      "type": "boolean",
+      "title": "Reply Broadcast",
+      "description": "If `true` for a threaded reply, also posts to main channel. Defaults to `false`.",
+      "human_parameter_name": "Broadcast Reply to Channel",
+      "human_parameter_description": "If you're replying in a thread, turn this on to also share the reply in the main channel."
+    }
+  },
+  "description": "Request schema for `SendMessage`"
+}
