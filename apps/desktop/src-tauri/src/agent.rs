@@ -197,23 +197,23 @@ pub async fn run(
     quiet: bool,
     cancelled: impl Fn() -> bool,
 ) -> Result<()> {
-    // A previous run that ended without the panel being dismissed — it finished
-    // on its own, errored, or was cancelled — leaves its unanswered gate in the
-    // slot. The next command then finds it occupied and declines its own
-    // confirmation with no prompt on screen. Nothing else clears it: only
-    // `close_agent` does, and that needs an explicit dismissal. Clearing at the
-    // start of every run means no exit path can leak into the next command.
-    clear_pending(app);
-
-    // Taking the ticket also invalidates any run still in flight: its events
-    // stop reaching the panel from here on, even though it keeps executing
-    // until its current tool returns.
+    // Taking the ticket supersedes any run still in flight: its events stop
+    // reaching the panel, and with `cancelled` below it stops at its next tool
+    // instead of carrying on unseen.
     let run = Run {
         ticket: claim_run(),
         quiet: AtomicBool::new(quiet),
         acted: AtomicBool::new(false),
         transcript: transcript.clone(),
     };
+    let cancelled = || cancelled_or_superseded(run.ticket, &cancelled);
+
+    // A previous run that ended without the panel being dismissed — it finished
+    // on its own, errored, or was cancelled — leaves its unanswered gate in the
+    // slot. The next command then finds it occupied and declines its own
+    // confirmation with no prompt on screen. After the claim, so the run being
+    // superseded cannot put a question back in between.
+    clear_pending(app);
 
     // Read before `show_panel`, which focuses our own window and would make us the front app. Our own
     // name means a panel still held focus from the last run, which says nothing about what the user is
@@ -268,6 +268,13 @@ pub async fn run(
     Ok(())
 }
 
+/// A run stops when its caller cancels it or when a newer command has taken
+/// the panel. Without the second, a superseded run kept executing reads and
+/// writes no one could see.
+fn cancelled_or_superseded(ticket: u64, cancelled: &impl Fn() -> bool) -> bool {
+    cancelled() || !is_current(ticket)
+}
+
 /// Whether a failure is the loop's own cancellation, which is not an error to
 /// report. Matched on the message because the loop returns `anyhow::Error` and
 /// a typed error for one string is not worth the crate boundary.
@@ -278,7 +285,7 @@ fn is_cancelled(error: &anyhow::Error) -> bool {
 /// Drops any unanswered gate or question. Dropping a sender resolves whoever is
 /// waiting on it — as a declined write or an unanswered question — so an
 /// abandoned run never leaves a live channel behind.
-fn clear_pending(app: &AppHandle) {
+pub(crate) fn clear_pending(app: &AppHandle) {
     if let Some(state) = app.try_state::<PendingConfirmation>() {
         state.0.lock().unwrap().take();
     }
@@ -363,7 +370,7 @@ async fn execute(
         },
         // The question itself already went out through `on_event`; this only
         // opens the reply channel and waits on it.
-        |_question| await_answer(app),
+        |_question| await_answer(app, run),
         cancelled,
     )
     .await
@@ -451,7 +458,7 @@ async fn run_direct(
                         options: vec!["Yes".to_string(), "No".to_string()],
                     }),
                 );
-                let yes = matches!(await_answer(app).await.as_deref(), Some("Yes"));
+                let yes = matches!(await_answer(app, run).await.as_deref(), Some("Yes"));
                 task.approve(yes).await.map_err(anyhow::Error::msg)?;
             }
             Some(aloud_engine::Update::Finished(result)) => {
@@ -492,7 +499,11 @@ async fn run_direct(
     }
 }
 
-async fn await_answer(app: &AppHandle) -> Option<String> {
+async fn await_answer(app: &AppHandle, run: &Run) -> Option<String> {
+    // A superseded run asking would take the reply slot from the current one.
+    if !is_current(run.ticket) {
+        return None;
+    }
     let (tx, rx) = oneshot::channel();
     if let Some(state) = app.try_state::<PendingQuestion>() {
         *state.0.lock().unwrap() = Some(tx);
@@ -731,6 +742,12 @@ mod tests {
             !is_current(first),
             "the superseded run must not still own the panel"
         );
+
+        // …and it stops at its next tool, even though its caller never
+        // cancelled it.
+        assert!(cancelled_or_superseded(first, &|| false));
+        assert!(!cancelled_or_superseded(second, &|| false));
+        assert!(cancelled_or_superseded(second, &|| true));
 
         // Tickets are strictly increasing, so a late run can never look current
         // again by coincidence.

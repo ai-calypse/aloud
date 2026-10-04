@@ -538,11 +538,21 @@ impl Pipeline {
         if captured.recorder.is_none() {
             return Ok(());
         }
+        // Every start and stop bumps this, so a change while the work ran means
+        // a newer session owns the pill.
+        let starts = self.session.lock().unwrap().starts;
 
         self.emit(Phase::Transcribing);
         let result = work(captured).await;
         if result.is_err() {
             tracing::Span::current().record("ok", false);
+        }
+        // A command superseded by the next one returns here while the user is
+        // recording that next one; its Idle would hide their pill and drop
+        // Escape.
+        if self.session.lock().unwrap().starts != starts {
+            tracing::debug!("a newer session owns the pill; not settling it");
+            return result;
         }
         match &result {
             Ok(()) => self.emit(done),
@@ -1117,6 +1127,9 @@ impl Pipeline {
         self.cancel_generation
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.cancelled.notify_waiters();
+        // The hotkey layer swallows Escape on the Command-key path, so an open
+        // gate never sees it; this is its decline.
+        crate::agent::clear_pending(&self.app);
         self.emit(Phase::Idle);
     }
 
