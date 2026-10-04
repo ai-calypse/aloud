@@ -144,7 +144,7 @@ export function NotchShell({ nav }: { nav: Nav }) {
         id={PANEL_ID}
         role="tabpanel"
         aria-labelledby={`notch-tab-${section.id}`}
-        className="max-h-[400px] overflow-y-auto px-4 pt-3.5 pb-3"
+        className="max-h-[420px] overflow-y-auto px-4 pt-3.5 pb-3"
       >
         {palette && <Palette onPick={pick} onClose={() => setPalette(false)} />}
         {/* Hidden, not unmounted, under the palette: a run's approval gate

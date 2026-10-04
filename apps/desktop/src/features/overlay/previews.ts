@@ -657,7 +657,12 @@ export const TOAST_PREVIEWS: Record<"show" | "undo" | "plain", Island> = {
  * three activities can be judged before they exist. In the order the crate
  * ranks them (high, normal, low): the preview has no Rust to rank them.
  */
-export const LIVE_PREVIEWS: Island[] = [
+export function livePreviews(n: number): Island[] {
+  // One is today's: the agents. More add the shapes features will bring.
+  return n === 1 ? LIVE_PREVIEWS.filter((i) => i.id === "agents") : LIVE_PREVIEWS.slice(0, n);
+}
+
+const LIVE_PREVIEWS: Island[] = [
   {
     id: "timer",
     kind: "live",

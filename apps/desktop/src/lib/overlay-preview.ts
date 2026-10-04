@@ -48,6 +48,11 @@ export type PreviewCommand = {
    */
   icon?: string;
   /**
+   * Back to the resting notch at once: no run, no panel, no alert, idle. The
+   * state live islands draw in, which a dictation only reaches through Rust.
+   */
+  rest?: boolean;
+  /**
    * Live islands in the closed notch: the first `n` of `LIVE_PREVIEWS`, 0
    * for none. With no Rust behind the preview, this stands in for the
    * `island` event.

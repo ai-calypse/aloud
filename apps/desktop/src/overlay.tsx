@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -46,7 +47,7 @@ import {
   CARD_PREVIEWS,
   CONTACT_PREVIEW,
   FINDER_PREVIEWS,
-  LIVE_PREVIEWS,
+  livePreviews,
   TOAST_PREVIEWS,
   withIcon,
 } from "./features/overlay/previews";
@@ -228,9 +229,11 @@ function Overlay() {
   }, [panelOpen]);
   // A voice command takes the panel to its run, exactly as it took the whole
   // panel before there were sections; keyed on the utterance, so it fires
-  // once per run and the user can still navigate away while it works.
+  // once per run and the user can still navigate away while it works. A
+  // layout effect so the panel never paints a frame of the wrong section —
+  // pure state, no `invoke`, so it cannot stall the paint it precedes.
   const runKey = agent?.heard;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (runKey !== undefined) takeFocus("agents", "voice");
   }, [runKey, takeFocus]);
 
@@ -281,8 +284,8 @@ function Overlay() {
     // The agents' island is Rust's, so the preview stands it in for `?agents`
     // (the cats beside the camera); `?islands=3` adds the fixtures' others.
     const live = Number(params.get("islands"));
-    if (live > 0) setIslands(LIVE_PREVIEWS.slice(0, live));
-    else if (count > 0) setIslands(LIVE_PREVIEWS.filter((island) => island.id === "agents"));
+    if (live > 0) setIslands(livePreviews(live));
+    else if (count > 0) setIslands(livePreviews(1));
     if (params.has("hover")) setHovering(true);
     // `?perm` and `?perm=2` stage the card and a queue behind it.
     const perms = params.has("perm") ? Math.max(1, Number(params.get("perm")) || 1) : 0;
@@ -513,16 +516,19 @@ function Overlay() {
    * latches for the rest of the run rather than tracking the words — the
    * transcript is gone by `transcribing`, and springing back up to a menu-bar
    * tab there would undo the drop just watched.
+   *
+   * At rest it is always the drop pill, whatever the last dictation drew: the
+   * resting notch is the cutout (Rust's `show_notch` says so too), and the
+   * live islands and the hover peek live in it. Before islands the agents'
+   * strip drew outside it, so a notch left in `wings` after a dictation lost
+   * only the hover; now it would lose the agents too.
    */
-  const effectiveStyle: OverlayStyle =
-    style === "wings" && (droppedDown || panelOpen || toast !== null) ? "dropPill" : style;
-
-  /**
-   * Nothing is being said and no panel is up: the notch is just sitting there.
-   * This is the state that did not exist before — the window used to be hidden
-   * entirely between dictations.
-   */
+  // Nothing is being said and no panel is up: the notch is just sitting there.
   const resting = !panelOpen && phase === "idle" && !dismissing && toast === null;
+  const effectiveStyle: OverlayStyle =
+    style === "wings" && (droppedDown || panelOpen || toast !== null || resting)
+      ? "dropPill"
+      : style;
   // What the resting notch shows *without* a hover: the live islands, beside
   // the camera — the coding agents' cats while they work or ask (Rust's
   // `agents` island), and whatever features push later. Hovering grows the
@@ -551,7 +557,7 @@ function Overlay() {
   }, [takeFocus]);
   // A drill — a permission arriving, a dealt card clicked, a row picked —
   // is a coding agent, so the panel goes to where they live.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (selected) takeFocus("agents", "coding");
   }, [selected, takeFocus]);
 
@@ -747,6 +753,18 @@ function Overlay() {
     const onPreview = (event: Event) => {
       const command = (event as CustomEvent<PreviewCommand>).detail;
       if (command.style) setStyle(command.style);
+      // First, so anything else in the same command draws on a resting notch.
+      if (command.rest) {
+        clearInterval(typing);
+        setAgent(null);
+        setBrowsing(false);
+        setSelected(null);
+        setToast(null);
+        setPartial("");
+        setDroppedDown(false);
+        setDismissing(false);
+        setPhase("idle");
+      }
       // Phase first: `recording` resets everything below, including the timer
       // both streams share, so a stream started before it would be cancelled.
       if (command.phase) {
@@ -893,7 +911,7 @@ function Overlay() {
         setAgent(null);
         setDismissing(false);
       }
-      if (command.islands !== undefined) setIslands(LIVE_PREVIEWS.slice(0, command.islands));
+      if (command.islands !== undefined) setIslands(livePreviews(command.islands));
       if (command.open) {
         setBrowsing(true);
         navigate(command.open.section, command.open.sub);

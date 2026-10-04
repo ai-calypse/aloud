@@ -20,7 +20,9 @@ export function IslandIcon({
   size?: "sm" | "md";
 }) {
   if (island.id === "agents" && sessions.length > 0) {
-    return <AgentCats sessions={sessions} permissions={permissions} />;
+    const cats = <AgentCats sessions={sessions} permissions={permissions} />;
+    // In a row it holds the icon column's width, so titles line up.
+    return size === "md" ? <span className="flex min-w-[26px] justify-center">{cats}</span> : cats;
   }
   return <AppIcon icon={island.icon} label={island.title} size={size} />;
 }

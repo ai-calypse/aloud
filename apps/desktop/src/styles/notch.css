@@ -184,7 +184,7 @@
 
 /* Under the body's own ceiling, so a long run scrolls in one place. */
 .notch-shell .ask__answer {
-  max-height: 280px;
+  max-height: 300px;
 }
 
 .notch-shell .tabs {
