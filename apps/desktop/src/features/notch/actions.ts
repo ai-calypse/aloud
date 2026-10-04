@@ -90,6 +90,18 @@ export const ACTIONS: NotchAction[] = [
       return true;
     },
   },
+  {
+    // Also what the privacy island's Show button names.
+    id: "mac.privacy",
+    title: "Show mic and camera use",
+    keywords: ["privacy", "microphone", "mic", "camera", "recording", "in use"],
+    section: "mac",
+    subsection: "privacy",
+    run: (ctx) => {
+      ctx.open("mac", "privacy");
+      return true;
+    },
+  },
   // notch-mac: actions end
   {
     // What a finished row's Show does: bring back what a write made.
