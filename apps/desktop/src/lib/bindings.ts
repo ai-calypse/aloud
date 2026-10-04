@@ -973,15 +973,17 @@ export type Settings = {
 	groqApiKey?: string,
 	composioApiKey?: string,
 	/**
-	 *  Gemini key. Agent tool-call parsing runs here — Groq's tokens-per-minute
-	 *  limit is too low for the agent's heavier calls.
+	 *  Gemini key: the last brain commands fall back to — see
+	 *  `aloud_agent::brains` for the order.
 	 */
 	geminiApiKey?: string,
 	/**
-	 *  Cerebras key. Commands run here first — see `aloud_agent::brains` —
-	 *  and fall back to Gemini when it is unset or out of budget.
+	 *  Cerebras key. Off the brain list while its account is unpaid; the eval
+	 *  still reaches it by name.
 	 */
 	cerebrasApiKey?: string,
+	/**  NVIDIA key: the brain behind Groq, for when Groq's per-minute budget trips. */
+	nvidiaApiKey?: string,
 	/**
 	 *  Deepgram key. Always-listening streams the mic to Deepgram's Flux, which
 	 *  decides where a spoken request ends; without it the mode falls back to a

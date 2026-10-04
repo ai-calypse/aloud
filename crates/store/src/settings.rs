@@ -49,12 +49,14 @@ pub enum OverlayDisplay {
 pub struct Settings {
     pub groq_api_key: String,
     pub composio_api_key: String,
-    /// Gemini key. Agent tool-call parsing runs here — Groq's tokens-per-minute
-    /// limit is too low for the agent's heavier calls.
+    /// Gemini key: the last brain commands fall back to — see
+    /// `aloud_agent::brains` for the order.
     pub gemini_api_key: String,
-    /// Cerebras key. Commands run here first — see `aloud_agent::brains` —
-    /// and fall back to Gemini when it is unset or out of budget.
+    /// Cerebras key. Off the brain list while its account is unpaid; the eval
+    /// still reaches it by name.
     pub cerebras_api_key: String,
+    /// NVIDIA key: the brain behind Groq, for when Groq's per-minute budget trips.
+    pub nvidia_api_key: String,
     /// Deepgram key. Always-listening streams the mic to Deepgram's Flux, which
     /// decides where a spoken request ends; without it the mode falls back to a
     /// pause detector and local whisper.
@@ -175,6 +177,7 @@ impl Default for Settings {
             composio_api_key: String::new(),
             gemini_api_key: String::new(),
             cerebras_api_key: String::new(),
+            nvidia_api_key: String::new(),
             deepgram_api_key: String::new(),
             // Local by default: works with no key and no network.
             engine: aloud_transcribe::Engine::Local,
@@ -314,6 +317,7 @@ impl Settings {
             ("COMPOSIO_API_KEY", &mut self.composio_api_key),
             ("GEMINI_API_KEY", &mut self.gemini_api_key),
             ("CEREBRAS_API_KEY", &mut self.cerebras_api_key),
+            ("NVIDIA_API_KEY", &mut self.nvidia_api_key),
             ("DEEPGRAM_API_KEY", &mut self.deepgram_api_key),
         ] {
             if !field.trim().is_empty() {

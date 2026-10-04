@@ -38,7 +38,16 @@ const GROQ: (&str, &str) = ("https://api.groq.com/openai/v1", "openai/gpt-oss-12
 /// Off the default list while its account returns 402; kept for the eval.
 /// It answered in 0.34s with 450 requests a minute when paid.
 const CEREBRAS: (&str, &str) = ("https://api.cerebras.ai/v1", "qwen-3.8-27b");
-/// Behind it: headroom when Groq's per-minute budget trips. Flash-Lite, not
+/// Second: Groq's free tier allows 8,000 tokens a minute, about one step, so
+/// back-to-back commands land here. Nemotron 3.5 Lightning picked "take 5
+/// photos" right in 1.0s with its thinking off (`aloud_llm` turns it off).
+/// ponytail: NVIDIA's free endpoint sends no rate-limit headers, so its budget
+/// is only known when it says 429. Measured 2026-10-04.
+const NVIDIA: (&str, &str) = (
+    "https://integrate.api.nvidia.com/v1",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
+);
+/// Last: headroom when both budgets trip. Flash-Lite, not
 /// Flash: on a free-tier key 3.5 Flash allows 20 requests a day, which one eval
 /// run exhausted for 14 hours; Flash-Lite answered in 0.58s on the same key.
 const GEMINI: (&str, &str) = (
@@ -47,10 +56,11 @@ const GEMINI: (&str, &str) = (
 );
 
 /// One named brain on its own, for the eval to compare them: "groq",
-/// "cerebras" or "gemini".
+/// "nvidia", "cerebras" or "gemini".
 pub fn brain(name: &str, key: &str) -> anyhow::Result<Brain> {
     let (base_url, model) = match name {
         "groq" => GROQ,
+        "nvidia" => NVIDIA,
         "cerebras" => CEREBRAS,
         "gemini" => GEMINI,
         other => anyhow::bail!("no brain called {other:?}"),
@@ -62,8 +72,8 @@ pub fn brain(name: &str, key: &str) -> anyhow::Result<Brain> {
 }
 
 /// The brains a command may use, best first, for whichever keys are set.
-pub fn brains(groq_key: &str, gemini_key: &str) -> anyhow::Result<Vec<Brain>> {
-    [(groq_key, GROQ), (gemini_key, GEMINI)]
+pub fn brains(groq_key: &str, nvidia_key: &str, gemini_key: &str) -> anyhow::Result<Vec<Brain>> {
+    [(groq_key, GROQ), (nvidia_key, NVIDIA), (gemini_key, GEMINI)]
         .into_iter()
         .filter(|(key, _)| !key.trim().is_empty())
         .map(|(key, (base_url, model))| {

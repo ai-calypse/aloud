@@ -167,6 +167,9 @@ struct ChatRequest<'a> {
     reasoning_effort: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     include_reasoning: Option<bool>,
+    /// NVIDIA's switch for a model's thinking; see [`thinking_off`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
 }
@@ -191,6 +194,15 @@ fn reasoning_for(model: &str) -> (Option<&'static str>, Option<bool>) {
         m if m.starts_with("gemini-3") => (Some("minimal"), None),
         _ => (None, None),
     }
+}
+
+/// Nemotron thinks unless its chat template is told not to — NVIDIA takes no
+/// `reasoning_effort`. Off, "take 5 photos" picked the right tool in 1.0s
+/// against 2.6s with it on, same call. Measured 2026-10-04.
+fn thinking_off(model: &str) -> Option<serde_json::Value> {
+    model
+        .starts_with("nvidia/nemotron")
+        .then(|| serde_json::json!({ "enable_thinking": false }))
 }
 
 #[derive(Deserialize)]
@@ -302,6 +314,7 @@ impl LlmClient {
                 tool_choice: None,
                 reasoning_effort,
                 include_reasoning,
+                chat_template_kwargs: thinking_off(model),
                 max_tokens: None,
             })
             .send()
@@ -396,6 +409,7 @@ impl LlmClient {
                 tool_choice: tools.map(|_| "auto"),
                 reasoning_effort,
                 include_reasoning,
+                chat_template_kwargs: thinking_off(model),
                 max_tokens: Some(TOOL_MAX_TOKENS),
             })
             .send()
@@ -538,5 +552,14 @@ mod tests {
         assert_eq!(reasoning_for("gemini-3.5-flash"), (Some("minimal"), None));
         assert_eq!(reasoning_for("llama-3.3-70b-versatile"), (None, None));
         assert_eq!(reasoning_for("whatever-the-user-typed"), (None, None));
+    }
+
+    #[test]
+    fn only_nemotron_is_told_not_to_think() {
+        assert_eq!(
+            thinking_off("nvidia/nemotron-3.5-lightning-30b-a3b"),
+            Some(serde_json::json!({ "enable_thinking": false }))
+        );
+        assert_eq!(thinking_off("openai/gpt-oss-120b"), None);
     }
 }
