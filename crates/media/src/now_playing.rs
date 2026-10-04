@@ -1,11 +1,8 @@
-//! What Spotify, Music or a browser tab is playing, read and driven over the
-//! same AppleScript the agent's `ALOUD_SPOTIFY` / `ALOUD_MUSIC` tools use.
-//!
-//! ponytail: the two players with a scripting dictionary, plus browser tabs
-//! through [`crate::browser`]. "Any app" (Podcasts, VLC) is MediaRemote, which
-//! is private and, from macOS 15.4, readable only by Apple-signed processes;
-//! the upgrade is the `mediaremote-adapter` helper run through
-//! `/usr/bin/perl`.
+//! What is playing: any app through [`crate::mediaremote`] first, and as
+//! fallbacks Spotify and Music over the same AppleScript the agent's
+//! `ALOUD_SPOTIFY` / `ALOUD_MUSIC` tools use, and browser tabs through
+//! [`crate::browser`]. The fallbacks matter when MediaRemote (a private API) is
+//! switched off, not built, or closed by a macOS update.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, PoisonError};
@@ -15,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::browser::{self, BrowserIssue, Cmd};
+use crate::mediaremote;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +21,8 @@ pub enum Player {
     Music,
     /// A tab in a browser; which one is [`NowPlaying::source`].
     Browser,
+    /// Whatever app macOS says is playing; which one is [`NowPlaying::source`].
+    MediaRemote,
 }
 
 impl Player {
@@ -33,6 +33,7 @@ impl Player {
             Player::Spotify => "Spotify",
             Player::Music => "Music",
             Player::Browser => "Browser",
+            Player::MediaRemote => "Any app",
         }
     }
 }
@@ -43,6 +44,8 @@ impl Player {
 #[serde(rename_all = "camelCase")]
 pub struct Source {
     pub app: String,
+    /// Known for what MediaRemote reports.
+    pub bundle_id: Option<String>,
     pub host: Option<String>,
     pub tab: Option<String>,
 }
@@ -51,6 +54,7 @@ impl Source {
     fn app(app: &str) -> Self {
         Source {
             app: app.into(),
+            bundle_id: None,
             host: None,
             tab: None,
         }
@@ -94,9 +98,11 @@ pub struct NowPlaying {
     /// players report 100.
     pub speed_pct: u16,
     /// Spotify's own https cover URL, a YouTube thumbnail, or a page's
-    /// `og:image`; Music has none and is read from the app.
+    /// `og:image`; Music has none and is read from the app. For MediaRemote an
+    /// opaque `mediaremote:<n>` that changes when the cover does.
     pub artwork_url: Option<String>,
-    /// Browser only, and only when the title and channel parse cleanly.
+    /// Browser and MediaRemote only, and only when the title and artist are a
+    /// track: a page that names its song cleanly, or a music app.
     pub song: Option<Song>,
 }
 
@@ -114,10 +120,10 @@ impl NowPlaying {
     }
 
     /// What to look lyrics up by: the players' own metadata, but for a web
-    /// video only a title and artist the page named cleanly.
+    /// video or an arbitrary app only a title and artist known to be a track.
     pub fn lyrics_query(&self) -> Option<(&str, &str)> {
         match self.player {
-            Player::Browser => self
+            Player::Browser | Player::MediaRemote => self
                 .song
                 .as_ref()
                 .map(|s| (s.title.as_str(), s.artist.as_str())),
@@ -228,13 +234,37 @@ impl Recency {
     }
 }
 
-/// Reads every running player (and, with `browsers`, every browser tab) and
-/// picks the one the user means: playing beats paused, the one that started
+/// What MediaRemote and the fallbacks make of a poll. MediaRemote is the
+/// source of truth for what it reports as playing, so nothing else is asked;
+/// otherwise the fallbacks speak, and a playing one beats a paused MediaRemote
+/// track.
+fn choose(mr: Option<NowPlaying>, fallback: Option<NowPlaying>) -> Option<NowPlaying> {
+    match (mr, fallback) {
+        (Some(mr), Some(other))
+            if mr.state != PlayState::Playing && other.state == PlayState::Playing =>
+        {
+            Some(other)
+        }
+        (Some(mr), _) => Some(mr),
+        (None, other) => other,
+    }
+}
+
+/// Reads what is playing and picks the one the user means. MediaRemote answers
+/// first (any app, no setup). When it is not playing, every running player
+/// (and, with `browsers`, every browser tab) is read too, minus the app
+/// MediaRemote already reported: playing beats paused, the one that started
 /// most recently beats an older one, and Spotify beats Music on a tie (Music
 /// ships with every Mac and is often left open, so it is the likelier idle
 /// one).
 pub fn read(browsers: bool) -> Reading {
     let mut readings = Reading::default();
+    let mr = mediaremote::current();
+    if mr.as_ref().is_some_and(|n| n.state == PlayState::Playing) {
+        *PICKED.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        readings.now = mr;
+        return readings;
+    }
     let mut found = Vec::new();
     for player in [Player::Spotify, Player::Music] {
         if !running(player) {
@@ -251,12 +281,25 @@ pub fn read(browsers: bool) -> Reading {
         found.extend(tabs);
         readings.browsers = issues;
     }
+    if let Some(mr) = &mr {
+        found.retain(|n| !mediaremote::same_app(mr, n));
+    }
     RECENCY
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get_or_insert_default()
         .order(&mut found);
-    readings.now = pick(found);
+    let fallback = pick(found);
+    mediaremote::observe(
+        fallback.as_ref().filter(|n| n.state == PlayState::Playing),
+        mr.as_ref(),
+    );
+    // Its own scan says what a browser's JavaScript switch is when MediaRemote
+    // is not covering browsers; with it working there is nothing to switch.
+    if mediaremote::working() {
+        readings.browsers.clear();
+    }
+    readings.now = choose(mr, fallback);
     *PICKED.lock().unwrap_or_else(PoisonError::into_inner) =
         readings.now.as_ref().map(|n| n.source.clone());
     readings
@@ -280,7 +323,9 @@ fn parse(player: Player, out: &str) -> Option<NowPlaying> {
     // and (in seconds for both) the position.
     let duration_ms = match player {
         Player::Spotify => v["duration"].as_f64().unwrap_or(0.0),
-        Player::Music | Player::Browser => v["duration"].as_f64().unwrap_or(0.0) * 1000.0,
+        Player::Music | Player::Browser | Player::MediaRemote => {
+            v["duration"].as_f64().unwrap_or(0.0) * 1000.0
+        }
     };
     Some(NowPlaying {
         player,
@@ -320,6 +365,9 @@ fn picked_tab() -> Result<Source, ScriptError> {
 }
 
 pub fn control(player: Player, transport: Transport) -> Result<(), ScriptError> {
+    if player == Player::MediaRemote {
+        return mediaremote::send(transport);
+    }
     let cmd = match transport {
         Transport::Play => "play",
         Transport::Pause => "pause",
@@ -346,6 +394,9 @@ pub fn control(player: Player, transport: Transport) -> Result<(), ScriptError> 
 }
 
 pub fn seek(player: Player, position_ms: u32) -> Result<(), ScriptError> {
+    if player == Player::MediaRemote {
+        return mediaremote::seek(position_ms);
+    }
     let seconds = f64::from(position_ms) / 1000.0;
     if player == Player::Browser {
         return browser::control(&picked_tab()?, Cmd::SeekSeconds(seconds));
@@ -422,6 +473,7 @@ mod tests {
         let mut n = track(Player::Browser, state);
         n.source = Source {
             app: "Brave Browser".into(),
+            bundle_id: None,
             host: Some("youtube.com".into()),
             tab: Some(id.into()),
         };
@@ -550,6 +602,64 @@ mod tests {
         // A closed tab's history does not pile up.
         poll(&mut r, vec![tab("1/2", PlayState::Paused)]);
         assert!(r.last.is_empty());
+    }
+
+    fn any_app(bundle: &str, state: PlayState) -> NowPlaying {
+        let mut n = track(Player::MediaRemote, state);
+        n.source = Source {
+            app: "App".into(),
+            bundle_id: Some(bundle.into()),
+            host: None,
+            tab: None,
+        };
+        n
+    }
+
+    /// Guards: MediaRemote hiding a song the fallbacks can hear (a player it
+    /// does not see), and a paused MediaRemote track hiding a playing one.
+    #[test]
+    fn mediaremote_wins_unless_it_is_paused_and_something_else_plays() {
+        let playing = any_app("org.videolan.vlc", PlayState::Playing);
+        let paused = any_app("org.videolan.vlc", PlayState::Paused);
+        let spotify = track(Player::Spotify, PlayState::Playing);
+
+        assert_eq!(
+            choose(Some(playing.clone()), Some(spotify.clone())),
+            Some(playing)
+        );
+        assert_eq!(
+            choose(Some(paused.clone()), Some(spotify.clone())),
+            Some(spotify.clone())
+        );
+        assert_eq!(
+            choose(
+                Some(paused.clone()),
+                Some(track(Player::Music, PlayState::Paused))
+            ),
+            Some(paused)
+        );
+        assert_eq!(choose(None, Some(spotify.clone())), Some(spotify));
+        assert_eq!(choose(None, None), None);
+    }
+
+    /// Guards: Brave's video showing twice, once from MediaRemote and once from
+    /// the tab scan, with the scan's 10-second buttons on the wrong one.
+    #[test]
+    fn a_browser_mediaremote_reports_is_not_also_scanned() {
+        let mr = any_app("com.brave.Browser", PlayState::Playing);
+        assert!(mediaremote::same_app(&mr, &tab("1/1", PlayState::Playing)));
+        let mut safari = tab("1/1", PlayState::Playing);
+        safari.source.app = "Safari".into();
+        assert!(!mediaremote::same_app(&mr, &safari));
+        assert!(mediaremote::same_app(
+            &any_app("com.spotify.client", PlayState::Paused),
+            &track(Player::Spotify, PlayState::Playing)
+        ));
+        // An app with no bundle id known to us is never "the same".
+        assert!(!mediaremote::same_app(
+            &any_app("org.videolan.vlc", PlayState::Playing),
+            &track(Player::Music, PlayState::Playing)
+        ));
     }
 
     #[test]

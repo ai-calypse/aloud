@@ -62,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
                 song: None,
                 source: aloud_media::Source {
                     app: "Spotify".into(),
+                    bundle_id: None,
                     host: None,
                     tab: None,
                 },

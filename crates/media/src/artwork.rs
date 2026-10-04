@@ -19,6 +19,11 @@ static LAST: Mutex<Option<(String, Option<String>)>> = Mutex::new(None);
 /// The cover for `now`, or None when it has none or the fetch failed. A
 /// failure is remembered for the track too, so a dead URL is tried once.
 pub async fn artwork(now: &NowPlaying) -> Option<String> {
+    // Not cached here: the helper holds the cover, and it often arrives after
+    // the title, so a miss now must not stick to the track.
+    if now.player == Player::MediaRemote {
+        return crate::mediaremote::artwork(now);
+    }
     let key = now.key();
     if let Some((k, uri)) = LAST.lock().ok()?.as_ref() {
         if *k == key {
@@ -77,7 +82,7 @@ fn public_https(url: &str) -> bool {
 /// `bytes` as an image `data:` URI. The type comes from the file's first
 /// bytes, not a header (Music's raw data has none, and a CDN's can be generic);
 /// a body that is neither a PNG nor a JPEG is dropped.
-fn data_uri(bytes: &[u8]) -> Option<String> {
+pub(crate) fn data_uri(bytes: &[u8]) -> Option<String> {
     if bytes.is_empty() || bytes.len() > MAX_BYTES {
         return None;
     }

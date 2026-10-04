@@ -56,6 +56,16 @@ impl Browser {
         Self::ALL.into_iter().find(|b| b.app() == app)
     }
 
+    /// What MediaRemote calls the browser, to tell its report from a tab scan's.
+    pub fn bundle_id(self) -> &'static str {
+        match self {
+            Browser::Brave => "com.brave.Browser",
+            Browser::Chrome => "com.google.Chrome",
+            Browser::Edge => "com.microsoft.edgemac",
+            Browser::Safari => "com.apple.Safari",
+        }
+    }
+
     fn safari(self) -> bool {
         self == Browser::Safari
     }
@@ -366,6 +376,7 @@ fn parse_scan(app: &str, out: &str) -> Result<(Vec<NowPlaying>, Vec<String>), Br
         .filter_map(|t| {
             let source = Source {
                 app: app.into(),
+                bundle_id: None,
                 host: Some(t.page.host.clone()),
                 tab: Some(format!("{}/{}", t.w, t.t)),
             };
@@ -813,6 +824,7 @@ mod tests {
     fn source() -> Source {
         Source {
             app: "Brave Browser".into(),
+            bundle_id: None,
             host: None,
             tab: Some("1/2".into()),
         }
