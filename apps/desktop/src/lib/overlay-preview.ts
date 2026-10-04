@@ -55,6 +55,8 @@ export type PreviewCommand = {
   islands?: number;
   /** Opens the sections panel at a place, as a click on the notch does. */
   open?: { section: SectionId; sub?: string };
+  /** Opens (or closes) ⌘K inside the open panel. */
+  palette?: boolean;
   dismissing?: boolean;
   /** Rebuilds the panel's springs, which is how a changed --panel-* applies. */
   restart?: boolean;

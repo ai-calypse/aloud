@@ -1,12 +1,15 @@
 import { useEffect, useRef } from "react";
-import { XIcon } from "lucide-react";
+import { SearchIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Materialize } from "@/components/ui/motion";
 import { Kbd } from "@/components/notch/controls";
 import { SectionTabs } from "@/components/notch/section-tabs";
 import { SubTabs } from "@/components/notch/segmented";
+import { runAction } from "./actions";
 import { useNotch } from "./context";
 import { shellIntent } from "./keys";
+import { Palette } from "./Palette";
+import type { PaletteEntry } from "./search";
 import { READY, SECTIONS } from "./registry";
 import { resolveNav, sectionForShortcut, stepSubsection, type Nav } from "./sections";
 
@@ -23,7 +26,7 @@ const PANEL_ID = "notch-panel";
  * switched mid-morph bends the morph rather than restarting it.
  */
 export function NotchShell({ nav }: { nav: Nav }) {
-  const { navigate, close, ...data } = useNotch();
+  const { navigate, close, palette, setPalette, ...data } = useNotch();
   const body = useRef<HTMLDivElement>(null);
   const place = resolveNav(READY, nav);
   // Read by the key handler, which subscribes once rather than per render.
@@ -48,16 +51,21 @@ export function NotchShell({ nav }: { nav: Nav }) {
       });
       if (!intent) return;
       e.preventDefault();
-      if (intent.kind === "section") {
+      if (intent.kind === "palette") {
+        setPalette(true);
+      } else if (intent.kind === "section") {
         const section = sectionForShortcut(SECTIONS, READY, intent.digit);
-        if (section) navigate(section.id);
-      } else if (intent.kind === "sub") {
+        if (section) {
+          setPalette(false);
+          navigate(section.id);
+        }
+      } else {
         navigate(place.section.id, stepSubsection(place.section, place.sub.id, intent.delta));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate]);
+  }, [navigate, setPalette]);
 
   if (!place) return null;
   const { section, sub } = place;
@@ -69,14 +77,23 @@ export function NotchShell({ nav }: { nav: Nav }) {
     `${section.id}/${sub.id}`,
   );
 
+  const pick = (entry: PaletteEntry) => {
+    setPalette(false);
+    if (entry.to) navigate(entry.to.section, entry.to.sub);
+    if (entry.action) void runAction(entry.action, { open: navigate });
+  };
+
   return (
     <div className="notch-shell flex w-[640px] flex-col font-notch text-notch-ink">
-      <header className="flex items-center gap-2 border-b border-notch-sep px-3.5">
+      <header className="flex items-center gap-1 border-b border-notch-sep px-3.5">
         <SectionTabs
           className="flex-1"
           panelId={PANEL_ID}
           value={section.id}
-          onChange={(id) => navigate(id as Nav["section"])}
+          onChange={(id) => {
+            setPalette(false);
+            navigate(id as Nav["section"]);
+          }}
           onExit={() => focusFirst(body.current)}
           items={READY.map((s) => ({
             id: s.id,
@@ -86,6 +103,17 @@ export function NotchShell({ nav }: { nav: Nav }) {
             shortcut: `⌘${SECTIONS.findIndex((x) => x.id === s.id) + 1}`,
           }))}
         />
+        <Button
+          variant="notch-quiet"
+          size="notch"
+          aria-label="Search sections, features and actions"
+          aria-pressed={palette}
+          className={palette ? "bg-notch-well text-notch-ink" : undefined}
+          onClick={() => setPalette(!palette)}
+        >
+          <SearchIcon />
+          <Kbd>⌘K</Kbd>
+        </Button>
         <Button variant="notch-quiet" size="notch-icon" aria-label="Close" title="Close (esc)" onClick={close}>
           <XIcon />
         </Button>
@@ -97,7 +125,10 @@ export function NotchShell({ nav }: { nav: Nav }) {
           <SubTabs
             panelId={PANEL_ID}
             value={sub.id}
-            onChange={(id) => navigate(section.id, id)}
+            onChange={(id) => {
+              setPalette(false);
+              navigate(section.id, id);
+            }}
             items={section.subsections.map((s) => ({ id: s.id, label: s.name }))}
           />
         ) : (
@@ -113,11 +144,17 @@ export function NotchShell({ nav }: { nav: Nav }) {
         id={PANEL_ID}
         role="tabpanel"
         aria-labelledby={`notch-tab-${section.id}`}
-        className="notch-shell__body max-h-[400px] overflow-y-auto px-4 pt-3.5 pb-3"
+        className="max-h-[400px] overflow-y-auto px-4 pt-3.5 pb-3"
       >
-        <Materialize index={flat}>
-          <View />
-        </Materialize>
+        {palette && <Palette onPick={pick} onClose={() => setPalette(false)} />}
+        {/* Hidden, not unmounted, under the palette: a run's approval gate
+            keeps its draft and its countdown while the user looks something
+            up. */}
+        <div hidden={palette}>
+          <Materialize index={flat}>
+            <View />
+          </Materialize>
+        </div>
       </div>
 
       <footer className="flex items-center justify-end gap-3.5 border-t border-notch-sep px-4 py-2 text-notch-label text-notch-ink-3">
@@ -126,6 +163,9 @@ export function NotchShell({ nav }: { nav: Nav }) {
         </span>
         <span className="flex items-center gap-1.5">
           <Kbd>⇥</Kbd> next
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Kbd>⌘K</Kbd> search
         </span>
         <span className="flex items-center gap-1.5">
           <Kbd>esc</Kbd> close

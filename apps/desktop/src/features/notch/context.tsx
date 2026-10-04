@@ -50,6 +50,9 @@ export type NotchContextValue = NotchData & {
   navigate: (section: SectionId, sub?: string) => void;
   /** Closes the whole panel, the way Escape does. */
   close: () => void;
+  /** ⌘K is open in the body. The overlay owns it so closing the panel resets it. */
+  palette: boolean;
+  setPalette: (open: boolean) => void;
 };
 
 const NotchContext = createContext<NotchContextValue | null>(null);

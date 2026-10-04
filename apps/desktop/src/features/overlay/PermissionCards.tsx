@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AgentPermission, ApprovalReply } from "@/lib/bindings";
 import { diffLines } from "@/lib/diff";
+import { fromPalette } from "@/features/notch/search";
 import { AGENT_NAME } from "./agentIdentity";
 
 /** The input keys worth leading with, per tool — the headline before the rest. */
@@ -110,6 +111,8 @@ function ApprovalCard({
   // Escape. While the message box is open, Enter belongs to it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // ⌘K's Enter picks a result; it must never allow the call under it.
+      if (fromPalette(e)) return;
       if (e.key === "Enter" && !denying) onResolve(request.id, { kind: "allowOnce" });
       if (e.key === "Escape") {
         e.stopPropagation();
@@ -247,6 +250,7 @@ function QuestionCard({
   // has walked away from.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (fromPalette(e)) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         onResolve(request.id, { kind: "deny", message: null });

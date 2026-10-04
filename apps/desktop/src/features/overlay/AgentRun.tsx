@@ -26,6 +26,7 @@ import {
   type Step,
 } from "@/lib/agent-steps";
 import { gateFor, labelFor, rowLabel, text } from "@/lib/tool-views";
+import { fromPalette } from "@/features/notch/search";
 import { Panel } from "./Panel";
 
 /**
@@ -439,9 +440,11 @@ function ConfirmGate({
   };
 
   // ApprovalCard's keys: Enter allows once, Escape declines. Capture phase so
-  // the panel's own Escape does not also fire.
+  // the panel's own Escape does not also fire — and so it must step aside for
+  // ⌘K, whose Enter and Escape are the palette's, not this write's.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (fromPalette(e)) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         decide("decline");

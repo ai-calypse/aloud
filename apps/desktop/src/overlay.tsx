@@ -216,9 +216,15 @@ function Overlay() {
   const takeFocus = useCallback((section: SectionId, sub: string) => {
     setNav((current) => ({ section, subs: { ...current.subs, [section]: sub } }));
   }, []);
+  // ⌘K, open in the panel's body. Here rather than in the shell so a closed
+  // panel cannot reopen onto a half-typed search.
+  const [palette, setPalette] = useState(false);
   // Closed, the next open is a click — which lands where the user last chose.
   useEffect(() => {
-    if (!panelOpen) setNav(chosen.current);
+    if (!panelOpen) {
+      setNav(chosen.current);
+      setPalette(false);
+    }
   }, [panelOpen]);
   // A voice command takes the panel to its run, exactly as it took the whole
   // panel before there were sections; keyed on the utterance, so it fires
@@ -892,6 +898,7 @@ function Overlay() {
         setBrowsing(true);
         navigate(command.open.section, command.open.sub);
       }
+      if (command.palette !== undefined) setPalette(command.palette);
       if (command.agent === "close") setAgent(null);
       if (command.partial === "clear") {
         clearInterval(typing);
@@ -1264,6 +1271,8 @@ function Overlay() {
                 bodyRef: answerRef,
                 navigate,
                 close: closePanel,
+                palette,
+                setPalette,
               }}
             >
               <NotchShell nav={nav} />
