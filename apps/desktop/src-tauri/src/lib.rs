@@ -2,6 +2,7 @@ mod agent;
 mod commands;
 // notch-today-focus: wiring begins
 mod focus;
+mod today;
 // notch-today-focus: wiring ends
 mod islands;
 mod listen;
@@ -156,6 +157,12 @@ fn specta_builder() -> Builder<tauri::Wry> {
             focus::awake_stop,
             focus::quick_notes,
             focus::save_quick_note,
+            today::weather,
+            today::set_weather_city,
+            today::clear_weather_city,
+            today::stock_quotes,
+            today::add_stock,
+            today::remove_stock,
             // notch-today-focus: commands end
             sessions::agent_hook_status,
             sessions::install_agent_hooks,

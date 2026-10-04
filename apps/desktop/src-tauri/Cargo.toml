@@ -38,6 +38,7 @@ aloud-permissions = { path = "../../../crates/permissions" }
 aloud-volume = { path = "../../../crates/volume" }
 aloud-selection = { path = "../../../crates/selection" }
 aloud-store = { path = "../../../crates/store" }
+aloud-today = { path = "../../../crates/today" }
 aloud-transcribe = { path = "../../../crates/transcribe" }
 anyhow.workspace = true
 chrono = "0.4"

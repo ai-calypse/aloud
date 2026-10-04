@@ -223,6 +223,23 @@ export const commands = {
 	 *  it will write.
 	 */
 	saveQuickNote: (path: string | null, text: string) => typedError<string, string>(__TAURI_INVOKE("save_quick_note", { path, text })),
+	/**
+	 *  The forecast for the saved city, else wherever this connection is. Served
+	 *  from a 30-minute cache unless `refresh`; the webview's `fahrenheit` is
+	 *  part of the key, so flipping units never shows the other unit's numbers.
+	 */
+	weather: (fahrenheit: boolean, refresh: boolean) => typedError<Weather, string>(__TAURI_INVOKE("weather", { fahrenheit, refresh })),
+	/**
+	 *  Pins the weather to a city by name, for a VPN or a Mac that is not where
+	 *  its IP says.
+	 */
+	setWeatherCity: (name: string, fahrenheit: boolean) => typedError<Weather, string>(__TAURI_INVOKE("set_weather_city", { name, fahrenheit })),
+	/**  Back to locating by IP. */
+	clearWeatherCity: (fahrenheit: boolean) => typedError<Weather, string>(__TAURI_INVOKE("clear_weather_city", { fahrenheit })),
+	/**  Quotes for the watchlist; empty when nothing is followed. */
+	stockQuotes: () => __TAURI_INVOKE<Ticker[]>("stock_quotes"),
+	addStock: (symbol: string) => typedError<Ticker[], string>(__TAURI_INVOKE("add_stock", { symbol })),
+	removeStock: (symbol: string) => typedError<Ticker[], string>(__TAURI_INVOKE("remove_stock", { symbol })),
 	agentHookStatus: () => typedError<HookStatus, string>(__TAURI_INVOKE("agent_hook_status")),
 	/**
 	 *  Installs our hooks, copying the sidecar out of the bundle first.
@@ -677,6 +694,14 @@ export type Connector = {
  */
 export type ConnectorsUpdated = Connector[];
 
+export type Day = {
+	/**  `YYYY-MM-DD` in the place's own timezone. */
+	day: string,
+	sky: Sky,
+	high: number | null,
+	low: number | null,
+};
+
 /**
  *  The shipped cleanup prompt and the date it last changed. `version` is what
  *  `Settings::seen_prompt_version` is compared against, to tell a user who
@@ -953,6 +978,8 @@ export type Macro = {
 	trigger: string,
 	expansion: string,
 };
+
+export type MarketState = "open" | "pre" | "after" | "closed";
 
 export type MeetingPhase = 
 /**
@@ -1326,6 +1353,8 @@ export type ShowTarget = {
 	target: string,
 };
 
+export type Sky = "clear" | "partlyCloudy" | "cloudy" | "fog" | "drizzle" | "rain" | "snow" | "storm";
+
 /**  One closed span. */
 export type Span = {
 	/**  Groups the stages of one dictation; monotonic, so it orders by time. */
@@ -1361,6 +1390,20 @@ export type Stats = {
 export type StatsView = {
 	timeSavedSeconds: number | null,
 } & Stats;
+
+export type Ticker = {
+	symbol: string,
+	name: string,
+	price: number | null,
+	/**  Against the previous close. */
+	changePct: number | null,
+	state: MarketState | null,
+	/**  Open, but the last trade is old: do not read the price as now. */
+	delayed: boolean,
+	/**  Why there is no price, in a sentence. */
+	error: string | null,
+	currency: string | null,
+};
 
 /**
  *  How hard the card makes it to say yes. Default-Always grants never reach a
@@ -1463,6 +1506,18 @@ export type ToolResult = {
 	tidied: string | null,
 	/**  The [`ToolCall::id`] this result finishes. */
 	id?: number | null,
+};
+
+export type Weather = {
+	place: string,
+	temperature: number | null,
+	feelsLike: number | null,
+	sky: Sky,
+	/**  "Partly cloudy". */
+	summary: string,
+	isDay: boolean,
+	/**  Today first, five days. */
+	days: Day[],
 };
 
 /* Tauri Specta runtime */

@@ -1,0 +1,22 @@
+[package]
+name = "aloud-today"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Today section's network data: weather, stock quotes, and the small prefs file behind them"
+
+[dependencies]
+aloud-notes = { path = "../notes" }
+anyhow.workspace = true
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+# rustls (not native-tls), matching aloud-llm and aloud-quota.
+reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+specta-typescript = "0.0.12"
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

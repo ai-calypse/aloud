@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, NOTCH_FOCUS } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { TextArea } from "@/components/notch/field";
 import { Empty, Label, Lead, List, Row } from "@/components/notch/list";
 import { Ring } from "@/components/notch/meters";
 import { Segmented } from "@/components/notch/segmented";
@@ -150,10 +151,10 @@ function Week({ days, streak }: { days: FocusDay[]; streak: number }) {
               <div
                 role="img"
                 aria-label={`${d.day}: ${d.sessions} sessions, ${d.minutes} minutes`}
-                className="flex h-7 w-[14px] items-end rounded-[3px] bg-notch-track"
+                className="flex h-7 w-[14px] items-end rounded-notch-key bg-notch-track"
               >
                 <div
-                  className={cn("w-full rounded-[3px]", last ? "bg-notch-ink" : "bg-notch-ink-3")}
+                  className={cn("w-full rounded-notch-key", last ? "bg-notch-ink" : "bg-notch-ink-3")}
                   style={{ height: `${Math.max(d.minutes > 0 ? 12 : 0, (d.minutes / top) * 100)}%` }}
                 />
               </div>
@@ -281,17 +282,12 @@ export function FocusNotes() {
 
   return (
     <div className="flex flex-col gap-3">
-      <textarea
+      <TextArea
         aria-label="Quick note"
         value={text}
         onChange={(e) => edit(e.target.value)}
         placeholder="Type a thought. It saves itself."
         rows={4}
-        className={cn(
-          "w-full resize-none rounded-notch-row border border-notch-edge bg-notch-well px-3 py-2 font-notch",
-          "text-notch-body text-notch-ink outline-none placeholder:text-notch-ink-3",
-          NOTCH_FOCUS,
-        )}
       />
       {notes.length === 0 ? (
         <Empty title="No quick notes yet">
