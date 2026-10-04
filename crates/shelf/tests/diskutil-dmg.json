@@ -1,0 +1,12 @@
+{
+ "VolumeName": "Slack",
+ "MountPoint": "/Volumes/Slack",
+ "Internal": false,
+ "Ejectable": true,
+ "Removable": true,
+ "RemovableMedia": true,
+ "BusProtocol": "Disk Image",
+ "TotalSize": 906452992,
+ "FreeSpace": 300535808,
+ "DeviceNode": "/dev/disk19s1"
+}

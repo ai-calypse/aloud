@@ -299,6 +299,40 @@ export const commands = {
 	 *  click is the yes, so no card: it reverses what the user already approved.
 	 */
 	undoTidy: (folder: string) => typedError<null, string>(__TAURI_INVOKE("undo_tidy", { folder })),
+	shelfItems: () => __TAURI_INVOKE<ShelfItem[]>("shelf_items"),
+	shelfAdd: (paths: string[]) => typedError<ShelfAdded, string>(__TAURI_INVOKE("shelf_add", { paths })),
+	shelfRemove: (id: string) => typedError<null, string>(__TAURI_INVOKE("shelf_remove", { id })),
+	shelfClear: () => typedError<null, string>(__TAURI_INVOKE("shelf_clear")),
+	shelfConvert: (id: string, to: ShelfImageFormat) => typedError<ShelfItem, string>(__TAURI_INVOKE("shelf_convert", { id, to })),
+	shelfZip: (ids: string[]) => typedError<ShelfItem, string>(__TAURI_INVOKE("shelf_zip", { ids })),
+	shelfUnzip: (id: string) => typedError<ShelfItem, string>(__TAURI_INVOKE("shelf_unzip", { id })),
+	/**
+	 *  Opens macOS's AirDrop picker for shelved items. AppKit sharing wants the
+	 *  main thread, so the job hops there and reports back.
+	 */
+	shelfAirdrop: (ids: string[]) => typedError<null, string>(__TAURI_INVOKE("shelf_airdrop", { ids })),
+	/**
+	 *  A `data:` thumbnail of a picture the Shelf shows — and only those: the
+	 *  path must sit in the shelf, the screenshot folder or Downloads.
+	 */
+	shelfThumbnail: (path: string) => typedError<string | null, string>(__TAURI_INVOKE("shelf_thumbnail", { path })),
+	shelfPrefs: () => __TAURI_INVOKE<ShelfPrefs>("shelf_prefs"),
+	/**
+	 *  Turns a watcher on or off and remembers it. A watcher that cannot start
+	 *  (a folder macOS has not allowed yet) leaves the switch off and says why.
+	 */
+	shelfSetWatch: (which: ShelfWatch, on: boolean) => typedError<ShelfPrefs, string>(__TAURI_INVOKE("shelf_set_watch", { which, on })),
+	shotsRecent: (limit: number) => typedError<ScreenShot[], string>(__TAURI_INVOKE("shots_recent", { limit })),
+	shotsCopy: (path: string) => typedError<null, string>(__TAURI_INVOKE("shots_copy", { path })),
+	/**  Starts macOS's region capture. It returns at once; the user finishes it. */
+	shotsCapture: (mode: ShotCapture) => typedError<null, string>(__TAURI_INVOKE("shots_capture", { mode })),
+	downloadsRecent: (limit: number) => typedError<ShelfDownload[], string>(__TAURI_INVOKE("downloads_recent", { limit })),
+	drivesList: () => typedError<ShelfDrive[], string>(__TAURI_INVOKE("drives_list")),
+	/**
+	 *  Ejects, then says it is safe — the only place that is said. A drive in
+	 *  use fails with whatever is holding it, in diskutil's words.
+	 */
+	driveEject: (mount: string) => typedError<null, string>(__TAURI_INVOKE("drive_eject", { mount })),
 };
 
 /** Events */
@@ -319,6 +353,7 @@ export const events = {
 	overlayDismiss: makeEvent<OverlayDismiss>("overlay-dismiss"),
 	overlayError: makeEvent<OverlayError>("overlay-error"),
 	overlayStyle: makeEvent<OverlayStyleChanged>("overlay-style"),
+	shelfChanged: makeEvent<ShelfChanged>("shelf-changed"),
 };
 
 /* Types */
@@ -876,6 +911,8 @@ export type Key = "leftCommand" | "rightCommand" | "leftShift" | "rightShift" | 
 /**  macOS only; no Windows equivalent. */
 "fn" | "escape" | "space" | ({ char: string }) & { f?: never } | ({ f: number }) & { char?: never };
 
+export type Kind = "file" | "folder";
+
 /**
  *  A local git repo the composer can offer, so the user picks instead of typing
  *  a path. `name` is the folder; `path` is what `start_coding_agent` takes.
@@ -1087,6 +1124,13 @@ export type Safer = {
 	tool: string,
 };
 
+export type ScreenShot = {
+	name: string,
+	path: string,
+	/**  Unix seconds. */
+	taken: number,
+};
+
 export type SearchResult = {
 	note: Note,
 	score: number,
@@ -1253,6 +1297,92 @@ export type Settings = {
 	 */
 	catImagesAgents?: boolean,
 };
+
+/**
+ *  What a drop put on the shelf. `failed` names what could not be copied;
+ *  the rest are shelved.
+ */
+export type ShelfAdded = {
+	added: ShelfItem[],
+	failed: string[],
+};
+
+/**  Which list changed, so the view showing it can read it again. */
+export type ShelfArea = "files" | "shots" | "downloads" | "drives";
+
+export type ShelfChanged = ShelfArea;
+
+export type ShelfDownload = {
+	name: string,
+	path: string,
+	size: number,
+	/**  Unix seconds it last changed — when it finished, to the second. */
+	finished: number,
+};
+
+export type ShelfDrive = {
+	name: string,
+	/**  `/Volumes/<name>` — what `diskutil eject` is given. */
+	mount: string,
+	/**
+	 *  How it is attached, in diskutil's words: "USB", "Disk Image",
+	 *  "Secure Digital".
+	 */
+	bus: string,
+	size: number,
+	free: number,
+};
+
+/**
+ *  What `sips` can write. Declared with its extension, so a name and a format
+ *  never disagree.
+ */
+export type ShelfImageFormat = "png" | "jpeg" | "heic" | "tiff";
+
+/**  One thing on the shelf. */
+export type ShelfItem = {
+	id: string,
+	/**  Shown, and what a drag out is called. */
+	name: string,
+	/**  The shelf's copy — what is dragged out and shared. */
+	path: string,
+	/**
+	 *  Where it came from. Dropping the same original again replaces the copy
+	 *  rather than shelving a stale twin.
+	 */
+	original: string,
+	kind: Kind,
+	/**  Bytes; a folder's is its own entry size, not its contents'. */
+	size: number,
+	/**  Unix seconds when it was shelved. */
+	added: number,
+	/**  A picture `sips` can convert and the notch can preview. */
+	image: boolean,
+};
+
+/**
+ *  What the Shelf watches. Screenshots and Downloads read folders macOS
+ *  guards behind a permission prompt, so they start off: the first prompt
+ *  should come from the user turning the feature on, not from launch.
+ */
+export type ShelfPrefs = {
+	shots?: boolean,
+	downloads?: boolean,
+	/**  `/Volumes` is not protected, so this one needs no permission. */
+	drives?: boolean,
+};
+
+export type ShelfWatch = "shots" | "downloads" | "drives";
+
+/**  How `screencapture` is asked to capture. */
+export type ShotCapture = 
+/**
+ *  Drag a region; the picture lands in the screenshot folder, so the
+ *  shelf's watcher picks it up like any other.
+ */
+"region" | 
+/**  Drag a region; the picture goes to the clipboard only. */
+"clipboard";
 
 /**
  *  A note id in Notes, a saved file, a folder in the app that opened it — for
