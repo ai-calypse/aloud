@@ -29,23 +29,17 @@ import { truncate } from "./lib/format";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import { CatSettingsProvider } from "./lib/cat-settings";
 import { listen } from "@tauri-apps/api/event";
-import { AgentList, AgentDetail } from "./features/overlay/AgentList";
-import { AgentRun } from "./features/overlay/AgentRun";
 import { NotchToast } from "./features/overlay/NotchToast";
-import { CodingAgentComposer } from "./features/overlay/CodingAgentComposer";
 import {
   ListeningCat,
   CatPeek,
   AmbientSign,
   NotchAgents,
 } from "./features/overlay/NotchAgents";
-import {
-  type Tab,
-  FIRST_TABS,
-  AGENTS_TAB,
-  MAX_TABS,
-  TabStrip,
-} from "./features/overlay/TabStrip";
+import { type Tab, FIRST_TABS, MAX_TABS } from "./features/overlay/TabStrip";
+import { NotchShell } from "./features/notch/NotchShell";
+import { NotchProvider } from "./features/notch/context";
+import { loadNav, saveNav, type Nav, type SectionId } from "./features/notch/sections";
 import {
   PARTIAL_PREVIEW,
   PARTIAL_MS,
@@ -201,12 +195,35 @@ function Overlay() {
     setActiveTab(0);
   }, [run]);
 
-  // With no run to show, the agents tab is the only content the panel has —
-  // opening by click, by a permission arriving, or by the run closing out
-  // from under the strip all land there rather than on an empty tab 0.
+  // Where the panel is, and where the user last chose to be. A run or an
+  // approval takes the panel to itself without moving the remembered place,
+  // so the next click on the notch opens where the user was, not wherever a
+  // command happened to land.
+  const [nav, setNav] = useState<Nav>(loadNav);
+  const navRef = useRef(nav);
+  navRef.current = nav;
+  const chosen = useRef(nav);
+  const navigate = useCallback((section: SectionId, sub?: string) => {
+    const current = navRef.current;
+    const next = { section, subs: sub ? { ...current.subs, [section]: sub } : current.subs };
+    chosen.current = next;
+    saveNav(next);
+    setNav(next);
+  }, []);
+  const takeFocus = useCallback((section: SectionId, sub: string) => {
+    setNav((current) => ({ section, subs: { ...current.subs, [section]: sub } }));
+  }, []);
+  // Closed, the next open is a click — which lands where the user last chose.
   useEffect(() => {
-    if (panelOpen && !agent) setActiveTab(AGENTS_TAB);
-  }, [panelOpen, agent]);
+    if (!panelOpen) setNav(chosen.current);
+  }, [panelOpen]);
+  // A voice command takes the panel to its run, exactly as it took the whole
+  // panel before there were sections; keyed on the utterance, so it fires
+  // once per run and the user can still navigate away while it works.
+  const runKey = agent?.heard;
+  useEffect(() => {
+    if (runKey !== undefined) takeFocus("agents", "voice");
+  }, [runKey, takeFocus]);
 
   // Dev/QA: `?agents=2` fakes a session list and `?hover` holds the peek row
   // open, so the resting notch's two states are reachable in a browser. The
@@ -403,12 +420,11 @@ function Overlay() {
       setTabs((current) =>
         current.map((tab) => (tab.id === id ? { ...tab, closing: true } : tab)),
       );
-      // Closing the active tab lands on the run when there is one, else on
-      // the agents — tab 0 without a run is an empty panel.
-      const home = agent ? 0 : AGENTS_TAB;
-      setActiveTab((active) => (active === id ? home : active));
+      // Closing the active tab lands on the run — or, without one, on the
+      // Voice view's empty state, which is what tab 0 is then.
+      setActiveTab((active) => (active === id ? 0 : active));
     },
-    [agent],
+    [],
   );
 
   const dropTab = useCallback(
@@ -475,13 +491,13 @@ function Overlay() {
   const openAgents = useCallback(() => {
     setBrowsing(true);
     setSelected(null);
-  }, []);
-
-  // The drill is plain navigation state. A permission arriving *sets* it
-  // (one-shot, in the event listener) — deriving it from the queue every
-  // render meant "back" un-drilled and the fallback instantly re-drilled,
-  // which read as the button not working.
-  const selectedSession = sessions.find((s) => s.id === selected) ?? null;
+    takeFocus("agents", "coding");
+  }, [takeFocus]);
+  // A drill — a permission arriving, a dealt card clicked, a row picked —
+  // is a coding agent, so the panel goes to where they live.
+  useEffect(() => {
+    if (selected) takeFocus("agents", "coding");
+  }, [selected, takeFocus]);
 
   // Reconcile the cat-variation counters once for the whole list before any
   // avatar reads a seed: bumps a session's counter on stage change and prunes
@@ -925,28 +941,43 @@ function Overlay() {
     if (el && agent && !agent.finished) el.scrollTop = el.scrollHeight;
   }, [agent]);
 
+  // Closes the panel: Escape, and the shell's ×.
+  const closePanel = useCallback(() => {
+    // A browse sets `PANEL_OPEN` in Rust (via `setPanelInteractive`), so
+    // closing it has to clear that too — `closeBrowse` does, and clearing
+    // only the webview `browsing` would leave the Rust flag stuck.
+    // `invoke` throws synchronously in the browser preview; the webview side
+    // of the close must still happen there.
+    if (!agent) {
+      try {
+        void commands.closeBrowse();
+      } catch {
+        /* browser preview: no Tauri */
+      }
+      setBrowsing(false);
+      setSelected(null);
+      return;
+    }
+    // `closeAgent` also abandons a pending confirmation, so Escape reads as
+    // "no" rather than leaving a write waiting on a channel nobody answers.
+    try {
+      void commands.closeAgent();
+    } catch {
+      // The preview has no Rust to send the dismiss back, so it closes here.
+      setAgent(null);
+    }
+  }, [agent]);
+
   // Escape dismisses the panel. Guarded on `panelOpen` so a stray keystroke
   // cannot ask Rust to hide a pill mid-dictation.
   useEffect(() => {
     if (!panelOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      // A browse sets `PANEL_OPEN` in Rust (via `setPanelInteractive`), so
-      // closing it has to clear that too — `closeBrowse` does, and clearing
-      // only the webview `browsing` would leave the Rust flag stuck.
-      if (!agent) {
-        void commands.closeBrowse();
-        setBrowsing(false);
-        setSelected(null);
-        return;
-      }
-      // `closeAgent` also abandons a pending confirmation, so Escape reads as
-      // "no" rather than leaving a write waiting on a channel nobody answers.
-      void commands.closeAgent();
+      if (e.key === "Escape") closePanel();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [panelOpen, agent]);
+  }, [panelOpen, closePanel]);
 
   // A dismissal is an animation, not a state of being: once the collapse has
   // settled, the panel is back to resting so the notch (and the agents under
@@ -1068,9 +1099,11 @@ function Overlay() {
         data-hover={resting && hovering ? "" : undefined}
         ref={panel.surface}
         // Only ever reaches the DOM while the pointer is over the panel — Rust
-        // hands the window clicks exactly then (`track_cursor`).
+        // hands the window clicks exactly then (`track_cursor`). A click on the
+        // resting notch opens the sections panel whatever is running: it is
+        // the way in when nothing is, and hovering only peeks.
         onClick={() => {
-          if (resting && sessions.length > 0) setBrowsing(true);
+          if (resting) setBrowsing(true);
         }}
       >
         {/* The panel's whole silhouette. A path and not a border-radius,
@@ -1087,7 +1120,7 @@ function Overlay() {
         <div
           className={`drop-pill__body${
             panelOpen
-              ? " drop-pill__body--ask"
+              ? " drop-pill__body--shell"
               : toast
                 ? " drop-pill__body--toast"
                 : resting && hovering
@@ -1115,80 +1148,34 @@ function Overlay() {
               />
             )
           ) : panelOpen ? (
-            // Everything under one notch: the strip always shows, the agents
-            // are a tab on it, and a dictation's agent panel is another —
+            // Everything under one notch: sections across the top, the voice
+            // run in Agents › Voice and the coding agents in Agents › Coding —
             // so escaping one never takes the other away.
-            <>
-              <TabStrip
-                tabs={tabs}
-                active={activeTab}
-                runOpen={agent !== null}
-                asking={permissions.length > 0}
-                title={
-                  agent?.heard ??
-                  // Opened from the notch rather than by speaking, so there is
-                  // no utterance to name the tab after.
-                  "Aloud"
-                }
-                onSelect={setActiveTab}
-                onClose={closeTab}
-                onClosed={dropTab}
-                onAdd={addTab}
-              />
-              {activeTab === AGENTS_TAB ? (
-                // The agents surface: the list, or one agent's live detail,
-                // with any pending permission under the row that is asking.
-                selectedSession ? (
-                  <AgentDetail
-                    session={selectedSession}
-                    permission={
-                      permissions.find((p) => p.sessionId === selectedSession.id) ?? null
-                    }
-                    onResolve={resolvePermission}
-                    onBack={() => setSelected(null)}
-                    onPeek={showPeek}
-                  />
-                ) : (
-                  <AgentList
-                    sessions={sessions}
-                    permissions={permissions}
-                    onSelect={setSelected}
-                    onResolve={resolvePermission}
-                    onPeek={showPeek}
-                    onClose={() => {
-                      setBrowsing(false);
-                      setSelected(null);
-                      // With a run open the X leaves the panel up on that run;
-                      // only a browse-only panel actually closes — and that is
-                      // the case that has to clear Rust's `PANEL_OPEN`.
-                      if (agent) setActiveTab(0);
-                      else void commands.closeBrowse();
-                    }}
-                  />
-                )
-              ) : /* Keyed so switching back to a tab replays its entrance rather
-                  than having the content appear already settled. */
-              tabs.find((tab) => tab.id === activeTab)?.blank ? (
-                // A new tab is where you start a coding agent. Keyed on the tab
-                // so switching back replays its entrance, like the run tabs.
-                <CodingAgentComposer
-                  key={activeTab}
-                  bodyRef={answerRef}
-                  onClose={() => closeTab(activeTab)}
-                  onAddTab={tabs.length < MAX_TABS ? addTab : undefined}
-                />
-              ) : agent ? (
-                <AgentRun
-                  key={agent.heard}
-                  run={agent}
-                  bodyRef={answerRef}
-                  onAddTab={tabs.length < MAX_TABS ? addTab : undefined}
-                  onDecide={(confirmed) =>
-                    setAgent((r) => r && { ...r, steps: withDecision(r.steps, confirmed) })
-                  }
-                />
-              ) : null}
-            </>
+            <NotchProvider
+              value={{
+                agent,
+                setAgent,
+                sessions,
+                permissions,
+                selected,
+                select: setSelected,
+                resolvePermission,
+                showPeek,
+                voice: {
+                  tabs,
+                  active: activeTab,
+                  select: setActiveTab,
+                  add: addTab,
+                  close: closeTab,
+                  drop: dropTab,
+                },
+                bodyRef: answerRef,
+                navigate,
+                close: closePanel,
+              }}
+            >
+              <NotchShell nav={nav} />
+            </NotchProvider>
           ) : toast ? (
             <NotchToast
               key={toast.key}

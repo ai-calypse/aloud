@@ -61,3 +61,57 @@
 .notch-slider:disabled::-webkit-slider-thumb {
   transform: none;
 }
+
+/* --- The shell (features/notch/NotchShell.tsx) ---------------------------
+ * Its rows rise in behind the shape the way the answer's parts always have
+ * (the keyframes are overlay.css's), staggered top to bottom. */
+.notch-shell > * {
+  animation:
+    ask-rise var(--spring-pop-dur) var(--spring-pop) both,
+    ask-fade var(--dur-fast) var(--ease-out) both;
+}
+
+.notch-shell > :nth-child(2) {
+  animation-delay: calc(var(--ask-stagger, 45ms) * 0.5);
+}
+
+.notch-shell > :nth-child(3) {
+  animation-delay: var(--ask-stagger, 45ms);
+}
+
+.notch-shell > :nth-child(4) {
+  animation-delay: calc(var(--ask-stagger, 45ms) * 1.5);
+}
+
+/* The surfaces that predate the shell, hosted in its body. */
+
+/* The run's panel already sits in the shell's padding, and rises with it:
+   a second rise inside would double the throw. It still fades in order. */
+.notch-shell .ask {
+  padding: 0;
+}
+
+.notch-shell .ask > * {
+  animation: ask-fade var(--dur-fast) var(--ease-out) both;
+}
+
+/* Under the body's own ceiling, so a long run scrolls in one place. */
+.notch-shell .ask__answer {
+  max-height: 280px;
+}
+
+.notch-shell .tabs {
+  padding: 0 0 10px;
+}
+
+/* An approval card is drawn as the acting app's own window, so it keeps the
+   system face its app would use rather than taking the panel's Geist. */
+.notch-shell .preview {
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* The coding agents were monospace to read as a terminal echo; Geist Mono
+   keeps that and joins the panel's family. */
+.notch-shell :is(.agents, .agent-detail) {
+  font-family: var(--font-notch-mono);
+}

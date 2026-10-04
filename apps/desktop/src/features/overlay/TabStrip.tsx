@@ -1,9 +1,9 @@
 import { PlusIcon, XIcon } from "lucide-react";
 
 /**
- * One tab in the notch's strip. Tab 0 is the live agent panel; the rest are
- * blank until we decide what they hold. `closing` is set instead of removing
- * the tab, so its exit has something to play on — see `closeTab`.
+ * One tab in the voice run's strip. Tab 0 is the live agent run; the rest are
+ * coding-agent composers. `closing` is set instead of removing the tab, so its
+ * exit has something to play on — see `closeTab`.
  */
 export type Tab = { id: number; blank: boolean; closing?: boolean };
 
@@ -11,14 +11,7 @@ export type Tab = { id: number; blank: boolean; closing?: boolean };
 export const FIRST_TABS: Tab[] = [{ id: 0, blank: false }];
 
 /**
- * The agents surface's slot in the strip — a fixed pseudo-tab, not an entry in
- * `tabs`: it cannot be closed, survives every run reset, and is what makes
- * "everything under one notch" true. Negative so no real tab id collides.
- */
-export const AGENTS_TAB = -1;
-
-/**
- * Where `+` stops. The strip has the answer body's 480pt and no more, and past
+ * Where `+` stops. The strip has the panel's width and no more, and past
  * this every label is ellipsed to two characters — a notch panel is not a
  * browser. ponytail: a hard cap, not overflow scrolling; if tabs ever carry
  * enough to want more, the strip needs its own overflow affordance anyway.
@@ -26,20 +19,20 @@ export const AGENTS_TAB = -1;
 export const MAX_TABS = 5;
 
 /**
- * The strip across the top of the notch panel. Terminal-style: the run that
- * opened the panel is the first tab, `+` puts a blank one beside it.
+ * The voice run's tab strip, inside Agents › Voice. Terminal-style: the run
+ * that opened the panel is the first tab, `+` puts a blank one (a coding-agent
+ * composer) beside it. The coding agents themselves are their own subsection
+ * now, so the strip no longer carries an Agents chip.
  *
- * Sizes nothing — it lives inside the fixed-width answer body, so adding a tab
- * moves the panel's shoulders not at all and only the swapped body retargets
- * the height spring.
+ * Sizes nothing — it lives inside the fixed-width panel, so adding a tab moves
+ * the panel's shoulders not at all and only the swapped body retargets the
+ * height spring.
  */
 export function TabStrip({
   tabs,
   active,
-  /** Whether an agent run exists — its tabs and `+` only show then. */
+  /** Whether an agent run exists — its tab only shows then. */
   runOpen,
-  /** An agent is waiting on an answer: the Agents chip carries the flag. */
-  asking,
   /** What tab 0 is called: the question asked, or what the agent heard. */
   title,
   onSelect,
@@ -50,7 +43,6 @@ export function TabStrip({
   tabs: Tab[];
   active: number;
   runOpen: boolean;
-  asking: boolean;
   title: string;
   onSelect: (id: number) => void;
   onClose: (id: number) => void;
@@ -59,20 +51,6 @@ export function TabStrip({
 }) {
   return (
     <div className="tabs">
-      {/* The agents' fixed slot: leftmost, always present, never closable —
-          home base for the strip, the way a browser pins its first tab. New
-          tabs open to its right. */}
-      <div className="tab" data-motion="in">
-        <div
-          className="tab__chip"
-          data-active={active === AGENTS_TAB || undefined}
-          data-asking={asking || undefined}
-        >
-          <button className="tab__select" onClick={() => onSelect(AGENTS_TAB)}>
-            Agents
-          </button>
-        </div>
-      </div>
       {/* The run's own tab only exists while a run does; blank tabs belong
           to the strip and open from anywhere — the notch is one surface. */}
       {tabs
@@ -94,7 +72,7 @@ export function TabStrip({
               {/* A blank tab is a coding-agent composer, so name it one —
                   numbered by position, not id, so the strip reads 1..n after a
                   close and two of them stay switchable-between. */}
-              {tab.blank ? `Agent ${i + 1}` : title}
+              {tab.blank ? `Agent ${i + (runOpen ? 0 : 1)}` : title}
             </button>
             {/* Tab 0 is the run itself; closing it would leave the panel with
                 nothing to show but no way back. Escape still closes the lot. */}

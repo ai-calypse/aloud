@@ -8,6 +8,7 @@ import {
   type ApprovalReply,
 } from "@/lib/bindings";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { Empty } from "@/components/notch/list";
 import {
   agentStage,
   agentHue,
@@ -15,9 +16,7 @@ import {
   type AgentStage,
 } from "@/lib/agent-stage";
 import { formatCost, tokenSummary, truncate } from "@/lib/format";
-import { Panel } from "./Panel";
 import { baseName, PermissionCard } from "./PermissionCards";
-import { QuotaDashboard } from "./QuotaDashboard";
 import {
   AgentAvatar,
   rowState,
@@ -130,28 +129,30 @@ function AgentRow({
 /**
  * The list of running agents. Each row summarises one agent; clicking it drills
  * into a live detail view; a row whose agent is asking permission is flagged.
+ * Chrome-less: it is the notch's Agents › Coding view, under the shell's own
+ * tabs, so a title and a close of its own would only repeat them.
  */
 export function AgentList({
   sessions,
   permissions,
   onSelect,
   onResolve,
-  onClose,
   onPeek,
 }: {
   sessions: AgentSession[];
   permissions: AgentPermission[];
   onSelect: (id: string) => void;
   onResolve: (id: string, reply: ApprovalReply) => void;
-  onClose: () => void;
   onPeek: PeekFn;
 }) {
   const askingIds = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
   return (
-    <Panel title="Agents" onClose={onClose}>
-      <QuotaDashboard />
+    <>
       {sessions.length === 0 ? (
-        <p className="agents-empty">No agents running</p>
+        <Empty title="No coding agents running">
+          Claude Code and Codex sessions show up here while they work, with any
+          approval they are waiting on.
+        </Empty>
       ) : (
         <ul className="agents">
           {sessions.map((session) => (
@@ -173,51 +174,19 @@ export function AgentList({
         .map((p) => (
           <PermissionCard key={p.id} request={p} queued={0} onResolve={onResolve} />
         ))}
-    </Panel>
+    </>
   );
 }
 
 /**
- * One agent, in full: its live tool, model, elapsed and cwd, every subagent
- * expanded, and — if it is asking — the Approve / Deny card right here, so the
- * decision sits with the terminal it belongs to.
- *
- * Reads live: it is handed the session straight from the `agentSessions` state,
- * which the event listener replaces on every poll, so the tool line updates
- * without anything here subscribing.
- */
-export function AgentDetail({
-  session,
-  permission,
-  onResolve,
-  onBack,
-  onPeek,
-}: {
-  session: AgentSession;
-  permission: AgentPermission | null;
-  onResolve: (id: string, reply: ApprovalReply) => void;
-  onBack: () => void;
-  onPeek: PeekFn;
-}) {
-  return (
-    <Panel title={rowName(session)} onClose={onBack}>
-      <AgentDetailBody
-        session={session}
-        permission={permission}
-        onResolve={onResolve}
-        onBack={onBack}
-        onPeek={onPeek}
-      />
-    </Panel>
-  );
-}
-
-/**
- * The detail's inner content, without the `Panel` chrome — one agent in full:
- * avatar + tag, cwd, prompt, the approve/deny card if it is asking, the live
+ * One agent in full: avatar + tag, cwd, prompt, the approve/deny card if it is
+ * asking (so the decision sits with the terminal it belongs to), the live
  * "Now" tool, and every subagent. Shared verbatim between the clicked-in
- * detail (`AgentDetail`, in the opened panel) and the hover peek (`NotchAgents`
- * on dwell), so the two are the same view — one just needs no click.
+ * detail (Agents › Coding, drilled) and the hover peek (`NotchAgents` on
+ * dwell), so the two are the same view — one just needs no click.
+ *
+ * Reads live: it is handed the session straight from the `agentSessions`
+ * state, which the event listener replaces on every poll.
  *
  * `onBack` renders the "‹ All agents" link only when given; the hover peek
  * omits it (there is nowhere to go back to). `onPeek` may be a no-op: the

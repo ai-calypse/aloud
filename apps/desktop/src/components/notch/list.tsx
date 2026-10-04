@@ -132,6 +132,31 @@ export function Lead({
 }
 
 /**
+ * A view with nothing to show. It teaches: what puts something here, and the
+ * one thing to do about it — never a bare "nothing here".
+ */
+export function Empty({
+  title,
+  children,
+  action,
+  className,
+}: {
+  title: ReactNode;
+  /** What puts something here, in a sentence. */
+  children: ReactNode;
+  action?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("flex flex-col items-start gap-1 py-1 font-notch", className)}>
+      <p className="m-0 text-notch-body font-medium text-notch-ink">{title}</p>
+      <p className="m-0 max-w-[56ch] text-notch-body text-pretty text-notch-ink-2">{children}</p>
+      {action && <div className="mt-2">{action}</div>}
+    </div>
+  );
+}
+
+/**
  * What a group of rows is, above it. Sentence case, not a tracked uppercase
  * eyebrow: it names, it does not shout.
  */

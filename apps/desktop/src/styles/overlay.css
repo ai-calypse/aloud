@@ -214,14 +214,15 @@
   }
 }
 
-/* Answer mode: fixed width, so only the height changes as the answer streams
-   rather than the panel's shoulders crawling outward per token. */
-.drop-pill__body--ask {
+/* The sections panel (features/notch/NotchShell). The shell sets its own
+   fixed width, so only the height changes as an answer streams rather than
+   the panel's shoulders crawling outward per token. */
+.drop-pill__body--shell {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
   gap: 0;
-  width: 480px;
+  width: max-content;
   height: auto;
   padding: 0;
 }
@@ -2426,13 +2427,6 @@ textarea.preview__input {
 
 /* Each row is a small block: head line, prompt line, optional subagents. The
    dithered separator agent-notch draws between them is a bottom hairline. */
-.agents-empty {
-  margin: 0;
-  padding: 8px 4px;
-  font-size: 13px;
-  opacity: 0.5;
-}
-
 .agent-row {
   display: flex;
   flex-direction: column;
@@ -2498,114 +2492,6 @@ textarea.preview__input {
   font-size: 12px;
   color: var(--sys-blue, #0a84ff);
   cursor: pointer;
-}
-
-/* Plan-quota dashboard — rolling usage limits above the agent list. */
-.quota {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 2px 2px 12px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid rgb(255 255 255 / 0.06);
-}
-
-.quota__row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.quota__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.quota__label {
-  font-size: 11px;
-  font-weight: 600;
-  opacity: 0.8;
-}
-
-.quota__figures {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  font-size: 10.5px;
-  font-variant-numeric: tabular-nums;
-}
-
-.quota__pct {
-  font-weight: 600;
-}
-
-.quota__pct[data-level="low"] {
-  color: var(--sys-green, #32d74b);
-}
-.quota__pct[data-level="mid"] {
-  color: var(--sys-orange, #ff9f0a);
-}
-.quota__pct[data-level="high"] {
-  color: var(--sys-red, #ff453a);
-}
-
-.quota__reset {
-  opacity: 0.45;
-}
-
-.quota__track {
-  height: 4px;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.08);
-  overflow: hidden;
-}
-
-.quota__fill {
-  height: 100%;
-  border-radius: 999px;
-  transition: width var(--dur-3, 0.3s) var(--ease-out, ease-out);
-}
-
-.quota__fill[data-level="low"] {
-  background: var(--sys-green, #32d74b);
-}
-.quota__fill[data-level="mid"] {
-  background: var(--sys-orange, #ff9f0a);
-}
-.quota__fill[data-level="high"] {
-  background: var(--sys-red, #ff453a);
-}
-
-.quota__extra {
-  font-size: 10.5px;
-  font-weight: 500;
-  color: var(--sys-red, #ff453a);
-  opacity: 0.85;
-}
-
-.quota__note {
-  margin: 0;
-  font-size: 11px;
-  opacity: 0.4;
-}
-
-/* Opt-in trigger — reading the token prompts for keychain access, so usage is
-   only fetched on an explicit click. */
-.quota__toggle {
-  align-self: flex-start;
-  background: none;
-  border: 0;
-  padding: 0;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--sys-blue, #0a84ff);
-  cursor: pointer;
-}
-
-.quota__toggle:hover {
-  text-decoration: underline;
 }
 
 .agent-detail__meta {
@@ -3496,7 +3382,7 @@ textarea.preview__input {
 /* The answer must be gone before the panel collapses over it — the collapse
    clips its contents, and a paragraph sliced off line by line reads as the
    window being killed. Faster than the collapse for that reason. */
-.overlay-root[data-exiting] :is(.ask > *, .tabs) {
+.overlay-root[data-exiting] :is(.ask > *, .tabs, .notch-shell > *) {
   animation: ask-out var(--dur-fast) var(--ease-in) both;
   animation-delay: 0ms;
 }
