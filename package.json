@@ -9,7 +9,8 @@
     "lint": "pnpm --filter @aloud/desktop lint",
     "typecheck": "pnpm --filter @aloud/desktop typecheck",
     "fmt": "cargo fmt --all && pnpm --filter @aloud/desktop fmt",
-    "test": "cargo test --workspace"
+    "test": "cargo test --workspace",
+    "evals": "node evals/serve.mjs"
   },
   "dependencies": {
     "@ag-ui/core": "^0.0.57",

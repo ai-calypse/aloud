@@ -5,8 +5,13 @@
 //! ```sh
 //! cargo run -p aloud-agent --example command_eval                   # every brain with a key
 //! cargo run -p aloud-agent --example command_eval -- gemini         # one brain
+//! EVAL_K=3 cargo run -p aloud-agent --example command_eval          # each brain case 3 times
 //! EVAL_SIZE=1 cargo run -p aloud-agent --example command_eval        # + tools and schema tokens per turn
 //! ```
+//!
+//! Each brain's run is also saved to `<app-data>/evals/<time>-<brain>.json`,
+//! which the dashboard (`pnpm evals`) reads. Repeats exist because one pass
+//! hides flakiness: a case counts as reliable only if all `EVAL_K` attempts pass.
 //!
 //! The case format is Raycast's AI-extension evals (MIT), trimmed: `input`,
 //! `expected: [{callsTool: {name, arguments}}]` or `[{not: {callsTool: {}}}]`.
@@ -20,9 +25,6 @@ use aloud_native::fast::Fast;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
-
-static SAID_WITH_CALL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-static CALLED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 #[derive(Deserialize)]
 struct Case {
@@ -40,10 +42,28 @@ enum Verdict {
     Skip(String),
 }
 
+/// What one attempt did besides its verdict, for the saved report.
+struct Trace {
+    route: &'static str,
+    called: Option<(String, Value)>,
+    /// Tools offered and their schema size in tokens: what the prompt costs.
+    offered: Option<(usize, usize)>,
+    /// The brain said what it did in the same reply as the call, so the run
+    /// could end without a second model call.
+    with_prose: bool,
+    /// Time spent waiting out rate limits, which is the quota's, not the brain's.
+    waited: Duration,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let settings = aloud_store::Settings::load();
     let only = std::env::args().nth(1);
+    let k: usize = std::env::var("EVAL_K")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1)
+        .max(1);
     let mut brains: Vec<(&str, Brain)> = Vec::new();
     for (name, key) in [
         ("cerebras", &settings.cerebras_api_key),
@@ -68,38 +88,67 @@ async fn main() -> anyhow::Result<()> {
 
     for (label, brain) in &brains {
         println!("\n== {label} ({})", brain.model);
-        let (mut passed, mut failed, mut skipped) = (0, 0, 0);
+        let started_at = chrono::Utc::now();
+        let (mut passed, mut failed, mut skipped, mut with_prose, mut called) = (0, 0, 0, 0, 0);
         let mut latencies: Vec<Duration> = Vec::new();
+        let mut report = Vec::new();
         for case in &cases {
-            let started = Instant::now();
-            let (verdict, routed) = judge(case, brain, &installed, composio).await;
-            let took = started.elapsed();
-            let mark = match &verdict {
-                Verdict::Pass => {
-                    passed += 1;
-                    "✓"
+            let mut attempts = Vec::new();
+            for _ in 0..k {
+                let started = Instant::now();
+                let (verdict, trace) = judge(case, brain, &installed, composio).await;
+                let took = started.elapsed().saturating_sub(trace.waited);
+                let (mark, outcome, why) = match &verdict {
+                    Verdict::Pass => {
+                        passed += 1;
+                        ("✓", "pass", None)
+                    }
+                    Verdict::Fail(why) => {
+                        failed += 1;
+                        ("✗", "fail", Some(why.clone()))
+                    }
+                    Verdict::Skip(why) => {
+                        skipped += 1;
+                        ("–", "skip", Some(why.clone()))
+                    }
+                };
+                if !matches!(verdict, Verdict::Skip(_)) && trace.route == "brain" {
+                    latencies.push(took);
                 }
-                Verdict::Fail(_) => {
-                    failed += 1;
-                    "✗"
+                with_prose += usize::from(trace.with_prose);
+                called += usize::from(trace.route == "brain" && trace.called.is_some());
+                let note = why.as_ref().map(|w| format!("  ({w})")).unwrap_or_default();
+                println!(
+                    "{mark} {:>5.2}s [{}] {}{note}",
+                    took.as_secs_f32(),
+                    trace.route,
+                    case.input
+                );
+                attempts.push(json!({
+                    "verdict": outcome,
+                    "why": why,
+                    "route": trace.route,
+                    "ms": took.as_millis() as u64,
+                    "rateLimitedMs": trace.waited.as_millis() as u64,
+                    "called": trace.called.as_ref().map(|(name, args)| json!({ "name": name, "args": args })),
+                    "tools": trace.offered.map(|(n, _)| n),
+                    "schemaTokens": trace.offered.map(|(_, t)| t),
+                    "withProse": trace.with_prose,
+                }));
+                // Only the brain is worth asking twice: the fast path and a
+                // skip come out the same every time.
+                if trace.route != "brain" || matches!(verdict, Verdict::Skip(_)) {
+                    break;
                 }
-                Verdict::Skip(_) => {
-                    skipped += 1;
-                    "–"
-                }
-            };
-            if !matches!(verdict, Verdict::Skip(_)) && routed == "brain" {
-                latencies.push(took);
             }
-            let note = match verdict {
-                Verdict::Fail(why) | Verdict::Skip(why) => format!("  ({why})"),
-                Verdict::Pass => String::new(),
-            };
-            println!(
-                "{mark} {:>5.2}s [{routed}] {}{note}",
-                took.as_secs_f32(),
-                case.input
-            );
+            report.push(json!({
+                "input": case.input,
+                "front": case.front,
+                "selection": case.selection,
+                "fast": case.fast,
+                "expected": case.expected,
+                "attempts": attempts,
+            }));
         }
         latencies.sort();
         let median = latencies
@@ -110,12 +159,52 @@ async fn main() -> anyhow::Result<()> {
             passed + failed
         );
         println!(
-            "{label}: {} of {} tool calls came with the confirmation alongside (early finish possible)",
-            SAID_WITH_CALL.swap(0, std::sync::atomic::Ordering::Relaxed),
-            CALLED.swap(0, std::sync::atomic::Ordering::Relaxed)
+            "{label}: {with_prose} of {called} tool calls came with the confirmation alongside (early finish possible)"
         );
+        let path = save(label, brain.model, k, started_at, report)?;
+        println!("{label}: report saved to {}", path.display());
     }
     Ok(())
+}
+
+/// Writes one brain's run where the dashboard looks: the app's data folder,
+/// shared by every worktree, so a branch's run lines up against main's.
+fn save(
+    label: &str,
+    model: &str,
+    k: usize,
+    started_at: chrono::DateTime<chrono::Utc>,
+    cases: Vec<Value>,
+) -> anyhow::Result<std::path::PathBuf> {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    let report = json!({
+        "brain": label,
+        "model": model,
+        "k": k,
+        "startedAt": started_at.to_rfc3339(),
+        "finishedAt": chrono::Utc::now().to_rfc3339(),
+        "git": {
+            "sha": git(&["rev-parse", "--short", "HEAD"]),
+            "branch": git(&["branch", "--show-current"]),
+            "dirty": git(&["status", "--porcelain"]).is_some_and(|s| !s.is_empty()),
+        },
+        "cases": cases,
+    });
+    let dir = aloud_notes::data_dir()?.join("evals");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!(
+        "{}-{label}.json",
+        started_at.format("%Y%m%d-%H%M%S")
+    ));
+    std::fs::write(&path, serde_json::to_string_pretty(&report)?)?;
+    Ok(path)
 }
 
 async fn judge(
@@ -123,24 +212,29 @@ async fn judge(
     brain: &Brain,
     installed: &[aloud_selection::InstalledApp],
     composio: Option<&ComposioClient>,
-) -> (Verdict, &'static str) {
+) -> (Verdict, Trace) {
+    let mut trace = Trace {
+        route: "fast",
+        called: None,
+        offered: None,
+        with_prose: false,
+        waited: Duration::ZERO,
+    };
     let fast = aloud_native::fast::route(&case.input, installed);
     if let Some(want) = case.fast {
         if want != fast.is_some() {
             let got = if fast.is_some() { "taken" } else { "missed" };
-            return (Verdict::Fail(format!("fast path {got}")), "fast");
+            return (Verdict::Fail(format!("fast path {got}")), trace);
         }
     }
-    let (called, routed): (Option<(String, Value)>, _) = match fast {
-        Some(Fast::Tool { name, args, .. }) => (Some((name.to_string(), args)), "fast"),
-        Some(Fast::Web { .. }) => (
-            Some((
-                aloud_engine::BROWSER_TASK.to_string(),
-                json!({ "goal": case.input }),
-            )),
-            "fast",
-        ),
+    trace.called = match fast {
+        Some(Fast::Tool { name, args, .. }) => Some((name.to_string(), args)),
+        Some(Fast::Web { .. }) => Some((
+            aloud_engine::BROWSER_TASK.to_string(),
+            json!({ "goal": case.input }),
+        )),
         None => {
+            trace.route = "brain";
             let aloud_agent::CommandTools { tools, more } =
                 aloud_agent::command_tools(&case.input, installed, composio).await;
             if let Some(name) = wanted_name(case) {
@@ -156,7 +250,7 @@ async fn judge(
                     }
                 });
                 if !tools.iter().any(|t| name_matches(&name, &t.name)) && !loadable {
-                    return (Verdict::Skip(format!("{name} not offered here")), "brain");
+                    return (Verdict::Skip(format!("{name} not offered here")), trace);
                 }
             }
             let command = aloud_agent::with_context(
@@ -164,9 +258,9 @@ async fn judge(
                 case.front.as_deref(),
                 case.selection.as_deref(),
             );
+            let schema_chars: usize = tools.iter().map(|t| t.to_openai().to_string().len()).sum();
+            trace.offered = Some((tools.len(), schema_chars / 4));
             if std::env::var_os("EVAL_SIZE").is_some() {
-                let schema_chars: usize =
-                    tools.iter().map(|t| t.to_openai().to_string().len()).sum();
                 eprintln!(
                     "   {} tools, ~{} schema tokens",
                     tools.len(),
@@ -189,38 +283,29 @@ async fn judge(
                 else {
                     break;
                 };
-                tokio::time::sleep(*retry_after + Duration::from_secs(1)).await;
+                let wait = *retry_after + Duration::from_secs(1);
+                trace.waited += wait;
+                tokio::time::sleep(wait).await;
                 turn = aloud_agent::first_turn(brain, &command, &tools, &more).await;
             }
             match turn {
                 Ok(turn) => {
-                    // Whether this call could end the run early: the brain said
-                    // what it did in the same reply.
-                    if !turn.tool_calls.is_empty()
+                    trace.with_prose = !turn.tool_calls.is_empty()
                         && turn
                             .content
                             .as_deref()
-                            .is_some_and(|c| !c.trim().is_empty())
-                    {
-                        SAID_WITH_CALL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    if !turn.tool_calls.is_empty() {
-                        CALLED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    (
-                        turn.tool_calls.first().map(|call| {
-                            let args = serde_json::from_str(&call.function.arguments)
-                                .unwrap_or(Value::Null);
-                            (call.function.name.clone(), args)
-                        }),
-                        "brain",
-                    )
+                            .is_some_and(|c| !c.trim().is_empty());
+                    turn.tool_calls.first().map(|call| {
+                        let args =
+                            serde_json::from_str(&call.function.arguments).unwrap_or(Value::Null);
+                        (call.function.name.clone(), args)
+                    })
                 }
-                Err(e) => return (Verdict::Fail(format!("error: {e:#}")), "brain"),
+                Err(e) => return (Verdict::Fail(format!("error: {e:#}")), trace),
             }
         }
     };
-    (check(case, called.as_ref()), routed)
+    (check(case, trace.called.as_ref()), trace)
 }
 
 /// The expected tool's name matcher, if the case expects a call.

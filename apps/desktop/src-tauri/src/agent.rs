@@ -297,7 +297,7 @@ pub(crate) fn clear_pending(app: &AppHandle) {
 #[tracing::instrument(
     name = "agent_run",
     skip_all,
-    fields(tool_count = tracing::field::Empty)
+    fields(tool_count = tracing::field::Empty, route = tracing::field::Empty)
 )]
 async fn execute(
     app: &AppHandle,
@@ -314,12 +314,16 @@ async fn execute(
     // Everything else, and a browser engine missing from this build, takes the brain below.
     match aloud_native::fast::route(transcript, &installed) {
         Some(aloud_native::fast::Fast::Tool { name, args, done }) => {
+            tracing::Span::current().record("route", "fast");
             return run_fast(app, run, name, args, done).await;
         }
         Some(aloud_native::fast::Fast::Web { query }) => {
             let goal = serde_json::json!({ "goal": transcript, "query": query });
             match aloud_engine::start(aloud_engine::BROWSER_TASK, &goal).await {
-                Some(Ok(task)) => return run_direct(app, run, transcript, task, &cancelled).await,
+                Some(Ok(task)) => {
+                    tracing::Span::current().record("route", "web");
+                    return run_direct(app, run, transcript, task, &cancelled).await;
+                }
                 Some(Err(e)) => tracing::warn!(%e, "browser engine unavailable; asking the brain"),
                 None => {}
             }
@@ -337,6 +341,7 @@ async fn execute(
     let aloud_agent::CommandTools { tools, more } =
         aloud_agent::command_tools(transcript, &installed, has_composio.then_some(&composio)).await;
     tracing::Span::current().record("tool_count", tools.len());
+    tracing::Span::current().record("route", "brain");
 
     let command = aloud_agent::with_context(transcript, context.front, context.selection);
 
