@@ -2,6 +2,7 @@ mod agent;
 mod clipboard;
 mod commands;
 mod islands;
+mod launcher;
 mod listen;
 mod meeting;
 mod notch;
@@ -171,6 +172,16 @@ fn specta_builder() -> Builder<tauri::Wry> {
             clipboard::color_copy,
             clipboard::color_clear,
             // -- end notch Clipboard section --
+            // -- notch Launch section (feat/notch-clipboard-launch) --
+            launcher::launcher_prefs,
+            launcher::launcher_open_app,
+            launcher::launcher_pin,
+            launcher::shortcut_list,
+            launcher::shortcut_run,
+            launcher::launcher_files,
+            launcher::launcher_recent_files,
+            launcher::launcher_open_path,
+            // -- end notch Launch section --
             agent::confirm_agent,
             agent::arm_agent,
             agent::hold_agent,
@@ -298,6 +309,9 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
 
             // notch Clipboard section: the store, and the pasteboard watcher.
             clipboard::start(app.handle());
+
+            // notch Launch section: pins and recents.
+            launcher::start(app.handle());
 
             tray::init(app)?;
 

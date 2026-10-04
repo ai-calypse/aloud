@@ -51,6 +51,7 @@ dependencies = [
  "aloud-engine",
  "aloud-hotkey",
  "aloud-islands",
+ "aloud-launcher",
  "aloud-llm",
  "aloud-meeting",
  "aloud-native",
@@ -216,6 +217,18 @@ dependencies = [
  "serde",
  "serde_json",
  "specta",
+]
+
+[[package]]
+name = "aloud-launcher"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

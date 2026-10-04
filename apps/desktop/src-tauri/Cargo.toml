@@ -27,6 +27,7 @@ aloud-engine = { path = "../../../crates/engine" }
 aloud-native = { path = "../../../crates/native" }
 aloud-hotkey = { path = "../../../crates/hotkey" }
 aloud-islands = { path = "../../../crates/islands" }
+aloud-launcher = { path = "../../../crates/launcher" }
 aloud-llm = { path = "../../../crates/llm" }
 aloud-notes = { path = "../../../crates/notes" }
 aloud-quota = { path = "../../../crates/quota" }

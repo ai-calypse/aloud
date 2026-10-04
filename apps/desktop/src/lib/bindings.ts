@@ -294,6 +294,23 @@ export const commands = {
 	/**  Copies a picked colour as `hex` or `rgb`. */
 	colorCopy: (hex: string, format: string) => typedError<null, string>(__TAURI_INVOKE("color_copy", { hex, format })),
 	colorClear: () => typedError<null, string>(__TAURI_INVOKE("color_clear")),
+	launcherPrefs: () => __TAURI_INVOKE<LauncherPrefs>("launcher_prefs"),
+	/**
+	 *  Opens an app and moves it to the front of the recents. The panel closes:
+	 *  the app is about to take the screen.
+	 */
+	launcherOpenApp: (name: string) => typedError<LauncherPrefs, string>(__TAURI_INVOKE("launcher_open_app", { name })),
+	launcherPin: (name: string, pinned: boolean) => typedError<LauncherPrefs, string>(__TAURI_INVOKE("launcher_pin", { name, pinned })),
+	shortcutList: () => typedError<string[], string>(__TAURI_INVOKE("shortcut_list")),
+	/**
+	 *  Runs a shortcut and answers when it finishes. A click in the panel is the
+	 *  user's own decision to run it, so there is no approval card.
+	 */
+	shortcutRun: (name: string) => typedError<null, string>(__TAURI_INVOKE("shortcut_run", { name })),
+	launcherFiles: (query: string) => typedError<LaunchFile[], string>(__TAURI_INVOKE("launcher_files", { query })),
+	launcherRecentFiles: () => typedError<LaunchFile[], string>(__TAURI_INVOKE("launcher_recent_files")),
+	/**  Opens a file or a note in its default app. */
+	launcherOpenPath: (path: string) => typedError<null, string>(__TAURI_INVOKE("launcher_open_path", { path })),
 	/**
 	 *  The gate's buttons. `edits` carries the fields the user changed, keyed by
 	 *  the pointer each card field names; `revision` is the card's own, so a click
@@ -931,6 +948,22 @@ export type IslandPriority =
 export type Key = "leftCommand" | "rightCommand" | "leftShift" | "rightShift" | "leftOption" | "rightOption" | "leftControl" | "rightControl" | 
 /**  macOS only; no Windows equivalent. */
 "fn" | "escape" | "space" | ({ char: string }) & { f?: never } | ({ f: number }) & { char?: never };
+
+/**  A file the panel can open. */
+export type LaunchFile = {
+	path: string,
+	name: string,
+	/**  Its folder, `~`-shortened, for the row's subtitle. */
+	folder: string,
+};
+
+/**  App names, as `installed_apps` reports them (what `open -a` takes). */
+export type LauncherPrefs = {
+	/**  In the order the user pinned them. */
+	pins: string[],
+	/**  Most recent first. */
+	recents: string[],
+};
 
 /**
  *  A local git repo the composer can offer, so the user picks instead of typing

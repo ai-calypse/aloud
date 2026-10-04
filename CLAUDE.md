@@ -17,9 +17,11 @@ apps/desktop/          Tauri app
 crates/
   agent/               the command brain: tool loop, Composio, evals
   audio/               mic capture (cpal), resampling, pause segmenter
+  clipboard/           notch clipboard: history watcher, snippets, picked colours
   engine/              runs the browser task engine (engine/, Node)
   hotkey/              global hotkeys: CGEventTap / WH_KEYBOARD_LL
   islands/             the notch's live activities: ranking, dedupe, expiry
+  launcher/            notch launch: pinned/recent apps, Apple Shortcuts, file search
   llm/                 OpenAI-compatible chat, prompts, rate limits
   meeting/             meeting transcript assembly, note composition
   native/              Mac app actions (AppleScript/JXA) + the no-model fast path
@@ -249,6 +251,12 @@ short version:
 - **Actions:** `features/notch/actions.ts` is the one registry ⌘K, island
   buttons and (next) the voice agent share. Rust names an action; it never
   sends code.
+- **Clipboard history:** off until the user flips it, local only (SQLite and
+  PNGs under `<data>/clipboard`), never logged or shown to a model. It polls
+  `changeCount`, skips `org.nspasteboard.ConcealedType` and friends, and skips
+  anything within 1.5s of an Aloud write — every clipboard write in
+  `aloud_paste` calls `note_own_write`, so a new writer there must too, or its
+  output lands in the user's history.
 
 ## Conventions
 

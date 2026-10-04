@@ -26,7 +26,10 @@ pub struct ClipboardChanged;
 const FOCUS_SETTLE: Duration = Duration::from_millis(250);
 
 fn store(state: &State<'_, ClipboardStore>) -> CmdResult<Arc<Store>> {
-    state.0.clone().ok_or_else(|| "clipboard storage is unavailable".to_string())
+    state
+        .0
+        .clone()
+        .ok_or_else(|| "clipboard storage is unavailable".to_string())
 }
 
 fn err(e: anyhow::Error) -> String {
@@ -73,7 +76,10 @@ pub fn clipboard_set_enabled(state: State<'_, ClipboardStore>, on: bool) -> CmdR
 
 #[tauri::command]
 #[specta::specta]
-pub fn clipboard_list(state: State<'_, ClipboardStore>, query: String) -> CmdResult<Vec<ClipboardEntry>> {
+pub fn clipboard_list(
+    state: State<'_, ClipboardStore>,
+    query: String,
+) -> CmdResult<Vec<ClipboardEntry>> {
     store(&state)?.list(&query, 100).map_err(err)
 }
 
@@ -90,7 +96,11 @@ pub async fn clipboard_copy(state: State<'_, ClipboardStore>, id: u32) -> CmdRes
 /// Copies an entry and pastes it into the app behind the panel.
 #[tauri::command]
 #[specta::specta]
-pub async fn clipboard_paste(app: AppHandle, state: State<'_, ClipboardStore>, id: u32) -> CmdResult<()> {
+pub async fn clipboard_paste(
+    app: AppHandle,
+    state: State<'_, ClipboardStore>,
+    id: u32,
+) -> CmdResult<()> {
     let store = store(&state)?;
     tauri::async_runtime::spawn_blocking(move || aloud_clipboard::actions::copy(&store, id))
         .await
@@ -152,7 +162,9 @@ pub fn snippet_save(
     trigger: String,
     body: String,
 ) -> CmdResult<u32> {
-    store(&state)?.save_snippet(id, &name, &trigger, &body).map_err(err)
+    store(&state)?
+        .save_snippet(id, &name, &trigger, &body)
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -164,7 +176,10 @@ pub fn snippet_delete(state: State<'_, ClipboardStore>, id: u32) -> CmdResult<()
 #[tauri::command]
 #[specta::specta]
 pub fn snippet_copy(state: State<'_, ClipboardStore>, id: u32) -> CmdResult<()> {
-    let body = store(&state)?.snippet_body(id).map_err(err)?.ok_or("that snippet no longer exists")?;
+    let body = store(&state)?
+        .snippet_body(id)
+        .map_err(err)?
+        .ok_or("that snippet no longer exists")?;
     aloud_paste::set_clipboard(&body).map_err(err)
 }
 
@@ -173,7 +188,10 @@ pub fn snippet_copy(state: State<'_, ClipboardStore>, id: u32) -> CmdResult<()> 
 #[tauri::command]
 #[specta::specta]
 pub fn snippet_paste(app: AppHandle, state: State<'_, ClipboardStore>, id: u32) -> CmdResult<()> {
-    let body = store(&state)?.snippet_body(id).map_err(err)?.ok_or("that snippet no longer exists")?;
+    let body = store(&state)?
+        .snippet_body(id)
+        .map_err(err)?
+        .ok_or("that snippet no longer exists")?;
     paste_soon(&app, move || {
         if let Err(e) = aloud_paste::paste_text(&body, false, true) {
             tracing::warn!(error = %format!("{e:#}"), "could not paste a snippet");
@@ -236,7 +254,12 @@ pub fn color_list(state: State<'_, ClipboardStore>) -> CmdResult<Vec<PickedColor
 #[specta::specta]
 pub fn color_copy(hex: String, format: String) -> CmdResult<()> {
     let rgb = aloud_clipboard::colors::parse(&hex).ok_or("not a colour")?;
-    aloud_paste::set_clipboard(&if format == "rgb" { rgb.css() } else { rgb.hex() }).map_err(err)
+    aloud_paste::set_clipboard(&if format == "rgb" {
+        rgb.css()
+    } else {
+        rgb.hex()
+    })
+    .map_err(err)
 }
 
 #[tauri::command]
