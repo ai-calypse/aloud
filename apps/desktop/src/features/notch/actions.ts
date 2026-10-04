@@ -153,6 +153,17 @@ export const ACTIONS: NotchAction[] = [
     },
   },
   {
+    id: "devices.open",
+    title: "Show AirPods and device batteries",
+    keywords: ["bluetooth", "headphones", "mouse", "keyboard", "battery", "airpods"],
+    section: "media",
+    subsection: "devices",
+    run: (ctx) => {
+      ctx.open("media", "devices");
+      return true;
+    },
+  },
+  {
     // What a finished row's Show does: bring back what a write made.
     id: "result.show",
     title: "Show what was made",

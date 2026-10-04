@@ -354,6 +354,21 @@ mod tests {
         assert_eq!((mouse.connected, mouse.kind.as_str()), (true, "mouse"));
     }
 
+    /// Guards: a battery field that is not a plain percentage ("N/A", "120%")
+    /// must drop the figure, not show a bar of nonsense or hide the device.
+    #[test]
+    fn a_bad_battery_figure_is_dropped_but_the_device_stays() {
+        let json = r#"{"SPBluetoothDataType":[{"device_connected":[
+          {"Buds":{"device_address":"AA-BB-CC-DD-EE-09","device_batteryLevelLeft":"N/A",
+            "device_batteryLevelRight":"120%","device_batteryLevelCase":" 55% "}}]}]}"#;
+        let devices = parse_profiler(json);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].address, "aa:bb:cc:dd:ee:09");
+        assert_eq!(devices[0].kind, "headphones");
+        assert_eq!(devices[0].batteries.len(), 1);
+        assert_eq!(devices[0].batteries[0].percent, 55);
+    }
+
     #[test]
     fn connect_refuses_what_is_not_an_address() {
         assert!(connect("--help").is_err());
