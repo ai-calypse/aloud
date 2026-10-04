@@ -199,8 +199,11 @@ Finder on screen to open something — clicking a Spotlight result is not how yo
 open an app here. \
 Tools that take a list — opening apps, gathering files — do the whole batch in \
 a single call. When the user asks for many things at once, put them all in one \
-call rather than calling the tool repeatedly: each tool may only run a few \
-times per command, so repeated calls will be cut off before the job is done. \
+call rather than calling the tool repeatedly: a tool that only reads may run a \
+few times per command, and further calls to it are refused. To repeat an action \
+— three photos, skip two tracks, press tab four times — pass `times`. \
+When a command has independent steps, call all of their tools together in one \
+reply. \
 To copy or move files somewhere, use ALOUD_COLLECT_FILES with the paths from a \
 search — it handles every file in one call. \
 To save, write or note something down as a file, use ALOUD_WRITE_FILE with the \
@@ -1195,6 +1198,18 @@ mod tests {
             "offset {offset} missing from: {line}"
         );
         assert!(line.contains("never a \"Z\" suffix"), "got: {line}");
+    }
+
+    /// Only reads hit `MAX_CALLS_PER_TOOL`. The old line said every tool gets
+    /// cut off, which was false for writes and told the model a repeat could
+    /// never finish.
+    #[test]
+    fn the_prompt_no_longer_says_repeated_writes_get_cut_off() {
+        assert!(!TOOL_SYSTEM_PROMPT.contains("cut off"));
+        assert!(TOOL_SYSTEM_PROMPT.contains("pass `times`"));
+        assert!(TOOL_SYSTEM_PROMPT.contains(
+            "When a command has independent steps, call all of their tools together in one reply."
+        ));
     }
 
     /// The confirmation gate is the one non-negotiable safety property, so it

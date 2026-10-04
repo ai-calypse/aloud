@@ -230,6 +230,43 @@ fn wait_until_frontmost(name: &str) {
     }
 }
 
+/// How long Photo Booth may keep Take Photo greyed out. A calibration knob: on
+/// a 2026 MacBook the item went grey 1.0s after the press and came back at 5.2s,
+/// once the countdown and shutter were done. Raise it if a slower camera times out.
+const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
+
+/// Waits until Photo Booth's Take Photo can be pressed, polled in one osascript
+/// rather than one per poll. `after_shot`: the item stays enabled for about a
+/// second after a press before the countdown greys it, so it must be seen grey
+/// first — else the "ready" read is the stale one from before the press. False
+/// on timeout.
+fn wait_ready(after_shot: bool) -> Result<bool, ScriptError> {
+    let out = script::run_jxa(
+        "System Events",
+        r#"const proc = Application("System Events").processes.byName("Photo Booth");
+        const find = () => {
+            for (const bar of proc.menuBars[0].menuBarItems()) {
+                const hits = bar.menus[0].menuItems.whose({ name: { _beginsWith: "Take" } })();
+                if (hits.length) return hits[0];
+            }
+            return null;
+        };
+        const until = Date.now() + ARG.timeout_ms;
+        let item = null, greyed = !ARG.after_shot;
+        while (Date.now() < until) {
+            try {
+                item = item || find();
+                if (!item || !item.enabled()) greyed = true;
+                else if (greyed) return "ready";
+            } catch (e) { item = null; }
+            delay(0.1);
+        }
+        return "timeout";"#,
+        &json!({ "after_shot": after_shot, "timeout_ms": READY_TIMEOUT.as_millis() as u64 }),
+    )?;
+    Ok(out == "ready")
+}
+
 /// Gathers `paths` into `destination`, copying or moving.
 ///
 /// One call for the whole batch, for the same reason the folder organiser is:
@@ -562,6 +599,9 @@ pub struct Action {
     /// gates the tool. Also what a -1743 denial names.
     pub app: &'static str,
     pub read_only: bool,
+    /// Offered a `times` argument and run that many times by `lib::execute`, so
+    /// "take three photos" is one call rather than three the model may not make.
+    pub repeatable: bool,
     pub params: fn() -> Value,
     pub run: fn(&Value) -> Result<Value, ScriptError>,
 }
@@ -596,6 +636,7 @@ pub const ACTIONS: &[Action] = &[
         // app the scanner cannot see.
         app: crate::ALWAYS,
         read_only: true,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -631,6 +672,7 @@ pub const ACTIONS: &[Action] = &[
                       library; without, resume), pause, next, previous, or now_playing.",
         app: "Music",
         read_only: false,
+        repeatable: true,
         params: || {
             json!({
                 "type": "object",
@@ -679,6 +721,7 @@ pub const ACTIONS: &[Action] = &[
                       cannot search on its own — say so in your answer.",
         app: "Spotify",
         read_only: false,
+        repeatable: true,
         params: || {
             json!({
                 "type": "object",
@@ -737,6 +780,7 @@ pub const ACTIONS: &[Action] = &[
                       day. `list` is optional; omit it for the default list.",
         app: "Reminders",
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -795,6 +839,7 @@ pub const ACTIONS: &[Action] = &[
                       actual list. Plain text, no emoji. Omit `body` for an empty note.",
         app: "Notes",
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -825,6 +870,7 @@ pub const ACTIONS: &[Action] = &[
                       exist yet is created. Write the content yourself into `body` as markdown.",
         app: "Notes",
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -859,12 +905,14 @@ pub const ACTIONS: &[Action] = &[
                       countdown, then the shutter).",
         app: "Photo Booth",
         read_only: false,
+        repeatable: true,
         params: || json!({ "type": "object", "properties": {} }),
         run: |_args| {
             open_one("Photo Booth")?;
             wait_until_frontmost("Photo Booth");
-            // The camera takes a moment to come up; a press before it does is ignored.
-            std::thread::sleep(std::time::Duration::from_millis(1500));
+            // A press while Take Photo is greyed out (a countdown under way) is ignored. A timeout
+            // here still tries: the press below falls back to the window's button.
+            wait_ready(false)?;
             // Photo Booth has no scripting dictionary, so its own control is pressed through
             // System Events: the menu item first, the window button if the menu lacks it.
             // The menu walk is macos-automator-mcp's jxa_ui_menu_actions fallback (MIT).
@@ -882,6 +930,15 @@ pub const ACTIONS: &[Action] = &[
                 throw new Error("Photo Booth showed no Take Photo control");"#,
                 &json!({}),
             )?;
+            // Back only once the shutter has fired, so a repeat's next press lands on a ready
+            // camera and the confirmation never beats the photo.
+            if !wait_ready(true)? {
+                return Err(ScriptError::Failed(format!(
+                    "Photo Booth's Take Photo did not come back within {}s; the photo may not \
+                     have been taken",
+                    READY_TIMEOUT.as_secs()
+                )));
+            }
             Ok(json!({ "took_photo": true, "via": how }))
         },
     },
@@ -891,6 +948,7 @@ pub const ACTIONS: &[Action] = &[
                       quick switcher, goes to `to`, and sends `text`. Write the message yourself.",
         app: "Discord",
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -944,6 +1002,7 @@ pub const ACTIONS: &[Action] = &[
                       for something the Mac does with keys.",
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: true,
         params: || {
             json!({
                 "type": "object",
@@ -977,6 +1036,7 @@ pub const ACTIONS: &[Action] = &[
                       the app's menu items. `app` defaults to the app in front.",
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: true,
         params: || {
             json!({
                 "type": "object",
@@ -1066,6 +1126,7 @@ pub const ACTIONS: &[Action] = &[
                       names to a handle first, or ask.",
         app: "Messages",
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -1108,6 +1169,7 @@ pub const ACTIONS: &[Action] = &[
              (\"open components in Cursor\"), pass it as `open`.",
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -1240,6 +1302,7 @@ pub const ACTIONS: &[Action] = &[
              set move=true to move instead.",
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -1291,6 +1354,7 @@ pub const ACTIONS: &[Action] = &[
              and say so.",
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -1346,6 +1410,7 @@ pub const ACTIONS: &[Action] = &[
              with the undo tool.",
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -1392,6 +1457,7 @@ pub const ACTIONS: &[Action] = &[
              when the user says to undo it or put things back.",
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -1413,6 +1479,7 @@ pub const ACTIONS: &[Action] = &[
              left\", \"tile these side by side\".",
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -1503,6 +1570,7 @@ pub const ACTIONS: &[Action] = &[
              currently looking at. Works with Safari, Chrome, Arc and Brave.",
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -1556,6 +1624,7 @@ pub const ACTIONS: &[Action] = &[
              I copy\", \"copy this to my clipboard\".",
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -1587,6 +1656,7 @@ pub const ACTIONS: &[Action] = &[
         description: "Quit an application by name. Use for \"close Safari\", \"quit Music\".",
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -1607,6 +1677,7 @@ pub const ACTIONS: &[Action] = &[
         // Finder is always running on macOS but never appears in installed_apps.
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
@@ -1635,6 +1706,7 @@ pub const ACTIONS: &[Action] = &[
         // A system-wide action with no app of its own.
         app: crate::ALWAYS,
         read_only: false,
+        repeatable: false,
         params: || {
             json!({
                 "type": "object",
