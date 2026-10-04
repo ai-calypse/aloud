@@ -33,6 +33,25 @@
     "editable": ["/to", "/text"],
     "ask": "No recipient — cancel and ask again."
   },
+  "ALOUD_MAIL_SEND": {
+    "kind": "email", "verb": "Send",
+    "slots": [
+      { "role": "person", "path": "/to", "label": "To" },
+      { "role": "heading", "path": "/subject", "label": "Subject" },
+      { "role": "text", "path": "/body", "label": "Body" }
+    ],
+    "editable": ["/to", "/subject", "/body"],
+    "ask": "No recipient — cancel and ask again."
+  },
+  "ALOUD_FACETIME_CALL": {
+    "kind": "message", "verb": "Call", "noun": "", "to": "",
+    "slots": [
+      { "role": "person", "path": "/to", "label": "Call" },
+      { "role": "plain", "path": "/audio", "label": "Audio only" }
+    ],
+    "editable": ["/to"],
+    "ask": "No one to call — cancel and ask again."
+  },
   "ALOUD_DISCORD_MESSAGE": {
     "kind": "message", "verb": "Send", "noun": "Discord message",
     "slots": [
