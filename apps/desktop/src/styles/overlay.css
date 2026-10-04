@@ -2819,55 +2819,21 @@ textarea.preview__input {
     opacity var(--dur-instant) var(--ease-out);
 }
 
-/* --- Resting strip + notch agent rows ----------------------------------- */
+/* --- The agents' cat stack + notch agent rows ---------------------------- */
 
-/* The resting strip: a tight stack of stage cats on the canvas just left of
-   the camera, shown at rest. Anchored by its RIGHT edge a hair left of the
-   cutout (centred, `--notch-w` wide, so half of it plus a gap is the offset).
-   It does NOT expand in place — hovering hands off to the notch, which grows
-   down and deals the same agents out as a bigger row (`.notch-card`, dealt
-   from the strip's side via `--from`). `pointer-events: none`: it is a sign,
-   not a target; the notch takes the clicks. It still reports its rect as the
-   resting click-box (so the hover that grows the notch fires over the strip),
-   but that is Rust's poll, not DOM events. */
+/* The coding agents' face in the closed notch: the `agents` island's lead,
+   left of the camera inside the live pill (`.island-pill`). It does NOT
+   expand in place — hovering grows the notch down and deals the same agents
+   out as a bigger row (`.notch-card`, dealt from this side via `--from`).
+   No entrance of its own: it arrives with the pill. */
 .ambient {
-  position: absolute;
-  top: 0;
-  right: calc(50% + var(--notch-w, 200px) / 2 + 6px);
-  height: var(--notch-h, 32px);
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  pointer-events: none;
-  /* Slides in from the notch when an agent first becomes busy. */
-  animation: ambient-in var(--dur-base) var(--ease-out) both;
-  transition: opacity var(--dur-fast) var(--ease-out);
-}
-
-/* Handed off: the notch has grown and its dealt row shows the same agents, so
-   the strip fades out. Fade (not `display:none`) so the exit actually plays.
-   `animation: none` so the entrance keyframe's `both` fill mode stops pinning
-   opacity at 1 (a running/filled animation outranks the declared value; the
-   transition would never take). */
-.ambient[data-handed-off] {
-  animation: none;
-  opacity: 0;
-}
-
-@keyframes ambient-in {
-  from {
-    opacity: 0;
-    transform: translateX(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
 }
 
 .ambient__cats {
   display: flex;
   align-items: center;
-  padding: 0 6px;
   border-radius: 12px;
 }
 

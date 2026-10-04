@@ -76,33 +76,23 @@ export function CatPeek({ stage, seed, rect }: { stage: AgentStage; seed: string
 const AMBIENT_CATS = 4;
 
 /**
- * The resting strip: a tight stack of stage cats on the canvas just *left* of
- * the camera (agent-notch's approach, not a growth of the drop-pill), shown at
- * rest without a hover. It does NOT expand in place — hovering hands off to the
- * notch, which grows down and *deals* the same cats out into a row of bigger
- * circles (`NotchAgents`, dealing from the strip's side via `--from`). The
- * strip just fades out once the notch takes over.
+ * The coding agents' face in the closed notch: a tight stack of stage cats,
+ * drawn as the lead of the `agents` island left of the camera (see
+ * `IslandPill`). It does NOT expand in place — hovering grows the notch down
+ * and *deals* the same cats out into a row of bigger circles (`NotchAgents`,
+ * dealing from the stack's side via `--from`).
  *
- * It still reports the resting click-box, though — the window only takes the
- * mouse over a reported box, and the strip sits left of the cutout, so without
- * this the hover that grows the notch would never fire when the cursor is over
- * the strip. Symmetric across the canvas (see `point_in_panel`): a width that
- * reaches the strip on the left also reaches its mirror on the right, with the
- * centred notch inside it either way — harmless dead canvas.
+ * It used to be a strip of its own on the canvas beside the cutout, reporting
+ * its own click-box. As an island it is the pill's content, so the pill's
+ * measured box is the click-box and there is one writer of it, not two.
  */
-export function AmbientSign({
+export function AgentCats({
   sessions,
   permissions,
-  handedOff,
-  onBox,
 }: {
   sessions: AgentSession[];
   permissions: AgentPermission[];
-  /** The notch has grown and shows the dealt row now — fade the strip out. */
-  handedOff: boolean;
-  onBox: (width: number, height: number) => void;
 }) {
-  const el = useRef<HTMLDivElement>(null);
   const asking = permissions.length > 0;
   const askingIds = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
   // Busy-first from Rust; the busy ones are what the sign is about. Asking but
@@ -111,38 +101,13 @@ export function AmbientSign({
   const cats = ambientCats(sessions);
   const extra = (busy.length > 0 ? busy.length : sessions.length) - cats.length;
 
-  // Report the strip's rect as the resting click-box, so hovering the strip (or
-  // the notch) makes Rust's poll flip `hovering` — which is what grows the
-  // notch. A ResizeObserver keeps it current if the cat count changes. Once
-  // handed off, the grown notch owns the box (`useNotchPanel` reports it): the
-  // strip bows out so the two do not fight over the shared report each frame.
-  useEffect(() => {
-    if (handedOff) return;
-    const node = el.current;
-    const root = node?.offsetParent as HTMLElement | null;
-    if (!node || !root) return;
-    const report = () => {
-      const rect = node.getBoundingClientRect();
-      const rootRect = root.getBoundingClientRect();
-      const centre = rootRect.left + rootRect.width / 2;
-      const halfWidth = centre - rect.left;
-      onBox(halfWidth * 2, rect.height);
-    };
-    report();
-    const observer = new ResizeObserver(report);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [onBox, handedOff]);
-
   return (
-    <div
-      ref={el}
+    <span
       className="ambient"
-      data-handed-off={handedOff || undefined}
       data-asking={asking || undefined}
       data-busy={busy.length > 0 || undefined}
     >
-      <div className="ambient__cats">
+      <span className="ambient__cats">
         {cats.map((session) => {
           const stage = agentStage(session, askingIds.has(session.id));
           return (
@@ -157,8 +122,8 @@ export function AmbientSign({
           );
         })}
         {extra > 0 && <span className="ambient__count">+{extra}</span>}
-      </div>
-    </div>
+      </span>
+    </span>
   );
 }
 

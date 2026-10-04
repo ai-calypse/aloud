@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { XIcon } from "lucide-react";
-import { commands, type Toast } from "@/lib/bindings";
+import type { Island, IslandAction } from "@/lib/bindings";
 import { AppIcon } from "@/components/preview/kit";
 
-/** How long a toast stays when nobody is looking at it. */
+/** How long an alert stays when nobody is looking at it. */
 const TOAST_MS = 4000;
 
 /**
@@ -26,58 +26,49 @@ function useDwell(ms: number, held: boolean, done: () => void) {
 }
 
 /**
- * The confirmation chip a run of writes that all worked ends on, hanging from
- * the notch: the app it acted in, what was done, and at most one thing to do
- * about it. It is the notch panel's own content, so it grows out of the
- * cutout — or the run's panel shrinks into it — on the panel's spring, and
- * leaves the same way (`onLeave` plays the collapse before anything unmounts).
+ * An alert island, hanging from the notch: the app it happened in, what was
+ * done, and at most one thing to do about it — the chip a run of writes that
+ * all worked ends on, and the one way any later alert is drawn. It is the
+ * notch panel's own content, so it grows out of the cutout — or the run's
+ * panel shrinks into it — on the panel's spring, and leaves the same way
+ * (`onLeave` plays the collapse before anything unmounts).
  */
 export function NotchToast({
-  toast,
+  island,
   hovering,
   onLeave,
+  onAction,
 }: {
-  toast: Toast;
-  /** The pointer is over the notch; the toast waits while it is. */
+  island: Island;
+  /** The pointer is over the notch; the alert waits while it is. */
   hovering: boolean;
   onLeave: () => void;
+  /** Runs a button through the action registry; true when it did. */
+  onAction: (action: IslandAction) => Promise<boolean>;
 }) {
-  const [undoFailed, setUndoFailed] = useState(false);
+  // The action that did not work, so its button can say so and stay.
+  const [failed, setFailed] = useState<string | null>(null);
   useDwell(TOAST_MS, hovering, onLeave);
-  const action = toast.action;
 
   return (
     <div className="toast" role="status">
       <button className="toast__close" aria-label="Dismiss" onClick={onLeave}>
         <XIcon size={9} strokeWidth={3} />
       </button>
-      <AppIcon app={toast.app} icon={toast.icon} />
-      <p className="toast__text">{toast.text}</p>
-      {action?.kind === "show" && (
+      <AppIcon app={island.detail ?? island.title} icon={island.icon} />
+      <p className="toast__text">{island.title}</p>
+      {island.actions.map((action) => (
         <button
+          key={action.action}
           className="app-pill"
-          onClick={() => {
-            void commands.showResult(action.app, action.target);
-            onLeave();
-          }}
-        >
-          Show
-        </button>
-      )}
-      {action?.kind === "undo" && (
-        <button
-          className="app-pill"
-          disabled={undoFailed}
+          disabled={failed === action.action}
           onClick={() =>
-            void commands.undoTidy(action.folder).then((res) => {
-              if (res.status === "ok") onLeave();
-              else setUndoFailed(true);
-            })
+            void onAction(action).then((done) => (done ? onLeave() : setFailed(action.action)))
           }
         >
-          {undoFailed ? "Couldn't undo" : "Undo"}
+          {failed === action.action ? `Couldn't ${action.label.toLowerCase()}` : action.label}
         </button>
-      )}
+      ))}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 mod agent;
 mod commands;
+mod islands;
 mod listen;
 mod meeting;
 mod notch;
@@ -138,6 +139,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::set_panel_box,
             overlay::set_panel_interactive,
             overlay::close_browse,
+            islands::islands,
+            islands::dismiss_island,
             sessions::agent_hook_status,
             sessions::install_agent_hooks,
             sessions::uninstall_agent_hooks,
@@ -166,6 +169,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::OverlayStyleChanged,
             overlay::OverlayDismiss,
             overlay::NotchHover,
+            islands::IslandChanged,
             sessions::AgentSessions,
             sessions::AgentPermission,
             sessions::AgentPermissionResolved,

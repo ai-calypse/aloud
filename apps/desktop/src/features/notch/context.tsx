@@ -1,5 +1,11 @@
 import { createContext, useContext, type Dispatch, type RefObject, type SetStateAction } from "react";
-import type { AgentPermission, AgentSession, ApprovalReply } from "@/lib/bindings";
+import type {
+  AgentPermission,
+  AgentSession,
+  ApprovalReply,
+  Island,
+  IslandAction,
+} from "@/lib/bindings";
 import type { Run } from "@/lib/agent-steps";
 import type { PeekFn } from "@/features/overlay/agentIdentity";
 import type { Tab } from "@/features/overlay/TabStrip";
@@ -17,10 +23,14 @@ export type NotchData = {
   sessions: AgentSession[];
   /** Approvals waiting on the user, newest first. */
   permissions: AgentPermission[];
+  /** The island queue, ranked by Rust. */
+  islands: Island[];
 };
 
 export type NotchContextValue = NotchData & {
   setAgent: Dispatch<SetStateAction<Run | null>>;
+  /** Runs an island's button through the action registry; true when it did. */
+  act: (action: IslandAction) => Promise<boolean>;
   /** The coding agent drilled into, by session id. */
   selected: string | null;
   select: (id: string | null) => void;

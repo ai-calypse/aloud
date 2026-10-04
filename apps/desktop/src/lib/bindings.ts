@@ -190,6 +190,17 @@ export const commands = {
 	 *  that dismiss a browse (cross, Escape, click-away) can all call it.
 	 */
 	closeBrowse: () => __TAURI_INVOKE<void>("close_browse"),
+	/**
+	 *  Everything on screen, ranked — for a webview that mounts after islands
+	 *  were pushed (the event only carries changes).
+	 */
+	islands: () => __TAURI_INVOKE<Island[]>("islands"),
+	/**
+	 *  The user is done with an island: its ×, an alert's clock running out, or
+	 *  an action that settles it. The action itself runs in the webview's
+	 *  registry; this is the half of it the queue has to hear.
+	 */
+	dismissIsland: (id: string) => __TAURI_INVOKE<void>("dismiss_island", { id }),
 	agentHookStatus: () => typedError<HookStatus, string>(__TAURI_INVOKE("agent_hook_status")),
 	/**
 	 *  Installs our hooks, copying the sidecar out of the bundle first.
@@ -301,6 +312,7 @@ export const events = {
 	dictationPartial: makeEvent<DictationPartial>("dictation-partial"),
 	dictationPhase: makeEvent<Phase>("dictation-phase"),
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
+	island: makeEvent<IslandChanged>("island"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
 	notchHover: makeEvent<NotchHover>("notch-hover"),
@@ -371,12 +383,7 @@ export type AgentEvent =
  *  A transient status line (e.g. "rate limited, retrying in 30s") shown
  *  while the run is otherwise silent; cleared by the next event.
  */
-{ kind: "status"; value: string } | 
-/**
- *  A run of writes that all worked: the chip under the notch. Sent before
- *  `RunFinished`, so a run's own panel collapses into it.
- */
-{ kind: "toast"; value: Toast } | { kind: "runFinished"; value: string } | { kind: "runError"; value: string };
+{ kind: "status"; value: string } | { kind: "runFinished"; value: string } | { kind: "runError"; value: string };
 
 /**
  *  One request awaiting an Approve / Deny. The notch opens itself on this and
@@ -780,6 +787,86 @@ export type InstalledApp = {
 	 */
 	icon: string | null,
 };
+
+/**  One live activity. */
+export type Island = {
+	/**
+	 *  Stable for the activity's life: pushing the same id again updates it
+	 *  in place. Namespace by owner — `agents`, `toast:3`, `download:<path>`.
+	 */
+	id: string,
+	kind: IslandKind,
+	priority: IslandPriority,
+	/**
+	 *  A `data:` image (an app's icon, as `aloud_selection::app_icon` and
+	 *  `aloud_agent::icons` make them), or the name of a glyph the webview
+	 *  knows (`agents`, `download`, `timer`…). None draws a neutral glyph.
+	 */
+	icon: string | null,
+	/**  What it is: "Claude · aloud-tauri", "Sent the email to David". */
+	title: string,
+	/**
+	 *  Its live value, short enough for the closed notch: "2 running",
+	 *  "18:42". For an alert, the app it happened in.
+	 */
+	detail: string | null,
+	actions: IslandAction[],
+	/**
+	 *  Milliseconds it lives after its last push; None lives until removed.
+	 *  `u32` and not a duration type: specta refuses 64-bit integers, which
+	 *  would reach the webview as a BigInt.
+	 */
+	expires: number | null,
+};
+
+/**  A button on an island. */
+export type IslandAction = {
+	/**  The button's word: "Show", "Undo", "Review". */
+	label: string,
+	/**
+	 *  An id in the webview's action registry (`features/notch/actions.ts`),
+	 *  the one ⌘K runs too — so an island never carries code, only a name.
+	 */
+	action: string,
+	/**  Its arguments. Strings, because specta will not export a JSON value. */
+	args: { [key in string]: string },
+};
+
+/**
+ *  What a push, a removal or the clock did to the queue — the `island`
+ *  event's payload, applied by the webview in order.
+ */
+export type IslandChange = { op: "add"; value: Island } | { op: "update"; value: Island } | 
+/**  By id. */
+{ op: "remove"; value: string };
+
+/**
+ *  One change to the queue, with the ranked order after it — so the webview
+ *  orders its copy by Rust's ranking rather than by a second one of its own.
+ */
+export type IslandChanged = {
+	change: IslandChange,
+	order: string[],
+};
+
+/**  How an island is drawn. */
+export type IslandKind = 
+/**
+ *  Ongoing: drawn beside the camera in the closed notch, and as a row in
+ *  Now › Overview while it lasts.
+ */
+"live" | 
+/**  Just happened: the chip that drops out of the notch, then goes. */
+"alert";
+
+/**  What it costs to miss. Declared in rank order, so `Ord` is the ranking. */
+export type IslandPriority = 
+/**  Ambient: worth a glance if there is room. */
+"low" | "normal" | 
+/**  Time-bound: a timer about to end, a download finishing. */
+"high" | 
+/**  Waiting on the user: an agent asking, a call ringing. */
+"urgent";
 
 /**
  *  A physical key, side-specific where the distinction matters — Right Option
@@ -1219,30 +1306,6 @@ export type StatsView = {
 export type Tier = "confirm" | 
 /**  Red, needs a click, never auto-runs, and "Always allow" cannot cover it. */
 "strict";
-
-/**
- *  The confirmation chip a run of writes that all worked ends on, under the
- *  notch — always-listening runs included, which otherwise report only to the
- *  bar's one line.
- */
-export type Toast = {
-	/**
-	 *  What was done, in one line: the run's closing words — for Mac writes,
-	 *  the tool's own confirmation.
-	 */
-	text: string,
-	/**  The app the last write acted in, and its icon as a data URI. */
-	app: string,
-	icon: string | null,
-	action: ToastAction | null,
-};
-
-/**  The one thing a toast offers: what a finished row already could. */
-export type ToastAction = 
-/**  Brings back what the write made; see [`show_result`]. */
-{ kind: "show"; app: string; target: string } | 
-/**  Puts a tidied folder back; see [`undo_tidy`]. */
-{ kind: "undo"; folder: string };
 
 /**
  *  A tool call for display. Kept separate from `ParsedAction` so the UI

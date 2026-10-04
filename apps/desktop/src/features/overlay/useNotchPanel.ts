@@ -35,7 +35,9 @@ const NOTCH_FALLBACK = { width: 200, height: 32 };
 
 /**
  * Minimum panel width, as a multiple of the cutout, so it is never narrower
- * than the hole it hangs from. Wider content still wins.
+ * than the hole it hangs from. Wider content still wins. A surface can lower
+ * it with `--panel-floor` — the live pill sits in the notch's own row and
+ * only has to clear the cutout (styles/notch.css).
  */
 const PANEL_WIDTH_FACTOR = 1.5;
 
@@ -59,15 +61,7 @@ export function useNotchPanel(
    * behind the notch.
    */
   populated: boolean,
-  /**
-   * The resting strip is showing beside the cutout and owns the resting
-   * click-box itself (it is wider than the cutout, and off-centre-left) so that
-   * hovering it flips Rust's `hovering` and grows the notch. While that is true
-   * the panel must not also write the box in its *unpopulated* branch, or the
-   * two writers fight through the same report. Once hovering grows the notch
-   * (populated), the panel reclaims the box — the strip bows out (`handedOff`).
-   */
-  ambientOwnsBox: boolean,
+  /** Collapse into the cutout: the window is going, or the live pill emptied. */
   dismissing: boolean,
   /** Called with the box the panel is settling to, whenever that changes. */
   onTarget: (width: number, height: number) => void,
@@ -121,10 +115,7 @@ export function useNotchPanel(
         "d",
         notchPath(width, height, Math.max(0, height / 3 - 4), height / 3),
       );
-      // When the ambient strip is up it owns the click-box (it is wider than
-      // the cutout and reaches left of it); reporting the bare cutout here
-      // would clobber that and the strip would stop taking clicks.
-      if (!ambientOwnsBox) onTarget(width, height);
+      onTarget(width, height);
       return;
     }
     // On screen but not laid out yet (just mounted, or `display: none`):
@@ -162,18 +153,25 @@ export function useNotchPanel(
       };
       const notchWidth = measured("--notch-w", NOTCH_FALLBACK.width);
       const notchHeight = measured("--notch-h", NOTCH_FALLBACK.height);
+      const floor = measured("--panel-floor", PANEL_WIDTH_FACTOR);
+      // A body pulled up over the cutout spacer (the live pill, negative
+      // margin) overlaps the notch's row by that much rather than adding to it.
+      const overlap = parseFloat(getComputedStyle(contentElement).marginTop) || 0;
 
       // The cutout's own rounding; every other radius is measured from it.
       baseRadius = notchHeight / 3;
       base = { width: notchWidth, height: notchHeight };
-      const settledHeight = notchHeight + contentElement.offsetHeight;
+      const settledHeight = Math.max(
+        notchHeight,
+        notchHeight + contentElement.offsetHeight + overlap,
+      );
       target = {
         // The body sits between the two concave shoulders, so the panel is
         // wider than its content by exactly that much — measured at the
         // *settled* top radius. Never narrower than the cutout, or the physical
         // camera bump sticks out either side.
         width: Math.max(
-          notchWidth * PANEL_WIDTH_FACTOR,
+          notchWidth * floor,
           contentElement.offsetWidth + topRadiusAt(settledHeight) * 2,
         ),
         height: settledHeight,
@@ -265,7 +263,7 @@ export function useNotchPanel(
       height.stop();
       driver.current = null;
     };
-  }, [style, run, populated, ambientOwnsBox, layoutTick]);
+  }, [style, run, populated, layoutTick]);
 
   // Declared after the effect above so that on a rebuild the driver exists
   // before this runs — effects fire in declaration order.

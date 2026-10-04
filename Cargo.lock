@@ -49,6 +49,7 @@ dependencies = [
  "aloud-drag",
  "aloud-engine",
  "aloud-hotkey",
+ "aloud-islands",
  "aloud-llm",
  "aloud-meeting",
  "aloud-native",
@@ -184,6 +185,15 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "windows 0.62.2",
+]
+
+[[package]]
+name = "aloud-islands"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "specta",
 ]
 
 [[package]]

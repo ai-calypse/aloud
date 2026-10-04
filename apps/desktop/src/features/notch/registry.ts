@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { readySections, type Section } from "./sections";
 import { AgentsCoding, AgentsUsage, AgentsVoice } from "./views/Agents";
+import { NowOverview } from "./views/Now";
 
 /**
  * Every section of the notch panel and every subsection in it, in tab order —
@@ -26,8 +27,18 @@ export const SECTIONS: Section[] = [
     id: "now",
     name: "Now",
     icon: ActivityIcon,
+    status: (d) => {
+      const live = d.islands.filter((i) => i.kind === "live").length;
+      return live > 0 ? `${live} live` : "";
+    },
     subsections: [
-      { id: "overview", name: "Overview", features: ["Live activities"], ready: false },
+      {
+        id: "overview",
+        name: "Overview",
+        features: ["Live activities"],
+        ready: true,
+        view: NowOverview,
+      },
       { id: "activity", name: "Activity", features: ["Shell activity", "Developer API"], ready: false },
     ],
   },

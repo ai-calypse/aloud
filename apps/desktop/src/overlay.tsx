@@ -13,9 +13,10 @@ import {
   type AgentPermission,
   type AgentSession,
   type ApprovalReply,
+  type Island,
+  type IslandAction,
   type OverlayStyle,
   type Phase,
-  type Toast,
 } from "./lib/bindings";
 import {
   withCall,
@@ -30,15 +31,13 @@ import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import { CatSettingsProvider } from "./lib/cat-settings";
 import { listen } from "@tauri-apps/api/event";
 import { NotchToast } from "./features/overlay/NotchToast";
-import {
-  ListeningCat,
-  CatPeek,
-  AmbientSign,
-  NotchAgents,
-} from "./features/overlay/NotchAgents";
+import { ListeningCat, CatPeek, NotchAgents } from "./features/overlay/NotchAgents";
 import { type Tab, FIRST_TABS, MAX_TABS } from "./features/overlay/TabStrip";
 import { NotchShell } from "./features/notch/NotchShell";
+import { IslandPill } from "./features/notch/IslandPill";
+import { runAction } from "./features/notch/actions";
 import { NotchProvider } from "./features/notch/context";
+import { applyIsland } from "./features/notch/islands";
 import { loadNav, saveNav, type Nav, type SectionId } from "./features/notch/sections";
 import {
   PARTIAL_PREVIEW,
@@ -47,6 +46,7 @@ import {
   CARD_PREVIEWS,
   CONTACT_PREVIEW,
   FINDER_PREVIEWS,
+  LIVE_PREVIEWS,
   TOAST_PREVIEWS,
   withIcon,
 } from "./features/overlay/previews";
@@ -114,11 +114,14 @@ function Overlay() {
   // Latched once a run has produced words; see `effectiveStyle`.
   const [droppedDown, setDroppedDown] = useState(false);
   const [agent, setAgent] = useState<Run | null>(null);
-  // The confirmation chip a run of writes ends on. Not a panel: it holds no
-  // focus and takes no keys, and it stays mounted through its own exit — it
-  // is cleared only once the collapse has played (the dismissing timer).
-  // Keyed, so a toast replacing another restarts its clock.
-  const [toast, setToast] = useState<{ value: Toast; key: number } | null>(null);
+  // The island queue's copy, ranked by Rust (see `applyIsland`).
+  const [islands, setIslands] = useState<Island[]>([]);
+  // The alert island on screen — the confirmation chip a run of writes ends
+  // on, and any later alert. Not a panel: it holds no focus and takes no
+  // keys, and it stays mounted through its own exit — it is cleared only once
+  // the collapse has played (the dismissing timer). Keyed, so an alert
+  // replacing another restarts its clock.
+  const [toast, setToast] = useState<{ value: Island; key: number } | null>(null);
   const toastKey = useRef(0);
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -262,6 +265,18 @@ function Overlay() {
         })),
       );
     }
+    // `?notch=200x32` stands in for the cutout Rust measures and sends with
+    // every style event, so a browser preview draws the hardware's shape.
+    const [notchW, notchH] = (params.get("notch") ?? "").split("x").map(Number);
+    if (notchW > 0 && notchH > 0) {
+      root.current?.style.setProperty("--notch-w", `${notchW}px`);
+      root.current?.style.setProperty("--notch-h", `${notchH}px`);
+    }
+    // The agents' island is Rust's, so the preview stands it in for `?agents`
+    // (the cats beside the camera); `?islands=3` adds the fixtures' others.
+    const live = Number(params.get("islands"));
+    if (live > 0) setIslands(LIVE_PREVIEWS.slice(0, live));
+    else if (count > 0) setIslands(LIVE_PREVIEWS.filter((island) => island.id === "agents"));
     if (params.has("hover")) setHovering(true);
     // `?perm` and `?perm=2` stage the card and a queue behind it.
     const perms = params.has("perm") ? Math.max(1, Number(params.get("perm")) || 1) : 0;
@@ -386,11 +401,40 @@ function Overlay() {
     const resolvedOff = events.agentPermissionResolved.listen((e) =>
       setPermissions((queue) => queue.filter((p) => p.id !== e.payload.id)),
     );
+    // The island queue. An alert arriving is what the agent's "toast" event
+    // used to be: the run's own panel collapses into the chip (the notch
+    // panel's spring retargets from the panel's size to the chip's) and a
+    // quiet run's grows out of the cutout. Rust only pushes one where no
+    // other panel is being read (`overlay::show_toast`).
+    const islandOff = events.island.listen(({ payload }) => {
+      setIslands((list) => applyIsland(list, payload));
+      const { change } = payload;
+      if (change.op !== "remove" && change.value.kind === "alert") {
+        setToast({ value: change.value, key: ++toastKey.current });
+        setAgent(null);
+        setBrowsing(false);
+        setSelected(null);
+        setDismissing(false);
+      }
+      // Taken down from Rust's side (its backstop): leave the way the
+      // clock would.
+      if (change.op === "remove" && toastRef.current?.value.id === change.value) {
+        setDismissing(true);
+      }
+    });
+    // The event carries changes only; islands pushed before this window
+    // listened arrive with the snapshot.
+    try {
+      void commands.islands().then(setIslands);
+    } catch {
+      /* browser preview: no Tauri, no islands */
+    }
     return () => {
       void sessionsOff.then((off) => off());
       void hoverOff.then((off) => off());
       void permOff.then((off) => off());
       void resolvedOff.then((off) => off());
+      void islandOff.then((off) => off());
     };
   }, []);
 
@@ -473,17 +517,23 @@ function Overlay() {
    * entirely between dictations.
    */
   const resting = !panelOpen && phase === "idle" && !dismissing && toast === null;
-  const busyCount = sessions.filter((s) => s.busy).length;
-  // The ambient sign: what the resting notch shows *without* a hover — a small
-  // strip of stage cats left of the camera while agents are busy, or an
-  // attention pulse when one wants permission and the notch did not auto-open
-  // (that setting off; when on, the panel is up and we are not resting).
-  // Hovering it expands the stack into a labelled horizontal row and offers a
-  // "view all agents" button; it owns the resting click-box while up.
-  const ambient = resting && (busyCount > 0 || permissions.length > 0);
+  // What the resting notch shows *without* a hover: the live islands, beside
+  // the camera — the coding agents' cats while they work or ask (Rust's
+  // `agents` island), and whatever features push later. Hovering grows the
+  // notch into the agents' dealt row, as it always has.
+  const live = islands.filter((island) => island.kind === "live");
+  const liveNow = resting && live.length > 0;
+  // Held up a beat after the last one goes, so the pill collapses into the
+  // cutout on the panel's spring (`pillLeaving` below) rather than snapping.
+  const pillShown = useLinger(liveNow, 600);
+  const pillLeaving = pillShown && !liveNow;
+  // What the pill draws while it leaves: the last activities, fading out as
+  // the shape collapses under them, rather than an empty pill doing so.
+  const lastLive = useRef(live);
+  if (live.length > 0) lastLive.current = live;
   // Drill into one agent (opens the panel on its detail) or open the whole
-  // list — the two things the expanded ambient row can do. Both route through
-  // the same open-the-notch state a click does today.
+  // list — the two things the dealt row can do. Both route through the same
+  // open-the-notch state a click does.
   const openAgent = useCallback((id: string) => {
     setBrowsing(true);
     setSelected(id);
@@ -537,19 +587,19 @@ function Overlay() {
   // judging by the body's measured width instead was wrong twice (a
   // `display: none` pill measures 0 with content, an empty body measures its
   // padding without any), so the decision is state, never pixels.
-  const populated = panelOpen || toast !== null || phase !== "idle" || (resting && hovering);
-  // The strip owns the click-box only while it is the thing on screen — i.e. at
-  // rest, NOT once a hover has grown the notch. Passing bare `ambient` here left
-  // the strip's small resting box reported after the panel grew, so the cursor
-  // (now over a dealt card well below the old cutout) tested as OUTSIDE and the
-  // window went click-through: the card never got `mouseenter`, so the hover
-  // pop/plate did not fire until a click→back forced the grown box to report.
+  const populated =
+    panelOpen ||
+    toast !== null ||
+    phase !== "idle" ||
+    (resting && (hovering || pillShown));
+  // The pill reports its own measured box, so hovering it is hovering the
+  // notch — the one writer of the click-box, where the old canvas strip and
+  // the panel used to take turns at it.
   const panel = useNotchPanel(
     effectiveStyle,
     run,
     populated,
-    ambient && !hovering,
-    dismissing,
+    dismissing || (pillLeaving && !hovering),
     reportBox,
   );
 
@@ -837,6 +887,11 @@ function Overlay() {
         setAgent(null);
         setDismissing(false);
       }
+      if (command.islands !== undefined) setIslands(LIVE_PREVIEWS.slice(0, command.islands));
+      if (command.open) {
+        setBrowsing(true);
+        navigate(command.open.section, command.open.sub);
+      }
       if (command.agent === "close") setAgent(null);
       if (command.partial === "clear") {
         clearInterval(typing);
@@ -862,17 +917,6 @@ function Overlay() {
           // A new run resets the panel; it is reused, not recreated.
           setAgent({ heard: payload.value, steps: [] });
           setToast(null);
-          break;
-        case "toast":
-          // The run's own panel collapses into it — the notch panel's spring
-          // retargets from the panel's size to the chip's — and a quiet run's
-          // grows out of the cutout. Rust only sends one where no other panel
-          // is being read.
-          setToast({ value: payload.value, key: ++toastKey.current });
-          setAgent(null);
-          setBrowsing(false);
-          setSelected(null);
-          setDismissing(false);
           break;
         case "planned":
           setAgent((r) => r && { ...r, planned: payload.value });
@@ -1013,10 +1057,37 @@ function Overlay() {
     return () => clearTimeout(timer);
   }, [dismissing]);
 
-  // The toast leaving, by its clock or its ×: the panel collapses into the
-  // notch on its close spring while the chip fades, then the timer above
-  // takes it away.
-  const leaveToast = useCallback(() => setDismissing(true), []);
+  // The toast leaving, by its clock, its × or its action: the panel collapses
+  // into the notch on its close spring while the chip fades, then the timer
+  // above takes it away. The queue hears it now, so the alert is not left
+  // for its backstop.
+  const leaveToast = useCallback(() => {
+    setDismissing(true);
+    const id = toastRef.current?.value.id;
+    try {
+      if (id) void commands.dismissIsland(id);
+    } catch {
+      /* browser preview: no queue to tell */
+    }
+  }, []);
+
+  // An island's button, through the one action registry ⌘K also runs. An
+  // action that opens the panel is the user choosing a place, so it is
+  // remembered like a tab click.
+  const actOnIsland = useCallback(
+    (action: IslandAction) =>
+      runAction(
+        action.action,
+        {
+          open: (section, sub) => {
+            setBrowsing(true);
+            navigate(section, sub);
+          },
+        },
+        action.args,
+      ),
+    [navigate],
+  );
 
   // Follow the words down as they arrive: past the height cap in overlay.css
   // this is the only thing keeping the newest ones on screen.
@@ -1094,7 +1165,15 @@ function Overlay() {
       // the phase says — `--idle` is `display: none`.
       <div
         className={`drop-pill drop-pill--${
-          panelOpen ? "answering" : toast ? "toast" : resting ? "resting" : phase
+          panelOpen
+            ? "answering"
+            : toast
+              ? "toast"
+              : resting
+                ? pillShown && !hovering
+                  ? "live"
+                  : "resting"
+                : phase
         }`}
         data-hover={resting && hovering ? "" : undefined}
         ref={panel.surface}
@@ -1125,20 +1204,22 @@ function Overlay() {
                 ? " drop-pill__body--toast"
                 : resting && hovering
                 ? " drop-pill__body--agents"
-                : transcript
-                  ? " drop-pill__body--transcript"
-                  : ""
+                : resting && pillShown
+                  ? " drop-pill__body--live"
+                  : transcript
+                    ? " drop-pill__body--transcript"
+                    : ""
           }${dictating ? " drop-pill__body--cat" : ""}`}
           ref={panel.content}
         >
           {resting ? (
-            // At rest the panel is exactly the cutout and this body is empty;
-            // the cats show on the strip left of the notch (`AmbientSign`).
-            // Hovering grows the notch down (the spring in `useNotchPanel`) and
-            // deals the same agents out into it as a row of bigger cards
-            // (`NotchAgents`), while the strip fades. This is the "agents
+            // At rest the panel is exactly the cutout and this body is empty —
+            // unless islands are live, when it widens beside the camera to
+            // show them (`IslandPill`). Hovering grows the notch down (the
+            // spring in `useNotchPanel`) and deals the agents out into it as
+            // a row of bigger cards (`NotchAgents`). This is the "agents
             // animate inside the notch on hover" the notch is for.
-            hovering && (
+            hovering ? (
               <NotchAgents
                 sessions={sessions}
                 permissions={permissions}
@@ -1146,6 +1227,15 @@ function Overlay() {
                 onOpenAgents={openAgents}
                 onResolve={resolvePermission}
               />
+            ) : (
+              pillShown && (
+                <IslandPill
+                  live={liveNow ? live : lastLive.current}
+                  sessions={sessions}
+                  permissions={permissions}
+                  leaving={pillLeaving}
+                />
+              )
             )
           ) : panelOpen ? (
             // Everything under one notch: sections across the top, the voice
@@ -1157,6 +1247,8 @@ function Overlay() {
                 setAgent,
                 sessions,
                 permissions,
+                islands,
+                act: actOnIsland,
                 selected,
                 select: setSelected,
                 resolvePermission,
@@ -1179,9 +1271,10 @@ function Overlay() {
           ) : toast ? (
             <NotchToast
               key={toast.key}
-              toast={toast.value}
+              island={toast.value}
               hovering={hovering}
               onLeave={leaveToast}
+              onAction={actOnIsland}
             />
           ) : (
             <>
@@ -1210,23 +1303,26 @@ function Overlay() {
         scroll clip. Grows out of the hovered avatar's box (its origin), which
         is why it is positioned from the anchor rect rather than centred. */}
     {peek && <CatPeek stage={peek.stage} seed={peek.seed} rect={peek.rect} />}
-    {/* The ambient sign lives on the canvas beside the cutout, not in the pill —
-        agent-notch's trick: a full transparent top-bar canvas lets a mascot be
-        drawn left of the notch without growing any box. Click-through
-        (`pointer-events: none`), so it never touches the hit-test region. */}
-    {ambient && (
-      <AmbientSign
-        sessions={sessions}
-        permissions={permissions}
-        // Hovering grew the notch and the dealt row took over: fade the strip
-        // out (it is the same agents, now shown bigger inside the notch).
-        handedOff={hovering}
-        onBox={reportBox}
-      />
-    )}
     </div>
     </CatSettingsProvider>
   );
+}
+
+/**
+ * True while `on`, and for `ms` after it goes false — the surface outliving
+ * its own exit. A returning `on` inside the window cancels the exit.
+ */
+function useLinger(on: boolean, ms: number): boolean {
+  const [held, setHeld] = useState(on);
+  useEffect(() => {
+    if (on) {
+      setHeld(true);
+      return;
+    }
+    const timer = setTimeout(() => setHeld(false), ms);
+    return () => clearTimeout(timer);
+  }, [on, ms]);
+  return on || held;
 }
 
 /**

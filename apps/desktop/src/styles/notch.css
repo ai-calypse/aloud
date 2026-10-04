@@ -62,6 +62,93 @@
   transform: none;
 }
 
+/* --- The live pill (features/notch/IslandPill.tsx) -----------------------
+ * The closed notch with live activities. Its floor is the cutout itself, not
+ * the dropped panel's 1.5× (useNotchPanel reads --panel-floor): it hangs in
+ * the menu bar's row and only needs to clear the hole. */
+.drop-pill--live {
+  --panel-floor: 1;
+  cursor: pointer;
+}
+
+/* Pulled up into the notch's own row, over the cutout spacer, so the notch
+   widens beside the camera instead of dropping below it. useNotchPanel
+   counts this negative margin when it measures the height. On a screen with
+   no notch (--notch-h is 0) it is a slim pill of its own at the top edge. */
+.drop-pill__body--live {
+  height: max(var(--notch-h, 24px), 24px);
+  margin-top: calc(-1 * var(--notch-h, 24px));
+  padding: 0;
+  gap: 0;
+}
+
+.island-pill {
+  display: grid;
+  /* 1fr either side of a max-content body: both columns take the wider
+     side's width, so the camera stays centred whatever each side holds. */
+  grid-template-columns: 1fr var(--notch-w, 200px) 1fr;
+  align-items: center;
+  height: 100%;
+  color: var(--notch-ink);
+  font: 600 var(--text-notch-meta) / 1 var(--font-notch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  /* After the shape has mostly arrived, so text never rides a moving edge. */
+  animation: peek-in var(--dur-base) var(--ease-out) 90ms both;
+}
+
+/* Gone before the collapse clips it, as the answer is. */
+.island-pill[data-leaving] {
+  animation: ask-out var(--dur-fast) var(--ease-in) both;
+}
+
+.island-pill__side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 8px 0 12px;
+}
+
+.island-pill__side--right {
+  justify-content: flex-end;
+  padding: 0 12px 0 8px;
+}
+
+.island-pill__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.island-pill__detail {
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.island-pill__detail[data-urgent] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--notch-warn);
+}
+
+.island-pill__detail[data-urgent]::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.island-pill__more {
+  color: var(--notch-ink-3);
+}
+
 /* --- The shell (features/notch/NotchShell.tsx) ---------------------------
  * Its rows rise in behind the shape the way the answer's parts always have
  * (the keyframes are overlay.css's), staggered top to bottom. */

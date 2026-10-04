@@ -324,13 +324,52 @@ impl Run {
         }
     }
 
-    /// Puts up the toast. A quiet run's panel never opened, so its toast takes
-    /// the window only from nothing or from another toast — never from a panel
-    /// the user is in. Sent past `emit`, which keeps a quiet run silent.
+    /// Puts up the toast — an alert island, on the one path every island
+    /// takes, sent before `RunFinished` so a run's own panel collapses into
+    /// it. A quiet run's panel never opened, so its toast takes the window
+    /// only from nothing or from another toast — never from a panel the user
+    /// is in. Past `emit`, which keeps a quiet run silent.
     fn toast(&self, app: &AppHandle, toast: Toast) {
         let own_panel = !self.quiet.load(Ordering::SeqCst);
         if is_current(self.ticket) && crate::overlay::show_toast(app, own_panel) {
-            emit(app, AgentEvent::Toast(toast));
+            crate::islands::push(app, toast.island(self.ticket));
+        }
+    }
+}
+
+/// How long an alert may stay in the queue if the webview never says it is
+/// done. Not the toast's dwell — that is the webview's four seconds, paused
+/// while the pointer is on it — only a backstop so a toast dropped by a
+/// dictation starting over it cannot linger in the queue.
+const ALERT_BACKSTOP_MS: u32 = 30_000;
+
+impl Toast {
+    /// The toast as an alert island. Its action becomes a named one from the
+    /// webview's registry — `result.show` and `files.undoTidy` call the same
+    /// commands a finished row's Show and Undo do. One id per run, so a later
+    /// toast never answers for this one.
+    fn island(self, ticket: u64) -> aloud_islands::Island {
+        use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority};
+        let actions = match self.action {
+            Some(ToastAction::Show { app, target }) => {
+                vec![IslandAction::new("Show", "result.show")
+                    .arg("app", app)
+                    .arg("target", target)]
+            }
+            Some(ToastAction::Undo { folder }) => {
+                vec![IslandAction::new("Undo", "files.undoTidy").arg("folder", folder)]
+            }
+            None => Vec::new(),
+        };
+        Island {
+            id: format!("toast:{ticket}"),
+            kind: IslandKind::Alert,
+            priority: IslandPriority::Normal,
+            icon: self.icon,
+            title: self.text,
+            detail: Some(self.app),
+            actions,
+            expires: Some(ALERT_BACKSTOP_MS),
         }
     }
 }
@@ -492,9 +531,6 @@ pub enum AgentEvent {
     /// A transient status line (e.g. "rate limited, retrying in 30s") shown
     /// while the run is otherwise silent; cleared by the next event.
     Status(String),
-    /// A run of writes that all worked: the chip under the notch. Sent before
-    /// `RunFinished`, so a run's own panel collapses into it.
-    Toast(Toast),
     RunFinished(String),
     RunError(String),
 }
@@ -1955,6 +1991,26 @@ mod tests {
         assert_eq!(toast_for(&both, false, "Done.").unwrap().0.app, "Slack");
         // Silence is still a line.
         assert_eq!(toast_for(&[tidy], false, "  ").unwrap().1.text, "Done");
+    }
+
+    /// The toast rides the island queue now: an alert whose button names the
+    /// registry action that does what the row's Undo did, with its folder.
+    #[test]
+    fn a_toast_becomes_an_alert_island_with_a_named_action() {
+        let tidy = wrote("Finder", None, Some("Downloads"));
+        let (_, toast) = toast_for(&[tidy], false, "Sorted 24 files.").unwrap();
+        let island = toast.island(7);
+        assert_eq!(island.id, "toast:7");
+        assert_eq!(island.kind, aloud_islands::IslandKind::Alert);
+        assert_eq!(island.title, "Sorted 24 files.");
+        assert_eq!(island.detail.as_deref(), Some("Finder"));
+        assert_eq!(island.actions.len(), 1);
+        assert_eq!(island.actions[0].action, "files.undoTidy");
+        assert_eq!(island.actions[0].args["folder"], "Downloads");
+        assert!(
+            island.expires.is_some(),
+            "an alert never outlives its backstop"
+        );
     }
 
     fn slack_send(named_rule: bool) -> Gate {

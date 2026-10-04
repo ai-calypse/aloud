@@ -5,7 +5,7 @@ import type {
   FinderResults,
   FoundFile,
   Role,
-  Toast,
+  Island,
 } from "@/lib/bindings";
 import type { Run } from "@/lib/agent-steps";
 import type { ToolArgs } from "@/lib/tool-views";
@@ -624,24 +624,68 @@ export const FINDER_PREVIEWS: Record<"list" | "grid", Run> = {
   },
 };
 
+/** An alert island, as `agent.rs`'s `Toast::island` builds one. */
+const alert = (id: string, title: string, app: string, actions: Island["actions"]): Island => ({
+  id,
+  kind: "alert",
+  priority: "normal",
+  icon: null,
+  title,
+  detail: app,
+  actions,
+  expires: 30_000,
+});
+
 /** The chips a run of writes ends on, one per action a toast can offer. */
-export const TOAST_PREVIEWS: Record<"show" | "undo" | "plain", Toast> = {
-  show: {
-    text: "Reminder: Send Maya the deck",
-    app: "Reminders",
-    icon: null,
-    action: { kind: "show", app: "Reminders", target: "x-apple-reminder://r1" },
-  },
-  undo: {
-    text: "Sorted 24 files in Downloads",
-    app: "macOS",
-    icon: null,
-    action: { kind: "undo", folder: "Downloads" },
-  },
-  plain: {
-    text: "Sent the email to David",
-    app: "Gmail",
-    icon: null,
-    action: null,
-  },
+export const TOAST_PREVIEWS: Record<"show" | "undo" | "plain", Island> = {
+  show: alert("toast:show", "Reminder: Send Maya the deck", "Reminders", [
+    {
+      label: "Show",
+      action: "result.show",
+      args: { app: "Reminders", target: "x-apple-reminder://r1" },
+    },
+  ]),
+  undo: alert("toast:undo", "Sorted 24 files in Downloads", "macOS", [
+    { label: "Undo", action: "files.undoTidy", args: { folder: "Downloads" } },
+  ]),
+  plain: alert("toast:plain", "Sent the email to David", "Gmail", []),
 };
+
+/**
+ * Live islands for the closed notch: the agents one Rust builds today, and
+ * the shapes later features will push, so the pill's layout with two and
+ * three activities can be judged before they exist. In the order the crate
+ * ranks them (high, normal, low): the preview has no Rust to rank them.
+ */
+export const LIVE_PREVIEWS: Island[] = [
+  {
+    id: "timer",
+    kind: "live",
+    priority: "high",
+    icon: "timer",
+    title: "Focus session",
+    detail: "18:42",
+    actions: [],
+    expires: null,
+  },
+  {
+    id: "agents",
+    kind: "live",
+    priority: "normal",
+    icon: "agents",
+    title: "Claude Code · aloud-tauri",
+    detail: "2 running",
+    actions: [{ label: "Open", action: "agents.open", args: {} }],
+    expires: null,
+  },
+  {
+    id: "download",
+    kind: "live",
+    priority: "low",
+    icon: "download",
+    title: "report-q3.pdf",
+    detail: "74%",
+    actions: [],
+    expires: null,
+  },
+];

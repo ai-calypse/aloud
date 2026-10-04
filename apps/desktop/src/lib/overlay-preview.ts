@@ -1,4 +1,5 @@
 import type { CardKind, OverlayStyle, Phase } from "./bindings";
+import type { SectionId } from "@/features/notch/sections";
 
 /**
  * The contract between the motion tuner (tune.html) and the overlay window.
@@ -46,6 +47,14 @@ export type PreviewCommand = {
    * can read no app's icon, so one is handed in (a `data:` URI) to check the slot.
    */
   icon?: string;
+  /**
+   * Live islands in the closed notch: the first `n` of `LIVE_PREVIEWS`, 0
+   * for none. With no Rust behind the preview, this stands in for the
+   * `island` event.
+   */
+  islands?: number;
+  /** Opens the sections panel at a place, as a click on the notch does. */
+  open?: { section: SectionId; sub?: string };
   dismissing?: boolean;
   /** Rebuilds the panel's springs, which is how a changed --panel-* applies. */
   restart?: boolean;
