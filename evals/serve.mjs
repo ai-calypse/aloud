@@ -123,6 +123,12 @@ const files = {
 }
 
 createServer((req, res) => {
+  // Loopback binding alone is not enough: a web page can rebind its own domain
+  // to 127.0.0.1 and read the history. Only a request addressed to us is ours.
+  if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(req.headers.host ?? '')) {
+    res.writeHead(403)
+    return res.end('forbidden')
+  }
   const path = new URL(req.url, 'http://x').pathname
   try {
     if (path === '/api/data') {
