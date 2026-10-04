@@ -56,5 +56,5 @@
 {"input":"text Suhani I'm on my way","fast":false,"expected":[{"callsTool":{"name":"ALOUD_MESSAGES_SEND","arguments":{"to":"suhani"}}}]}
 {"input":"send a message to mom saying call me","fast":false,"expected":[{"callsTool":{"name":"ALOUD_MESSAGES_SEND","arguments":{"to":"mom"}}}]}
 {"input":"message the team on slack I'm running late","fast":false,"expected":[{"callsTool":{"name":"SLACK_"}}]}
-{"input":"email bob@example.com the notes are ready","fast":false,"expected":[{"callsTool":{"name":"ALOUD_MAIL_SEND","arguments":{"to":"bob@example.com"}}}]}
+{"input":"email bob@example.com the notes are ready","fast":false,"expected":[{"callsTool":{"name":"GMAIL_SEND_EMAIL","arguments":{"recipient_email":"bob@example.com"}}}]}
 {"input":"facetime mom","fast":false,"expected":[{"callsTool":{"name":"ALOUD_FACETIME_CALL","arguments":{"to":"mom"}}}]}
