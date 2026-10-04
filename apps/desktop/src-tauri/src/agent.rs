@@ -397,9 +397,13 @@ async fn execute(
         None => {}
     }
 
-    let brains = aloud_agent::brains(&settings.groq_api_key, &settings.gemini_api_key)?;
+    let brains = aloud_agent::brains(
+        &settings.groq_api_key,
+        &settings.nvidia_api_key,
+        &settings.gemini_api_key,
+    )?;
     if brains.is_empty() {
-        bail!("Agent mode is unavailable — no Groq or Gemini credential is configured");
+        bail!("Agent mode is unavailable — no Groq, NVIDIA or Gemini credential is configured");
     }
     // Connected services are optional: without a Composio key the Mac's own tools still run.
     let composio = aloud_agent::ComposioClient::new(&settings.composio_api_key)?;

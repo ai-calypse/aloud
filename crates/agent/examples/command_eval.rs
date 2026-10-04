@@ -88,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
     let mut brains: Vec<(&str, Brain)> = Vec::new();
     for (name, key) in [
         ("groq", &settings.groq_api_key),
+        ("nvidia", &settings.nvidia_api_key),
         ("gemini", &settings.gemini_api_key),
         // Only when asked for by name: off the default list while it returns 402.
         ("cerebras", &settings.cerebras_api_key),
@@ -101,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     if brains.is_empty() {
-        anyhow::bail!("no brain to evaluate: set GROQ_API_KEY or GEMINI_API_KEY");
+        anyhow::bail!("no brain to evaluate: set GROQ_API_KEY, NVIDIA_API_KEY or GEMINI_API_KEY");
     }
 
     let cases: Vec<Case> = include_str!("../evals/commands.jsonl")
