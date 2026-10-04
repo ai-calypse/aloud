@@ -14,7 +14,7 @@ use aloud_native::{run, run_jxa, ScriptError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::browser::{self, Cmd, Issue};
+use crate::browser::{self, BrowserIssue, Cmd};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -49,7 +49,11 @@ pub struct Source {
 
 impl Source {
     fn app(app: &str) -> Self {
-        Source { app: app.into(), host: None, tab: None }
+        Source {
+            app: app.into(),
+            host: None,
+            tab: None,
+        }
     }
 
     /// One per player, one per tab: what "most recently playing" is tracked by.
@@ -113,7 +117,10 @@ impl NowPlaying {
     /// video only a title and artist the page named cleanly.
     pub fn lyrics_query(&self) -> Option<(&str, &str)> {
         match self.player {
-            Player::Browser => self.song.as_ref().map(|s| (s.title.as_str(), s.artist.as_str())),
+            Player::Browser => self
+                .song
+                .as_ref()
+                .map(|s| (s.title.as_str(), s.artist.as_str())),
             _ => Some((self.title.as_str(), self.artist.as_str())),
         }
     }
@@ -138,7 +145,7 @@ pub enum Transport {
 pub struct Reading {
     pub now: Option<NowPlaying>,
     pub denied: Option<Player>,
-    pub browsers: Vec<Issue>,
+    pub browsers: Vec<BrowserIssue>,
 }
 
 const READ: &str = r#"
@@ -199,7 +206,11 @@ impl Recency {
     fn order(&mut self, found: &mut [NowPlaying]) {
         self.tick += 1;
         let playing = |n: &NowPlaying| n.state == PlayState::Playing;
-        let live: HashSet<String> = found.iter().filter(|n| playing(n)).map(|n| n.source.id()).collect();
+        let live: HashSet<String> = found
+            .iter()
+            .filter(|n| playing(n))
+            .map(|n| n.source.id())
+            .collect();
         let all: HashSet<String> = found.iter().map(|n| n.source.id()).collect();
         self.since.retain(|k, _| live.contains(k));
         // A closed tab stops reporting; its history goes with it.
@@ -350,7 +361,10 @@ pub fn seek(player: Player, position_ms: u32) -> Result<(), ScriptError> {
 /// Playback speed for the browser tab; Spotify and Music have none.
 pub fn set_speed(player: Player, speed_pct: u16) -> Result<(), ScriptError> {
     if player != Player::Browser {
-        return Err(ScriptError::Failed(format!("{} has no playback speed", player.app())));
+        return Err(ScriptError::Failed(format!(
+            "{} has no playback speed",
+            player.app()
+        )));
     }
     browser::control(&picked_tab()?, Cmd::Speed(f64::from(speed_pct) / 100.0))
 }
@@ -406,7 +420,11 @@ mod tests {
 
     fn tab(id: &str, state: PlayState) -> NowPlaying {
         let mut n = track(Player::Browser, state);
-        n.source = Source { app: "Brave Browser".into(), host: Some("youtube.com".into()), tab: Some(id.into()) };
+        n.source = Source {
+            app: "Brave Browser".into(),
+            host: Some("youtube.com".into()),
+            tab: Some(id.into()),
+        };
         n
     }
 
@@ -477,17 +495,39 @@ mod tests {
         let mut r = Recency::default();
         let spotify = || track(Player::Spotify, PlayState::Playing);
         // Both start together: Spotify, by order.
-        assert_eq!(poll(&mut r, vec![spotify(), tab("1/1", PlayState::Playing)]).player, Player::Spotify);
+        assert_eq!(
+            poll(&mut r, vec![spotify(), tab("1/1", PlayState::Playing)]).player,
+            Player::Spotify
+        );
         // Alone, then a tab starts: the tab.
         let mut r = Recency::default();
         assert_eq!(poll(&mut r, vec![spotify()]).player, Player::Spotify);
-        assert_eq!(poll(&mut r, vec![spotify(), tab("1/1", PlayState::Playing)]).player, Player::Browser);
+        assert_eq!(
+            poll(&mut r, vec![spotify(), tab("1/1", PlayState::Playing)]).player,
+            Player::Browser
+        );
         // Stays the tab on the next poll, not flipping back by order.
-        assert_eq!(poll(&mut r, vec![spotify(), tab("1/1", PlayState::Playing)]).player, Player::Browser);
+        assert_eq!(
+            poll(&mut r, vec![spotify(), tab("1/1", PlayState::Playing)]).player,
+            Player::Browser
+        );
         // The tab pauses: playing Spotify beats a paused tab.
-        assert_eq!(poll(&mut r, vec![spotify(), tab("1/1", PlayState::Paused)]).player, Player::Spotify);
+        assert_eq!(
+            poll(&mut r, vec![spotify(), tab("1/1", PlayState::Paused)]).player,
+            Player::Spotify
+        );
         // Spotify pauses and the tab resumes: it starts again, so it is newest.
-        assert_eq!(poll(&mut r, vec![track(Player::Spotify, PlayState::Paused), tab("1/1", PlayState::Playing)]).player, Player::Browser);
+        assert_eq!(
+            poll(
+                &mut r,
+                vec![
+                    track(Player::Spotify, PlayState::Paused),
+                    tab("1/1", PlayState::Playing)
+                ]
+            )
+            .player,
+            Player::Browser
+        );
     }
 
     /// Guards: two paused sources choosing by position in the list rather than
@@ -495,9 +535,18 @@ mod tests {
     #[test]
     fn of_two_paused_sources_the_one_playing_last_is_shown() {
         let mut r = Recency::default();
-        poll(&mut r, vec![tab("1/1", PlayState::Playing), tab("1/2", PlayState::Paused)]);
+        poll(
+            &mut r,
+            vec![
+                tab("1/1", PlayState::Playing),
+                tab("1/2", PlayState::Paused),
+            ],
+        );
         let both_paused = || vec![tab("1/2", PlayState::Paused), tab("1/1", PlayState::Paused)];
-        assert_eq!(poll(&mut r, both_paused()).source.tab.as_deref(), Some("1/1"));
+        assert_eq!(
+            poll(&mut r, both_paused()).source.tab.as_deref(),
+            Some("1/1")
+        );
         // A closed tab's history does not pile up.
         poll(&mut r, vec![tab("1/2", PlayState::Paused)]);
         assert!(r.last.is_empty());
@@ -507,8 +556,14 @@ mod tests {
     fn web_video_lyrics_need_a_clean_song() {
         let mut n = tab("1/1", PlayState::Playing);
         assert_eq!(n.lyrics_query(), None);
-        n.song = Some(Song { title: "Hello".into(), artist: "Adele".into() });
+        n.song = Some(Song {
+            title: "Hello".into(),
+            artist: "Adele".into(),
+        });
         assert_eq!(n.lyrics_query(), Some(("Hello", "Adele")));
-        assert_eq!(track(Player::Spotify, PlayState::Playing).lyrics_query(), Some(("t", "a")));
+        assert_eq!(
+            track(Player::Spotify, PlayState::Playing).lyrics_query(),
+            Some(("t", "a"))
+        );
     }
 }

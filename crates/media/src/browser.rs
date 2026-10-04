@@ -5,7 +5,7 @@
 //! No private API. It costs the user one switch per browser, which Aloud can
 //! only point at and never flip: Brave/Chrome/Edge › View › Developer ›
 //! "Allow JavaScript from Apple Events", Safari › Develop › the same words.
-//! Until it is on, every browser reports [`IssueKind::JsOff`] and the view says
+//! Until it is on, every browser reports [`BrowserIssueKind::JsOff`] and the view says
 //! so, rather than saying "nothing playing" over a playing video.
 //!
 //! Privacy: only a tab that holds playing (or part-played) media is reported,
@@ -35,7 +35,12 @@ pub enum Browser {
 }
 
 impl Browser {
-    pub const ALL: [Browser; 4] = [Browser::Brave, Browser::Chrome, Browser::Edge, Browser::Safari];
+    pub const ALL: [Browser; 4] = [
+        Browser::Brave,
+        Browser::Chrome,
+        Browser::Edge,
+        Browser::Safari,
+    ];
 
     /// The app's name: its process name and its scripting target.
     pub fn app(self) -> &'static str {
@@ -59,7 +64,7 @@ impl Browser {
 /// Why a running browser could not be read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub enum IssueKind {
+pub enum BrowserIssueKind {
     /// "Allow JavaScript from Apple Events" is off.
     JsOff,
     /// macOS Automation permission for the browser was refused.
@@ -68,9 +73,9 @@ pub enum IssueKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct Issue {
+pub struct BrowserIssue {
     pub app: String,
-    pub kind: IssueKind,
+    pub kind: BrowserIssueKind,
 }
 
 /// What the page script reports about the media element it chose.
@@ -326,7 +331,11 @@ fn parse_lines(out: &str) -> Reply {
             (Some("T"), Some(w), Some(t), Some(json)) => {
                 reply.ok += 1;
                 if let Ok(page) = serde_json::from_str::<Page>(json) {
-                    reply.tabs.push(Tab { w: w.into(), t: t.into(), page });
+                    reply.tabs.push(Tab {
+                        w: w.into(),
+                        t: t.into(),
+                        page,
+                    });
                 }
             }
             _ => {}
@@ -346,10 +355,10 @@ pub fn is_js_off(message: &str) -> bool {
 /// Reads one scan's lines into hits and the tabs that would not answer, or
 /// the issue that stopped it. A scan where no tab answered and one said
 /// "JavaScript is off" is `JsOff`; a scan that simply found no media is empty.
-fn parse_scan(app: &str, out: &str) -> Result<(Vec<NowPlaying>, Vec<String>), IssueKind> {
+fn parse_scan(app: &str, out: &str) -> Result<(Vec<NowPlaying>, Vec<String>), BrowserIssueKind> {
     let reply = parse_lines(out);
     if reply.ok == 0 && reply.errors.iter().any(|e| is_js_off(e)) {
-        return Err(IssueKind::JsOff);
+        return Err(BrowserIssueKind::JsOff);
     }
     let hits = reply
         .tabs
@@ -374,7 +383,11 @@ fn now_playing(source: Source, p: Page) -> Option<NowPlaying> {
         title.clone_from(&p.host);
     }
     let artist = if p.host == "music.youtube.com" {
-        p.mb.split('•').next().unwrap_or_default().trim().to_string()
+        p.mb.split('•')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string()
     } else if youtube {
         p.channel.trim().trim_end_matches(" - Topic").to_string()
     } else {
@@ -391,7 +404,11 @@ fn now_playing(source: Source, p: Page) -> Option<NowPlaying> {
         .flatten();
     Some(NowPlaying {
         player: Player::Browser,
-        state: if p.paused { PlayState::Paused } else { PlayState::Playing },
+        state: if p.paused {
+            PlayState::Paused
+        } else {
+            PlayState::Playing
+        },
         title,
         artist,
         album: String::new(),
@@ -411,7 +428,10 @@ fn is_youtube(host: &str) -> bool {
 
 /// The id lands in a URL we fetch, so it is checked rather than trusted.
 fn is_video_id(id: &str) -> bool {
-    id.len() == 11 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    id.len() == 11
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 /// A tab's title as the thing playing: without YouTube's " - YouTube" and its
@@ -470,9 +490,7 @@ fn parse_song(p: &Page, title: &str, artist: &str, duration_ms: u32) -> Option<S
 /// Splits "A - B" into A and B, or None when there is not exactly one dash
 /// (an "A - B - C" title has no clean answer) or a side is empty.
 fn split_once_only(s: &str) -> Option<(&str, &str)> {
-    let mut found = s
-        .match_indices(" - ")
-        .chain(s.match_indices(" \u{2013} "));
+    let mut found = s.match_indices(" - ").chain(s.match_indices(" \u{2013} "));
     let (i, sep) = found.next()?;
     if found.next().is_some() {
         return None;
@@ -485,12 +503,23 @@ fn split_once_only(s: &str) -> Option<(&str, &str)> {
 /// that carries anything else ("(feat. X)", "(Remix)") is part of the title.
 fn strip_noise(title: &str) -> String {
     const NOISE: [&str; 8] = [
-        "official", "lyric", "video", "audio", "visualizer", "4k", "hd", "hq",
+        "official",
+        "lyric",
+        "video",
+        "audio",
+        "visualizer",
+        "4k",
+        "hd",
+        "hq",
     ];
     let mut out = String::new();
     let mut rest = title;
     while let Some(open) = rest.find(['(', '[']) {
-        let close_ch = if rest[open..].starts_with('(') { ')' } else { ']' };
+        let close_ch = if rest[open..].starts_with('(') {
+            ')'
+        } else {
+            ']'
+        };
         let Some(len) = rest[open..].find(close_ch) else {
             break;
         };
@@ -513,7 +542,9 @@ fn related(channel: &str, artist: &str) -> bool {
     let norm = |s: &str| {
         let s = s.to_lowercase();
         let s = s.trim_end_matches("vevo").trim_end_matches("official");
-        s.chars().filter(|c| c.is_alphanumeric()).collect::<String>()
+        s.chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
     };
     let (c, a) = (norm(channel), norm(artist));
     c.len() >= 3 && a.len() >= 3 && (c.contains(&a) || a.contains(&c))
@@ -523,7 +554,7 @@ fn related(channel: &str, artist: &str) -> bool {
 
 /// A browser's last verdict, so a browser that cannot be read costs one call
 /// every few minutes, not one per poll.
-static ISSUES: Mutex<Option<HashMap<Browser, (IssueKind, Instant)>>> = Mutex::new(None);
+static ISSUES: Mutex<Option<HashMap<Browser, (BrowserIssueKind, Instant)>>> = Mutex::new(None);
 
 /// What a browser's tabs looked like at the last full walk.
 #[derive(Default)]
@@ -553,7 +584,9 @@ const WALK_DUTY: u32 = 5;
 /// this runs out.
 const SLOW_FOR: Duration = Duration::from_secs(10 * 60);
 
-fn lock<T>(m: &'static Mutex<Option<HashMap<Browser, T>>>) -> std::sync::MutexGuard<'static, Option<HashMap<Browser, T>>> {
+fn lock<T>(
+    m: &'static Mutex<Option<HashMap<Browser, T>>>,
+) -> std::sync::MutexGuard<'static, Option<HashMap<Browser, T>>> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -594,16 +627,23 @@ fn parse_running(out: &str) -> Vec<Browser> {
 
 /// Every running browser's media tabs, and the browsers that could not be
 /// read. Returns at once when no browser is running.
-pub fn scan() -> (Vec<NowPlaying>, Vec<Issue>) {
+pub fn scan() -> (Vec<NowPlaying>, Vec<BrowserIssue>) {
     let (mut hits, mut issues) = (Vec::new(), Vec::new());
     let running = running();
     // A browser that quit and came back has a fresh setting and permission.
-    lock(&ISSUES).get_or_insert_default().retain(|b, _| running.contains(b));
-    lock(&WALKS).get_or_insert_default().retain(|b, _| running.contains(b));
+    lock(&ISSUES)
+        .get_or_insert_default()
+        .retain(|b, _| running.contains(b));
+    lock(&WALKS)
+        .get_or_insert_default()
+        .retain(|b, _| running.contains(b));
     for browser in running {
         let known = lock(&ISSUES).get_or_insert_default().get(&browser).copied();
         if let Some((kind, _)) = known.filter(|(_, at)| at.elapsed() < RECHECK) {
-            issues.push(Issue { app: browser.app().into(), kind });
+            issues.push(BrowserIssue {
+                app: browser.app().into(),
+                kind,
+            });
             continue;
         }
         match scan_browser(browser) {
@@ -615,7 +655,10 @@ pub fn scan() -> (Vec<NowPlaying>, Vec<Issue>) {
                 lock(&ISSUES)
                     .get_or_insert_default()
                     .insert(browser, (kind, Instant::now()));
-                issues.push(Issue { app: browser.app().into(), kind });
+                issues.push(BrowserIssue {
+                    app: browser.app().into(),
+                    kind,
+                });
             }
         }
     }
@@ -626,7 +669,7 @@ pub fn scan() -> (Vec<NowPlaying>, Vec<Issue>) {
 /// dozens of tabs it has not loaded (they never answer) delays a poll by up to
 /// five seconds per walk until each has been noted and skipped. The upgrade is
 /// a scanner thread that publishes its last result.
-fn scan_browser(browser: Browser) -> Result<Vec<NowPlaying>, IssueKind> {
+fn scan_browser(browser: Browser) -> Result<Vec<NowPlaying>, BrowserIssueKind> {
     let (only, skip) = {
         let mut walks = lock(&WALKS);
         let walk = walks.get_or_insert_default().entry(browser).or_default();
@@ -636,7 +679,11 @@ fn scan_browser(browser: Browser) -> Result<Vec<NowPlaying>, IssueKind> {
             .is_none_or(|at| at.elapsed() >= WALK_EVERY.max(walk.took * WALK_DUTY));
         let skip: Vec<String> = walk.slow.keys().cloned().collect();
         let only = (!due && !walk.media.is_empty()).then(|| {
-            walk.media.iter().filter(|t| !walk.slow.contains_key(*t)).cloned().collect::<Vec<_>>()
+            walk.media
+                .iter()
+                .filter(|t| !walk.slow.contains_key(*t))
+                .cloned()
+                .collect::<Vec<_>>()
         });
         (only, skip)
     };
@@ -644,11 +691,14 @@ fn scan_browser(browser: Browser) -> Result<Vec<NowPlaying>, IssueKind> {
     let (hits, slow) = scan_app(browser.app(), browser.safari(), only.as_deref(), &skip)?;
     let mut walks = lock(&WALKS);
     let walk = walks.get_or_insert_default().entry(browser).or_default();
-    walk.slow.extend(slow.into_iter().map(|t| (t, Instant::now())));
+    walk.slow
+        .extend(slow.into_iter().map(|t| (t, Instant::now())));
     if only.is_none() {
         walk.at = Some(Instant::now());
         // Without the timeouts, which are not the cost of a tab that answers.
-        walk.took = started.elapsed().saturating_sub(Duration::from_secs(walk.slow.len() as u64));
+        walk.took = started
+            .elapsed()
+            .saturating_sub(Duration::from_secs(walk.slow.len() as u64));
         walk.media = hits.iter().filter_map(|n| n.source.tab.clone()).collect();
     }
     Ok(hits)
@@ -662,13 +712,13 @@ pub fn scan_app(
     safari: bool,
     only: Option<&[String]>,
     skip: &[String],
-) -> Result<(Vec<NowPlaying>, Vec<String>), IssueKind> {
+) -> Result<(Vec<NowPlaying>, Vec<String>), BrowserIssueKind> {
     let only = only.map(|ids| ids.join(",")).unwrap_or_default();
     let skip = format!(",{},", skip.join(","));
     let js = page_fn(READ_PAGE);
     match run_args(app, &scan_script(app, safari), &[&js, &only, &skip]) {
         Ok(out) => parse_scan(app, &out),
-        Err(ScriptError::NotPermitted { .. }) => Err(IssueKind::NotPermitted),
+        Err(ScriptError::NotPermitted { .. }) => Err(BrowserIssueKind::NotPermitted),
         Err(e) => {
             tracing::debug!(%e, app, "browser media scan failed");
             Ok((Vec::new(), Vec::new()))
@@ -720,7 +770,9 @@ pub fn control(source: &Source, cmd: Cmd) -> Result<(), ScriptError> {
     match run_jxa(&source.app, CONTROL, &arg)?.as_str() {
         "ok" => Ok(()),
         "unsupported" => Err(failed("this page has no next button")),
-        _ => Err(failed("that tab changed; the next reading will find the video")),
+        _ => Err(failed(
+            "that tab changed; the next reading will find the video",
+        )),
     }
 }
 
@@ -729,7 +781,9 @@ pub fn control(source: &Source, cmd: Cmd) -> Result<(), ScriptError> {
 pub fn open(app: &str) {
     #[cfg(target_os = "macos")]
     if Browser::from_app(app).is_some() {
-        let _ = std::process::Command::new("open").args(["-a", app]).status();
+        let _ = std::process::Command::new("open")
+            .args(["-a", app])
+            .status();
     }
     #[cfg(not(target_os = "macos"))]
     let _ = app;
@@ -757,7 +811,11 @@ mod tests {
     }
 
     fn source() -> Source {
-        Source { app: "Brave Browser".into(), host: None, tab: Some("1/2".into()) }
+        Source {
+            app: "Brave Browser".into(),
+            host: None,
+            tab: Some("1/2".into()),
+        }
     }
 
     /// Guards: the notification counter and site suffix showing up as part of
@@ -765,26 +823,50 @@ mod tests {
     #[test]
     fn youtube_titles_lose_the_counter_and_the_suffix() {
         let yt = "www.youtube.com";
-        assert_eq!(clean_title(yt, "(3) Never Gonna Give You Up - YouTube"), "Never Gonna Give You Up");
+        assert_eq!(
+            clean_title(yt, "(3) Never Gonna Give You Up - YouTube"),
+            "Never Gonna Give You Up"
+        );
         assert_eq!(clean_title(yt, "(99+) A (Live) - YouTube"), "A (Live)");
-        assert_eq!(clean_title("music.youtube.com", "Song - YouTube Music"), "Song");
+        assert_eq!(
+            clean_title("music.youtube.com", "Song - YouTube Music"),
+            "Song"
+        );
         assert_eq!(clean_title(yt, "Plain"), "Plain");
         // Other sites keep their own punctuation.
-        assert_eq!(clean_title("example.com", "(3) Inbox - YouTube"), "(3) Inbox - YouTube");
+        assert_eq!(
+            clean_title("example.com", "(3) Inbox - YouTube"),
+            "(3) Inbox - YouTube"
+        );
     }
 
     #[test]
     fn a_youtube_page_becomes_a_track_with_a_thumbnail_and_speed() {
-        let mut p = page("www.youtube.com", "(2) Rick Astley - Never Gonna Give You Up (Official Video) - YouTube");
+        let mut p = page(
+            "www.youtube.com",
+            "(2) Rick Astley - Never Gonna Give You Up (Official Video) - YouTube",
+        );
         p.channel = "Rick Astley".into();
         let n = now_playing(source(), p).unwrap();
-        assert_eq!(n.title, "Rick Astley - Never Gonna Give You Up (Official Video)");
+        assert_eq!(
+            n.title,
+            "Rick Astley - Never Gonna Give You Up (Official Video)"
+        );
         assert_eq!(n.artist, "Rick Astley");
-        assert_eq!(n.artwork_url.as_deref(), Some("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"));
-        assert_eq!((n.position_ms, n.duration_ms, n.speed_pct), (12_500, 213_000, 125));
+        assert_eq!(
+            n.artwork_url.as_deref(),
+            Some("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg")
+        );
+        assert_eq!(
+            (n.position_ms, n.duration_ms, n.speed_pct),
+            (12_500, 213_000, 125)
+        );
         assert_eq!(n.state, PlayState::Playing);
         let song = n.song.unwrap();
-        assert_eq!((song.artist.as_str(), song.title.as_str()), ("Rick Astley", "Never Gonna Give You Up"));
+        assert_eq!(
+            (song.artist.as_str(), song.title.as_str()),
+            ("Rick Astley", "Never Gonna Give You Up")
+        );
     }
 
     /// Guards: lyrics for the wrong song, which is worse than none.
@@ -837,12 +919,20 @@ mod tests {
 
         let mut p = page("example.com", "Episode 4");
         p.art = "https://cdn.example.com/c.jpg".into();
-        assert_eq!(now_playing(source(), p).unwrap().artwork_url.as_deref(), Some("https://cdn.example.com/c.jpg"));
+        assert_eq!(
+            now_playing(source(), p).unwrap().artwork_url.as_deref(),
+            Some("https://cdn.example.com/c.jpg")
+        );
         let mut p = page("example.com", "Episode 4");
         p.art = "http://cdn.example.com/c.jpg".into();
         assert_eq!(now_playing(source(), p).unwrap().artwork_url, None);
         // No song for a site that is not YouTube.
-        assert_eq!(now_playing(source(), page("example.com", "A - B")).unwrap().song, None);
+        assert_eq!(
+            now_playing(source(), page("example.com", "A - B"))
+                .unwrap()
+                .song,
+            None
+        );
     }
 
     /// Guards the silent failure: a browser with the setting off answers every
@@ -857,7 +947,10 @@ mod tests {
 
         for msg in [chromium, safari] {
             let off = format!("E\t{msg}\n");
-            assert_eq!(parse_scan("Brave Browser", &off).err(), Some(IssueKind::JsOff));
+            assert_eq!(
+                parse_scan("Brave Browser", &off).err(),
+                Some(BrowserIssueKind::JsOff)
+            );
         }
         let idle = "K\nK\nK\n";
         assert!(parse_scan("Brave Browser", idle).unwrap().0.is_empty());
@@ -900,7 +993,11 @@ mod tests {
                 .args(["-l", "JavaScript", "-e", &src])
                 .output()
                 .unwrap();
-            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
         }
     }
 
@@ -917,7 +1014,12 @@ mod tests {
                 .args(["-o", "/dev/null", "-e", &scan_script(b.app(), b.safari())])
                 .output()
                 .unwrap();
-            assert!(out.status.success(), "{}: {}", b.app(), String::from_utf8_lossy(&out.stderr));
+            assert!(
+                out.status.success(),
+                "{}: {}",
+                b.app(),
+                String::from_utf8_lossy(&out.stderr)
+            );
         }
     }
 }

@@ -32,7 +32,8 @@ export function MediaLyrics() {
 
   useEffect(() => {
     const track = latest.current;
-    if (!key || !track) return;
+    // A web video the page does not name a song for has nothing to look up.
+    if (!key || !track || (track.player === "browser" && !track.song)) return;
     let live = true;
     setLoad({ key, status: "loading" });
     try {
@@ -58,7 +59,16 @@ export function MediaLyrics() {
   if (!now) {
     return (
       <Empty title="No lyrics without a song">
-        Play something in Spotify or Music and its lyrics scroll here in time.
+        Play something in Spotify, Music or a browser tab and its lyrics scroll here in time.
+      </Empty>
+    );
+  }
+  if (now.player === "browser" && !now.song) {
+    return (
+      <Empty title="No lyrics for this video">
+        Aloud looks lyrics up only when the page names the song and artist
+        cleanly: YouTube Music, an artist&apos;s own upload titled
+        &ldquo;Artist - Song&rdquo;, or an auto-generated Topic channel.
       </Empty>
     );
   }

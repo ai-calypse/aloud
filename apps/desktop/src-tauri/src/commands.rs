@@ -44,7 +44,13 @@ pub fn update_settings(
         .settings
         .lock()
         .map_err(|_| "settings lock poisoned")?;
+    let browsers_changed = current.browser_media != settings.browser_media;
     *current = settings;
+    drop(current);
+    if browsers_changed {
+        // Now Playing should show or drop the browser tab now, not at the next tick.
+        crate::media::poll_now();
+    }
     Ok(())
 }
 

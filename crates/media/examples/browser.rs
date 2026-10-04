@@ -24,15 +24,31 @@ fn main() {
             let t = Instant::now();
             let (hits, issues) = match app {
                 Some(app) => match browser::scan_app(app, safari, None, &[]) {
-                    Ok((hits, slow)) => (hits, slow.iter().map(|t| format!("{app}: tab {t} did not answer")).collect()),
+                    Ok((hits, slow)) => (
+                        hits,
+                        slow.iter()
+                            .map(|t| format!("{app}: tab {t} did not answer"))
+                            .collect(),
+                    ),
                     Err(kind) => (vec![], vec![format!("{app}: {kind:?}")]),
                 },
                 None => {
                     let (hits, issues) = browser::scan();
-                    (hits, issues.iter().map(|i| format!("{}: {:?}", i.app, i.kind)).collect())
+                    (
+                        hits,
+                        issues
+                            .iter()
+                            .map(|i| format!("{}: {:?}", i.app, i.kind))
+                            .collect(),
+                    )
                 }
             };
-            println!("{} media tab(s), {} issue(s) in {:?}", hits.len(), issues.len(), t.elapsed());
+            println!(
+                "{} media tab(s), {} issue(s) in {:?}",
+                hits.len(),
+                issues.len(),
+                t.elapsed()
+            );
             issues.iter().for_each(|i| println!("  issue: {i}"));
             hits.iter().for_each(|h| println!("{h:#?}"));
         }
@@ -41,11 +57,19 @@ fn main() {
             let (mut only, mut skip): (Option<Vec<String>>, Vec<String>) = (None, vec![]);
             for i in 0..10 {
                 let t = Instant::now();
-                let (hits, slow) = browser::scan_app(app, safari, only.as_deref(), &skip).unwrap_or_default();
+                let (hits, slow) =
+                    browser::scan_app(app, safari, only.as_deref(), &skip).unwrap_or_default();
                 println!(
                     "#{i} {} ({}) -> {} hit(s), {} newly unanswering, in {:?}",
-                    if only.is_some() { "targeted" } else { "full walk" },
-                    hits.iter().map(|n| format!("{:?} {}ms", n.state, n.position_ms)).collect::<Vec<_>>().join(", "),
+                    if only.is_some() {
+                        "targeted"
+                    } else {
+                        "full walk"
+                    },
+                    hits.iter()
+                        .map(|n| format!("{:?} {}ms", n.state, n.position_ms))
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     hits.len(),
                     slow.len(),
                     t.elapsed()
@@ -61,7 +85,8 @@ fn main() {
             }
         }
         Some("control") => {
-            let (hits, _) = match browser::scan_app(app.expect("control <app>"), safari, None, &[]) {
+            let (hits, _) = match browser::scan_app(app.expect("control <app>"), safari, None, &[])
+            {
                 Ok((h, _)) => (h, ()),
                 Err(e) => return println!("cannot scan: {e:?}"),
             };
@@ -76,11 +101,19 @@ fn main() {
                 Some("speed") => Cmd::Speed(n / 100.0),
                 _ => Cmd::Toggle,
             };
-            println!("before: {:?} at {}ms, {}%", now.state, now.position_ms, now.speed_pct);
+            println!(
+                "before: {:?} at {}ms, {}%",
+                now.state, now.position_ms, now.speed_pct
+            );
             println!("control: {:?}", browser::control(&now.source, cmd));
             std::thread::sleep(std::time::Duration::from_millis(600));
-            let after = browser::scan_app(app.unwrap(), safari, None, &[]).unwrap_or_default().0;
-            println!("after:  {:?}", after.first().map(|n| (n.state, n.position_ms, n.speed_pct)));
+            let after = browser::scan_app(app.unwrap(), safari, None, &[])
+                .unwrap_or_default()
+                .0;
+            println!(
+                "after:  {:?}",
+                after.first().map(|n| (n.state, n.position_ms, n.speed_pct))
+            );
         }
         _ => {
             let t = Instant::now();

@@ -330,6 +330,20 @@ export const commands = {
 	mediaWatch: (on: boolean) => __TAURI_INVOKE<void>("media_watch", { on }),
 	mediaControl: (player: Player, transport: Transport) => typedError<null, string>(__TAURI_INVOKE("media_control", { player, transport })),
 	mediaSeek: (player: Player, positionMs: number) => typedError<null, string>(__TAURI_INVOKE("media_seek", { player, positionMs })),
+	/**  Playback speed of the browser tab on screen, in percent (100 is normal). */
+	mediaSetSpeed: (player: Player, speedPct: number) => typedError<null, string>(__TAURI_INVOKE("media_set_speed", { player, speedPct })),
+	/**  An app's icon as a `data:` URI, for the badge saying where a track plays. */
+	mediaSourceIcon: (app: string) => __TAURI_INVOKE<string | null>("media_source_icon", { app }),
+	/**
+	 *  "I turned it on": forget that a browser could not be read and look now,
+	 *  instead of waiting out the few minutes between checks.
+	 */
+	mediaRecheckBrowsers: () => __TAURI_INVOKE<void>("media_recheck_browsers"),
+	/**
+	 *  Brings a browser forward so its menu bar is within reach of the fix the
+	 *  view describes.
+	 */
+	mediaOpenBrowser: (app: string) => __TAURI_INVOKE<void>("media_open_browser", { app }),
 	/**  The cover of `now`, as a `data:` URI the overlay's CSP will load. */
 	mediaArtwork: (now: NowPlaying) => __TAURI_INVOKE<string | null>("media_artwork", { now }),
 	/**
@@ -831,6 +845,18 @@ export type Binding = { kind: "disabled" } | { kind: "key"; key: Key; modifiers:
  */
 { kind: "modifierKey"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] };
 
+export type BrowserIssue = {
+	app: string,
+	kind: BrowserIssueKind,
+};
+
+/**  Why a running browser could not be read. */
+export type BrowserIssueKind = 
+/**  "Allow JavaScript from Apple Events" is off. */
+"jsOff" | 
+/**  macOS Automation permission for the browser was refused. */
+"notPermitted";
+
 export type BtDevice = {
 	name: string,
 	/**  `aa:bb:cc:dd:ee:ff`, lowercase: what connecting names it by. */
@@ -1323,6 +1349,7 @@ export type Note = {
 
 export type NowPlaying = {
 	player: Player,
+	source: Source,
 	state: PlayState,
 	title: string,
 	artist: string,
@@ -1330,8 +1357,18 @@ export type NowPlaying = {
 	/**  `u32`: specta forbids 64-bit ints on the wire, and 49 days of track fit. */
 	durationMs: number,
 	positionMs: number,
-	/**  Spotify's own https cover URL; Music has none and is read from the app. */
+	/**
+	 *  Playback speed in percent (100 is normal). Only a web page has one; the
+	 *  players report 100.
+	 */
+	speedPct: number,
+	/**
+	 *  Spotify's own https cover URL, a YouTube thumbnail, or a page's
+	 *  `og:image`; Music has none and is read from the app.
+	 */
 	artworkUrl: string | null,
+	/**  Browser only, and only when the title and channel parse cleanly. */
+	song: Song | null,
 };
 
 /**  Whose words a text field holds. */
@@ -1442,7 +1479,9 @@ export type PlannedCall = {
 /**  Stopped is not here: a player with nothing loaded is "nothing playing". */
 export type PlayState = "playing" | "paused";
 
-export type Player = "spotify" | "music";
+export type Player = "spotify" | "music" | 
+/**  A tab in a browser; which one is [`NowPlaying::source`]. */
+"browser";
 
 export type PrivacyUse = {
 	mic: boolean,
@@ -1485,11 +1524,13 @@ export type QuotaWindow = {
 /**
  *  One look at the players. `denied` is a player that is running but has not
  *  granted the Automation permission: without it the view would say "nothing
- *  playing" over a perfectly good song.
+ *  playing" over a perfectly good song. `browsers` is the same for running
+ *  browsers, which have a second switch (JavaScript from Apple Events).
  */
 export type Reading = {
 	now: NowPlaying | null,
 	denied: Player | null,
+	browsers: BrowserIssue[],
 };
 
 export type Reminder = {
@@ -1671,6 +1712,12 @@ export type Settings = {
 	 *  the user opens the notch when they hover. The hook waits either way.
 	 */
 	agentOpenOnPermission?: boolean,
+	/**
+	 *  Whether the notch's Now Playing also reads video and audio playing in a
+	 *  browser tab. It reads only media state (title, host, position), but it
+	 *  does script the browser, which asks macOS for Automation permission.
+	 */
+	browserMedia?: boolean,
 	overlayDisplay?: OverlayDisplay,
 	/**
 	 *  Put the previous clipboard back after pasting. Off leaves the dictated
@@ -1824,6 +1871,12 @@ export type Snippet = {
 	body: string,
 };
 
+/**  A track and artist the page names cleanly enough to ask for lyrics. */
+export type Song = {
+	title: string,
+	artist: string,
+};
+
 export type SoundState = {
 	outputs: Device[],
 	inputs: Device[],
@@ -1832,6 +1885,16 @@ export type SoundState = {
 	 *  pull to zero (some USB interfaces): the view hides the switch.
 	 */
 	micMuted: boolean | null,
+};
+
+/**
+ *  Where a track is playing: the app, and for a browser the page's host and
+ *  which tab (an opaque "window/tab" the controls hand back to the browser).
+ */
+export type Source = {
+	app: string,
+	host: string | null,
+	tab: string | null,
 };
 
 /**  One closed span. */

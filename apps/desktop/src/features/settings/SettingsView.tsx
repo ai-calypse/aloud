@@ -614,6 +614,20 @@ export function SettingsView({
 
             {IS_MAC && (
               <Row
+                label="Web video in the notch"
+                hint="Now Playing also shows video and audio playing in Brave, Chrome, Edge and Safari, and the notch's play, pause, skip and speed buttons drive that tab. It reads only the tab's title, site and position. Each browser needs its Allow JavaScript from Apple Events switch on (View › Developer, or Safari's Develop menu); the Now Playing view says when one is off."
+                className="py-[11px]"
+              >
+                <Toggle
+                  checked={settings.browserMedia ?? true}
+                  label="Web video in the notch"
+                  onChange={(c) => update({ browserMedia: c })}
+                />
+              </Row>
+            )}
+
+            {IS_MAC && (
+              <Row
                 label="Style"
                 hint="Both weld to the top edge. Wings stay inside the menu bar, and hand over to the drop-down pill whenever there is something to show that will not fit in one — a live transcript, an answer, or an error."
               >

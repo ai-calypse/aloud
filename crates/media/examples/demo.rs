@@ -60,7 +60,11 @@ async fn main() -> anyhow::Result<()> {
                 speed_pct: 100,
                 artwork_url: None,
                 song: None,
-                source: aloud_media::Source { app: "Spotify".into(), host: None, tab: None },
+                source: aloud_media::Source {
+                    app: "Spotify".into(),
+                    host: None,
+                    tab: None,
+                },
             };
             match lyrics::lyrics(&now).await? {
                 Some(l) => {
