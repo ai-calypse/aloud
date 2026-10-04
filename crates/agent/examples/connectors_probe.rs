@@ -10,6 +10,12 @@
 //! on a real field. Refresh `preview/fixtures/connectors.json` when it fails.
 //!
 //!   cargo run -p aloud-agent --example connectors_probe -- previews
+//!
+//! `generate <toolkit> [n]` has the Gemini brain map the first `n` (default 3)
+//! write tools of a toolkit that no hand mapping covers, into a scratch file
+//! kept between runs, and prints which validated. Costs up to `n` model calls.
+//!
+//!   cargo run -p aloud-agent --example connectors_probe -- generate slack
 use aloud_store::Settings;
 use std::collections::HashMap;
 
@@ -20,6 +26,9 @@ async fn main() -> anyhow::Result<()> {
     let c = aloud_agent::ComposioClient::new(&settings.composio_api_key)?;
     if command == "previews" {
         return previews(&c).await;
+    }
+    if let Some(rest) = command.strip_prefix("generate ") {
+        return generate(&c, &settings, rest).await;
     }
 
     println!("== connected_toolkits ==");
@@ -85,5 +94,51 @@ async fn previews(c: &aloud_agent::ComposioClient) -> anyhow::Result<()> {
     }
     anyhow::ensure!(problems.is_empty(), "{} problems", problems.len());
     println!("  every connector pointer lands on a live field");
+    Ok(())
+}
+
+async fn generate(
+    c: &aloud_agent::ComposioClient,
+    settings: &Settings,
+    args: &str,
+) -> anyhow::Result<()> {
+    use aloud_agent::preview::{layer, Layer};
+    let mut args = args.split_whitespace();
+    let toolkit = args.next().unwrap_or("slack");
+    let n: usize = args.next().and_then(|n| n.parse().ok()).unwrap_or(3);
+    let all = c.all_tools(toolkit).await?;
+    let writes = all.iter().filter(|t| !t.read_only).count();
+    println!("== {toolkit}: {} tools, {writes} writes ==", all.len());
+    let tools: Vec<_> = all
+        .into_iter()
+        .filter(|t| !t.read_only && layer(&t.name, Some(&t.parameters)) != Layer::Hand)
+        .take(n)
+        .collect();
+    let brain = aloud_agent::brain("gemini", &settings.gemini_api_key)?;
+    // Kept between runs, like the app's: a run cut short by a rate limit
+    // resumes where it stopped.
+    let path = std::env::temp_dir().join("aloud-action-previews-probe.json");
+    aloud_agent::preview::load_generated(&path);
+    let started = std::time::Instant::now();
+    let pass = aloud_agent::preview::generate(&[brain], &tools, &path).await;
+    println!(
+        "  asked {} in {:.1}s; stopped: {:?}",
+        pass.asked,
+        started.elapsed().as_secs_f32(),
+        pass.stopped
+    );
+    let stored: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    for tool in &tools {
+        let entry = &stored["tools"][&tool.name];
+        let state = match layer(&tool.name, Some(&tool.parameters)) {
+            Layer::Generated => "valid  ",
+            _ if entry.is_null() => "unasked",
+            _ => "null   ",
+        };
+        println!("  {state} {} {}", tool.name, entry["mapping"]);
+    }
     Ok(())
 }

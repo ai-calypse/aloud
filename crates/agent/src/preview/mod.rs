@@ -7,15 +7,18 @@
 //! crosses the bridge.
 //!
 //! [`render`] draws a call: its hand mapping (`hand.json`) when there is one,
-//! else [`build`], the schema layer every tool gets for free — with ids named
-//! from the run's earlier reads ([`Names`]). [`enrich`] then makes the reads a
+//! else the mapping the brain generated for it ([`warm_previews`]), else
+//! [`build`], the schema layer every tool gets for free — with ids named from
+//! the run's earlier reads ([`Names`]). [`enrich`] then makes the reads a
 //! mapping asks for, each bounded in time.
 
 mod fallback;
+mod generate;
 mod hand;
 mod resolve;
 
 pub use fallback::build;
+pub use generate::{generate, layer, load_generated, warm_previews, Layer, Pass, PROMPT_VERSION};
 pub use hand::{check_hand, hand_tools, render, Context};
 pub use resolve::{enrich, Names};
 

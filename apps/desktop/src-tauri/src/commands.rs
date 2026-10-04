@@ -408,6 +408,8 @@ fn revalidate(app: AppHandle, key: String, cache: ConnectorCache) {
     if !cache.begin_revalidation() {
         return;
     }
+    // A service connected since the last pass has tools with no card yet.
+    warm_previews(&app, key.clone());
     tauri::async_runtime::spawn(async move {
         let fetched = match client(&key) {
             Ok(composio) => fetch_connected(&composio).await.ok(),
@@ -436,12 +438,36 @@ pub fn warm_connectors(app: AppHandle) {
         return;
     };
     let cache = state.connectors.clone();
+    warm_previews(&app, key.clone());
     tauri::async_runtime::spawn(async move {
         let Ok(composio) = client(&key) else {
             return;
         };
         if let Ok(fresh) = fetch_connected(&composio).await {
             cache.store_primary(&key, fresh);
+        }
+    });
+}
+
+/// Loads the approval cards earlier passes generated, then has the brain map
+/// connected tools that still have none, in the background. Single-flight and
+/// capped inside `aloud_agent`, so every trigger may call it.
+fn warm_previews(app: &AppHandle, key: String) {
+    use tauri::Manager;
+
+    let Ok(path) = aloud_notes::data_dir().map(|dir| dir.join("action-previews.json")) else {
+        return;
+    };
+    let brains = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .ok()
+        .and_then(|s| aloud_agent::brains(&s.cerebras_api_key, &s.gemini_api_key).ok())
+        .unwrap_or_default();
+    tauri::async_runtime::spawn(async move {
+        if let Ok(composio) = client(&key) {
+            aloud_agent::warm_previews(&brains, &composio, &path).await;
         }
     });
 }

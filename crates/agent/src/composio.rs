@@ -7,7 +7,7 @@
 //! Endpoints (all `x-api-key` authed against `backend.composio.dev/api/v3.1`):
 //! - `GET  /connected_accounts`      → items[].{id,status,user_id,toolkit.slug}
 //! - `GET  /toolkits?search=&limit=` → items[].{slug,name,no_auth,meta.{logo,description,tools_count}}
-//! - `GET  /tools?toolkit_slug=&limit=` → items[].{slug,description,input_parameters,tags}
+//! - `GET  /tools?toolkit_slug=&limit=&cursor=` → items[].{slug,description,input_parameters,tags}, next_cursor
 //! - `POST /auth_configs`            → {auth_config.id}, using Composio-managed OAuth
 //! - `POST /connected_accounts/link` → {redirect_url} to send the user through OAuth
 //! - `POST /tools/execute/{slug}` (needs BOTH connected_account_id AND user_id) → {data,error,successful}
@@ -430,6 +430,37 @@ impl ComposioClient {
             }
             if !out.iter().any(|t| t.name == tool.name) {
                 out.push(tool);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Every tool of one toolkit, following Composio's cursor: Slack alone runs
+    /// to 168, past one page.
+    pub async fn all_tools(&self, toolkit: &str) -> Result<Vec<ToolDef>> {
+        // A cursor that never ends must not page forever.
+        const MAX_PAGES: usize = 20;
+        let mut out = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..MAX_PAGES {
+            let mut path = format!("/tools?toolkit_slug={toolkit}&limit=100");
+            if let Some(cursor) = &cursor {
+                path.push_str(&format!("&cursor={}", urlencode(cursor)));
+            }
+            let json = self.get(&path).await?;
+            out.extend(
+                json["items"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(tool_def),
+            );
+            cursor = json["next_cursor"]
+                .as_str()
+                .filter(|c| !c.is_empty())
+                .map(str::to_string);
+            if cursor.is_none() {
+                break;
             }
         }
         Ok(out)

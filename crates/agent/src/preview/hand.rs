@@ -148,14 +148,18 @@ pub struct Context<'a> {
     pub names: &'a Names,
 }
 
-/// The card for a call: its hand mapping when there is one, else the schema
-/// layer, with ids named from earlier reads and text the user said tagged as
-/// theirs. Synchronous and offline; [`super::enrich`] adds what needs a read.
+/// The card for a call: its hand mapping when there is one, else its generated
+/// mapping, else the schema layer, with ids named from earlier reads and text
+/// the user said tagged as theirs. Synchronous and offline; [`super::enrich`]
+/// adds what needs a read.
 pub fn render(name: &str, args: &Value, schema: Option<&Value>, ctx: &Context) -> ActionPreview {
-    // Generated mappings (`preview/generate.rs`, feat/preview-mappings) go
-    // here: `hand(name).or_else(|| generated(name))`. They are a `Mapping`
-    // too, so nothing below changes.
-    let mut preview = match hand(name) {
+    // A generated mapping (`generate.rs`) is a `Mapping` too, so nothing below
+    // changes; a hand one always wins.
+    let generated = hand(name)
+        .is_none()
+        .then(|| super::generate::generated(name, schema))
+        .flatten();
+    let mut preview = match hand(name).or(generated.as_deref()) {
         Some(mapping) => mapped(mapping, name, args, schema, ctx.names),
         None => {
             let mut preview = build(name, args, schema);
@@ -395,7 +399,7 @@ fn sibling<'a>(args: &'a Value, pointer: &str, key: &str) -> Option<&'a str> {
 
 /// The schema of the argument at `pointer`: properties by name, `items` by
 /// index.
-fn prop_at<'a>(schema: Option<&'a Value>, pointer: &str) -> Option<&'a Value> {
+pub(super) fn prop_at<'a>(schema: Option<&'a Value>, pointer: &str) -> Option<&'a Value> {
     let mut at = schema?;
     for segment in pointer.strip_prefix('/')?.split('/') {
         let segment = unescape(segment);

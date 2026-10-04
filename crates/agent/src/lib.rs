@@ -15,6 +15,7 @@ pub mod tools;
 
 pub use cache::ResponseCache;
 pub use composio::{toolkit_of_slug, ComposioClient, ToolDef, Toolkit, TOOLS_PER_TOOLKIT};
+pub use preview::warm_previews;
 pub use tool_loop::{
     first_turn, run as run_tool_loop, Callbacks, Command, LoopEvent, Mock, ProposedCall, Verdict,
 };

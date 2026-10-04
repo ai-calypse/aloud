@@ -313,7 +313,7 @@ fn backoff(error: &LlmError) -> Option<&'static [f64]> {
 /// than wait: everything [`backoff`] would retry, plus the errors waiting cannot
 /// fix — a key with no billing (Cerebras answers 402), a revoked key, a model id
 /// the provider no longer serves.
-fn fails_over(error: &LlmError) -> bool {
+pub(crate) fn fails_over(error: &LlmError) -> bool {
     backoff(error).is_some()
         || matches!(
             error,
