@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { humanise, labelFor } from "./tool-views";
+import { humanise, labelFor, rowLabel } from "./tool-views";
 
 describe("tool views", () => {
   it("says what the tool is doing, not what it is called", () => {
@@ -28,6 +28,17 @@ describe("tool views", () => {
   });
 
   /** After Connectors, most tools come from toolkits nobody wrote a view for. */
+  it("labels an unregistered write by its card's title, not its slug", () => {
+    expect(rowLabel("SLACK_CHAT_POST_MESSAGE", {}, "Send message to launch")).toBe(
+      "Send message to launch",
+    );
+    expect(rowLabel("SLACK_FIND_CHANNELS", {}, null)).toBe(humanise("SLACK_FIND_CHANNELS"));
+    // A hand-written label still wins over the card's title.
+    expect(rowLabel("ALOUD_NOTES_CREATE", { title: "Groceries" }, "New Note")).toBe(
+      labelFor("ALOUD_NOTES_CREATE", { title: "Groceries" }),
+    );
+  });
+
   it("falls back to a readable label for an unregistered tool", () => {
     expect(humanise("SLACK_SEND_MESSAGE")).toBe("Slack: send message");
     expect(labelFor("LINEAR_CREATE_ISSUE", {})).toBe("Linear: create issue");

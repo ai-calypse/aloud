@@ -25,7 +25,7 @@ import {
   type Run,
   type Step,
 } from "@/lib/agent-steps";
-import { gateFor, labelFor, text } from "@/lib/tool-views";
+import { gateFor, labelFor, rowLabel, text } from "@/lib/tool-views";
 import { Panel } from "./Panel";
 
 /**
@@ -57,9 +57,10 @@ export function AgentRun({
       footer={
         <span className="agent__trail">
           {run.steps.length > 0
-            ? labelFor(
+            ? rowLabel(
                 run.steps[run.steps.length - 1].name,
                 run.steps[run.steps.length - 1].args,
+                run.steps[run.steps.length - 1].preview?.title,
               )
             : ""}
         </span>
@@ -90,7 +91,9 @@ export function AgentRun({
             <li key={`${step.name}-${i}`}>
               <span className="agent__step">
                 <StepIcon step={step} pending={step === pending} />
-                <span className="agent__name">{labelFor(step.name, step.args)}</span>
+                <span className="agent__name">
+                  {rowLabel(step.name, step.args, step.preview?.title)}
+                </span>
                 {count > 1 && <span className="agent__count">×{count}</span>}
                 <span className="agent__state">
                   {stepStatus(step, step === pending)}
@@ -594,5 +597,5 @@ function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
  * identically, which is exactly when collapsing them hides nothing.
  */
 function rowKey(step: Step, pending: boolean): string {
-  return `${labelFor(step.name, step.args)}|${stepStatus(step, pending)}`;
+  return `${rowLabel(step.name, step.args, step.preview?.title)}|${stepStatus(step, pending)}`;
 }

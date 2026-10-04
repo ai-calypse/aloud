@@ -370,6 +370,15 @@ export function labelFor(name: string, args: ToolArgs): string {
   }
 }
 
+/**
+ * A step row's label: the registered one, else the title Rust gave the step's
+ * card ("Send message to launch"), else the slug humanised ("Slack: chat post
+ * message"), which is all an unregistered read has.
+ */
+export function rowLabel(name: string, args: ToolArgs, title?: string | null): string {
+  return name in VIEWS || !title ? labelFor(name, args) : title;
+}
+
 /** The approval gate's own title, or "" to use the label. */
 export function gateFor(name: string, args: ToolArgs): string {
   try {
