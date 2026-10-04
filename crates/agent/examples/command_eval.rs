@@ -7,7 +7,18 @@
 //! cargo run -p aloud-agent --example command_eval -- gemini         # one brain
 //! EVAL_K=3 cargo run -p aloud-agent --example command_eval          # each brain case 3 times
 //! EVAL_SIZE=1 cargo run -p aloud-agent --example command_eval        # + tools and schema tokens per turn
+//! cargo run -p aloud-agent --example command_eval -- runs           # whole runs, tools mocked
+//! cargo run -p aloud-agent --example command_eval -- runs cerebras
 //! ```
+//!
+//! `runs` plays each case in `evals/runs.jsonl` through the whole tool loop
+//! with every tool answered from the case's `mocks` (default
+//! `{"successful":true}`), questions from `answers` and writes auto-approved,
+//! then scores every call the run made: all `expected` entries must be met and
+//! no `forbid` entry may be. `{"callsTool":{"name":…,"count":N}}` passes when
+//! the matching calls' `times` (1 each when absent) add up to exactly N, so
+//! five calls and one call with `times: 5` both count. The first turn alone
+//! cannot see a run that stops after its first step; this can.
 //!
 //! Each brain's run is also saved to `<app-data>/evals/<time>-<brain>.json`,
 //! which the dashboard (`pnpm evals`) reads. Repeats exist because one pass
@@ -58,7 +69,8 @@ struct Trace {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let settings = aloud_store::Settings::load();
-    let only = std::env::args().nth(1);
+    let runs = std::env::args().nth(1).as_deref() == Some("runs");
+    let only = std::env::args().nth(if runs { 2 } else { 1 });
     let k: usize = std::env::var("EVAL_K")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -85,6 +97,9 @@ async fn main() -> anyhow::Result<()> {
     let installed = aloud_selection::installed_apps();
     let composio = ComposioClient::new(&settings.composio_api_key)?;
     let composio = (!settings.composio_api_key.trim().is_empty()).then_some(&composio);
+    if runs {
+        return whole_runs(&brains, &installed, composio).await;
+    }
 
     for (label, brain) in &brains {
         println!("\n== {label} ({})", brain.model);
@@ -306,6 +321,225 @@ async fn judge(
         }
     };
     (check(case, trace.called.as_ref()), trace)
+}
+
+#[derive(Deserialize)]
+struct RunCase {
+    input: String,
+    front: Option<String>,
+    selection: Option<String>,
+    /// Tool name → its canned result. Unlisted tools answer `{"successful":true}`.
+    #[serde(default)]
+    mocks: serde_json::Map<String, Value>,
+    /// Replies to the run's questions, in order; past the end they go unanswered.
+    #[serde(default)]
+    answers: Vec<String>,
+    expected: Vec<Value>,
+    #[serde(default)]
+    forbid: Vec<Value>,
+}
+
+async fn whole_runs(
+    brains: &[(&str, Brain)],
+    installed: &[aloud_selection::InstalledApp],
+    composio: Option<&ComposioClient>,
+) -> anyhow::Result<()> {
+    let cases: Vec<RunCase> = include_str!("../evals/runs.jsonl")
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()?;
+    // Never called with tools mocked, but the loop's signature wants a client.
+    let offline = ComposioClient::new("")?;
+    for (label, brain) in brains {
+        println!("\n== {label} ({}) — whole runs", brain.model);
+        let started_at = chrono::Utc::now();
+        let (mut passed, mut failed, mut skipped) = (0, 0, 0);
+        let mut report = Vec::new();
+        for case in &cases {
+            let started = Instant::now();
+            let (verdict, calls) = play(case, brain, installed, composio, &offline).await;
+            let took = started.elapsed();
+            let (mark, outcome, why) = match &verdict {
+                Verdict::Pass => {
+                    passed += 1;
+                    ("✓", "pass", None)
+                }
+                Verdict::Fail(why) => {
+                    failed += 1;
+                    ("✗", "fail", Some(why.clone()))
+                }
+                Verdict::Skip(why) => {
+                    skipped += 1;
+                    ("–", "skip", Some(why.clone()))
+                }
+            };
+            let note = why.as_ref().map(|w| format!("  ({w})")).unwrap_or_default();
+            let made: Vec<&str> = calls.iter().map(|(n, _)| n.as_str()).collect();
+            println!(
+                "{mark} {:>5.2}s {}{note}\n        {}",
+                took.as_secs_f32(),
+                case.input,
+                made.join(" → ")
+            );
+            report.push(json!({
+                "input": case.input,
+                "front": case.front,
+                "selection": case.selection,
+                "expected": case.expected,
+                "attempts": [{
+                    "verdict": outcome,
+                    "why": why,
+                    "route": "run",
+                    "ms": took.as_millis() as u64,
+                    "calls": calls.iter().map(|(name, args)| json!({ "name": name, "args": args })).collect::<Vec<_>>(),
+                }],
+            }));
+        }
+        println!(
+            "{label}: {passed}/{} whole runs passed, {failed} failed, {skipped} skipped",
+            passed + failed
+        );
+        let path = save(&format!("{label}-runs"), brain.model, 1, started_at, report)?;
+        println!("{label}: report saved to {}", path.display());
+    }
+    Ok(())
+}
+
+/// Plays one case through the real loop with every tool mocked, and returns
+/// the verdict with every call the run made, in order.
+async fn play(
+    case: &RunCase,
+    brain: &Brain,
+    installed: &[aloud_selection::InstalledApp],
+    composio: Option<&ComposioClient>,
+    offline: &ComposioClient,
+) -> (Verdict, Vec<(String, Value)>) {
+    let aloud_agent::CommandTools { tools, more } =
+        aloud_agent::command_tools(&case.input, installed, composio).await;
+    for want in case
+        .expected
+        .iter()
+        .filter_map(|e| e.pointer("/callsTool/name"))
+    {
+        let loadable = more
+            .iter()
+            .any(|kit| name_matches(want, &format!("{}_", kit.to_uppercase())));
+        if !tools.iter().any(|t| name_matches(want, &t.name)) && !loadable {
+            return (
+                Verdict::Skip(format!("{want} not offered here")),
+                Vec::new(),
+            );
+        }
+    }
+    let prompt = aloud_agent::with_context(
+        &case.input,
+        case.front.as_deref(),
+        case.selection.as_deref(),
+    );
+    let mock = |name: &str, _args: &Value| {
+        case.mocks
+            .get(name)
+            .map_or_else(|| r#"{"successful":true}"#.to_string(), Value::to_string)
+    };
+    let answers = std::sync::Mutex::new(case.answers.iter().cloned());
+    let mut calls: Vec<(String, Value)> = Vec::new();
+    let result = aloud_agent::run_tool_loop(
+        std::slice::from_ref(brain),
+        composio.unwrap_or(offline),
+        aloud_agent::Command {
+            said: &case.input,
+            prompt: &prompt,
+            tools: &tools,
+            more: &more,
+        },
+        aloud_agent::Callbacks {
+            on_event: |event| {
+                if let aloud_agent::LoopEvent::ToolCallStart { name, args } = event {
+                    calls.push((name, args));
+                }
+            },
+            confirm: |call: aloud_agent::ProposedCall| async move {
+                aloud_agent::Verdict::Run(call.args)
+            },
+            ask: |_question: String| {
+                let next = answers.lock().ok().and_then(|mut a| a.next());
+                async move { next }
+            },
+            cancelled: || false,
+            mock: Some(&mock),
+        },
+    )
+    .await;
+    if let Err(e) = result {
+        return (Verdict::Fail(format!("error: {e:#}")), calls);
+    }
+    (score(case, &calls), calls)
+}
+
+/// Every `expected` entry met and no `forbid` entry met. A failure says how
+/// far the run got: "finished after 1 of 2" is a run that stopped early.
+fn score(case: &RunCase, calls: &[(String, Value)]) -> Verdict {
+    for entry in &case.forbid {
+        if let Some(want) = entry.get("callsTool") {
+            if let Some((name, args)) = calls.iter().find(|(n, a)| call_matches(want, n, a)) {
+                return Verdict::Fail(format!("forbidden call {name} {args}"));
+            }
+        }
+    }
+    let mut met = 0;
+    for entry in &case.expected {
+        if entry.get("not").is_some() {
+            if !calls.is_empty() {
+                return Verdict::Fail(format!("answer expected, called {}", calls[0].0));
+            }
+            met += 1;
+            continue;
+        }
+        let want = &entry["callsTool"];
+        let matching: Vec<&Value> = calls
+            .iter()
+            .filter(|(n, a)| call_matches(want, n, a))
+            .map(|(_, a)| a)
+            .collect();
+        let ok = match want.get("count").and_then(Value::as_u64) {
+            Some(count) => {
+                let done: u64 = matching
+                    .iter()
+                    .map(|a| a.get("times").and_then(Value::as_u64).unwrap_or(1))
+                    .sum();
+                done == count
+            }
+            None => !matching.is_empty(),
+        };
+        if !ok {
+            let made: Vec<&str> = calls.iter().map(|(n, _)| n.as_str()).collect();
+            return Verdict::Fail(format!(
+                "finished after {met} of {}: missing {want}; made [{}]",
+                case.expected.len(),
+                made.join(", ")
+            ));
+        }
+        met += 1;
+    }
+    Verdict::Pass
+}
+
+fn call_matches(want: &Value, name: &str, args: &Value) -> bool {
+    name_matches(&want["name"], name)
+        && want
+            .get("arguments")
+            .and_then(Value::as_object)
+            .is_none_or(|wanted| {
+                wanted.iter().all(|(key, matcher)| {
+                    let actual = match args.get(key) {
+                        Some(Value::String(s)) => s.clone(),
+                        Some(other) => other.to_string(),
+                        None => return false,
+                    };
+                    value_matches(matcher, &actual, args.get(key))
+                })
+            })
 }
 
 /// The expected tool's name matcher, if the case expects a call.
