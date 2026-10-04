@@ -8,6 +8,7 @@
 
 pub mod cache;
 pub mod composio;
+pub mod preview;
 pub mod tool_loop;
 pub mod tools;
 

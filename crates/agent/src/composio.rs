@@ -920,8 +920,9 @@ fn error_message(body: &str, status: u16) -> String {
 }
 
 /// Composio schemas run ~5K tokens for six tools, enough alone to burst a small
-/// tokens-per-minute budget. Keep only the keys the model needs for arguments.
-fn slim_schema(schema: &Value) -> Value {
+/// tokens-per-minute budget. Keep only the keys the model needs for arguments,
+/// plus `title`: a few tokens that give the action preview its field labels.
+pub(crate) fn slim_schema(schema: &Value) -> Value {
     let Some(obj) = schema.as_object() else {
         return schema.clone();
     };
@@ -930,7 +931,7 @@ fn slim_schema(schema: &Value) -> Value {
         match key.as_str() {
             // `default` stays: without it the model invents values for optional
             // params (calendar_id "role" instead of the documented "primary").
-            "type" | "required" | "enum" | "format" | "default" => {
+            "type" | "required" | "enum" | "format" | "default" | "title" => {
                 out.insert(key.clone(), value.clone());
             }
             "description" => {
@@ -953,7 +954,7 @@ fn slim_schema(schema: &Value) -> Value {
             "items" => {
                 out.insert(key.clone(), slim_schema(value));
             }
-            // drop examples, title, file_uploadable, …
+            // drop examples, file_uploadable, …
             _ => {}
         }
     }
@@ -1444,7 +1445,7 @@ mod tests {
     fn slim_schema_keeps_only_model_relevant_keys() {
         let bloated = json!({
             "type": "object",
-            "title": "drop me",
+            "title": "SendEmailRequest",
             "required": ["to"],
             "properties": {
                 "to": {
@@ -1460,7 +1461,8 @@ mod tests {
             }
         });
         let slim = slim_schema(&bloated);
-        assert!(slim.get("title").is_none(), "title must be dropped");
+        // The action preview labels its fields from these.
+        assert_eq!(slim["title"], "SendEmailRequest");
         assert_eq!(slim["type"], "object");
         assert_eq!(slim["required"], json!(["to"]));
         let to = &slim["properties"]["to"];
