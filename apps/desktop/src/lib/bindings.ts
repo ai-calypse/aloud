@@ -266,6 +266,41 @@ export const commands = {
 	 */
 	agentQuota: () => typedError<Quota, string>(__TAURI_INVOKE("agent_quota")),
 	/**
+	 *  What the players are doing right now, read fresh: a view that mounts
+	 *  should not wait up to a second for its first frame.
+	 */
+	mediaNowPlaying: () => __TAURI_INVOKE<Reading>("media_now_playing"),
+	/**  A Media view mounted (`true`) or went away (`false`). */
+	mediaWatch: (on: boolean) => __TAURI_INVOKE<void>("media_watch", { on }),
+	mediaControl: (player: Player, transport: Transport) => typedError<null, string>(__TAURI_INVOKE("media_control", { player, transport })),
+	mediaSeek: (player: Player, positionMs: number) => typedError<null, string>(__TAURI_INVOKE("media_seek", { player, positionMs })),
+	/**  The cover of `now`, as a `data:` URI the overlay's CSP will load. */
+	mediaArtwork: (now: NowPlaying) => __TAURI_INVOKE<string | null>("media_artwork", { now }),
+	/**
+	 *  Lyrics for `now` from LRCLIB, cached per track. `None` is "none exist";
+	 *  an error is a network failure the view may retry.
+	 */
+	mediaLyrics: (now: NowPlaying) => typedError<{
+	/**  Timed lines, empty when LRCLIB only has plain text. */
+	lines: LyricLine[],
+	plain: string | null,
+	instrumental: boolean,
+} | null, string>(__TAURI_INVOKE("media_lyrics", { now })),
+	soundState: () => __TAURI_INVOKE<SoundState>("sound_state"),
+	soundSetDefault: (direction: Direction, id: number) => typedError<null, string>(__TAURI_INVOKE("sound_set_default", { direction, id })),
+	soundSetMicMuted: (muted: boolean) => typedError<null, string>(__TAURI_INVOKE("sound_set_mic_muted", { muted })),
+	/**
+	 *  Paired Bluetooth devices and their batteries. Slow (the profiler takes a
+	 *  second or two), so the view asks on a slow clock, not a fast one.
+	 */
+	bluetoothDevices: () => typedError<BtDevice[], string>(__TAURI_INVOKE("bluetooth_devices")),
+	bluetoothConnect: (address: string) => typedError<null, string>(__TAURI_INVOKE("bluetooth_connect", { address })),
+	/**
+	 *  Opens System Settings at Automation, where Spotify and Music are allowed
+	 *  or not: the one fix for a player that is running but says nothing.
+	 */
+	openAutomationSettings: () => __TAURI_INVOKE<void>("open_automation_settings"),
+	/**
 	 *  The gate's buttons. `edits` carries the fields the user changed, keyed by
 	 *  the pointer each card field names; `revision` is the card's own, so a click
 	 *  meant for one gate can never answer the next.
@@ -347,6 +382,7 @@ export const events = {
 	dictationPhase: makeEvent<Phase>("dictation-phase"),
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
 	island: makeEvent<IslandChanged>("island"),
+	mediaNowPlaying: makeEvent<MediaNowPlaying>("media-now-playing"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
 	notchHover: makeEvent<NotchHover>("notch-hover"),
@@ -618,6 +654,12 @@ export type AudioDevice = {
 /**  Live input level, 0.0–1.0, driving the pill's waveform. Only while recording. */
 export type AudioLevel = number | null;
 
+export type Battery = {
+	/**  "Left", "Right", "Case", or "" for a single battery. */
+	label: string,
+	percent: number,
+};
+
 /**
  *  What triggers a binding.
  * 
@@ -631,6 +673,16 @@ export type Binding = { kind: "disabled" } | { kind: "key"; key: Key; modifiers:
  *  cannot express, and why this crate exists.
  */
 { kind: "modifierKey"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] };
+
+export type BtDevice = {
+	name: string,
+	/**  `aa:bb:cc:dd:ee:ff`, lowercase: what connecting names it by. */
+	address: string,
+	/**  `headphones`, `mouse`, `keyboard`, `trackpad` or `other`. */
+	kind: string,
+	connected: boolean,
+	batteries: Battery[],
+};
 
 /**
  *  Version, commit and build date, for pasting into a bug report. Baked in by
@@ -688,6 +740,15 @@ export type DefaultPrompt = {
 	version: string,
 };
 
+export type Device = {
+	/**  CoreAudio's id: good for this boot, which is as long as a list lives. */
+	id: number,
+	name: string,
+	/**  What it is plugged in as: "Built-in", "Bluetooth", "USB", "HDMI"… */
+	transport: string,
+	isDefault: boolean,
+};
+
 /**
  *  The words so far, while the live preview is on.
  * 
@@ -696,6 +757,8 @@ export type DefaultPrompt = {
  *  pass over the whole recording once the key is up.
  */
 export type DictationPartial = string;
+
+export type Direction = "output" | "input";
 
 export type Engine = 
 /**  On-device whisper.cpp. No network, no API key. */
@@ -922,11 +985,31 @@ export type LocalRepo = {
 	path: string,
 };
 
+export type LyricLine = {
+	ms: number,
+	/**  Empty for an instrumental break; the view draws a rest. */
+	text: string,
+};
+
+export type Lyrics = {
+	/**  Timed lines, empty when LRCLIB only has plain text. */
+	lines: LyricLine[],
+	plain: string | null,
+	instrumental: boolean,
+};
+
 export type Macro = {
 	/**  The spoken phrase that triggers expansion, e.g. "my address". */
 	trigger: string,
 	expansion: string,
 };
+
+/**
+ *  The players, as of the last poll. Pushed whenever the track or state
+ *  changes, and on every poll while a Media view is on screen (the position
+ *  moves; the view interpolates between polls).
+ */
+export type MediaNowPlaying = Reading;
 
 export type MeetingPhase = 
 /**
@@ -965,6 +1048,19 @@ export type Note = {
 	 */
 	date: number,
 	content: string,
+};
+
+export type NowPlaying = {
+	player: Player,
+	state: PlayState,
+	title: string,
+	artist: string,
+	album: string,
+	/**  `u32`: specta forbids 64-bit ints on the wire, and 49 days of track fit. */
+	durationMs: number,
+	positionMs: number,
+	/**  Spotify's own https cover URL; Music has none and is read from the app. */
+	artworkUrl: string | null,
 };
 
 /**  Whose words a text field holds. */
@@ -1061,6 +1157,11 @@ export type PlannedCall = {
 	app: string,
 };
 
+/**  Stopped is not here: a player with nothing loaded is "nothing playing". */
+export type PlayState = "playing" | "paused";
+
+export type Player = "spotify" | "music";
+
 /**
  *  A question put to the user mid-run. `options` non-empty means the answer is
  *  one of them, so the panel offers buttons instead of a text field.
@@ -1087,6 +1188,16 @@ export type QuotaWindow = {
 	 *  without a refetch.
 	 */
 	resetsAt: string | null,
+};
+
+/**
+ *  One look at the players. `denied` is a player that is running but has not
+ *  granted the Automation permission: without it the view would say "nothing
+ *  playing" over a perfectly good song.
+ */
+export type Reading = {
+	now: NowPlaying | null,
+	denied: Player | null,
 };
 
 /**  What a field is, which decides how the card draws it. */
@@ -1393,6 +1504,16 @@ export type ShowTarget = {
 	target: string,
 };
 
+export type SoundState = {
+	outputs: Device[],
+	inputs: Device[],
+	/**
+	 *  None when the default input has neither a mute switch nor a level to
+	 *  pull to zero (some USB interfaces): the view hides the switch.
+	 */
+	micMuted: boolean | null,
+};
+
 /**  One closed span. */
 export type Span = {
 	/**  Groups the stages of one dictation; monotonic, so it orders by time. */
@@ -1491,6 +1612,8 @@ export type ToolResult = {
 	/**  The [`ToolCall::id`] this result finishes. */
 	id?: number | null,
 };
+
+export type Transport = "play" | "pause" | "toggle" | "next" | "previous";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

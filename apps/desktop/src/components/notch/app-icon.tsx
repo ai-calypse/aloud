@@ -3,13 +3,18 @@ import {
   ArrowDownToLineIcon,
   BellIcon,
   BotIcon,
+  BluetoothIcon,
   CheckIcon,
   FileIcon,
   FolderIcon,
   HardDriveIcon,
   ImageIcon,
+  HeadphonesIcon,
+  KeyboardIcon,
+  MouseIcon,
   MusicIcon,
   TimerIcon,
+  TouchpadIcon,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -23,13 +28,18 @@ export const GLYPHS: Record<string, LucideIcon> = {
   agents: BotIcon,
   alert: BellIcon,
   done: CheckIcon,
+  bluetooth: BluetoothIcon,
   download: ArrowDownToLineIcon,
   drive: HardDriveIcon,
   file: FileIcon,
   folder: FolderIcon,
   image: ImageIcon,
+  headphones: HeadphonesIcon,
+  keyboard: KeyboardIcon,
+  mouse: MouseIcon,
   music: MusicIcon,
   timer: TimerIcon,
+  trackpad: TouchpadIcon,
 };
 
 const SIZE = {

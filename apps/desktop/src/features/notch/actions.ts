@@ -1,4 +1,4 @@
-import { commands } from "@/lib/bindings";
+import { commands, type Player, type Transport } from "@/lib/bindings";
 import type { SectionId } from "./sections";
 
 /** What an action may do to the notch itself. */
@@ -32,6 +32,22 @@ export type NotchAction = {
   run: (ctx: ActionContext, args: Record<string, string>) => boolean | Promise<boolean>;
 };
 
+/**
+ * The player a media action means: the one an island names (Rust sends the
+ * app's name), else whichever is on — ⌘K has no island to ask.
+ */
+async function mediaPlayer(args: Record<string, string>): Promise<Player | null> {
+  if (args.player === "Spotify") return "spotify";
+  if (args.player === "Music") return "music";
+  return (await commands.mediaNowPlaying()).now?.player ?? null;
+}
+
+/** Sends a transport command to the player. False when nothing is playing or the player refuses. */
+async function transport(args: Record<string, string>, command: Transport): Promise<boolean> {
+  const player = await mediaPlayer(args);
+  return player !== null && (await commands.mediaControl(player, command)).status === "ok";
+}
+
 export const ACTIONS: NotchAction[] = [
   {
     id: "agents.open",
@@ -63,6 +79,87 @@ export const ACTIONS: NotchAction[] = [
     subsection: "usage",
     run: (ctx) => {
       ctx.open("agents", "usage");
+      return true;
+    },
+  },
+  // notch-media: the Media section's actions.
+  {
+    id: "media.toggle",
+    title: "Play or pause",
+    keywords: ["music", "spotify", "song", "resume", "stop"],
+    section: "media",
+    subsection: "playing",
+    run: (_, args) => transport(args, "toggle"),
+  },
+  {
+    id: "media.next",
+    title: "Next track",
+    keywords: ["skip", "music", "spotify", "song"],
+    section: "media",
+    subsection: "playing",
+    run: (_, args) => transport(args, "next"),
+  },
+  {
+    id: "media.previous",
+    title: "Previous track",
+    keywords: ["back", "music", "spotify", "song"],
+    section: "media",
+    subsection: "playing",
+    run: (_, args) => transport(args, "previous"),
+  },
+  {
+    id: "media.open",
+    title: "Show what's playing",
+    keywords: ["music", "spotify", "now playing", "track"],
+    section: "media",
+    subsection: "playing",
+    run: (ctx) => {
+      ctx.open("media", "playing");
+      return true;
+    },
+  },
+  {
+    id: "media.lyrics",
+    title: "Show lyrics",
+    keywords: ["song", "words", "sing", "karaoke"],
+    section: "media",
+    subsection: "lyrics",
+    run: (ctx) => {
+      ctx.open("media", "lyrics");
+      return true;
+    },
+  },
+  {
+    id: "sound.micMute",
+    title: "Mute or unmute the microphone",
+    keywords: ["mic", "meeting", "zoom", "silence", "audio"],
+    section: "media",
+    subsection: "sound",
+    run: async () => {
+      const { micMuted } = await commands.soundState();
+      // No switch on this microphone: say so rather than pretend.
+      return micMuted !== null && (await commands.soundSetMicMuted(!micMuted)).status === "ok";
+    },
+  },
+  {
+    id: "sound.open",
+    title: "Choose an audio output or input",
+    keywords: ["speakers", "headphones", "airpods", "switch", "audio device"],
+    section: "media",
+    subsection: "sound",
+    run: (ctx) => {
+      ctx.open("media", "sound");
+      return true;
+    },
+  },
+  {
+    id: "devices.open",
+    title: "Show AirPods and device batteries",
+    keywords: ["bluetooth", "headphones", "mouse", "keyboard", "battery", "airpods"],
+    section: "media",
+    subsection: "devices",
+    run: (ctx) => {
+      ctx.open("media", "devices");
       return true;
     },
   },
