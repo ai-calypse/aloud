@@ -1,5 +1,6 @@
 import { commands } from "@/lib/bindings";
 import type { SectionId } from "./sections";
+import { SNAPS } from "./snaps";
 
 /** What an action may do to the notch itself. */
 export type ActionContext = {
@@ -102,6 +103,28 @@ export const ACTIONS: NotchAction[] = [
       return true;
     },
   },
+  {
+    id: "mac.windows",
+    title: "Show window snapping",
+    keywords: ["snap", "tile", "window", "halves", "quarters", "maximize"],
+    section: "mac",
+    subsection: "windows",
+    run: (ctx) => {
+      ctx.open("mac", "windows");
+      return true;
+    },
+  },
+  // One per position, so ⌘K reads "Snap window left" and Enter does it.
+  ...SNAPS.map(
+    (snap): NotchAction => ({
+      id: `mac.snap.${snap.id}`,
+      title: `Snap window: ${snap.label.toLowerCase()}`,
+      keywords: ["window", "snap", "tile", "move", snap.group.toLowerCase()],
+      section: "mac",
+      subsection: "windows",
+      run: async () => (await commands.macSnap(snap.id)).status === "ok",
+    }),
+  ),
   // notch-mac: actions end
   {
     // What a finished row's Show does: bring back what a write made.
