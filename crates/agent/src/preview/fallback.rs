@@ -112,7 +112,7 @@ pub fn build(name: &str, args: &Value, schema: Option<&Value>) -> ActionPreview 
 }
 
 /// Slug words that name the action, and the button label each gets.
-const VERBS: &[(&str, &str)] = &[
+pub(super) const VERBS: &[(&str, &str)] = &[
     ("send", "Send"),
     ("post", "Send"),
     ("reply", "Send"),

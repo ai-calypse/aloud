@@ -31,12 +31,15 @@
 //! `{"or": [..]}`. `fast` asserts whether the no-model path takes it. A case
 //! whose tool this machine or account doesn't offer is skipped, not failed.
 //! A brain write that passes arguments its approval card would not show fails
-//! as "blank preview", however right the call.
+//! as "blank preview", however right the call. The run ends with which layer
+//! would draw the card for each write tool offered: hand, generated
+//! (`<app-data>/action-previews.json`) or schema.
 
 use aloud_agent::{Brain, ComposioClient};
 use aloud_native::fast::Fast;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 #[derive(Deserialize)]
@@ -108,6 +111,8 @@ async fn main() -> anyhow::Result<()> {
     if runs {
         return whole_runs(&brains, &installed, composio).await;
     }
+    aloud_agent::preview::load_generated(&aloud_notes::data_dir()?.join("action-previews.json"));
+    let mut writes: BTreeMap<String, Value> = BTreeMap::new();
 
     for (label, brain) in &brains {
         println!("\n== {label} ({})", brain.model);
@@ -119,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
             let mut attempts = Vec::new();
             for _ in 0..k {
                 let started = Instant::now();
-                let (verdict, trace) = judge(case, brain, &installed, composio).await;
+                let (verdict, trace) = judge(case, brain, &installed, composio, &mut writes).await;
                 let took = started.elapsed().saturating_sub(trace.waited);
                 let (mark, outcome, why) = match &verdict {
                     Verdict::Pass => {
@@ -187,7 +192,33 @@ async fn main() -> anyhow::Result<()> {
         let path = save(label, brain.model, k, started_at, report)?;
         println!("{label}: report saved to {}", path.display());
     }
+    coverage(&writes);
     Ok(())
+}
+
+/// Which layer draws the card for each write tool the cases were offered.
+fn coverage(writes: &BTreeMap<String, Value>) {
+    use aloud_agent::preview::{layer, Layer};
+    let mut by: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (name, schema) in writes {
+        let key = match layer(name, Some(schema)) {
+            Layer::Hand => "hand",
+            Layer::Generated => "generated",
+            Layer::Schema => "schema",
+        };
+        by.entry(key).or_default().push(name);
+    }
+    let count = |key| by.get(key).map_or(0, Vec::len);
+    println!(
+        "\npreviews: {} write tools offered — hand {}, generated {}, schema {}",
+        writes.len(),
+        count("hand"),
+        count("generated"),
+        count("schema")
+    );
+    if let Some(schema) = by.get("schema") {
+        println!("   schema only: {}", schema.join(", "));
+    }
 }
 
 /// Writes one brain's run where the dashboard looks: the app's data folder,
@@ -235,6 +266,7 @@ async fn judge(
     brain: &Brain,
     installed: &[aloud_selection::InstalledApp],
     composio: Option<&ComposioClient>,
+    writes: &mut BTreeMap<String, Value>,
 ) -> (Verdict, Trace) {
     let mut trace = Trace {
         route: "fast",
@@ -284,6 +316,9 @@ async fn judge(
                 None,
                 case.selection.as_deref(),
             );
+            for tool in tools.iter().filter(|t| !t.read_only) {
+                writes.insert(tool.name.clone(), tool.parameters.clone());
+            }
             let schema_chars: usize = tools.iter().map(|t| t.to_openai().to_string().len()).sum();
             trace.offered = Some((tools.len(), schema_chars / 4));
             if std::env::var_os("EVAL_SIZE").is_some() {
