@@ -8,6 +8,7 @@ mod overlay;
 mod pipeline;
 mod quota;
 mod sessions;
+mod shelf;
 mod sound;
 mod tray;
 
@@ -157,6 +158,25 @@ fn specta_builder() -> Builder<tauri::Wry> {
             agent::close_agent,
             agent::show_result,
             agent::undo_tidy,
+            // -- notch Shelf (aloud-shelf) --
+            shelf::shelf_items,
+            shelf::shelf_add,
+            shelf::shelf_remove,
+            shelf::shelf_clear,
+            shelf::shelf_convert,
+            shelf::shelf_zip,
+            shelf::shelf_unzip,
+            shelf::shelf_airdrop,
+            shelf::shelf_thumbnail,
+            shelf::shelf_prefs,
+            shelf::shelf_set_watch,
+            shelf::shots_recent,
+            shelf::shots_copy,
+            shelf::shots_capture,
+            shelf::downloads_recent,
+            shelf::drives_list,
+            shelf::drive_eject,
+            // -- end notch Shelf --
         ])
         .events(collect_events![
             pipeline::Phase,
@@ -170,6 +190,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::OverlayDismiss,
             overlay::NotchHover,
             islands::IslandChanged,
+            shelf::ShelfChanged,
             sessions::AgentSessions,
             sessions::AgentPermission,
             sessions::AgentPermissionResolved,
@@ -273,6 +294,10 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             }
 
             sessions::start(app.handle());
+
+            // -- notch Shelf --
+            shelf::init(app.handle());
+            // -- end notch Shelf --
 
             tray::init(app)?;
 

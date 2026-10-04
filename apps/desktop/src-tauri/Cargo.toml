@@ -36,6 +36,7 @@ aloud-paste = { path = "../../../crates/paste" }
 aloud-permissions = { path = "../../../crates/permissions" }
 aloud-volume = { path = "../../../crates/volume" }
 aloud-selection = { path = "../../../crates/selection" }
+aloud-shelf = { path = "../../../crates/shelf" }
 aloud-store = { path = "../../../crates/store" }
 aloud-transcribe = { path = "../../../crates/transcribe" }
 anyhow.workspace = true

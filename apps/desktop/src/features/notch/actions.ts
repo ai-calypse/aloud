@@ -83,6 +83,87 @@ export const ACTIONS: NotchAction[] = [
     args: ["folder"],
     run: async (_, { folder }) => (await commands.undoTidy(folder)).status === "ok",
   },
+
+  // -- notch Shelf --
+  {
+    id: "shelf.files",
+    title: "Open the file shelf",
+    keywords: ["shelf", "drop", "airdrop", "zip", "convert", "image", "files"],
+    section: "shelf",
+    subsection: "files",
+    run: (ctx) => {
+      ctx.open("shelf", "files");
+      return true;
+    },
+  },
+  {
+    id: "shelf.shots",
+    title: "Show recent screenshots",
+    keywords: ["screenshot", "screen capture", "pictures"],
+    section: "shelf",
+    subsection: "shots",
+    run: (ctx) => {
+      ctx.open("shelf", "shots");
+      return true;
+    },
+  },
+  {
+    id: "shelf.downloads",
+    title: "Show recent downloads",
+    keywords: ["downloaded", "downloads folder"],
+    section: "shelf",
+    subsection: "downloads",
+    run: (ctx) => {
+      ctx.open("shelf", "downloads");
+      return true;
+    },
+  },
+  {
+    id: "shelf.drives",
+    title: "Show external drives",
+    keywords: ["eject", "usb", "disk", "volume", "sd card"],
+    section: "shelf",
+    subsection: "drives",
+    run: (ctx) => {
+      ctx.open("shelf", "drives");
+      return true;
+    },
+  },
+  {
+    id: "shelf.capture",
+    title: "Capture a screenshot region",
+    keywords: ["screenshot", "screencapture", "snip", "crop"],
+    section: "shelf",
+    subsection: "shots",
+    run: async () => (await commands.shotsCapture("region")).status === "ok",
+  },
+  {
+    id: "shelf.captureClipboard",
+    title: "Capture a region to the clipboard",
+    keywords: ["screenshot", "screencapture", "copy"],
+    section: "shelf",
+    subsection: "shots",
+    run: async () => (await commands.shotsCapture("clipboard")).status === "ok",
+  },
+  {
+    id: "shelf.copyShot",
+    title: "Copy a screenshot",
+    args: ["path"],
+    run: async (_, { path }) => (await commands.shotsCopy(path)).status === "ok",
+  },
+  {
+    id: "shelf.reveal",
+    title: "Show a file in Finder",
+    args: ["path"],
+    run: async (_, { path }) => (await commands.finderReveal(path)).status === "ok",
+  },
+  {
+    id: "shelf.eject",
+    title: "Eject a drive",
+    args: ["mount"],
+    run: async (_, { mount }) => (await commands.driveEject(mount)).status === "ok",
+  },
+  // -- end notch Shelf --
 ];
 
 /**
