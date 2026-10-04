@@ -1225,6 +1225,11 @@ export type ToolCall = {
 	 *  write outside content asked for.
 	 */
 	canAlways: boolean,
+	/**
+	 *  The loop's step for this call: a round's calls all start before any
+	 *  finishes, so a result finds its row by this. None on the fast path.
+	 */
+	id?: number | null,
 };
 
 export type ToolResult = {
@@ -1239,6 +1244,8 @@ export type ToolResult = {
 	note: string | null,
 	/**  The folder a tidy-up sorted, which the row's Undo puts back. */
 	tidied: string | null,
+	/**  The [`ToolCall::id`] this result finishes. */
+	id?: number | null,
 };
 
 /* Tauri Specta runtime */

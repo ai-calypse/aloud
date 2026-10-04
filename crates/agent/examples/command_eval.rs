@@ -555,17 +555,16 @@ async fn play(
         },
         aloud_agent::Callbacks {
             on_event: |event| match event {
-                aloud_agent::LoopEvent::ToolCallStart { name, args } => {
+                // Steps count every start from 0, so a step is its index here.
+                aloud_agent::LoopEvent::ToolCallStart { name, args, .. } => {
                     played.calls.push((name, args));
                 }
-                // Paired with the latest start of the same name: the ask tool
-                // reports a result with no start, and must not be counted.
                 aloud_agent::LoopEvent::ToolCallResult {
-                    name,
+                    step,
                     success: true,
                     ..
                 } => {
-                    if let Some(call) = played.calls.iter().rev().find(|(n, _)| *n == name) {
+                    if let Some(call) = played.calls.get(step as usize) {
                         played.executed.push(call.clone());
                     }
                 }
