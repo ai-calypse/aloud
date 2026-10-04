@@ -51,6 +51,7 @@ dependencies = [
  "aloud-hotkey",
  "aloud-islands",
  "aloud-llm",
+ "aloud-media",
  "aloud-meeting",
  "aloud-native",
  "aloud-notes",

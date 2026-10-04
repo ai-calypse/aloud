@@ -69,7 +69,6 @@ async fn main() -> anyhow::Result<()> {
                     for line in l.lines.iter().take(6) {
                         println!("  {:>6} ms  {}", line.ms, line.text);
                     }
-                    println!("line at 30s: {:?}", lyrics::line_at(&l.lines, 30_000));
                 }
                 None => println!("no lyrics"),
             }

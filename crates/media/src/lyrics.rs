@@ -1,6 +1,8 @@
 //! Synced lyrics from LRCLIB (free, no key): fetched in Rust because the
 //! overlay's CSP is `default-src 'self'`, parsed from LRC, cached on disk per
-//! track, and mapped from a playback position to the line being sung.
+//! track. Which line is being sung is the webview's call (`features/notch/media.ts`):
+//! it already interpolates the position every frame, and a round trip per tick
+//! to Rust would add nothing.
 //!
 //! This sends the track's title, artist, album and length to lrclib.net.
 
@@ -222,14 +224,6 @@ fn parse_stamp(tag: &str) -> Option<u32> {
     Some((minutes * 60 + seconds) * 1000 + fraction)
 }
 
-/// The index of the line being sung at `position_ms`: the last one that has
-/// started. None before the first line.
-pub fn line_at(lines: &[LyricLine], position_ms: u32) -> Option<usize> {
-    lines
-        .partition_point(|l| l.ms <= position_ms)
-        .checked_sub(1)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,25 +259,6 @@ mod tests {
                 line(60_500, "chorus"),
             ]
         );
-    }
-
-    /// Guards: the boundary lines. A position exactly on a stamp is already
-    /// that line, and before the first stamp nothing is highlighted.
-    #[test]
-    fn the_line_is_the_last_one_started() {
-        let lines = [
-            line(1000, "a"),
-            line(2000, "b"),
-            line(2000, "c"),
-            line(5000, "d"),
-        ];
-        assert_eq!(line_at(&lines, 0), None);
-        assert_eq!(line_at(&lines, 999), None);
-        assert_eq!(line_at(&lines, 1000), Some(0));
-        assert_eq!(line_at(&lines, 1999), Some(0));
-        assert_eq!(line_at(&lines, 2000), Some(2));
-        assert_eq!(line_at(&lines, 999_999), Some(3));
-        assert_eq!(line_at(&[], 5), None);
     }
 
     fn record(duration: f64, synced: Option<&str>, plain: Option<&str>) -> Record {

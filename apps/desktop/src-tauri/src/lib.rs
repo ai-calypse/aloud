@@ -2,6 +2,7 @@ mod agent;
 mod commands;
 mod islands;
 mod listen;
+mod media; // notch-media
 mod meeting;
 mod notch;
 mod overlay;
@@ -150,6 +151,19 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sessions::list_repo_branches,
             sessions::read_agent_transcript,
             quota::agent_quota,
+            // notch-media: the Media section's commands and event.
+            media::media_now_playing,
+            media::media_watch,
+            media::media_control,
+            media::media_seek,
+            media::media_artwork,
+            media::media_lyrics,
+            media::sound_state,
+            media::sound_set_default,
+            media::sound_set_mic_muted,
+            media::bluetooth_devices,
+            media::bluetooth_connect,
+            media::open_automation_settings,
             agent::confirm_agent,
             agent::arm_agent,
             agent::hold_agent,
@@ -173,6 +187,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sessions::AgentSessions,
             sessions::AgentPermission,
             sessions::AgentPermissionResolved,
+            media::MediaNowPlaying, // notch-media
             HotkeysPermitted,
             ConnectorsUpdated,
         ])
@@ -273,6 +288,7 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             }
 
             sessions::start(app.handle());
+            media::start(app.handle()); // notch-media
 
             tray::init(app)?;
 
