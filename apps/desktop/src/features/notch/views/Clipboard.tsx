@@ -106,7 +106,7 @@ function HistorySwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) 
     <List label="Clipboard history setting">
       <Row
         title="Keep clipboard history"
-        subtitle="Stored on this Mac only. Never logged, never sent anywhere or shown to a model. Copies from password managers are skipped."
+        subtitle="This Mac only. Never logged, never sent to a model."
         trailing={<Switch checked={on} onChange={onChange} label="Keep clipboard history" />}
       />
     </List>
@@ -145,7 +145,8 @@ export function ClipboardHistory() {
       <>
         <Empty title="Clipboard history is off">
           Turn it on and Aloud keeps what you copy — text, images and files — so you can copy it again,
-          paste it, or act on it.
+          paste it, or act on it. It all stays on this Mac: it is never logged, never sent anywhere or
+          shown to a model, and copies from password managers are skipped.
         </Empty>
         <div className="mt-3">
           <HistorySwitch on={false} onChange={(on) => void toggle(on)} />
