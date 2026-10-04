@@ -49,7 +49,7 @@ export default function Closing() {
           at the top; the links sit on its dark floor. */}
       <footer className="relative isolate overflow-hidden text-neutral-0">
         {/* Natural shape at every width, so the cat can be placed in % of the picture and stay
-            on the same TV screen: the big wooden set at the front, standing on the glass. */}
+            put: bottom-left, standing on the floor in front of the little wooden set. */}
         <div className="relative">
           <img
             src={footerArt}
@@ -68,7 +68,7 @@ export default function Closing() {
               width={192}
               height={206}
               loading="lazy"
-              className="pointer-events-none absolute left-[42.4%] top-[58.2%] w-[11%] [filter:drop-shadow(0_2px_5px_rgb(0_0_60/0.45))]"
+              className="pointer-events-none absolute left-[7%] top-[70%] w-[14%] md:top-[77.5%] md:w-[10%] [filter:drop-shadow(0_2px_5px_rgb(0_0_60/0.45))]"
             />
           </picture>
         </div>
