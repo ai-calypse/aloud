@@ -1,4 +1,5 @@
 mod agent;
+mod clipboard;
 mod commands;
 mod islands;
 mod listen;
@@ -150,6 +151,26 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sessions::list_repo_branches,
             sessions::read_agent_transcript,
             quota::agent_quota,
+            // -- notch Clipboard section (feat/notch-clipboard-launch) --
+            clipboard::clipboard_enabled,
+            clipboard::clipboard_set_enabled,
+            clipboard::clipboard_list,
+            clipboard::clipboard_copy,
+            clipboard::clipboard_paste,
+            clipboard::clipboard_action,
+            clipboard::clipboard_pin,
+            clipboard::clipboard_delete,
+            clipboard::clipboard_clear,
+            clipboard::snippet_list,
+            clipboard::snippet_save,
+            clipboard::snippet_delete,
+            clipboard::snippet_copy,
+            clipboard::snippet_paste,
+            clipboard::color_pick,
+            clipboard::color_list,
+            clipboard::color_copy,
+            clipboard::color_clear,
+            // -- end notch Clipboard section --
             agent::confirm_agent,
             agent::arm_agent,
             agent::hold_agent,
@@ -173,6 +194,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sessions::AgentSessions,
             sessions::AgentPermission,
             sessions::AgentPermissionResolved,
+            clipboard::ClipboardChanged, // notch Clipboard section
             HotkeysPermitted,
             ConnectorsUpdated,
         ])
@@ -273,6 +295,9 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             }
 
             sessions::start(app.handle());
+
+            // notch Clipboard section: the store, and the pasteboard watcher.
+            clipboard::start(app.handle());
 
             tray::init(app)?;
 

@@ -32,6 +32,7 @@ aloud-notes = { path = "../../../crates/notes" }
 aloud-quota = { path = "../../../crates/quota" }
 aloud-sessions = { path = "../../../crates/sessions" }
 aloud-bridge = { path = "../../../crates/bridge" }
+aloud-clipboard = { path = "../../../crates/clipboard" }
 aloud-paste = { path = "../../../crates/paste" }
 aloud-permissions = { path = "../../../crates/permissions" }
 aloud-volume = { path = "../../../crates/volume" }

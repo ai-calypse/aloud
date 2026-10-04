@@ -66,6 +66,37 @@ export const ACTIONS: NotchAction[] = [
       return true;
     },
   },
+  // -- Clipboard section --
+  {
+    id: "clipboard.history",
+    title: "Open clipboard history",
+    keywords: ["copy", "paste", "copied", "ocr"],
+    section: "clipboard",
+    subsection: "history",
+    run: (ctx) => {
+      ctx.open("clipboard", "history");
+      return true;
+    },
+  },
+  {
+    id: "clipboard.snippets",
+    title: "Open snippets",
+    keywords: ["text", "template", "boilerplate"],
+    section: "clipboard",
+    subsection: "snippets",
+    run: (ctx) => {
+      ctx.open("clipboard", "snippets");
+      return true;
+    },
+  },
+  {
+    id: "colors.pick",
+    title: "Pick a color from the screen",
+    keywords: ["eyedropper", "hex", "rgb", "sample"],
+    section: "clipboard",
+    subsection: "colors",
+    run: async () => (await commands.colorPick()).status === "ok",
+  },
   {
     // What a finished row's Show does: bring back what a write made.
     id: "result.show",

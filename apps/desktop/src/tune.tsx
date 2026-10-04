@@ -9,6 +9,7 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { AppIcon } from "./components/notch/app-icon";
 import { Kbd, Slider as NotchSlider, Switch } from "./components/notch/controls";
+import { SearchBox, Swatch, TextArea, TextField } from "./components/notch/field";
 import { Empty, Label, Lead, List, Row, Value } from "./components/notch/list";
 import { Bar, Ring } from "./components/notch/meters";
 import { SectionTabs } from "./components/notch/section-tabs";
@@ -487,6 +488,7 @@ function NotchGallery() {
   const [awake, setAwake] = useState(true);
   const [volume, setVolume] = useState(64);
   const [picked, setPicked] = useState("music");
+  const [query, setQuery] = useState("");
 
   return (
     <div
@@ -600,6 +602,19 @@ function NotchGallery() {
                 trailing={<Value>1:42</Value>}
               />
             </List>
+          </div>
+        </Specimen>
+
+        <Specimen name="TextField · TextArea · SearchBox · Swatch" note="the notch's inputs; a swatch is the user's own colour, so it is the one raw value">
+          <div className="grid max-w-[420px] gap-2">
+            <SearchBox label="Search clipboard" value={query} onChange={setQuery} />
+            <TextField aria-label="Name" placeholder="Name" />
+            <TextArea aria-label="Text" placeholder="Text to paste" />
+            <div className="flex items-center gap-2">
+              <Swatch color="#ff8800" />
+              <Swatch color="#000000" />
+              <Swatch color="#30d158" size="lg" />
+            </div>
           </div>
         </Specimen>
 

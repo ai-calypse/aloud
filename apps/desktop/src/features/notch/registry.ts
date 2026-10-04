@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { readySections, type Section } from "./sections";
 import { AgentsCoding, AgentsUsage, AgentsVoice } from "./views/Agents";
+import { ClipboardColors, ClipboardHistory, ClipboardSnippets } from "./views/Clipboard";
 import { NowOverview } from "./views/Now";
 
 /**
@@ -105,9 +106,27 @@ export const SECTIONS: Section[] = [
     name: "Clipboard",
     icon: ClipboardIcon,
     subsections: [
-      { id: "history", name: "History", features: ["Clipboard history", "Smart actions", "OCR"], ready: false },
-      { id: "snippets", name: "Snippets", features: ["Text snippets"], ready: false },
-      { id: "colors", name: "Colors", features: ["Color eyedropper"], ready: false },
+      {
+        id: "history",
+        name: "History",
+        features: ["Clipboard history", "Smart actions", "OCR"],
+        ready: true,
+        view: ClipboardHistory,
+      },
+      {
+        id: "snippets",
+        name: "Snippets",
+        features: ["Text snippets"],
+        ready: true,
+        view: ClipboardSnippets,
+      },
+      {
+        id: "colors",
+        name: "Colors",
+        features: ["Color eyedropper"],
+        ready: true,
+        view: ClipboardColors,
+      },
     ],
   },
   {

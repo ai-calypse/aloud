@@ -265,6 +265,35 @@ export const commands = {
 	 *  the dashboard's empty state (e.g. "not signed in", "token expired").
 	 */
 	agentQuota: () => typedError<Quota, string>(__TAURI_INVOKE("agent_quota")),
+	clipboardEnabled: () => __TAURI_INVOKE<boolean>("clipboard_enabled"),
+	clipboardSetEnabled: (on: boolean) => typedError<null, string>(__TAURI_INVOKE("clipboard_set_enabled", { on })),
+	clipboardList: (query: string) => typedError<ClipboardEntry[], string>(__TAURI_INVOKE("clipboard_list", { query })),
+	clipboardCopy: (id: number) => typedError<null, string>(__TAURI_INVOKE("clipboard_copy", { id })),
+	/**  Copies an entry and pastes it into the app behind the panel. */
+	clipboardPaste: (id: number) => typedError<null, string>(__TAURI_INVOKE("clipboard_paste", { id })),
+	/**  Runs one of an entry's smart actions; the answer is a few words for the row. */
+	clipboardAction: (id: number, action: string) => typedError<string, string>(__TAURI_INVOKE("clipboard_action", { id, action })),
+	clipboardPin: (id: number, pinned: boolean) => typedError<null, string>(__TAURI_INVOKE("clipboard_pin", { id, pinned })),
+	clipboardDelete: (id: number) => typedError<null, string>(__TAURI_INVOKE("clipboard_delete", { id })),
+	clipboardClear: () => typedError<null, string>(__TAURI_INVOKE("clipboard_clear")),
+	snippetList: () => typedError<Snippet[], string>(__TAURI_INVOKE("snippet_list")),
+	snippetSave: (id: number | null, name: string, trigger: string, body: string) => typedError<number, string>(__TAURI_INVOKE("snippet_save", { id, name, trigger, body })),
+	snippetDelete: (id: number) => typedError<null, string>(__TAURI_INVOKE("snippet_delete", { id })),
+	snippetCopy: (id: number) => typedError<null, string>(__TAURI_INVOKE("snippet_copy", { id })),
+	/**
+	 *  Pastes a snippet into the app behind the panel, putting the user's own
+	 *  clipboard back afterwards.
+	 */
+	snippetPaste: (id: number) => typedError<null, string>(__TAURI_INVOKE("snippet_paste", { id })),
+	/**
+	 *  Shows the system eyedropper; the picked colour is saved and its hex copied.
+	 *  None when the user cancelled.
+	 */
+	colorPick: () => typedError<string | null, string>(__TAURI_INVOKE("color_pick")),
+	colorList: () => typedError<PickedColor[], string>(__TAURI_INVOKE("color_list")),
+	/**  Copies a picked colour as `hex` or `rgb`. */
+	colorCopy: (hex: string, format: string) => typedError<null, string>(__TAURI_INVOKE("color_copy", { hex, format })),
+	colorClear: () => typedError<null, string>(__TAURI_INVOKE("color_clear")),
 	/**
 	 *  The gate's buttons. `edits` carries the fields the user changed, keyed by
 	 *  the pointer each card field names; `revision` is the card's own, so a click
@@ -308,6 +337,7 @@ export const events = {
 	agentPermissionResolved: makeEvent<AgentPermissionResolved>("agent-permission-resolved"),
 	agentSessions: makeEvent<AgentSessions>("agent-sessions"),
 	audioLevel: makeEvent<AudioLevel>("audio-level"),
+	clipboardChanged: makeEvent<ClipboardChanged>("clipboard-changed"),
 	connectorsUpdated: makeEvent<ConnectorsUpdated>("connectors-updated"),
 	dictationPartial: makeEvent<DictationPartial>("dictation-partial"),
 	dictationPhase: makeEvent<Phase>("dictation-phase"),
@@ -609,6 +639,32 @@ export type BuildInfo = {
 
 /**  Which card layout draws the preview. */
 export type CardKind = "message" | "email" | "event" | "task" | "note" | "issue" | "row" | "file" | "share" | "update" | "delete" | "money" | "fallback";
+
+/**
+ *  The history changed (a copy was recorded), so an open panel can refresh.
+ *  Carries no content: the event reaches every listener.
+ */
+export type ClipboardChanged = null;
+
+/**
+ *  One thing the user copied, as the panel lists it. The full text and the
+ *  image's pixels stay in Rust: the row needs a preview, and an action names
+ *  the entry by id.
+ */
+export type ClipboardEntry = {
+	id: number,
+	kind: ClipboardKind,
+	/**  First line or so of text, the file names, or "Image · 1200×800". */
+	preview: string,
+	/**  A small `data:` PNG for images; the CSP loads nothing else. */
+	thumbnail: string | null,
+	pinned: boolean,
+	/**  Unix seconds of the most recent copy of this content. */
+	copiedAt: number,
+	actions: SmartAction[],
+};
+
+export type ClipboardKind = "text" | "image" | "files";
 
 export type Config = {
 	hold: Binding | null,
@@ -1015,6 +1071,13 @@ export type Phase = "idle" |
  */
 "noSpeech" | "error";
 
+/**  A colour the eyedropper picked. */
+export type PickedColor = {
+	id: number,
+	hex: string,
+	pickedAt: number,
+};
+
 /**
  *  A tool the run intends to call. No arguments: they arrive with the call
  *  itself, which is where it stops being a plan and starts being an action.
@@ -1261,6 +1324,21 @@ export type Settings = {
 export type ShowTarget = {
 	app: string,
 	target: string,
+};
+
+/**  Something worth doing with an entry, offered as a button on its row. */
+export type SmartAction = {
+	id: string,
+	label: string,
+};
+
+/**  A snippet: text kept to be pasted again. */
+export type Snippet = {
+	id: number,
+	name: string,
+	/**  A short word to find it by ("sig", "addr"). Empty for none. */
+	trigger: string,
+	body: string,
 };
 
 /**  One closed span. */
