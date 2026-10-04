@@ -55,7 +55,10 @@ pub fn read() -> Option<Battery> {
 
 #[cfg(target_os = "macos")]
 fn run(program: &str, args: &[&str]) -> Option<String> {
-    let out = std::process::Command::new(program).args(args).output().ok()?;
+    let out = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()?;
     out.status
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
@@ -110,9 +113,11 @@ pub fn parse_ioreg(text: &str) -> (Option<u32>, Option<u8>) {
             .and_then(|v| v.trim().parse().ok())
     };
     let health = match (value("AppleRawMaxCapacity"), value("DesignCapacity")) {
-        (Some(now), Some(design)) if design > 0 => {
-            Some((f64::from(now) / f64::from(design) * 100.0).round().min(100.0) as u8)
-        }
+        (Some(now), Some(design)) if design > 0 => Some(
+            (f64::from(now) / f64::from(design) * 100.0)
+                .round()
+                .min(100.0) as u8,
+        ),
         _ => None,
     };
     (value("CycleCount"), health)
@@ -213,13 +218,17 @@ mod tests {
     fn pmset_lines_parse_into_state_and_time() {
         let on_battery = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=22675555)\t71%; discharging; 7:20 remaining present: true\n";
         let b = parse_pmset(on_battery).unwrap();
-        assert_eq!((b.percent, b.state, b.minutes), (71, ChargeState::Discharging, Some(440)));
+        assert_eq!(
+            (b.percent, b.state, b.minutes),
+            (71, ChargeState::Discharging, Some(440))
+        );
 
         let charging = " -InternalBattery-0 (id=1)\t80%; charging; 0:45 remaining present: true";
         let b = parse_pmset(charging).unwrap();
         assert_eq!((b.state, b.minutes), (ChargeState::Charging, Some(45)));
 
-        let estimating = " -InternalBattery-0 (id=1)\t52%; discharging; (no estimate) present: true";
+        let estimating =
+            " -InternalBattery-0 (id=1)\t52%; discharging; (no estimate) present: true";
         assert_eq!(parse_pmset(estimating).unwrap().minutes, None);
 
         let held = " -InternalBattery-0 (id=1)\t80%; AC attached; not charging present: true";
@@ -246,7 +255,9 @@ mod tests {
     fn low_battery_is_live_only_while_unplugged() {
         let mut watch = Watch::default();
         let steps = watch.update(Some(&battery(18, ChargeState::Discharging)));
-        assert!(matches!(&steps[0], Step::Push(i) if i.id == LOW_ID && i.priority == IslandPriority::High));
+        assert!(
+            matches!(&steps[0], Step::Push(i) if i.id == LOW_ID && i.priority == IslandPriority::High)
+        );
         // Plugged in at the same 18%: the island goes.
         assert_eq!(
             watch.update(Some(&battery(18, ChargeState::Charging))),
@@ -263,12 +274,24 @@ mod tests {
     fn full_charge_fires_on_the_transition_only() {
         let mut watch = Watch::default();
         let full = battery(100, ChargeState::Full);
-        let announced = |steps: &[Step]| steps.iter().any(|s| matches!(s, Step::Push(i) if i.id == FULL_ID));
+        let announced = |steps: &[Step]| {
+            steps
+                .iter()
+                .any(|s| matches!(s, Step::Push(i) if i.id == FULL_ID))
+        };
 
-        assert!(!announced(&watch.update(Some(&full))), "already full at launch");
+        assert!(
+            !announced(&watch.update(Some(&full))),
+            "already full at launch"
+        );
         assert!(!announced(&watch.update(Some(&full))));
-        assert!(!announced(&watch.update(Some(&battery(99, ChargeState::Charging)))));
-        assert!(announced(&watch.update(Some(&full))), "filled up while watching");
+        assert!(!announced(
+            &watch.update(Some(&battery(99, ChargeState::Charging)))
+        ));
+        assert!(
+            announced(&watch.update(Some(&full))),
+            "filled up while watching"
+        );
         assert!(!announced(&watch.update(Some(&full))), "and only once");
     }
 }

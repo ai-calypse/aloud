@@ -59,7 +59,11 @@ pub fn is_background_listener(id: &str) -> bool {
 
 /// When there is no running app to ask, the last word of the bundle id.
 pub fn fallback_name(id: &str) -> String {
-    parent_bundle(id).rsplit('.').next().unwrap_or(id).to_string()
+    parent_bundle(id)
+        .rsplit('.')
+        .next()
+        .unwrap_or(id)
+        .to_string()
 }
 
 pub const ID: &str = "mac:privacy";
@@ -337,7 +341,10 @@ mod tests {
 
     #[test]
     fn a_helper_process_is_named_for_its_app() {
-        assert_eq!(parent_bundle("com.google.Chrome.helper.Renderer"), "com.google.Chrome");
+        assert_eq!(
+            parent_bundle("com.google.Chrome.helper.Renderer"),
+            "com.google.Chrome"
+        );
         assert_eq!(parent_bundle("us.zoom.xos"), "us.zoom.xos");
         assert_eq!(fallback_name("com.google.Chrome.Helper"), "Chrome");
         assert_eq!(fallback_name("us.zoom.xos"), "xos");
@@ -349,7 +356,10 @@ mod tests {
     #[test]
     fn the_island_names_what_is_on_and_who() {
         let i = island(&using(true, false, &["Zoom"]));
-        assert_eq!((i.title.as_str(), i.detail.as_deref(), i.icon.as_deref()), ("Microphone in use", Some("Zoom"), Some("mic")));
+        assert_eq!(
+            (i.title.as_str(), i.detail.as_deref(), i.icon.as_deref()),
+            ("Microphone in use", Some("Zoom"), Some("mic"))
+        );
         let i = island(&using(true, true, &["Zoom", "Slack", "Meet"]));
         assert_eq!(i.title, "Camera and microphone in use");
         assert_eq!(i.detail.as_deref(), Some("Zoom +2"));
@@ -362,11 +372,21 @@ mod tests {
     #[test]
     fn it_shows_at_once_and_leaves_only_after_two_quiet_polls() {
         let mut watch = Watch::default();
-        assert!(matches!(watch.update(&using(true, false, &[])), Some(Step::Push(_))));
+        assert!(matches!(
+            watch.update(&using(true, false, &[])),
+            Some(Step::Push(_))
+        ));
         assert_eq!(watch.update(&PrivacyUse::default()), None);
-        assert!(matches!(watch.update(&using(false, true, &[])), Some(Step::Push(_))), "a blip resets the count");
+        assert!(
+            matches!(watch.update(&using(false, true, &[])), Some(Step::Push(_))),
+            "a blip resets the count"
+        );
         assert_eq!(watch.update(&PrivacyUse::default()), None);
         assert_eq!(watch.update(&PrivacyUse::default()), Some(Step::Remove(ID)));
-        assert_eq!(watch.update(&PrivacyUse::default()), None, "removed once, not every poll");
+        assert_eq!(
+            watch.update(&PrivacyUse::default()),
+            None,
+            "removed once, not every poll"
+        );
     }
 }

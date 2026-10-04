@@ -69,7 +69,12 @@ pub fn snap_rect(snap: Snap, v: Rect) -> Rect {
         Snap::BottomRight => (v.x + left_w, v.y + top_h, v.w - left_w, v.h - top_h),
         Snap::Center => {
             let (w, h) = ((v.w * 0.6).round(), (v.h * 0.75).round());
-            (v.x + ((v.w - w) / 2.0).floor(), v.y + ((v.h - h) / 2.0).floor(), w, h)
+            (
+                v.x + ((v.w - w) / 2.0).floor(),
+                v.y + ((v.h - h) / 2.0).floor(),
+                w,
+                h,
+            )
         }
     };
     Rect { x, y, w, h }
@@ -197,11 +202,20 @@ mod macos {
         fn AXIsProcessTrusted() -> bool;
         fn AXUIElementCreateApplication(pid: i32) -> AxElement;
         fn AXUIElementSetMessagingTimeout(element: AxElement, seconds: f32) -> i32;
-        fn AXUIElementCopyAttributeValue(element: AxElement, attr: CFStringRef, out: *mut *const c_void) -> i32;
-        fn AXUIElementSetAttributeValue(element: AxElement, attr: CFStringRef, value: *const c_void) -> i32;
+        fn AXUIElementCopyAttributeValue(
+            element: AxElement,
+            attr: CFStringRef,
+            out: *mut *const c_void,
+        ) -> i32;
+        fn AXUIElementSetAttributeValue(
+            element: AxElement,
+            attr: CFStringRef,
+            value: *const c_void,
+        ) -> i32;
         fn AXValueCreate(kind: u32, value: *const c_void) -> *const c_void;
         fn CGWindowListCopyWindowInfo(options: u32, relative_to: u32) -> CFArrayRef;
-        fn CGRectMakeWithDictionaryRepresentation(dict: CFDictionaryRef, rect: *mut CgRect) -> bool;
+        fn CGRectMakeWithDictionaryRepresentation(dict: CFDictionaryRef, rect: *mut CgRect)
+            -> bool;
     }
 
     pub fn is_trusted() -> bool {
@@ -245,7 +259,7 @@ mod macos {
     }
 
     fn number(dict: &CFDictionary<CFString, CFType>, name: &str) -> Option<f64> {
-        dict.find(&key(name))?.downcast::<CFNumber>()?.to_f64()
+        dict.find(key(name))?.downcast::<CFNumber>()?.to_f64()
     }
 
     /// The window the user was in; see the module doc.
@@ -270,15 +284,18 @@ mod macos {
                 let item = CFArrayGetValueAtIndex(list.as_concrete_TypeRef(), i);
                 CFDictionary::<CFString, CFType>::wrap_under_get_rule(item as CFDictionaryRef)
             };
-            let bounds = dict.find(&key("kCGWindowBounds"))?;
+            let bounds = dict.find(key("kCGWindowBounds"))?;
             let mut rect = CgRect::default();
             // SAFETY: the bounds value is a CFDictionary by contract.
             let ok = unsafe {
-                CGRectMakeWithDictionaryRepresentation(bounds.as_CFTypeRef() as CFDictionaryRef, &mut rect)
+                CGRectMakeWithDictionaryRepresentation(
+                    bounds.as_CFTypeRef() as CFDictionaryRef,
+                    &mut rect,
+                )
             };
             ok.then_some(())?;
             let app = dict
-                .find(&key("kCGWindowOwnerName"))?
+                .find(key("kCGWindowOwnerName"))?
                 .downcast::<CFString>()?
                 .to_string();
             Some(Listed {
@@ -318,7 +335,7 @@ mod macos {
         let standard = |w: &CFType| {
             attribute(w, "AXSubrole")
                 .and_then(|r| r.downcast::<CFString>())
-                .is_some_and(|r| r.to_string() == "AXStandardWindow")
+                .is_some_and(|r| matches!(r.to_string().as_str(), "AXStandardWindow"))
         };
         attribute(&app, "AXFocusedWindow")
             .filter(standard)
@@ -326,7 +343,9 @@ mod macos {
                 let windows = attribute(&app, "AXWindows")?;
                 // SAFETY: AXWindows is a CFArray of elements, retained by the wrap.
                 let windows = unsafe {
-                    CFArray::<*const c_void>::wrap_under_get_rule(windows.as_CFTypeRef() as CFArrayRef)
+                    CFArray::<*const c_void>::wrap_under_get_rule(
+                        windows.as_CFTypeRef() as CFArrayRef
+                    )
                 };
                 (0..windows.len()).find_map(|i| {
                     let item = unsafe { CFArrayGetValueAtIndex(windows.as_concrete_TypeRef(), i) };
@@ -360,8 +379,15 @@ mod macos {
     fn attribute(element: &CFType, name: &str) -> Option<CFType> {
         let mut out: *const c_void = std::ptr::null();
         // SAFETY: a +1 value on success.
-        let err = unsafe { AXUIElementCopyAttributeValue(element.as_CFTypeRef(), key(name).as_concrete_TypeRef(), &mut out) };
-        (err == AX_SUCCESS && !out.is_null()).then(|| unsafe { CFType::wrap_under_create_rule(out) })
+        let err = unsafe {
+            AXUIElementCopyAttributeValue(
+                element.as_CFTypeRef(),
+                key(name).as_concrete_TypeRef(),
+                &mut out,
+            )
+        };
+        (err == AX_SUCCESS && !out.is_null())
+            .then(|| unsafe { CFType::wrap_under_create_rule(out) })
     }
 
     fn set(window: &CFType, name: &str, kind: u32, pair: [f64; 2]) -> Result<()> {
@@ -372,7 +398,11 @@ mod macos {
         }
         let value = unsafe { CFType::wrap_under_create_rule(value) };
         let err = unsafe {
-            AXUIElementSetAttributeValue(window.as_CFTypeRef(), key(name).as_concrete_TypeRef(), value.as_CFTypeRef())
+            AXUIElementSetAttributeValue(
+                window.as_CFTypeRef(),
+                key(name).as_concrete_TypeRef(),
+                value.as_CFTypeRef(),
+            )
         };
         if err != AX_SUCCESS {
             bail!("the window refused {name} (error {err})");
@@ -393,7 +423,12 @@ mod macos {
 mod tests {
     use super::*;
 
-    const SCREEN: Rect = Rect { x: 0.0, y: 38.0, w: 1511.0, h: 944.0 };
+    const SCREEN: Rect = Rect {
+        x: 0.0,
+        y: 38.0,
+        w: 1511.0,
+        h: 944.0,
+    };
 
     #[test]
     fn halves_and_quarters_tile_the_screen_without_a_seam_on_odd_widths() {
@@ -401,9 +436,15 @@ mod tests {
         let right = snap_rect(Snap::Right, SCREEN);
         assert_eq!(left.x + left.w, right.x, "no gap between the halves");
         assert_eq!(right.x + right.w, SCREEN.x + SCREEN.w, "reaches the edge");
-        let (tl, br) = (snap_rect(Snap::TopLeft, SCREEN), snap_rect(Snap::BottomRight, SCREEN));
+        let (tl, br) = (
+            snap_rect(Snap::TopLeft, SCREEN),
+            snap_rect(Snap::BottomRight, SCREEN),
+        );
         assert_eq!(tl.y + tl.h, br.y);
-        assert_eq!((br.x + br.w, br.y + br.h), (SCREEN.x + SCREEN.w, SCREEN.y + SCREEN.h));
+        assert_eq!(
+            (br.x + br.w, br.y + br.h),
+            (SCREEN.x + SCREEN.w, SCREEN.y + SCREEN.h)
+        );
         assert_eq!(snap_rect(Snap::Maximize, SCREEN), SCREEN);
         let c = snap_rect(Snap::Center, SCREEN);
         assert!(c.x > 0.0 && c.x + c.w < SCREEN.w && c.y > SCREEN.y);
@@ -413,12 +454,32 @@ mod tests {
     /// window was on, which dragged it across the desk.
     #[test]
     fn a_snap_stays_on_the_display_the_window_is_mostly_on() {
-        let primary = Rect { x: 0.0, y: 38.0, w: 1512.0, h: 944.0 };
-        let external = Rect { x: 1512.0, y: -200.0, w: 2560.0, h: 1415.0 };
-        let window = Rect { x: 1400.0, y: 100.0, w: 900.0, h: 700.0 };
+        let primary = Rect {
+            x: 0.0,
+            y: 38.0,
+            w: 1512.0,
+            h: 944.0,
+        };
+        let external = Rect {
+            x: 1512.0,
+            y: -200.0,
+            w: 2560.0,
+            h: 1415.0,
+        };
+        let window = Rect {
+            x: 1400.0,
+            y: 100.0,
+            w: 900.0,
+            h: 700.0,
+        };
         // 112pt on the primary, 788pt on the external.
         assert_eq!(pick_screen(window, &[primary, external]), Some(external));
-        let off = Rect { x: 9000.0, y: 0.0, w: 300.0, h: 300.0 };
+        let off = Rect {
+            x: 9000.0,
+            y: 0.0,
+            w: 300.0,
+            h: 300.0,
+        };
         assert!(pick_screen(off, &[primary, external]).is_some());
         assert_eq!(pick_screen(window, &[]), None);
     }
@@ -426,15 +487,36 @@ mod tests {
     #[test]
     fn cocoa_frames_flip_into_accessibility_space() {
         // Primary 1117 tall: menu bar 38 at the top, Dock 70 at the bottom.
-        let visible = Rect { x: 0.0, y: 70.0, w: 1728.0, h: 1009.0 };
+        let visible = Rect {
+            x: 0.0,
+            y: 70.0,
+            w: 1728.0,
+            h: 1009.0,
+        };
         assert_eq!(cocoa_to_ax(1117.0, visible).y, 38.0);
         // A display above the primary has a negative AX y.
-        let above = Rect { x: 0.0, y: 1117.0, w: 1920.0, h: 1055.0 };
+        let above = Rect {
+            x: 0.0,
+            y: 1117.0,
+            w: 1920.0,
+            h: 1055.0,
+        };
         assert_eq!(cocoa_to_ax(1117.0, above).y, -1055.0);
     }
 
     fn listed(app: &str, pid: i32, layer: i64, w: f64) -> Listed {
-        Listed { app: app.into(), pid, layer, alpha: 1.0, bounds: Rect { x: 0.0, y: 0.0, w, h: 600.0 } }
+        Listed {
+            app: app.into(),
+            pid,
+            layer,
+            alpha: 1.0,
+            bounds: Rect {
+                x: 0.0,
+                y: 0.0,
+                w,
+                h: 600.0,
+            },
+        }
     }
 
     /// The failure: snapping Aloud's own overlay, or the menu bar, because
@@ -448,7 +530,10 @@ mod tests {
             listed("Safari", 7, 0, 1000.0),
             listed("Mail", 9, 0, 900.0),
         ];
-        let apps: Vec<_> = candidates(list, 50).into_iter().map(|w| (w.app, w.pid)).collect();
+        let apps: Vec<_> = candidates(list, 50)
+            .into_iter()
+            .map(|w| (w.app, w.pid))
+            .collect();
         assert_eq!(apps, [("Safari".to_string(), 7), ("Mail".to_string(), 9)]);
         assert!(candidates(Vec::new(), 50).is_empty());
     }

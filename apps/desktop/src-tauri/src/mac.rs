@@ -50,7 +50,7 @@ pub fn start(app: &AppHandle) {
                         apply(&app, step);
                     }
                 }
-                if on.battery && tick % BATTERY_EVERY_TICKS == 0 {
+                if on.battery && tick.is_multiple_of(BATTERY_EVERY_TICKS) {
                     for step in battery.update(power::read().as_ref()) {
                         apply(&app, step);
                     }

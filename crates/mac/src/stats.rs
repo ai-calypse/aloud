@@ -98,11 +98,13 @@ impl Sampler {
             .fold((0u64, 0u64), |(d, u), (_, n)| {
                 (d + n.received(), u + n.transmitted())
             });
-        let (disk_used, disk_total) = disk_usage(
-            self.disks
-                .iter()
-                .map(|d| (d.mount_point().to_string_lossy().into_owned(), d.total_space(), d.available_space())),
-        );
+        let (disk_used, disk_total) = disk_usage(self.disks.iter().map(|d| {
+            (
+                d.mount_point().to_string_lossy().into_owned(),
+                d.total_space(),
+                d.available_space(),
+            )
+        }));
         SystemStats {
             cpu: f64::from(self.system.global_cpu_usage()).clamp(0.0, 100.0),
             memory_used_gb: self.system.used_memory() as f64 / GB,
@@ -135,7 +137,9 @@ fn disk_usage(disks: impl Iterator<Item = (String, u64, u64)>) -> (u64, u64) {
         .iter()
         .find(|(mount, ..)| mount == "/")
         .or_else(|| disks.iter().max_by_key(|(_, total, _)| *total));
-    pick.map_or((0, 0), |(_, total, free)| (total.saturating_sub(*free), *total))
+    pick.map_or((0, 0), |(_, total, free)| {
+        (total.saturating_sub(*free), *total)
+    })
 }
 
 #[cfg(target_os = "macos")]

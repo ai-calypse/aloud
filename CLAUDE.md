@@ -21,6 +21,7 @@ crates/
   hotkey/              global hotkeys: CGEventTap / WH_KEYBOARD_LL
   islands/             the notch's live activities: ranking, dedupe, expiry
   llm/                 OpenAI-compatible chat, prompts, rate limits
+  mac/                 the notch's Mac section: stats, battery, mic/camera use, window snapping
   meeting/             meeting transcript assembly, note composition
   native/              Mac app actions (AppleScript/JXA) + the no-model fast path
   notes/               markdown notes + search, app data paths
