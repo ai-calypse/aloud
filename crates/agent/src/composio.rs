@@ -420,9 +420,9 @@ impl ComposioClient {
         Ok(out)
     }
 
-    /// Exact tools by slug. An empty slug list would fetch the whole catalogue,
-    /// so it short-circuits instead.
-    async fn tools_by_slug(&self, slugs: &str) -> Result<Vec<ToolDef>> {
+    /// Exact tools by slug, comma-separated. An empty slug list would fetch the
+    /// whole catalogue, so it short-circuits instead.
+    pub async fn tools_by_slug(&self, slugs: &str) -> Result<Vec<ToolDef>> {
         if slugs.is_empty() {
             return Ok(Vec::new());
         }
