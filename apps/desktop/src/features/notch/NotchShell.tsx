@@ -16,6 +16,13 @@ import { resolveNav, sectionForShortcut, stepSubsection, type Nav } from "./sect
 const PANEL_ID = "notch-panel";
 
 /**
+ * The body's width. 640 holds up to six labelled section tabs plus ⌘K and
+ * close; all nine need the prototype's 780 (measured in Geist at 13px). Fixed
+ * per build, from the registry, so it never changes while the app runs.
+ */
+const WIDTH = READY.length > 6 ? 780 : 640;
+
+/**
  * The expanded notch panel: section tabs, the open section's subsections with
  * its status line, the subsection's view, and a footer naming the keys.
  *
@@ -84,7 +91,7 @@ export function NotchShell({ nav }: { nav: Nav }) {
   };
 
   return (
-    <div className="notch-shell flex w-[640px] flex-col font-notch text-notch-ink">
+    <div className="notch-shell flex flex-col font-notch text-notch-ink" style={{ width: WIDTH }}>
       <header className="flex items-center gap-1 border-b border-notch-sep px-3.5">
         <SectionTabs
           className="flex-1"

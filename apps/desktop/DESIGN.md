@@ -140,7 +140,7 @@ Motion is part of the system, not decoration. Springs, never durations, for anyt
 - Pure black (#000) welded to the cutout; depth from tone and hairlines, never shadow or blur.
 - Geist for words, Geist Mono for numbers that tick; one lead per view.
 - Every destination is named: icon plus label, never an icon alone.
-- Fixed width (640px body), height to fit up to a ceiling, every size change on the panel's live spring.
+- Fixed width per build (640px body; 780px once more than six sections are ready), height to fit up to a ceiling, every size change on the panel's live spring.
 - Only built features render: the registry hides anything not ready.
 
 ## 2. Colors
@@ -229,7 +229,7 @@ Primitives live in `src/components/notch/` and extend `src/components/ui/` where
 - **Bar / Ring:** meters with `role="meter"`. The bar's fill is clipped (`clip-path`) so its end stays round and it moves on the compositor; the ring is an SVG stroke. Tones beside a number, never instead of it.
 
 ### The section shell (signature)
-`features/notch/NotchShell.tsx` is the expanded panel: SectionTabs (+ ⌘K and close), SubTabs with a status line, the view, and a footer naming the keys. Fixed 640px body width so the tab strip never moves sideways; height hugs content up to a 420px body ceiling, and every height change rides the panel's live spring (`useNotchPanel`), so switching tabs mid-morph bends the morph. Views swap with `Materialize`.
+`features/notch/NotchShell.tsx` is the expanded panel: SectionTabs (+ ⌘K and close), SubTabs with a status line, the view, and a footer naming the keys. Fixed body width — 640px, 780px once more than six sections are ready (all nine labels need it) — so the tab strip never moves sideways; height hugs content up to a 420px body ceiling, and every height change rides the panel's live spring (`useNotchPanel`), so switching tabs mid-morph bends the morph. Views swap with `Materialize`.
 
 Keys: **⌘1–9** go to sections by their *registry position* (⌘2 is Agents in every build, even while Now is hidden in front of it); **Tab / Shift-Tab** step subsections from the chrome and stay native inside the body (so an approval card's buttons stay reachable); **⌘K** opens the palette; **esc** closes the palette, else the panel. The last place the user chose is remembered across opens and launches; a voice run or an approval takes the panel to itself without moving that memory.
 

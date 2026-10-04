@@ -22,6 +22,11 @@ export type SectionTab = {
  *
  * Labels are never dropped for icons alone — "Named, not memorised"
  * (PRODUCT.md). The strip is one Tab stop; arrows move between sections.
+ *
+ * ponytail: no overflow handling. The shell widens once more than six
+ * sections are ready (NotchShell's `WIDTH`), which fits all nine with
+ * their labels; a tenth needs a scroll affordance, and the underline moved
+ * outside the scroller, which would clip it.
  */
 export function SectionTabs({
   items,
