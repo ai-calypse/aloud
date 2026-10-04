@@ -1175,9 +1175,11 @@ mod tests {
         ToolDef {
             name: name.into(),
             toolkit: crate::composio::toolkit_of_slug(name),
+            app: crate::composio::toolkit_of_slug(name),
             description: String::new(),
             parameters: serde_json::json!({}),
             read_only,
+            hints: Vec::new(),
         }
     }
 

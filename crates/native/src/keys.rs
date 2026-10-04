@@ -115,6 +115,13 @@ pub(crate) fn destructive(chord: &Chord) -> bool {
     }
 }
 
+/// ⌘⇧⌫: Finder's Empty Trash, which nothing undoes.
+pub(crate) fn empties_trash(chord: &Chord) -> bool {
+    matches!(chord.key, ChordKey::Code(51))
+        && chord.modifiers.contains(&Modifier::Command)
+        && chord.modifiers.contains(&Modifier::Shift)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

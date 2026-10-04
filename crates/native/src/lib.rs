@@ -116,40 +116,87 @@ pub fn tools(installed: &[aloud_selection::InstalledApp]) -> Vec<NativeTool> {
     }
 }
 
-/// Runs a native tool by name. Returns `None` when `name` is not one of ours,
-/// which is the signal for the dispatch branch to fall through to Composio —
-/// so the `ALOUD_` prefix is never hardcoded at the call site.
-///
-/// The `Ok` value is a JSON result in the same shape Composio returns, so the
-/// loop's `tool_succeeded` and the panel need no special case. A `ScriptError`
-/// is surfaced as an error result the model can read back.
+/// Who a native write needs permission from, and how much. Its saved grant is
+/// keyed by `app` and `action`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Permission {
+    pub app: String,
+    /// Plain words for the Settings row and the card's scope line.
+    pub action: String,
+    /// Runs with no card until the user says otherwise.
+    pub default_always: bool,
+    /// Always asks, and "Always allow" cannot cover it.
+    pub strict: bool,
+}
+
+/// The permission a native write needs; None for reads and for tools that are
+/// not ours. The app is the action's own, except for the tools that act in
+/// whatever app they are pointed at: the one named, else the one in front.
+pub fn permission(name: &str, args: &Value, front: Option<&str>) -> Option<Permission> {
+    let app = if name == RUN_SHORTCUT {
+        "Shortcuts"
+    } else {
+        catalogue::ACTIONS
+            .iter()
+            .find(|a| a.name == name && !a.read_only)?
+            .app
+    };
+    let app = match name {
+        "ALOUD_MENU" | "ALOUD_PRESS_KEYS" | "ALOUD_WINDOW_ARRANGE" => catalogue::target_app(args)
+            .or(front.map(str::trim).filter(|f| !f.is_empty()))
+            .unwrap_or(app),
+        _ => app,
+    };
+    Some(Permission {
+        app: app.to_string(),
+        action: action_label(name).to_string(),
+        default_always: default_always(name, args),
+        strict: strict(name, args),
+    })
+}
+
+/// Whether a native write may run without asking. A strict one never may,
+/// even where its tool would otherwise skip the card.
+pub fn low_risk(name: &str, args: &Value) -> bool {
+    permission(name, args, None).is_some_and(|p| p.default_always && !p.strict)
+}
+
+fn action_label(name: &str) -> &'static str {
+    match name {
+        "ALOUD_MUSIC" | "ALOUD_SPOTIFY" => "play music",
+        "ALOUD_REMINDERS_ADD" => "add reminders",
+        "ALOUD_PHOTO_BOOTH_TAKE_PHOTO" => "take photos",
+        "ALOUD_DISCORD_MESSAGE" | "ALOUD_MESSAGES_SEND" => "send messages",
+        "ALOUD_PRESS_KEYS" => "press keys",
+        "ALOUD_MENU" => "choose menu items",
+        "ALOUD_OPEN_APP" => "open apps",
+        "ALOUD_QUIT_APP" => "quit apps",
+        "ALOUD_COLLECT_FILES" | "ALOUD_ORGANIZE_FOLDER" | "ALOUD_UNDO_ORGANIZE" => "move files",
+        "ALOUD_WRITE_FILE" => "save files",
+        "ALOUD_WINDOW_ARRANGE" => "arrange windows",
+        "ALOUD_BROWSER_TAB" => "open web pages",
+        "ALOUD_CLIPBOARD" => "use the clipboard",
+        "ALOUD_FINDER_REVEAL" => "show files",
+        "ALOUD_SYSTEM_VOLUME" => "change the volume",
+        RUN_SHORTCUT => "run shortcuts",
+        _ => "create and edit",
+    }
+}
+
 /// Writes too small to confirm: each is undone by saying the opposite (open/quit, play/pause, volume,
 /// a window moved, a reminder or a note line added, the clipboard set). Asking "are you sure?" before
 /// opening Safari made every command a two-step chore. Sending, quitting, Shortcuts and file moves or
 /// writes are left out, so they still ask.
-pub fn low_risk(name: &str, args: &Value) -> bool {
+fn default_always(name: &str, args: &Value) -> bool {
     if name == "ALOUD_WRITE_FILE" {
         return catalogue::creates_new_file(args);
     }
     if name == "ALOUD_PRESS_KEYS" {
-        let keys = args.get("keys").and_then(Value::as_str).unwrap_or_default();
-        return keys::parse(keys).is_ok_and(|chord| !keys::destructive(&chord));
+        return chord(args).is_ok_and(|chord| !keys::destructive(&chord));
     }
     if name == "ALOUD_MENU" {
         // Listing changes nothing; a click is as safe as the command it names.
-        let item = args
-            .get("item")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .or_else(|| {
-                args.get("path")
-                    .and_then(Value::as_array)
-                    .and_then(|p| p.last())
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-            .unwrap_or_default()
-            .to_lowercase();
+        let item = menu_item(args);
         const RISKY: &[&str] = &[
             "quit",
             "close",
@@ -181,6 +228,81 @@ pub fn low_risk(name: &str, args: &Value) -> bool {
             | "ALOUD_FINDER_REVEAL"
             | "ALOUD_SYSTEM_VOLUME"
     )
+}
+
+/// What nothing undoes, or what hands a secret over: emptying the Trash, a
+/// menu delete or erase, an app link that is not a file or web page (it can
+/// call, pay or change settings), and anything carrying a password or code.
+fn strict(name: &str, args: &Value) -> bool {
+    shares_a_secret(args)
+        || match name {
+            "ALOUD_MENU" => {
+                let item = menu_item(args);
+                ["delete", "erase", "empty trash"]
+                    .iter()
+                    .any(|word| item.contains(word))
+            }
+            "ALOUD_PRESS_KEYS" => chord(args).is_ok_and(|chord| keys::empties_trash(&chord)),
+            "ALOUD_OPEN_APP" => args
+                .get("open")
+                .and_then(Value::as_str)
+                .is_some_and(foreign_scheme),
+            _ => false,
+        }
+}
+
+/// Whether any argument mentions a password or a one-time code.
+///
+/// ponytail: a word list over the serialized arguments, keys included; a check
+/// on the one field a secret would sit in is the upgrade if it misfires.
+pub fn shares_a_secret(args: &Value) -> bool {
+    const PHRASES: &[&str] = &[
+        "password",
+        "passcode",
+        "verification code",
+        "one-time",
+        "one time code",
+    ];
+    // Whole words only: "otp" sits inside "hotpot".
+    const WORDS: &[&str] = &["otp", "2fa"];
+    let text = args.to_string().to_lowercase();
+    PHRASES.iter().any(|p| text.contains(p))
+        || text
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|word| WORDS.contains(&word))
+}
+
+/// A `scheme:` other than file or http(s), like `tel:` or
+/// `x-apple.systempreferences:`. "Meeting: notes" is a name with a colon.
+fn foreign_scheme(target: &str) -> bool {
+    let Some((scheme, rest)) = target.trim().split_once(':') else {
+        return false;
+    };
+    let is_scheme = scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c));
+    is_scheme
+        && !rest.starts_with(char::is_whitespace)
+        && !["file", "http", "https"].contains(&scheme.to_ascii_lowercase().as_str())
+}
+
+fn chord(args: &Value) -> Result<keys::Chord, String> {
+    keys::parse(args.get("keys").and_then(Value::as_str).unwrap_or_default())
+}
+
+/// The menu item a MENU call clicks, lowercased; empty for a listing.
+fn menu_item(args: &Value) -> String {
+    args.get("item")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            args.get("path")
+                .and_then(Value::as_array)
+                .and_then(|p| p.last())
+                .and_then(Value::as_str)
+        })
+        .unwrap_or_default()
+        .to_lowercase()
 }
 
 /// One sentence saying what a native write did, built from its arguments and
@@ -268,6 +390,13 @@ pub fn confirmation(name: &str, args: &Value, result: &Value) -> Option<String> 
     })
 }
 
+/// Runs a native tool by name. Returns `None` when `name` is not one of ours,
+/// which is the signal for the dispatch branch to fall through to Composio —
+/// so the `ALOUD_` prefix is never hardcoded at the call site.
+///
+/// The `Ok` value is a JSON result in the same shape Composio returns, so the
+/// loop's `tool_succeeded` and the panel need no special case. A `ScriptError`
+/// is surfaced as an error result the model can read back.
 pub fn execute(name: &str, args: &Value) -> Option<Result<Value, ScriptError>> {
     if name == RUN_SHORTCUT {
         tracing::info!(tool = name, "running native tool");
@@ -520,6 +649,74 @@ mod tests {
             );
         }
         assert!(low_risk("ALOUD_OPEN_APP", &json!({})));
+    }
+
+    #[test]
+    fn emptying_the_trash_is_strict_but_closing_a_window_is_not() {
+        let strict = |name, args| permission(name, &args, None).unwrap().strict;
+        assert!(strict("ALOUD_MENU", json!({ "item": "Empty Trash…" })));
+        assert!(strict("ALOUD_MENU", json!({ "path": ["Edit", "Delete"] })));
+        assert!(strict(
+            "ALOUD_PRESS_KEYS",
+            json!({ "keys": "cmd+shift+delete" })
+        ));
+        assert!(!strict("ALOUD_MENU", json!({ "item": "Close Window" })));
+        assert!(!strict("ALOUD_PRESS_KEYS", json!({ "keys": "cmd+w" })));
+        assert!(!strict("ALOUD_PRESS_KEYS", json!({ "keys": "cmd+delete" })));
+        // Closing still asks; it just may be always-allowed.
+        let close = permission("ALOUD_MENU", &json!({ "item": "Close Window" }), None).unwrap();
+        assert!(!close.default_always);
+        assert!(!low_risk("ALOUD_MENU", &json!({ "item": "Empty Trash…" })));
+    }
+
+    #[test]
+    fn an_app_link_that_is_not_a_file_or_web_page_is_strict() {
+        let strict = |open: &str| {
+            permission(
+                "ALOUD_OPEN_APP",
+                &json!({ "names": ["Safari"], "open": open }),
+                None,
+            )
+            .unwrap()
+            .strict
+        };
+        assert!(strict("tel:+15551234"));
+        assert!(strict(
+            "x-apple.systempreferences:com.apple.preference.security"
+        ));
+        assert!(!strict("https://example.com"));
+        assert!(!strict("file:///Users/me/a.txt"));
+        assert!(!strict("~/Projects/components"));
+        assert!(!strict("Meeting: notes"));
+        // Strict wins over the tool's default: the old fast path must ask too.
+        assert!(!low_risk(
+            "ALOUD_OPEN_APP",
+            &json!({ "open": "tel:+15551234" })
+        ));
+    }
+
+    #[test]
+    fn a_tool_acting_on_the_front_app_is_scoped_to_it() {
+        let app = |name, args, front| permission(name, &args, front).unwrap().app;
+        assert_eq!(
+            app("ALOUD_MENU", json!({ "item": "New" }), Some("Safari")),
+            "Safari"
+        );
+        assert_eq!(
+            app(
+                "ALOUD_PRESS_KEYS",
+                json!({ "keys": "cmd+t", "_front_app": "Arc" }),
+                Some("Safari")
+            ),
+            "Arc"
+        );
+        assert_eq!(app("ALOUD_WINDOW_ARRANGE", json!({}), None), "macOS");
+        assert_eq!(
+            app("ALOUD_NOTES_CREATE", json!({}), Some("Safari")),
+            "Notes"
+        );
+        assert!(permission("ALOUD_FINDER_SEARCH", &json!({}), None).is_none());
+        assert!(permission("GMAIL_SEND_EMAIL", &json!({}), None).is_none());
     }
 
     /// Creating a new file is undone by deleting it; overwriting one is not

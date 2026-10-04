@@ -45,25 +45,32 @@ pub async fn command_tools(
     tools.extend(aloud_native::tools(installed).into_iter().map(|t| ToolDef {
         name: t.name,
         toolkit: "macOS".to_string(),
+        // The real app per call comes from `aloud_native::permission`.
+        app: "macOS".to_string(),
         description: t.description,
         parameters: t.parameters,
         read_only: t.read_only,
+        hints: Vec::new(),
     }));
     // Empty when Cua Driver isn't installed.
     tools.extend(aloud_screen::tools().into_iter().map(|t| ToolDef {
         name: t.name.to_string(),
         toolkit: "Screen".to_string(),
+        app: "Screen".to_string(),
         description: t.description.to_string(),
         parameters: t.parameters,
         read_only: t.read_only,
+        hints: Vec::new(),
     }));
     // Empty when the engine wasn't staged into this build.
     tools.extend(aloud_engine::tools().into_iter().map(|t| ToolDef {
         toolkit: "Browser".to_string(),
+        app: "Browser".to_string(),
         name: t.name,
         description: t.description,
         parameters: t.parameters,
         read_only: t.read_only,
+        hints: Vec::new(),
     }));
     CommandTools { tools, more }
 }

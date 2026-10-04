@@ -1,6 +1,7 @@
 //! Settings, history and stats persistence: `settings.json` and
 //! `history.sqlite` in the app data directory.
 
+pub mod grants;
 pub mod history;
 pub mod macros;
 pub mod migrate;
@@ -9,6 +10,7 @@ pub mod settings;
 pub mod stats;
 pub mod timings;
 
+pub use grants::{Decision, Grant, Grants, SavedGrant};
 pub use history::History;
 pub use macros::Macro;
 pub use rules::AppRule;
