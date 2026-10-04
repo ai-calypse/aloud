@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct Battery {
+pub struct DeviceBattery {
     /// "Left", "Right", "Case", or "" for a single battery.
     pub label: String,
     pub percent: u8,
@@ -32,7 +32,7 @@ pub struct BtDevice {
     /// `headphones`, `mouse`, `keyboard`, `trackpad` or `other`.
     pub kind: String,
     pub connected: bool,
-    pub batteries: Vec<Battery>,
+    pub batteries: Vec<DeviceBattery>,
 }
 
 /// Every paired device, connected first, then by name. Blocking: the profiler
@@ -109,7 +109,7 @@ fn parse_profiler(json: &str) -> Vec<BtDevice> {
                 ]
                 .into_iter()
                 .filter_map(|(label, k)| {
-                    Some(Battery {
+                    Some(DeviceBattery {
                         label: label.into(),
                         percent: percent(&d[k])?,
                     })
@@ -183,7 +183,7 @@ fn parse_ioreg(text: &str) -> Vec<Hid> {
 /// the Magic Mouse is often missing from the profiler's connected list.
 fn merge_hid(devices: &mut Vec<BtDevice>, hids: Vec<Hid>) {
     for hid in hids {
-        let battery = Battery {
+        let battery = DeviceBattery {
             label: String::new(),
             percent: hid.percent,
         };
@@ -257,15 +257,15 @@ mod tests {
         assert_eq!(
             pods.batteries,
             vec![
-                Battery {
+                DeviceBattery {
                     label: "Left".into(),
                     percent: 100
                 },
-                Battery {
+                DeviceBattery {
                     label: "Right".into(),
                     percent: 98
                 },
-                Battery {
+                DeviceBattery {
                     label: "Case".into(),
                     percent: 63
                 },
@@ -273,7 +273,7 @@ mod tests {
         );
         assert_eq!(
             devices[1].batteries,
-            vec![Battery {
+            vec![DeviceBattery {
                 label: String::new(),
                 percent: 41
             }]

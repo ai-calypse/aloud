@@ -9,7 +9,7 @@ mod islands;
 mod launcher;
 mod listen;
 mod media; // notch-media
-// notch-mac: wiring begins
+           // notch-mac: wiring begins
 mod mac;
 // notch-mac: wiring ends
 mod meeting;
@@ -282,7 +282,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sessions::AgentSessions,
             sessions::AgentPermission,
             sessions::AgentPermissionResolved,
-            media::MediaNowPlaying, // notch-media
+            media::MediaNowPlaying,      // notch-media
             clipboard::ClipboardChanged, // notch Clipboard section
             HotkeysPermitted,
             ConnectorsUpdated,
