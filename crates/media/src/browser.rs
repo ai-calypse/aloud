@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use aloud_native::{run_jxa, ScriptError};
+use aloud_native::{run_args, run_jxa, ScriptError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -173,52 +173,122 @@ fn page_fn(body: &str) -> String {
     format!("(function(){{ {PICK} return ({body}); }})()")
 }
 
-/// Runs `ARG.js` (a page function) in each tab and returns the ones that
-/// answered with a media report. With `ARG.only` it asks just those tabs, the
-/// cheap refresh between full walks. `errors` is how the caller learns that
-/// JavaScript from Apple Events is off; one failing tab ends its window,
-/// since the setting is per browser and the rest would fail the same way.
+/// Asks each tab for its media report and prints one line per tab: `T w t json`
+/// for a tab with media, `K` for one that answered with none, `S w/t` for one
+/// that did not answer, `E message` for an error. Argv: the page function,
+/// the "w/t,w/t" tabs to ask (empty: walk every window), and the ",w/t,"
+/// tabs known not to answer.
+///
+/// AppleScript rather than JXA, for `with timeout`. A tab the browser has
+/// discarded to save memory (Chrome's Memory Saver does it to idle tabs, and
+/// Brave's does too) never answers `execute javascript`, and without a
+/// timeout one such tab holds the whole scan for the Apple Event's two minutes.
+/// A discarded tab cannot be playing, so skipping it loses nothing.
 ///
 /// Window and Chromium tab ids are stable; Safari has no tab ids, so its tabs
 /// are told apart by position, and the page script's host check catches a tab
-/// that has moved.
+/// that has moved. One failing window ends its walk: "JavaScript is off" is
+/// per browser, and the rest would fail the same way.
 const SCAN: &str = r#"
-const A = Application(ARG.app);
-const tabs = [], errors = [];
-let ok = 0;
-const ask = (tab) => ARG.safari
-  ? A.doJavaScript(ARG.js, { in: tab })
-  : tab.execute({ javascript: ARG.js });
-const probe = (w, t, tab) => {
-  try {
-    const r = ask(tab);
-    ok++;
-    if (typeof r === "string" && r[0] === "{") tabs.push({ w: String(w), t: String(t), page: JSON.parse(r) });
-    return true;
-  } catch (e) {
-    const m = String(e.message);
-    if (errors.length < 3 && !errors.includes(m)) errors.push(m);
-    return false;
-  }
-};
-if (ARG.only) {
-  for (const o of ARG.only) {
-    try {
-      const w = A.windows.byId(Number(o.w));
-      probe(o.w, o.t, ARG.safari ? w.tabs[Number(o.t) - 1] : w.tabs.byId(Number(o.t)));
-    } catch (e) { /* the tab or window is gone */ }
-  }
-} else {
-  for (const w of A.windows()) {
-    let wid, list, urls, ids;
-    try { wid = w.id(); list = w.tabs; urls = list.url(); ids = ARG.safari ? null : list.id(); } catch (e) { continue; }
-    for (let i = 0; i < urls.length; i++) {
-      if (!/^(https?|file):/i.test(urls[i] || "")) continue;
-      if (!probe(wid, ARG.safari ? i + 1 : ids[i], list[i])) break;
-    }
-  }
+on run argv
+	set code to "(" & (item 1 of argv) & ")(null)"
+	set only to item 2 of argv
+	set skip to item 3 of argv
+	set out to ""
+	set hung to 0
+	if only is not "" then
+		repeat with entry in my splitOn(only, ",")
+			set parts to my splitOn(entry, "/")
+			set out to out & my probe(item 1 of parts, item 2 of parts, code)
+		end repeat
+		return out
+	end if
+	tell application "@APP@" to set winIds to id of every window
+	repeat with wid in winIds
+		try
+			tell application "@APP@" to set urls to URL of every tab of window id wid
+			set tabIds to my tabIds(wid, count of urls)
+		on error
+			set urls to {}
+			set tabIds to {}
+		end try
+		repeat with i from 1 to count of urls
+			set u to item i of urls
+			set tid to item i of tabIds
+			if u is not missing value and (u starts with "http" or u starts with "file:") and skip does not contain ("," & wid & "/" & tid & ",") then
+				set got to my probe(wid, tid, code)
+				set out to out & got
+				if got starts with "S" then set hung to hung + 1
+				if got starts with "E" and got contains "Apple Events" then exit repeat
+				-- A browser full of discarded tabs would otherwise cost a second each;
+				-- the next walk skips these and goes on.
+				if hung is 5 then return out
+			end if
+		end repeat
+	end repeat
+	return out
+end run
+
+on probe(wid, tid, code)
+	try
+		with timeout of 1 second
+			tell application "@APP@" to set r to @RUN@
+		end timeout
+	on error e number n
+		if n is -1712 then return "S" & tab & wid & "/" & tid & linefeed
+		return "E" & tab & my oneLine(e) & linefeed
+	end try
+	try
+		if r starts with "{" then return "T" & tab & wid & tab & tid & tab & r & linefeed
+	end try
+	return "K" & linefeed
+end probe
+
+on splitOn(s, d)
+	set AppleScript's text item delimiters to d
+	set parts to text items of s
+	set AppleScript's text item delimiters to ""
+	return parts
+end splitOn
+
+on oneLine(s)
+	set AppleScript's text item delimiters to {linefeed, return}
+	set parts to text items of s
+	set AppleScript's text item delimiters to " "
+	set s to parts as text
+	set AppleScript's text item delimiters to ""
+	return s
+end oneLine
+"#;
+
+/// Chromium numbers its tabs; Safari has only positions.
+const CHROMIUM_TABS: &str = r#"
+on tabIds(wid, n)
+	tell application "@APP@" to return id of every tab of window id wid
+end tabIds"#;
+const SAFARI_TABS: &str = r#"
+on tabIds(wid, n)
+	set ids to {}
+	repeat with i from 1 to n
+		set end of ids to i
+	end repeat
+	return ids
+end tabIds"#;
+const CHROMIUM_RUN: &str = "execute (tab id tid of window id wid) javascript code";
+const SAFARI_RUN: &str = "do JavaScript code in (tab (tid as integer) of window id wid)";
+
+/// The scan script for `app`. The app name is one of ours (`Browser::app`) or
+/// the example's argument, never page data.
+fn scan_script(app: &str, safari: bool) -> String {
+    let (tabs, run) = if safari {
+        (SAFARI_TABS, SAFARI_RUN)
+    } else {
+        (CHROMIUM_TABS, CHROMIUM_RUN)
+    };
+    format!("{SCAN}\n{tabs}")
+        .replace("@RUN@", run)
+        .replace("@APP@", app)
 }
-return JSON.stringify({ tabs, errors, ok });"#;
 
 const CONTROL: &str = r#"
 const A = Application(ARG.app);
@@ -227,21 +297,42 @@ const tab = ARG.safari ? w.tabs[Number(ARG.t) - 1] : w.tabs.byId(Number(ARG.t));
 const code = "(" + ARG.js + ")(" + JSON.stringify(ARG.args) + ")";
 return String(ARG.safari ? A.doJavaScript(code, { in: tab }) : tab.execute({ javascript: code }));"#;
 
-#[derive(Debug, Deserialize)]
+/// One scan's answer, from the script's lines.
+#[derive(Debug, Default)]
 struct Reply {
-    #[serde(default)]
     tabs: Vec<Tab>,
-    #[serde(default)]
     errors: Vec<String>,
-    #[serde(default)]
+    /// "window/tab" of the tabs that did not answer in time.
+    slow: Vec<String>,
+    /// Tabs that answered, with media or without.
     ok: u32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct Tab {
     w: String,
     t: String,
     page: Page,
+}
+
+fn parse_lines(out: &str) -> Reply {
+    let mut reply = Reply::default();
+    for line in out.lines() {
+        let mut f = line.splitn(4, '\t');
+        match (f.next(), f.next(), f.next(), f.next()) {
+            (Some("K"), ..) => reply.ok += 1,
+            (Some("S"), Some(id), ..) => reply.slow.push(id.into()),
+            (Some("E"), Some(msg), ..) => reply.errors.push(msg.into()),
+            (Some("T"), Some(w), Some(t), Some(json)) => {
+                reply.ok += 1;
+                if let Ok(page) = serde_json::from_str::<Page>(json) {
+                    reply.tabs.push(Tab { w: w.into(), t: t.into(), page });
+                }
+            }
+            _ => {}
+        }
+    }
+    reply
 }
 
 /// True for the error a browser gives while "Allow JavaScript from Apple
@@ -252,17 +343,15 @@ pub fn is_js_off(message: &str) -> bool {
     message.contains("Allow JavaScript from Apple Events")
 }
 
-/// Reads one scan's JSON into hits, or the issue that stopped it. An answer
-/// with no successful tab and a "JavaScript is off" error is `JsOff`; an
-/// answer with simply no media is an empty scan.
-fn parse_scan(app: &str, out: &str) -> Result<Vec<NowPlaying>, IssueKind> {
-    let Ok(reply) = serde_json::from_str::<Reply>(out) else {
-        return Ok(Vec::new());
-    };
+/// Reads one scan's lines into hits and the tabs that would not answer, or
+/// the issue that stopped it. A scan where no tab answered and one said
+/// "JavaScript is off" is `JsOff`; a scan that simply found no media is empty.
+fn parse_scan(app: &str, out: &str) -> Result<(Vec<NowPlaying>, Vec<String>), IssueKind> {
+    let reply = parse_lines(out);
     if reply.ok == 0 && reply.errors.iter().any(|e| is_js_off(e)) {
         return Err(IssueKind::JsOff);
     }
-    Ok(reply
+    let hits = reply
         .tabs
         .into_iter()
         .filter_map(|t| {
@@ -273,7 +362,8 @@ fn parse_scan(app: &str, out: &str) -> Result<Vec<NowPlaying>, IssueKind> {
             };
             now_playing(source, t.page)
         })
-        .collect())
+        .collect();
+    Ok((hits, reply.slow))
 }
 
 fn now_playing(source: Source, p: Page) -> Option<NowPlaying> {
@@ -434,15 +524,34 @@ fn related(channel: &str, artist: &str) -> bool {
 /// A browser's last verdict, so a browser that cannot be read costs one call
 /// every few minutes, not one per poll.
 static ISSUES: Mutex<Option<HashMap<Browser, (IssueKind, Instant)>>> = Mutex::new(None);
-/// When each browser was last walked tab by tab, and where its media was.
-static WALKED: Mutex<Option<HashMap<Browser, (Instant, Vec<String>)>>> = Mutex::new(None);
+
+/// What a browser's tabs looked like at the last full walk.
+#[derive(Default)]
+struct Walk {
+    at: Option<Instant>,
+    /// How long the walk took: it grows with the tab count.
+    took: Duration,
+    /// "window/tab" of the tabs that had media.
+    media: Vec<String>,
+    /// Tabs that did not answer (discarded), and when each was seen so.
+    slow: HashMap<String, Instant>,
+}
+
+static WALKS: Mutex<Option<HashMap<Browser, Walk>>> = Mutex::new(None);
 
 /// How long "JavaScript is off" is believed before the browser is asked again.
 const RECHECK: Duration = Duration::from_secs(3 * 60);
 /// Between full walks only the tabs that had media are asked again. A new
-/// video is therefore found within this long, and a playing one is followed
-/// every poll for the cost of one tab, however many are open.
+/// video is therefore found within a walk's period, and a playing one is
+/// followed every poll for the cost of one tab, however many are open.
 const WALK_EVERY: Duration = Duration::from_secs(3);
+/// A walk is never more than about one part in this of the time: a 40-tab
+/// browser's walk takes ~0.9 s, so it is repeated every ~4.5 s, not every 3.
+const WALK_DUTY: u32 = 5;
+/// A tab that did not answer is left alone this long. It is usually discarded,
+/// and a discarded tab is not playing; one the user brings back is found when
+/// this runs out.
+const SLOW_FOR: Duration = Duration::from_secs(10 * 60);
 
 fn lock<T>(m: &'static Mutex<Option<HashMap<Browser, T>>>) -> std::sync::MutexGuard<'static, Option<HashMap<Browser, T>>> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -451,7 +560,7 @@ fn lock<T>(m: &'static Mutex<Option<HashMap<Browser, T>>>) -> std::sync::MutexGu
 /// Forgets every verdict, for "I turned it on" in the view.
 pub fn recheck() {
     *lock(&ISSUES) = None;
-    *lock(&WALKED) = None;
+    *lock(&WALKS) = None;
 }
 
 /// Processes to look for. One `pgrep` for all of them: scripting a browser
@@ -489,12 +598,8 @@ pub fn scan() -> (Vec<NowPlaying>, Vec<Issue>) {
     let (mut hits, mut issues) = (Vec::new(), Vec::new());
     let running = running();
     // A browser that quit and came back has a fresh setting and permission.
-    lock(&ISSUES)
-        .get_or_insert_default()
-        .retain(|b, _| running.contains(b));
-    lock(&WALKED)
-        .get_or_insert_default()
-        .retain(|b, _| running.contains(b));
+    lock(&ISSUES).get_or_insert_default().retain(|b, _| running.contains(b));
+    lock(&WALKS).get_or_insert_default().retain(|b, _| running.contains(b));
     for browser in running {
         let known = lock(&ISSUES).get_or_insert_default().get(&browser).copied();
         if let Some((kind, _)) = known.filter(|(_, at)| at.elapsed() < RECHECK) {
@@ -517,40 +622,56 @@ pub fn scan() -> (Vec<NowPlaying>, Vec<Issue>) {
     (hits, issues)
 }
 
+/// ponytail: the scan runs on the caller's thread, so a browser restored with
+/// dozens of tabs it has not loaded (they never answer) delays a poll by up to
+/// five seconds per walk until each has been noted and skipped. The upgrade is
+/// a scanner thread that publishes its last result.
 fn scan_browser(browser: Browser) -> Result<Vec<NowPlaying>, IssueKind> {
-    let only = lock(&WALKED)
-        .get_or_insert_default()
-        .get(&browser)
-        .filter(|(at, tabs)| at.elapsed() < WALK_EVERY && !tabs.is_empty())
-        .map(|(_, tabs)| tabs.clone());
-    let hits = scan_app(browser.app(), browser.safari(), only.as_deref())?;
+    let (only, skip) = {
+        let mut walks = lock(&WALKS);
+        let walk = walks.get_or_insert_default().entry(browser).or_default();
+        walk.slow.retain(|_, at| at.elapsed() < SLOW_FOR);
+        let due = walk
+            .at
+            .is_none_or(|at| at.elapsed() >= WALK_EVERY.max(walk.took * WALK_DUTY));
+        let skip: Vec<String> = walk.slow.keys().cloned().collect();
+        let only = (!due && !walk.media.is_empty()).then(|| {
+            walk.media.iter().filter(|t| !walk.slow.contains_key(*t)).cloned().collect::<Vec<_>>()
+        });
+        (only, skip)
+    };
+    let started = Instant::now();
+    let (hits, slow) = scan_app(browser.app(), browser.safari(), only.as_deref(), &skip)?;
+    let mut walks = lock(&WALKS);
+    let walk = walks.get_or_insert_default().entry(browser).or_default();
+    walk.slow.extend(slow.into_iter().map(|t| (t, Instant::now())));
     if only.is_none() {
-        let tabs = hits.iter().filter_map(|n| n.source.tab.clone()).collect();
-        lock(&WALKED)
-            .get_or_insert_default()
-            .insert(browser, (Instant::now(), tabs));
+        walk.at = Some(Instant::now());
+        // Without the timeouts, which are not the cost of a tab that answers.
+        walk.took = started.elapsed().saturating_sub(Duration::from_secs(walk.slow.len() as u64));
+        walk.media = hits.iter().filter_map(|n| n.source.tab.clone()).collect();
     }
     Ok(hits)
 }
 
-/// One osascript call over `app`'s tabs (`only`: "window/tab" ids, else all).
+/// One osascript call over `app`'s tabs (`only`: "window/tab" ids, else every
+/// tab but `skip`). Returns the media tabs and the tabs that did not answer.
 /// Public for the example, which scans a browser by any name.
-pub fn scan_app(app: &str, safari: bool, only: Option<&[String]>) -> Result<Vec<NowPlaying>, IssueKind> {
-    let only: Option<Vec<Value>> = only.map(|ids| {
-        ids.iter()
-            .filter_map(|id| id.split_once('/'))
-            .map(|(w, t)| json!({ "w": w, "t": t }))
-            .collect()
-    });
-    let arg = json!({ "app": app, "safari": safari, "js": page_fn(READ_PAGE), "only": only });
-    match run_jxa(app, SCAN, &arg) {
-        Ok(out) => {
-            parse_scan(app, &out)
-        }
+pub fn scan_app(
+    app: &str,
+    safari: bool,
+    only: Option<&[String]>,
+    skip: &[String],
+) -> Result<(Vec<NowPlaying>, Vec<String>), IssueKind> {
+    let only = only.map(|ids| ids.join(",")).unwrap_or_default();
+    let skip = format!(",{},", skip.join(","));
+    let js = page_fn(READ_PAGE);
+    match run_args(app, &scan_script(app, safari), &[&js, &only, &skip]) {
+        Ok(out) => parse_scan(app, &out),
         Err(ScriptError::NotPermitted { .. }) => Err(IssueKind::NotPermitted),
         Err(e) => {
             tracing::debug!(%e, app, "browser media scan failed");
-            Ok(Vec::new())
+            Ok((Vec::new(), Vec::new()))
         }
     }
 }
@@ -586,18 +707,17 @@ impl Cmd {
 /// Sends `cmd` to the exact window and tab `source` names.
 pub fn control(source: &Source, cmd: Cmd) -> Result<(), ScriptError> {
     let failed = |m: &str| ScriptError::Failed(m.into());
-    let browser = Browser::from_app(&source.app).ok_or_else(|| failed("not a browser"))?;
     let (w, t) = source
         .tab
         .as_deref()
         .and_then(|id| id.split_once('/'))
         .ok_or_else(|| failed("no tab to control"))?;
     let arg = json!({
-        "app": browser.app(), "safari": browser.safari(), "w": w, "t": t,
+        "app": source.app, "safari": source.app == Browser::Safari.app(), "w": w, "t": t,
         "js": page_fn(CONTROL_PAGE),
         "args": cmd.args(source.host.as_deref().unwrap_or_default()),
     });
-    match run_jxa(browser.app(), CONTROL, &arg)?.as_str() {
+    match run_jxa(&source.app, CONTROL, &arg)?.as_str() {
         "ok" => Ok(()),
         "unsupported" => Err(failed("this page has no next button")),
         _ => Err(failed("that tab changed; the next reading will find the video")),
@@ -730,37 +850,37 @@ mod tests {
     /// "nothing playing".
     #[test]
     fn js_off_is_told_from_an_idle_browser() {
-        let chromium = "Executing JavaScript through AppleScript is turned off. To turn it on, from the menu bar, go to View > Developer > Allow JavaScript from Apple Events.";
-        let safari = "You must enable 'Allow JavaScript from Apple Events' in the Developer section of Safari Settings to use 'do JavaScript'.";
+        let chromium = "Brave Browser got an error: Executing JavaScript through AppleScript is turned off. To turn it on, from the menu bar, go to View > Developer > Allow JavaScript from Apple Events. (12)";
+        let safari = "Safari got an error: You must enable 'Allow JavaScript from Apple Events' in the Developer section of Safari Settings to use 'do JavaScript'. (8)";
         assert!(is_js_off(chromium) && is_js_off(safari));
         assert!(!is_js_off("Tab was closed"));
 
         for msg in [chromium, safari] {
-            let off = json!({ "tabs": [], "errors": [msg], "ok": 0 }).to_string();
+            let off = format!("E\t{msg}\n");
             assert_eq!(parse_scan("Brave Browser", &off).err(), Some(IssueKind::JsOff));
         }
-        let idle = json!({ "tabs": [], "errors": [], "ok": 9 }).to_string();
-        assert!(parse_scan("Brave Browser", &idle).unwrap().is_empty());
+        let idle = "K\nK\nK\n";
+        assert!(parse_scan("Brave Browser", idle).unwrap().0.is_empty());
         // One window with the setting off beside windows that answered is not "off".
-        let mixed = json!({ "tabs": [], "errors": [chromium], "ok": 4 }).to_string();
+        let mixed = format!("K\nE\t{chromium}\nK\n");
         assert!(parse_scan("Brave Browser", &mixed).is_ok());
-        assert!(parse_scan("Brave Browser", "garbage").unwrap().is_empty());
+        assert!(parse_scan("Brave Browser", "garbage").unwrap().0.is_empty());
+        assert!(parse_scan("Brave Browser", "").unwrap().0.is_empty());
     }
 
     #[test]
     fn a_scan_reply_becomes_hits_that_name_their_tab() {
-        let reply = json!({ "ok": 3, "errors": [], "tabs": [
-            { "w": "7", "t": "42", "page": {
-                "host": "www.youtube.com", "title": "A - YouTube", "cur": 3.0, "dur": 100.0,
-                "paused": true, "rate": 1.0, "yt": "dQw4w9WgXcQ", "channel": "A" } },
-        ]})
-        .to_string();
-        let hits = parse_scan("Safari", &reply).unwrap();
+        let page = r#"{"host":"www.youtube.com","title":"A - YouTube","cur":3.0,"dur":100.0,"paused":true,"rate":1.0,"yt":"dQw4w9WgXcQ","channel":"A"}"#;
+        let reply = format!("K\nT\t7\t42\t{page}\nS\t7/43\nT\t7\t44\tnot json\n");
+        let (hits, slow) = parse_scan("Safari", &reply).unwrap();
+        assert_eq!(hits.len(), 1);
         let n = &hits[0];
         assert_eq!(n.source.app, "Safari");
         assert_eq!(n.source.tab.as_deref(), Some("7/42"));
         assert_eq!(n.source.host.as_deref(), Some("www.youtube.com"));
         assert_eq!(n.state, PlayState::Paused);
+        // A tab that did not answer is remembered, not mistaken for "off".
+        assert_eq!(slow, vec!["7/43".to_string()]);
     }
 
     #[test]
@@ -781,6 +901,23 @@ mod tests {
                 .output()
                 .unwrap();
             assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        }
+    }
+
+    /// The scan script is AppleScript the compiler never sees. It needs the
+    /// browser's dictionary to compile, so it checks the browsers installed here.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_scan_scripts_compile() {
+        for b in Browser::ALL {
+            if !std::path::Path::new(&format!("/Applications/{}.app", b.app())).exists() {
+                continue;
+            }
+            let out = std::process::Command::new("osacompile")
+                .args(["-o", "/dev/null", "-e", &scan_script(b.app(), b.safari())])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{}: {}", b.app(), String::from_utf8_lossy(&out.stderr));
         }
     }
 }
