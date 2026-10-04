@@ -15,6 +15,7 @@ export type Step = {
   requiresConfirmation: boolean;
   /** Set by Confirm/Cancel; undefined while this step's gate is open. */
   confirmed?: boolean;
+  /** Kept whole: its `show` is what the finished row's Show button brings back. */
   result?: ToolResult;
 };
 

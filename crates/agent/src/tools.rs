@@ -68,13 +68,29 @@ pub async fn command_tools(
     CommandTools { tools, more }
 }
 
-/// The command as the model sees it: what was said, plus the app the user was
-/// looking at and anything they had selected, so "add this to my note" and
-/// "summarise this" have a "this".
-pub fn with_context(transcript: &str, front: Option<&str>, selection: Option<&str>) -> String {
+/// The command as the model sees it: what was said, plus the app and window the
+/// user was looking at and anything they had selected, so "add this to my
+/// note", "summarise this" and "open components" have a "this" and a "here".
+///
+/// The window rides only with an app: no app means the front window was our own
+/// panel, which says nothing about where the user is.
+pub fn with_context(
+    transcript: &str,
+    front: Option<&str>,
+    title: Option<&str>,
+    document: Option<&str>,
+    selection: Option<&str>,
+) -> String {
     let mut command = transcript.to_string();
     if let Some(app) = front {
-        command.push_str(&format!("\n(The app on screen: {app})"));
+        command.push_str(&format!("\n(The app on screen: {app}"));
+        if let Some(title) = title.map(str::trim).filter(|t| !t.is_empty()) {
+            command.push_str(&format!(" — \"{title}\""));
+        }
+        if let Some(document) = document {
+            command.push_str(&format!(", {document}"));
+        }
+        command.push(')');
     }
     if let Some(selected) = selection.map(str::trim).filter(|s| !s.is_empty()) {
         let selected: String = selected.chars().take(MAX_SELECTION).collect();
@@ -89,9 +105,15 @@ mod tests {
 
     #[test]
     fn context_carries_the_front_app_and_selection_and_skips_blanks() {
-        assert_eq!(with_context("hi", None, Some("  ")), "hi");
+        assert_eq!(with_context("hi", None, None, None, Some("  ")), "hi");
         assert_eq!(
-            with_context("add this to my groceries note", Some("Safari"), Some(" oat milk ")),
+            with_context(
+                "add this to my groceries note",
+                Some("Safari"),
+                None,
+                None,
+                Some(" oat milk ")
+            ),
             "add this to my groceries note\n(The app on screen: Safari)\n(Selected text: «oat milk»)"
         );
     }
@@ -100,7 +122,43 @@ mod tests {
     #[test]
     fn a_huge_selection_is_cut() {
         let big = "x".repeat(MAX_SELECTION * 3);
-        let command = with_context("summarise this", None, Some(&big));
+        let command = with_context("summarise this", None, None, None, Some(&big));
         assert!(command.chars().count() < MAX_SELECTION + 100);
+    }
+
+    /// "Open components" and "summarise this" lean on which window and file
+    /// the user was in, not just the app.
+    #[test]
+    fn context_carries_the_front_window_and_its_document() {
+        assert_eq!(
+            with_context(
+                "open components",
+                Some("Cursor"),
+                Some("main.rs — aloud-tauri"),
+                None,
+                None
+            ),
+            "open components\n(The app on screen: Cursor — \"main.rs — aloud-tauri\")"
+        );
+        assert_eq!(
+            with_context(
+                "summarise this",
+                Some("Preview"),
+                Some("report.pdf"),
+                Some("/Users/me/report.pdf"),
+                None
+            ),
+            "summarise this\n(The app on screen: Preview — \"report.pdf\", /Users/me/report.pdf)"
+        );
+        assert_eq!(
+            with_context("hi", Some("Finder"), Some(" "), None, None),
+            "hi\n(The app on screen: Finder)",
+            "an untitled window adds nothing"
+        );
+        assert_eq!(
+            with_context("hi", None, Some("Aloud"), Some("/x"), None),
+            "hi",
+            "no app means the window was our own panel"
+        );
     }
 }

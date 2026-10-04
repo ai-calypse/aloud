@@ -138,7 +138,13 @@ pub enum LoopEvent {
         args: serde_json::Value,
     },
     /// That tool finished (success carries no payload; the model gets the JSON).
-    ToolCallResult { name: String, success: bool },
+    /// `show` is what the row's Show button brings back, as (app, target); see
+    /// `aloud_native::show_target`.
+    ToolCallResult {
+        name: String,
+        success: bool,
+        show: Option<(String, String)>,
+    },
     /// The model needs something only the user has; the loop is suspended until
     /// the panel answers. `options` non-empty means the answer is one of them —
     /// a choice, not free text. See [`ASK_USER`].
@@ -453,6 +459,12 @@ pub struct Command<'a> {
     pub tools: &'a [ToolDef],
     /// Connected services left out of `tools`, loadable via ALOUD_MORE_TOOLS.
     pub more: &'a [String],
+    /// The app, its window's file and an editor's project when the user spoke —
+    /// what a native tool with no target falls back on. See
+    /// `aloud_native::with_front`.
+    pub front: Option<&'a str>,
+    pub document: Option<&'a str>,
+    pub project: Option<&'a str>,
 }
 
 /// A write the gate is asked about: the call as the model made it, and the
@@ -517,6 +529,9 @@ where
         prompt: command,
         tools,
         more,
+        front,
+        document,
+        project,
         ..
     } = command;
     let (mut schemas, mut messages) = opening(command, tools, more);
@@ -793,6 +808,7 @@ where
                 on_event(LoopEvent::ToolCallResult {
                     name: name.clone(),
                     success: true,
+                    show: None,
                 });
                 messages.push(Message::tool_result(&call.id, result));
                 continue;
@@ -908,6 +924,7 @@ where
                 on_event(LoopEvent::ToolCallResult {
                     name: name.clone(),
                     success: false,
+                    show: None,
                 });
                 r#"{"error":"user declined this action"}"#.to_string()
             } else {
@@ -917,9 +934,19 @@ where
                     toolkit,
                     ok = tracing::field::Empty
                 );
+                // A native tool falls back on where the user was when they spoke.
+                // Merged here — after the start event, the gate and the dedup key
+                // — so neither the model, the panel nor the confirmation sees it.
+                let fronted;
+                let exec_args = if toolkit == "macOS" {
+                    fronted = aloud_native::with_front(&args, front, document, project);
+                    &fronted
+                } else {
+                    &args
+                };
                 let result = dispatch(
                     &name,
-                    &args,
+                    exec_args,
                     composio,
                     mock,
                     &mut on_event,
@@ -932,13 +959,17 @@ where
                 span.record("ok", success);
                 any_failed |= !success;
                 round_native_ok &= success;
-                if success {
+                let show = if success {
                     let parsed = serde_json::from_str(&result).unwrap_or_default();
                     confirmations.push(aloud_native::confirmation(&name, &args, &parsed));
-                }
+                    aloud_native::show_target(&name, &args, &parsed)
+                } else {
+                    None
+                };
                 on_event(LoopEvent::ToolCallResult {
                     name: name.clone(),
                     success,
+                    show,
                 });
                 result
             };
@@ -1179,6 +1210,134 @@ mod tests {
             parameters: serde_json::json!({}),
             read_only,
         }
+    }
+
+    /// A chat endpoint on localhost answering request `n` with `replies[n]`
+    /// (the last repeats), and keeping every request body the loop sent it.
+    fn fake_brain(
+        replies: Vec<serde_json::Value>,
+    ) -> (Brain, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use std::io::{BufRead, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let bodies = sent.clone();
+        std::thread::spawn(move || {
+            for (n, stream) in listener.incoming().enumerate() {
+                let mut stream = stream.unwrap();
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    match line.split_once(':') {
+                        Some((key, value)) if key.eq_ignore_ascii_case("content-length") => {
+                            length = value.trim().parse().unwrap();
+                        }
+                        _ if line.trim().is_empty() => break,
+                        _ => {}
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                bodies
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&body).into_owned());
+                let reply = replies[n.min(replies.len() - 1)].to_string();
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                    reply.len()
+                )
+                .unwrap();
+            }
+        });
+        let brain = Brain {
+            client: aloud_llm::LlmClient::new("test", Some(&url)).unwrap(),
+            model: "fake",
+        };
+        (brain, sent)
+    }
+
+    /// The front app reaches our own tools only, and only once the gate has
+    /// passed: a connected service never gets it, and neither the model, the
+    /// panel's start event nor the confirmation ever sees it.
+    #[tokio::test]
+    async fn the_front_app_reaches_native_tools_only_and_nothing_else_sees_it() {
+        let menu = serde_json::json!({ "item": "Quit Safari" });
+        let issue = serde_json::json!({ "title": "Bug" });
+        let calls = serde_json::json!({ "choices": [{ "message": { "tool_calls": [
+            { "id": "a", "type": "function",
+              "function": { "name": "ALOUD_MENU", "arguments": menu.to_string() } },
+            { "id": "b", "type": "function",
+              "function": { "name": "GITHUB_CREATE_ISSUE", "arguments": issue.to_string() } },
+        ] } }] });
+        // The answer, then the grader's verdict on it.
+        let finished = serde_json::json!({ "choices": [{ "message": { "content": "FINISHED" } }] });
+        let (brain, requests) = fake_brain(vec![calls, finished]);
+
+        let mut menu_tool = tool("ALOUD_MENU", false);
+        menu_tool.toolkit = "macOS".into();
+        let tools = [menu_tool, tool("GITHUB_CREATE_ISSUE", false)];
+        let ran = std::sync::Mutex::new(Vec::new());
+        let mock = |name: &str, args: &serde_json::Value| {
+            ran.lock().unwrap().push((name.to_string(), args.clone()));
+            r#"{"successful":true}"#.to_string()
+        };
+        let gated = std::sync::Mutex::new(Vec::new());
+        let mut started = Vec::new();
+
+        run(
+            &[brain],
+            &ComposioClient::new("").unwrap(),
+            Command {
+                said: "quit safari and file a bug",
+                prompt: "quit safari and file a bug",
+                tools: &tools,
+                more: &[],
+                front: Some("Safari"),
+                document: Some("/Users/me/page.html"),
+                project: None,
+            },
+            Callbacks {
+                on_event: |event| {
+                    if let LoopEvent::ToolCallStart { args, .. } = event {
+                        started.push(args);
+                    }
+                },
+                confirm: |call: ProposedCall| {
+                    gated.lock().unwrap().push(call.args.clone());
+                    async move { Verdict::Run(call.args) }
+                },
+                ask: |_: String| async { None },
+                cancelled: || false,
+                mock: Some(&mock),
+            },
+        )
+        .await
+        .unwrap();
+
+        let ran = ran.into_inner().unwrap();
+        assert_eq!(ran[0].0, "ALOUD_MENU");
+        assert_eq!(ran[0].1["item"], "Quit Safari");
+        assert_eq!(ran[0].1["_front_app"], "Safari");
+        assert_eq!(ran[0].1["_front_document"], "/Users/me/page.html");
+        assert!(
+            ran[0].1.get("_front_project").is_none(),
+            "only what is known"
+        );
+        assert_eq!(ran[1], ("GITHUB_CREATE_ISSUE".to_string(), issue.clone()));
+        assert_eq!(started, vec![menu.clone(), issue.clone()]);
+        assert_eq!(gated.into_inner().unwrap(), vec![menu, issue]);
+        let requests = requests.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            3,
+            "a round of calls, the answer, the grader"
+        );
+        assert!(requests.iter().all(|body| !body.contains("_front_")));
     }
 
     #[test]

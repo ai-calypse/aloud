@@ -271,6 +271,8 @@ async fn judge(
             let command = aloud_agent::with_context(
                 &case.input,
                 case.front.as_deref(),
+                None,
+                None,
                 case.selection.as_deref(),
             );
             let schema_chars: usize = tools.iter().map(|t| t.to_openai().to_string().len()).sum();
@@ -435,6 +437,8 @@ async fn play(
     let prompt = aloud_agent::with_context(
         &case.input,
         case.front.as_deref(),
+        None,
+        None,
         case.selection.as_deref(),
     );
     let mock = |name: &str, _args: &Value| {
@@ -452,6 +456,9 @@ async fn play(
             prompt: &prompt,
             tools: &tools,
             more: &more,
+            front: case.front.as_deref(),
+            document: None,
+            project: None,
         },
         aloud_agent::Callbacks {
             on_event: |event| {

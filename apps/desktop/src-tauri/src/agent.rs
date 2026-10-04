@@ -108,6 +108,12 @@ impl Run {
 #[derive(Clone, Copy)]
 struct Context<'a> {
     front: Option<&'a str>,
+    /// The front window's title and file.
+    title: Option<&'a str>,
+    document: Option<&'a str>,
+    /// The repo an editor's title names, for when it gives no file; see
+    /// `aloud_native::editor_project`.
+    project: Option<&'a str>,
     selection: Option<&'a str>,
 }
 
@@ -182,6 +188,21 @@ pub struct Question {
 pub struct ToolResult {
     pub success: bool,
     pub message: String,
+    /// What the row's Show button brings back, when the step made something.
+    pub show: Option<ShowTarget>,
+}
+
+/// A note id in Notes, a saved file, a folder in the app that opened it — for
+/// [`show_result`]. The tools work in the background, so this is the way back.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ShowTarget {
+    pub app: String,
+    pub target: String,
+}
+
+fn show_of(show: Option<(String, String)>) -> Option<ShowTarget> {
+    show.map(|(app, target)| ShowTarget { app, target })
 }
 
 /// Runs the full agent flow for a transcript. Called by the pipeline, which
@@ -221,16 +242,30 @@ pub async fn run(
     let front = aloud_selection::frontmost_app()
         .map(|a| a.name)
         .filter(|name| !name.eq_ignore_ascii_case("aloud"));
-    // Also before the panel: once it has focus the selection is ours, not theirs. Bounded, because
-    // an app busy on its main thread can hold an accessibility read for seconds.
-    let selection = tokio::time::timeout(
+    // Also before the panel: once it has focus the window and the selection are ours, not theirs.
+    // One bounded task for both, because an app busy on its main thread can hold an accessibility
+    // read for seconds.
+    let (window, selection) = tokio::time::timeout(
         std::time::Duration::from_millis(300),
-        tauri::async_runtime::spawn_blocking(aloud_selection::selected_text_quietly),
+        tauri::async_runtime::spawn_blocking(|| {
+            (
+                aloud_selection::frontmost_window(),
+                aloud_selection::selected_text_quietly(),
+            )
+        }),
     )
     .await
     .ok()
     .and_then(Result::ok)
-    .flatten();
+    .unwrap_or_default();
+    // With no front app the window was our own panel's.
+    let (title, document) = window
+        .filter(|_| front.is_some())
+        .map_or((None, None), |(title, document)| (Some(title), document));
+    let project = front
+        .as_deref()
+        .zip(title.as_deref())
+        .and_then(|(app, title)| aloud_native::editor_project(app, title));
 
     if !quiet {
         crate::overlay::show_panel(app);
@@ -239,6 +274,9 @@ pub async fn run(
 
     let context = Context {
         front: front.as_deref(),
+        title: title.as_deref(),
+        document: document.as_deref(),
+        project,
         selection: selection.as_deref(),
     };
     match execute(app, &run, &transcript, context, settings, cancelled).await {
@@ -315,7 +353,7 @@ async fn execute(
     match aloud_native::fast::route(transcript, &installed) {
         Some(aloud_native::fast::Fast::Tool { name, args, done }) => {
             tracing::Span::current().record("route", "fast");
-            return run_fast(app, run, name, args, done).await;
+            return run_fast(app, run, name, args, done, context).await;
         }
         Some(aloud_native::fast::Fast::Web { query }) => {
             let goal = serde_json::json!({ "goal": transcript, "query": query });
@@ -343,7 +381,13 @@ async fn execute(
     tracing::Span::current().record("tool_count", tools.len());
     tracing::Span::current().record("route", "brain");
 
-    let command = aloud_agent::with_context(transcript, context.front, context.selection);
+    let command = aloud_agent::with_context(
+        transcript,
+        context.front,
+        context.title,
+        context.document,
+        context.selection,
+    );
 
     aloud_agent::run_tool_loop(
         &brains,
@@ -353,6 +397,9 @@ async fn execute(
             prompt: &command,
             tools: &tools,
             more: &more,
+            front: context.front,
+            document: context.document,
+            project: context.project,
         },
         aloud_agent::Callbacks {
             on_event: |event| {
@@ -401,6 +448,7 @@ async fn run_fast(
     name: &'static str,
     args: serde_json::Value,
     done: String,
+    context: Context<'_>,
 ) -> Result<String> {
     run.acted.store(true, Ordering::SeqCst);
     let args = if aloud_native::low_risk(name, &args) {
@@ -420,19 +468,26 @@ async fn run_fast(
             None => return Ok("Cancelled.".to_string()),
         }
     };
-    let outcome = tauri::async_runtime::spawn_blocking(move || aloud_native::execute(name, &args))
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let result = match outcome {
-        Some(Ok(_)) => Ok(done),
-        Some(Err(e)) => Err(anyhow::anyhow!("{e}")),
-        None => Err(anyhow::anyhow!("{name} is not available on this Mac")),
+    // After the gate, like the loop's: the row and the confirmation show what was asked.
+    let fronted = aloud_native::with_front(&args, context.front, context.document, context.project);
+    let outcome =
+        tauri::async_runtime::spawn_blocking(move || aloud_native::execute(name, &fronted))
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let (result, show) = match outcome {
+        Some(Ok(value)) => (Ok(done), aloud_native::show_target(name, &args, &value)),
+        Some(Err(e)) => (Err(anyhow::anyhow!("{e}")), None),
+        None => (
+            Err(anyhow::anyhow!("{name} is not available on this Mac")),
+            None,
+        ),
     };
     run.emit(
         app,
         AgentEvent::ToolResult(ToolResult {
             success: result.is_ok(),
             message: format!("{name} {}", if result.is_ok() { "done" } else { "failed" }),
+            show: show_of(show),
         }),
     );
     result
@@ -485,6 +540,7 @@ async fn run_direct(
                     AgentEvent::ToolResult(ToolResult {
                         success,
                         message: format!("{name} {}", if success { "done" } else { "failed" }),
+                        show: None,
                     }),
                 );
                 if !success {
@@ -622,16 +678,19 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
             // The gate is enforced in the loop; the panel just shows the call.
             requires_confirmation: false,
         }),
-        aloud_agent::LoopEvent::ToolCallResult { name, success } => {
-            AgentEvent::ToolResult(ToolResult {
-                success,
-                message: if success {
-                    format!("{name} done")
-                } else {
-                    format!("{name} failed")
-                },
-            })
-        }
+        aloud_agent::LoopEvent::ToolCallResult {
+            name,
+            success,
+            show,
+        } => AgentEvent::ToolResult(ToolResult {
+            success,
+            message: if success {
+                format!("{name} done")
+            } else {
+                format!("{name} failed")
+            },
+            show: show_of(show),
+        }),
         aloud_agent::LoopEvent::RateLimited { seconds } => {
             AgentEvent::Status(format!("Rate limited — retrying in {seconds}s…"))
         }
@@ -725,6 +784,17 @@ fn apply_edits(
 
 pub fn hide(app: &AppHandle) {
     crate::overlay::end_panel(app);
+}
+
+/// Brings back what a finished step made — the note, the saved file, the
+/// opened folder — from its row's Show button.
+#[tauri::command]
+#[specta::specta]
+pub async fn show_result(app_name: String, target: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || aloud_native::show(&app_name, &target))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 /// Lets the panel dismiss itself on Escape or after showing a result.
