@@ -66,9 +66,10 @@ const PINNED_TOOLS: &[(&str, &[&str])] = &[
             "GOOGLECALENDAR_DELETE_EVENT",
         ],
     ),
-    // Slack's send verbs rank fine from the command; only the directory needs
-    // the pin.
-    ("slack", &["SLACK_FIND_USERS"]),
+    // The send is pinned too: "send hi to the team channel on slack" ranked
+    // eight channel and team tools above it and offered no way to post
+    // (measured 2026-10-04).
+    ("slack", &["SLACK_FIND_USERS", "SLACK_CHAT_POST_MESSAGE"]),
     // Look someone up, and write one down. `CREATE_CONTACT` carries no
     // `readOnlyHint`, so it takes the confirmation gate like any other write —
     // which is the whole approval flow for "save Dad to my contacts", with no
@@ -293,6 +294,21 @@ fn card_reads(
     CACHE.get_or_init(Default::default)
 }
 
+/// How long the account list is reused. Every Composio call looks its
+/// connection up first, so a round of three made three identical fetches. The
+/// Connectors pane always asks fresh and refreshes this, so an account connected
+/// a moment ago is seen as soon as the pane has looked.
+const CONNECTIONS_TTL: Duration = Duration::from_secs(30);
+
+/// Account lists by hash of the credential, with when each was fetched.
+type ConnectionLists =
+    std::sync::Mutex<std::collections::HashMap<u64, (std::time::Instant, Vec<Connection>)>>;
+
+fn connection_lists() -> &'static ConnectionLists {
+    static CACHE: std::sync::OnceLock<ConnectionLists> = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
 pub struct ComposioClient {
     client: reqwest::Client,
     api_key: String,
@@ -314,14 +330,27 @@ impl ComposioClient {
         })
     }
 
-    /// Every connected account, any toolkit, all statuses. Filtering by toolkit
-    /// here once made a freshly connected one look unconnected everywhere.
+    /// Every connected account, any toolkit, all statuses, reused for
+    /// [`CONNECTIONS_TTL`]. Filtering by toolkit here once made a freshly
+    /// connected one look unconnected everywhere.
+    pub async fn connections(&self) -> Result<Vec<Connection>> {
+        let hit = connection_lists()
+            .lock()
+            .ok()
+            .and_then(|c| c.get(&self.credential()).cloned());
+        if let Some((_, list)) = hit.filter(|(at, _)| at.elapsed() < CONNECTIONS_TTL) {
+            return Ok(list);
+        }
+        self.fresh_connections().await
+    }
+
+    /// [`Self::connections`] straight from Composio, refreshing the copy it reuses.
     ///
     /// ponytail: one page of 100 accounts; paginate if anyone connects more.
-    pub async fn connections(&self) -> Result<Vec<Connection>> {
+    async fn fresh_connections(&self) -> Result<Vec<Connection>> {
         let json = self.get("/connected_accounts?limit=100").await?;
         let items = json["items"].as_array().cloned().unwrap_or_default();
-        Ok(items
+        let list: Vec<Connection> = items
             .iter()
             .filter_map(|item| {
                 let id = item["id"].as_str()?;
@@ -333,7 +362,20 @@ impl ComposioClient {
                     status: item["status"].as_str().unwrap_or("").to_string(),
                 })
             })
-            .collect())
+            .collect();
+        if let Ok(mut cache) = connection_lists().lock() {
+            cache.insert(self.credential(), (std::time::Instant::now(), list.clone()));
+        }
+        Ok(list)
+    }
+
+    /// The cache key for this client's account, so a key change never serves
+    /// another account's view.
+    fn credential(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.api_key.hash(&mut hasher);
+        hasher.finish()
     }
 
     /// Tools for every toolkit with an ACTIVE connection, chosen for `command`.
@@ -670,14 +712,18 @@ impl ComposioClient {
             None,
             Duration::from_secs(30),
         )
-        .await
-        .map(|_| ())
+        .await?;
+        if let Ok(mut cache) = connection_lists().lock() {
+            cache.remove(&self.credential());
+        }
+        Ok(())
     }
 
-    /// Active connections as slug → connected-account id.
+    /// Active connections as slug → connected-account id. Fresh: this is what
+    /// the Connectors pane shows, right after the user connects something.
     async fn connected_by_slug(&self) -> Result<std::collections::HashMap<String, String>> {
         Ok(self
-            .connections()
+            .fresh_connections()
             .await?
             .into_iter()
             .filter(Connection::is_active)
@@ -932,8 +978,8 @@ impl ComposioClient {
     // MARK: transport
 
     async fn get(&self, path: &str) -> Result<Value> {
-        // Only the tool catalogue: connections stay live, so an account connected a moment ago
-        // shows up on the next command.
+        // Only the tool catalogue: the account list keeps its own, much shorter, copy in
+        // `connections`.
         let cacheable = path.starts_with("/tools?");
         let key = {
             use std::hash::{Hash, Hasher};

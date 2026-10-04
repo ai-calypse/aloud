@@ -8,6 +8,8 @@ import type { ToolArgs } from "./tool-views";
  * inherited the first's result and its confirmation gate never rendered.
  */
 export type Step = {
+  /** The loop's id for the call; absent on the fast path's single row. */
+  id?: number | null;
   name: string;
   app: string;
   /** The tool's own argument object; views pick the fields worth showing. */
@@ -49,29 +51,45 @@ function asArgs(value: unknown): ToolArgs {
 }
 
 /**
+ * Where a call event belongs: the step carrying its id, else — for the fast
+ * path, whose events carry none — the last step if it is the same call still
+ * waiting for its result.
+ */
+function stepFor(steps: Step[], call: ToolCall): number {
+  if (call.id != null) return steps.findIndex((s) => s.id === call.id);
+  const last = steps.length - 1;
+  const open = steps[last];
+  return open && !open.result && open.name === call.name ? last : -1;
+}
+
+/**
  * Folds a tool-call event into the step list. Rust emits two events per write —
  * the start, then the same call with `requiresConfirmation` — so the second
- * updates the open step rather than appending a duplicate.
+ * updates its step rather than appending a duplicate. A round's calls all
+ * start before any finishes, so the step is found by id, not by being last.
  */
 export function withCall(steps: Step[], call: ToolCall): Step[] {
-  const open = steps.length > 0 ? steps[steps.length - 1] : undefined;
-  if (open && open.name === call.name && !open.result) {
-    return [
-      ...steps.slice(0, -1),
-      {
-        ...open,
-        args: asArgs(call.args),
-        requiresConfirmation: open.requiresConfirmation || call.requiresConfirmation,
-        // Only the gate event carries one; whichever of the pair lands second
-        // must not wipe it.
-        preview: call.preview ?? open.preview,
-        canAlways: open.canAlways || call.canAlways,
-      },
-    ];
+  const at = stepFor(steps, call);
+  if (at !== -1) {
+    const open = steps[at];
+    return steps.map((s, i) =>
+      i === at
+        ? {
+            ...open,
+            args: asArgs(call.args),
+            requiresConfirmation: open.requiresConfirmation || call.requiresConfirmation,
+            // Only the gate event carries one; whichever of the pair lands
+            // second must not wipe it.
+            preview: call.preview ?? open.preview,
+            canAlways: open.canAlways || call.canAlways,
+          }
+        : s,
+    );
   }
   return [
     ...steps,
     {
+      id: call.id,
       name: call.name,
       app: call.app,
       args: asArgs(call.args),
@@ -115,13 +133,21 @@ export function withoutPlanned(
   return left.length ? left : undefined;
 }
 
-/** Attaches a result to the last step still waiting for one. */
+/**
+ * Attaches a result to its own step: the one with its id, else (the fast path)
+ * the last still waiting. A result for a step the panel never saw — a quiet run
+ * that surfaced mid-round — is dropped rather than put on another's row.
+ */
 export function withResult(steps: Step[], result: ToolResult): Step[] {
   let index = -1;
-  for (let i = steps.length - 1; i >= 0; i--) {
-    if (!steps[i].result) {
-      index = i;
-      break;
+  if (result.id != null) {
+    index = steps.findIndex((s) => s.id === result.id && !s.result);
+  } else {
+    for (let i = steps.length - 1; i >= 0; i--) {
+      if (!steps[i].result) {
+        index = i;
+        break;
+      }
     }
   }
   if (index === -1) return steps;

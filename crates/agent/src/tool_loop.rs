@@ -15,9 +15,26 @@ use crate::preview::Names;
 use crate::Brain;
 use aloud_llm::{LlmError, Message};
 use anyhow::Result;
+use futures_util::StreamExt;
 use std::future::Future;
 use std::time::Duration;
 use tracing::Instrument;
+
+/// How many of one round's calls run at once. "Send this, search that, note
+/// the other" is three; a round asking for more is usually several reads
+/// against one service's rate limit, where waiting costs little.
+const MAX_PARALLEL: usize = 3;
+
+/// The screen, keyboard focus and the clipboard: one tool drives them at a
+/// time, across every run in the process. Held in [`dispatch`] by the engine,
+/// screen control and native tools that take the front
+/// (`aloud_native::takes_front`); a screen session holds it until the run ends
+/// (see [`ScreenSession`]). Background AppleScript and Composio never wait on it.
+static UI: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// The longest one wait on a rate limit may hold a spoken command, whatever
+/// the server or the breaker says; past it we would rather fail and say so.
+const RETRY_CAP: Duration = Duration::from_secs(30);
 
 /// Rounds allowed a command that only calls structured tools. Five covers the
 /// shape those have — look something up, act on it, confirm — and a model still
@@ -135,17 +152,26 @@ pub enum LoopEvent {
     /// The model asked to run a tool, with the arguments it chose. The whole
     /// JSON object, not a flattened list: the panel renders a draft's body as
     /// text and ignores `user_id`, which needs the fields kept apart.
+    ///
+    /// `step` numbers the run's calls from 0. A round's calls all start before
+    /// any finishes, so a result finds its own row by it, not by arriving last.
     ToolCallStart {
+        step: u32,
         name: String,
         args: serde_json::Value,
     },
     /// That tool finished (success carries no payload; the model gets the JSON).
     /// `show` is what the row's Show button brings back, as (app, target); see
-    /// `aloud_native::show_target`.
+    /// `aloud_native::show_target`. Results come in call order, whichever
+    /// finished first.
     ToolCallResult {
+        step: u32,
         name: String,
         success: bool,
         show: Option<(String, String)>,
+        /// The app a write that ran acted in, as its permission names it, for
+        /// the audit log. None for a read, and for a write that never ran.
+        write_app: Option<String>,
     },
     /// The model needs something only the user has; the loop is suspended until
     /// the panel answers. `options` non-empty means the answer is one of them —
@@ -316,10 +342,10 @@ fn backoff(error: &LlmError) -> Option<&'static [f64]> {
     }
 }
 
-/// Whether a failure on the first round should move to the next brain rather
-/// than wait: everything [`backoff`] would retry, plus the errors waiting cannot
-/// fix — a key with no billing (Cerebras answers 402), a revoked key, a model id
-/// the provider no longer serves.
+/// Whether a failure should move to the next brain rather than wait:
+/// everything [`backoff`] would retry, plus the errors waiting cannot fix — a
+/// key with no billing (Cerebras answers 402), a revoked key, a model id the
+/// provider no longer serves, and an endpoint that never answered.
 pub(crate) fn fails_over(error: &LlmError) -> bool {
     backoff(error).is_some()
         || matches!(
@@ -327,8 +353,16 @@ pub(crate) fn fails_over(error: &LlmError) -> bool {
             LlmError::Failed {
                 status: 401..=404,
                 ..
-            }
+            } | LlmError::Unreachable { .. }
         )
+}
+
+/// Moves the run to the next brain. Gemini 3 needs the earlier calls signed.
+fn next_brain(brain: &mut usize, brains: &[Brain], messages: &mut [Message]) {
+    *brain += 1;
+    if brains[*brain].model.starts_with("gemini") {
+        sign_for_gemini(messages);
+    }
 }
 
 /// Gemini 3 rejects a history holding tool calls without its thought
@@ -357,11 +391,10 @@ fn sign_for_gemini(messages: &mut [Message]) {
 /// every dictation at the same schedule, so without it a burst of commands
 /// syncs up and re-hits the limit together.
 fn retry_delay(error: &LlmError, schedule: &[f64], attempt: usize, jitter: f64) -> Duration {
-    const CAP: Duration = Duration::from_secs(30);
     if let LlmError::RateLimited { retry_after, .. } = error {
-        return (*retry_after).min(CAP);
+        return (*retry_after).min(RETRY_CAP);
     }
-    Duration::from_secs_f64(schedule[attempt] + jitter).min(CAP)
+    Duration::from_secs_f64(schedule[attempt] + jitter).min(RETRY_CAP)
 }
 
 /// The model has no clock: without this, "tomorrow at 4pm" landed on
@@ -509,6 +542,9 @@ pub struct ProposedCall {
     /// The app and action its saved grant is keyed by, and whether the
     /// named-app rule fired. The caller holds the grants, so it decides.
     pub gate: Option<Gate>,
+    /// Its `LoopEvent::ToolCallStart::step`, so the card lands on its own
+    /// row; None for a call that never went through the loop.
+    pub step: Option<u32>,
 }
 
 /// The gate's answer: run with these arguments (the user may have edited
@@ -525,10 +561,11 @@ pub type Mock<'a> = dyn Fn(&str, &serde_json::Value) -> String + Sync + 'a;
 /// How the loop reaches the outside world.
 ///
 /// `on_event` fires for each tool call so the panel can show progress.
-/// `confirm` is awaited before any write runs. `ask` waits on the user's reply
-/// to a question. `cancelled` is polled at the top of each round and between
-/// individual tool dispatches, so Escape during a six-tool round stops after
-/// the tool in flight rather than running the other five.
+/// `confirm` is awaited before any write runs, one call at a time and never
+/// while a tool is running, so two cards are never up at once. `ask` waits on
+/// the user's reply to a question. `cancelled` is polled at the top of each
+/// round, between the calls a round admits, and before each queued call
+/// starts, so Escape during a six-tool round stops the ones not yet running.
 pub struct Callbacks<'a, E, C, A, X> {
     pub on_event: E,
     pub confirm: C,
@@ -554,12 +591,21 @@ where
     X: Fn() -> bool,
 {
     let Callbacks {
-        mut on_event,
+        on_event,
         confirm,
         ask,
         cancelled,
         mock,
     } = callbacks;
+    // Behind a lock so a round's calls, running together, can each report
+    // progress. Never held across an await.
+    let events = std::sync::Mutex::new(on_event);
+    let emit = |event: LoopEvent| {
+        let mut on_event = events
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (*on_event)(event);
+    };
     let Command {
         said,
         prompt: command,
@@ -602,8 +648,15 @@ where
     let mut max_rounds = MAX_ROUNDS;
     // Screen control asks once per run, not per click; see `screen_gate`.
     let mut screen_approved = false;
-    let mut screen = ScreenSession(false);
+    let mut screen = ScreenSession {
+        driving: false,
+        ui: None,
+    };
+    // What this run's own screen-taking calls queue on once its screen
+    // session holds `UI`, rather than waiting on themselves.
+    let own_ui = tokio::sync::Mutex::const_new(());
     let mut taint = RunTaint::new(selection);
+    let mut next_step = 0u32;
 
     let mut round = 0usize;
     while round < max_rounds {
@@ -614,6 +667,9 @@ where
         // Per round, not per run: a run that survived a 429 in round one still
         // deserves a full ladder if round three trips a different limit.
         let mut attempts = 0usize;
+        // Set by a backoff sleep, which already waited out the breaker's entry
+        // for that 429; checking it again would wait twice.
+        let mut waited = false;
 
         // Overload and transient 5xx are retried on a backoff ladder: the loop
         // makes several calls in a row, so a per-minute budget can trip between
@@ -626,6 +682,42 @@ where
             // Gemini between two calls.
             let current = &brains[brain];
             let model = current.model;
+            // The process-wide breaker may already know this model is out of
+            // budget, from an earlier round or another command. The next brain
+            // beats waiting; on the last one this is the wait a 429 would have
+            // cost, without spending the request.
+            let cooling = if std::mem::take(&mut waited) {
+                None
+            } else {
+                current.client.cooldown_remaining(model)
+            };
+            if let Some(wait) = cooling {
+                if brain + 1 < brains.len() {
+                    tracing::info!(
+                        from = model,
+                        to = brains[brain + 1].model,
+                        wait_s = wait.as_secs_f64(),
+                        round,
+                        "cooling down; failing over"
+                    );
+                    next_brain(&mut brain, brains, &mut messages);
+                    continue;
+                }
+                let wait = wait.min(RETRY_CAP);
+                emit(LoopEvent::RateLimited {
+                    seconds: wait.as_secs().max(1),
+                });
+                async { tokio::time::sleep(wait).await }
+                    .instrument(tracing::info_span!(
+                        "tool_select_cooldown",
+                        round,
+                        waited_s = wait.as_secs_f64()
+                    ))
+                    .await;
+                if cancelled() {
+                    anyhow::bail!("cancelled");
+                }
+            }
             let reply = current
                 .client
                 .chat_with_tools(
@@ -648,14 +740,12 @@ where
                 Err(e) => e,
             };
             // Another brain beats waiting out this one's budget — mid-run too:
-            // Groq's free tier trips on a command's second step.
+            // Groq's free tier trips on a command's second step, and NVIDIA's
+            // free endpoint sometimes never answers.
             if brain + 1 < brains.len() && error.downcast_ref::<LlmError>().is_some_and(fails_over)
             {
                 tracing::warn!(%error, from = brains[brain].model, to = brains[brain + 1].model, round, "failing over");
-                brain += 1;
-                if brains[brain].model.starts_with("gemini") {
-                    sign_for_gemini(&mut messages);
-                }
+                next_brain(&mut brain, brains, &mut messages);
                 continue;
             }
             let Some(schedule) = error.downcast_ref::<LlmError>().and_then(backoff) else {
@@ -673,7 +763,7 @@ where
             // waiting on a spoken command, a 503 and a 429 are the same event —
             // the machine is busy, it will try again. The real status is logged.
             tracing::warn!(%error, attempt, wait_s = wait.as_secs_f64(), "retrying chat");
-            on_event(LoopEvent::RateLimited {
+            emit(LoopEvent::RateLimited {
                 seconds: wait.as_secs().max(1),
             });
             async { tokio::time::sleep(wait).await }
@@ -684,6 +774,7 @@ where
                     waited_s = wait.as_secs_f64()
                 ))
                 .await;
+            waited = true;
             if cancelled() {
                 anyhow::bail!("cancelled");
             }
@@ -751,7 +842,7 @@ where
 
         // A queue of one is a second surface saying what the step list says.
         if turn.tool_calls.len() > 1 {
-            on_event(LoopEvent::Planned {
+            emit(LoopEvent::Planned {
                 names: turn
                     .tool_calls
                     .iter()
@@ -764,10 +855,15 @@ where
         let mut round_native_ok = true;
         // What each of those writes did, in its own words; see `finishes_early`.
         let mut confirmations: Vec<Option<String>> = Vec::new();
+        // Every call is admitted in order first — budgets, questions, the gates
+        // one card at a time — and only then do the approved ones run,
+        // together. Each was chosen and approved before any result came back,
+        // so no page or message one of them reads can steer a sibling; later
+        // rounds are the named-app rule's.
+        let mut slots: Vec<Slot> = Vec::with_capacity(turn.tool_calls.len());
         for call in &turn.tool_calls {
-            // Between dispatches, not just at the top of the round: a round
-            // holding six calls otherwise runs all six after Escape, and the
-            // ones that matter — the writes — tend to come last.
+            // Between admissions, not just at the top of the round: Escape
+            // during a gate must not leave the rest of the round to run.
             if cancelled() {
                 anyhow::bail!("cancelled");
             }
@@ -776,6 +872,10 @@ where
             let args: serde_json::Value = serde_json::from_str(&call.function.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
             round_native_ok &= native_write(&name, &args, &tools);
+            let done = |result: String| Slot::Done {
+                id: call.id.clone(),
+                result,
+            };
 
             if name == MORE_TOOLS {
                 let service = args["service"].as_str().unwrap_or_default().to_string();
@@ -797,7 +897,7 @@ where
                         Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
                     }
                 };
-                messages.push(Message::tool_result(&call.id, result));
+                slots.push(done(result));
                 continue;
             }
 
@@ -820,13 +920,12 @@ where
                 asked += 1;
                 if asked > MAX_QUESTIONS {
                     tracing::warn!("question budget exhausted");
-                    messages.push(Message::tool_result(
-                        &call.id,
-                        r#"{"error":"no more questions can be asked this run. Act on what you have and state any assumption in your answer."}"#,
+                    slots.push(done(
+                        r#"{"error":"no more questions can be asked this run. Act on what you have and state any assumption in your answer."}"#.to_string(),
                     ));
                     continue;
                 }
-                on_event(LoopEvent::Asked {
+                emit(LoopEvent::Asked {
                     question: question.clone(),
                     options,
                 });
@@ -846,12 +945,9 @@ where
                     // model closes the run politely instead of retrying.
                     None => r#"{"error":"the user did not answer"}"#.to_string(),
                 };
-                on_event(LoopEvent::ToolCallResult {
-                    name: name.clone(),
-                    success: true,
-                    show: None,
-                });
-                messages.push(Message::tool_result(&call.id, result));
+                // No result event: the question is the panel's whole UI for
+                // it, and there is no row for a result to land on.
+                slots.push(done(result));
                 continue;
             }
 
@@ -866,7 +962,18 @@ where
             if !is_write(&name, &tools) && name != aloud_screen::READ {
                 if let Some(previous) = seen.get(&(name.clone(), args.to_string())) {
                     tracing::debug!(tool = %name, "identical read already made; reusing");
-                    messages.push(Message::tool_result(&call.id, previous.clone()));
+                    slots.push(done(previous.clone()));
+                    continue;
+                }
+                // The same read twice in one round runs once.
+                let twin = slots.iter().position(
+                    |s| matches!(s, Slot::Run(job) if job.name == name && job.args == args),
+                );
+                if let Some(of) = twin {
+                    slots.push(Slot::Same {
+                        id: call.id.clone(),
+                        of,
+                    });
                     continue;
                 }
             }
@@ -883,14 +990,11 @@ where
                 *calls += 1;
                 if *calls > cap {
                     tracing::warn!(tool = %name, "per-tool budget exhausted");
-                    messages.push(Message::tool_result(
-                        &call.id,
-                        format!(
-                            "{{\"error\":\"{name} has already been called \
-                             {cap} times this run and will not run \
-                             again. Answer from what you have.\"}}"
-                        ),
-                    ));
+                    slots.push(done(format!(
+                        "{{\"error\":\"{name} has already been called \
+                         {cap} times this run and will not run \
+                         again. Answer from what you have.\"}}"
+                    )));
                     continue;
                 }
             }
@@ -903,12 +1007,15 @@ where
                 Some(Err(error)) => {
                     any_failed = true;
                     round_native_ok = false;
-                    messages.push(Message::tool_result(&call.id, error.to_string()));
+                    slots.push(done(error.to_string()));
                     continue;
                 }
             };
 
-            on_event(LoopEvent::ToolCallStart {
+            let step = next_step;
+            next_step += 1;
+            emit(LoopEvent::ToolCallStart {
+                step,
                 name: name.clone(),
                 args: args.clone(),
             });
@@ -919,8 +1026,7 @@ where
             let toolkit = tools
                 .iter()
                 .find(|t| t.name == name)
-                .map(|t| t.toolkit.as_str())
-                .unwrap_or("unknown");
+                .map_or_else(|| "unknown".to_string(), |t| t.toolkit.clone());
 
             // Confirmation is the user thinking, not the app working: its own
             // span so a 40s wait is not charged to pipeline latency. A declined
@@ -935,7 +1041,7 @@ where
                 tracing::info!("screen control engaged; raising the round budget");
                 max_rounds = MAX_SCREEN_ROUNDS;
                 // A mocked run drove no screen, so there is no session to end.
-                screen.0 = mock.is_none();
+                screen.driving = mock.is_none();
             }
             // Every other write reaches `confirm`, default-Always ones included:
             // the saved grants live with the caller, which decides whether a
@@ -944,6 +1050,7 @@ where
             let gate = crate::permissions::gate(&name, &args, tool.as_ref(), said, front, &taint);
             let gate_needed = gate.is_some()
                 && (!aloud_screen::is_screen_write(&name) || screen_gate(&mut screen_approved));
+            let write_app = gate.as_ref().map(|g| g.app.clone());
 
             let mut args = args;
             let declined = if gate_needed {
@@ -960,9 +1067,10 @@ where
                     said: said.to_string(),
                     names: names.clone(),
                     gate,
+                    step: Some(step),
                 };
                 match confirm(proposed)
-                    .instrument(tracing::info_span!("confirm", tool = %name, toolkit))
+                    .instrument(tracing::info_span!("confirm", tool = %name, %toolkit))
                     .await
                 {
                     Verdict::Run(approved) => {
@@ -985,78 +1093,143 @@ where
                 false
             };
 
-            round_native_ok &= !declined;
-            let result = if declined {
-                on_event(LoopEvent::ToolCallResult {
-                    name: name.clone(),
-                    success: false,
-                    show: None,
+            if declined {
+                round_native_ok = false;
+                slots.push(Slot::Declined {
+                    id: call.id.clone(),
+                    step,
+                    name,
                 });
-                r#"{"error":"user declined this action"}"#.to_string()
-            } else {
-                let span = tracing::info_span!(
-                    "tool_exec",
-                    tool = %name,
-                    toolkit,
-                    ok = tracing::field::Empty
-                );
-                // A native tool falls back on where the user was when they spoke.
-                // Merged here — after the start event, the gate and the dedup key
-                // — so neither the model, the panel nor the confirmation sees it.
-                let fronted;
-                let exec_args = if toolkit == "macOS" {
-                    fronted = aloud_native::with_front(&args, front, document, project);
-                    &fronted
-                } else {
-                    &args
-                };
-                let result = dispatch(
-                    &name,
-                    exec_args,
-                    composio,
-                    mock,
-                    &mut on_event,
-                    &ask,
-                    &cancelled,
-                )
-                .instrument(span.clone())
-                .await;
-                let success = tool_succeeded(&result);
-                span.record("ok", success);
-                // Text someone else wrote is in the context from here on.
-                taint.saw(
-                    !is_write(&name, &tools)
-                        || aloud_engine::is_engine_tool(&name)
-                        || aloud_screen::is_screen_tool(&name),
-                );
-                any_failed |= !success;
-                round_native_ok &= success;
-                let show = if success {
-                    let parsed = serde_json::from_str(&result).unwrap_or_default();
-                    confirmations.push(aloud_native::confirmation(&name, &args, &parsed));
-                    aloud_native::show_target(&name, &args, &parsed)
-                } else {
-                    None
-                };
-                on_event(LoopEvent::ToolCallResult {
-                    name: name.clone(),
-                    success,
-                    show,
-                });
-                result
-            };
-
-            if !declined
-                && !is_write(&name, &tools)
-                && !aloud_engine::is_engine_tool(&name)
-                && name != aloud_screen::READ
-            {
-                if let Ok(parsed) = serde_json::from_str(&result) {
-                    names.harvest(&parsed, &query_of(&name, &args));
-                }
-                seen.insert((name.clone(), args.to_string()), result.clone());
+                continue;
             }
-            messages.push(Message::tool_result(&call.id, result));
+            slots.push(Slot::Run(Job {
+                id: call.id.clone(),
+                step,
+                name,
+                args,
+                toolkit,
+                write_app,
+            }));
+        }
+
+        // A screen session keeps the screen until the run ends, so no other
+        // run brings its app forward between two clicks. Taken before the
+        // first screen call runs; this run's own calls then queue on `own_ui`.
+        let drives_screen = slots
+            .iter()
+            .any(|s| matches!(s, Slot::Run(job) if aloud_screen::is_screen_tool(&job.name)));
+        if drives_screen && screen.ui.is_none() {
+            screen.ui = Some(UI.lock().await);
+        }
+        let ui = if screen.ui.is_some() { &own_ui } else { &UI };
+        // Collected before the stream, not mapped inside it: a stream over a
+        // closure taking `&Slot` trips rustc's higher-ranked Send check
+        // (rust-lang/rust#102211) where the app spawns the run.
+        let jobs: Vec<_> = slots
+            .iter()
+            .map(|slot| {
+                let (emit, ask, cancelled) = (&emit, &ask, &cancelled);
+                async move {
+                    let Slot::Run(job) = slot else {
+                        return None;
+                    };
+                    // A call still queued when the user pressed Escape never starts.
+                    if cancelled() {
+                        return None;
+                    }
+                    let span = tracing::info_span!(
+                        "tool_exec",
+                        tool = %job.name,
+                        toolkit = %job.toolkit,
+                        ok = tracing::field::Empty
+                    );
+                    // A native tool falls back on where the user was when they
+                    // spoke. Merged here — after the start event, the gate and the
+                    // dedup key — so neither the model, the panel nor the
+                    // confirmation sees it.
+                    let exec_args = if job.toolkit == "macOS" {
+                        aloud_native::with_front(&job.args, front, document, project)
+                    } else {
+                        job.args.clone()
+                    };
+                    let mut progress = |event| emit(event);
+                    let result = dispatch(
+                        &job.name,
+                        &exec_args,
+                        composio,
+                        mock,
+                        &mut progress,
+                        ask,
+                        cancelled,
+                        ui,
+                    )
+                    .instrument(span.clone())
+                    .await;
+                    span.record("ok", tool_succeeded(&result));
+                    Some(result)
+                }
+            })
+            .collect();
+        let outcomes: Vec<Option<String>> = futures_util::stream::iter(jobs)
+            .buffered(MAX_PARALLEL)
+            .collect()
+            .await;
+        if cancelled() {
+            anyhow::bail!("cancelled");
+        }
+
+        // To the model and the panel in call order, whichever finished first.
+        let mut results: Vec<String> = Vec::with_capacity(slots.len());
+        for (slot, outcome) in slots.into_iter().zip(outcomes) {
+            let (id, result) = match slot {
+                Slot::Done { id, result } => (id, result),
+                Slot::Same { id, of } => (id, results[of].clone()),
+                Slot::Declined { id, step, name } => {
+                    emit(LoopEvent::ToolCallResult {
+                        step,
+                        name,
+                        success: false,
+                        show: None,
+                        write_app: None,
+                    });
+                    (id, r#"{"error":"user declined this action"}"#.to_string())
+                }
+                Slot::Run(job) => {
+                    // Only a cancel leaves it empty, and that bailed above.
+                    let result = outcome.unwrap_or_default();
+                    let success = tool_succeeded(&result);
+                    let read = !is_write(&job.name, &tools);
+                    let engine = aloud_engine::is_engine_tool(&job.name);
+                    // Text someone else wrote is in the context from here on.
+                    taint.saw(read || engine || aloud_screen::is_screen_tool(&job.name));
+                    any_failed |= !success;
+                    round_native_ok &= success;
+                    let show = if success {
+                        let parsed = serde_json::from_str(&result).unwrap_or_default();
+                        confirmations
+                            .push(aloud_native::confirmation(&job.name, &job.args, &parsed));
+                        aloud_native::show_target(&job.name, &job.args, &parsed)
+                    } else {
+                        None
+                    };
+                    emit(LoopEvent::ToolCallResult {
+                        step: job.step,
+                        name: job.name.clone(),
+                        success,
+                        show,
+                        write_app: job.write_app,
+                    });
+                    if read && !engine && job.name != aloud_screen::READ {
+                        if let Ok(parsed) = serde_json::from_str(&result) {
+                            names.harvest(&parsed, &query_of(&job.name, &job.args));
+                        }
+                        seen.insert((job.name, job.args.to_string()), result.clone());
+                    }
+                    (job.id, result)
+                }
+            };
+            messages.push(Message::tool_result(&id, result.clone()));
+            results.push(result);
         }
         only_native_writes = Some(only_native_writes.unwrap_or(true) && round_native_ok);
         // The model already said what it did, and what it did was ours and
@@ -1087,16 +1260,54 @@ fn screen_gate(approved: &mut bool) -> bool {
     !std::mem::replace(approved, true)
 }
 
-/// Ends the driver session however a run that drove the screen ends — answer,
-/// error or cancel — so the next run starts with no stale snapshots.
-struct ScreenSession(bool);
+/// A run's hold on the screen once it drives it. However the run ends —
+/// answer, error or cancel — the driver session ends first, so the next run
+/// starts with no stale snapshots, and only then is `ui` released for other
+/// runs' screen-taking tools (fields drop after `drop` returns).
+struct ScreenSession {
+    /// A real driver session to end; a mocked run drove none.
+    driving: bool,
+    ui: Option<tokio::sync::MutexGuard<'static, ()>>,
+}
 
 impl Drop for ScreenSession {
     fn drop(&mut self) {
-        if self.0 {
+        if self.driving {
             aloud_screen::finish();
         }
     }
+}
+
+/// One call of a round once it has been admitted, waiting to be reported.
+enum Slot {
+    /// Answered without running a tool: a question, a loaded service, a read
+    /// already made, a spent budget, a lookup that found nobody.
+    Done {
+        id: String,
+        result: String,
+    },
+    /// The same read as an earlier slot this round, answered from it.
+    Same {
+        id: String,
+        of: usize,
+    },
+    Declined {
+        id: String,
+        step: u32,
+        name: String,
+    },
+    Run(Job),
+}
+
+/// An approved call, with the arguments it runs with.
+struct Job {
+    /// The model's id for the call, which its result answers.
+    id: String,
+    step: u32,
+    name: String,
+    args: serde_json::Value,
+    toolkit: String,
+    write_app: Option<String>,
 }
 
 /// Runs a screen-control tool; None when the name is not one, the same
@@ -1116,6 +1327,10 @@ async fn run_screen(name: &str, args: &serde_json::Value) -> Option<String> {
 /// Runs one tool. Native macOS tools are ours; a Composio slug is not, so each
 /// "is it mine?" returns None and the call falls through to the next. One
 /// chain, because the gate, dedup and budgets above all key off the tool name.
+///
+/// A tool that drives the screen holds `ui` while it runs: [`UI`], or the
+/// run's own lock once its screen session holds that.
+#[allow(clippy::too_many_arguments)]
 async fn dispatch<A>(
     name: &str,
     args: &serde_json::Value,
@@ -1124,10 +1339,17 @@ async fn dispatch<A>(
     on_event: &mut impl FnMut(LoopEvent),
     ask: &impl Fn(String) -> A,
     cancelled: &impl Fn() -> bool,
+    ui: &tokio::sync::Mutex<()>,
 ) -> String
 where
     A: Future<Output = Option<String>>,
 {
+    // Before the mock, so an evaluated run queues exactly as a real one would.
+    let _front = if takes_ui(name, args) {
+        Some(ui.lock().await)
+    } else {
+        None
+    };
     if let Some(mock) = mock {
         return mock(name, args);
     }
@@ -1141,6 +1363,14 @@ where
         return screen;
     }
     composio.execute(name, args).await
+}
+
+/// Whether a tool drives what is on screen, so it runs alone: the browser
+/// engine, screen control, and native tools that take the front.
+fn takes_ui(name: &str, args: &serde_json::Value) -> bool {
+    aloud_engine::is_engine_tool(name)
+        || aloud_screen::is_screen_tool(name)
+        || aloud_native::takes_front(name, args)
 }
 
 /// Runs a native macOS tool, returning `Some(json_string)` in the same shape
@@ -1365,6 +1595,7 @@ mod tests {
 
     /// A chat endpoint on localhost answering request `n` with `replies[n]`
     /// (the last repeats), and keeping every request body the loop sent it.
+    /// A [`rate_limited`] reply is sent as a 429.
     fn fake_brain(
         replies: Vec<serde_json::Value>,
     ) -> (Brain, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
@@ -1395,10 +1626,15 @@ mod tests {
                     .lock()
                     .unwrap()
                     .push(String::from_utf8_lossy(&body).into_owned());
-                let reply = replies[n.min(replies.len() - 1)].to_string();
+                let reply = &replies[n.min(replies.len() - 1)];
+                let status = match reply["retry_after"].as_str() {
+                    Some(seconds) => format!("429 Too Many Requests\r\nRetry-After: {seconds}"),
+                    None => "200 OK".to_string(),
+                };
+                let reply = reply.to_string();
                 write!(
                     stream,
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\
                      Content-Length: {}\r\nConnection: close\r\n\r\n{reply}",
                     reply.len()
                 )
@@ -1591,6 +1827,336 @@ mod tests {
         serde_json::json!({ "choices": [{ "message": { "content": text } }] })
     }
 
+    /// A 429 telling the client to come back in `seconds`; see [`fake_brain`].
+    fn rate_limited(seconds: u32) -> serde_json::Value {
+        serde_json::json!({ "retry_after": seconds.to_string() })
+    }
+
+    fn command<'a>(said: &'a str, tools: &'a [ToolDef]) -> Command<'a> {
+        Command {
+            said,
+            prompt: said,
+            tools,
+            more: &[],
+            front: None,
+            document: None,
+            project: None,
+            selection: false,
+        }
+    }
+
+    /// Plays `said` on `brains` with every tool answered by `mock` and every
+    /// gate approved.
+    async fn play(
+        brains: &[Brain],
+        said: &str,
+        tools: &[ToolDef],
+        mock: &Mock<'_>,
+        on_event: impl FnMut(LoopEvent),
+    ) -> Result<String> {
+        run(
+            brains,
+            &ComposioClient::new("").unwrap(),
+            command(said, tools),
+            Callbacks {
+                on_event,
+                confirm: |call: ProposedCall| async move { Verdict::Run(call.args) },
+                ask: |_: String| async { None },
+                cancelled: || false,
+                mock: Some(mock),
+            },
+        )
+        .await
+    }
+
+    /// Holds the screen as another run would, letting go once `ran` holds
+    /// `count` calls — which can only happen if those calls did not queue
+    /// behind the one waiting for the screen.
+    async fn hold_the_screen_until(ran: &std::sync::Mutex<Vec<String>>, count: usize) {
+        let held = UI.lock().await;
+        while ran.lock().unwrap().len() < count {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        drop(held);
+    }
+
+    /// A mock that logs each call's name and answers with `{"successful":true}`.
+    fn logging(
+        ran: &std::sync::Mutex<Vec<String>>,
+    ) -> impl Fn(&str, &serde_json::Value) -> String + Sync + '_ {
+        move |name: &str, _: &serde_json::Value| {
+            ran.lock().unwrap().push(name.to_string());
+            r#"{"successful":true}"#.to_string()
+        }
+    }
+
+    /// "Open Safari, make a note and add a reminder": the note and the reminder
+    /// run while the app waits for the screen, rather than in line behind it.
+    #[tokio::test]
+    async fn independent_calls_in_one_round_run_concurrently() {
+        let round = [
+            "ALOUD_OPEN_APP",
+            "ALOUD_NOTES_CREATE",
+            "ALOUD_REMINDERS_ADD",
+        ];
+        let (brain, _) = fake_brain(vec![calls(&round), content("Done."), content("FINISHED")]);
+        let tools = round.map(|name| tool(name, false));
+        let ran = std::sync::Mutex::new(Vec::new());
+        let mock = logging(&ran);
+        let brains = [brain];
+
+        let (answer, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(
+                play(
+                    &brains,
+                    "open safari, note and remind",
+                    &tools,
+                    &mock,
+                    |_| {}
+                ),
+                hold_the_screen_until(&ran, 2),
+            )
+        })
+        .await
+        .expect("the note and reminder queued behind the app");
+        answer.unwrap();
+        assert_eq!(
+            *ran.lock().unwrap(),
+            [
+                "ALOUD_NOTES_CREATE",
+                "ALOUD_REMINDERS_ADD",
+                "ALOUD_OPEN_APP"
+            ]
+        );
+    }
+
+    /// A screen run keeps the screen between its rounds — here while its click
+    /// waits on the user — and another run's app does not open until it ends.
+    #[tokio::test]
+    async fn ui_tools_never_run_at_the_same_time() {
+        let (screen_brain, _) = fake_brain(vec![
+            calls(&[aloud_screen::READ]),
+            calls(&[aloud_screen::CLICK]),
+            content("Clicked."),
+            content("FINISHED"),
+        ]);
+        let (other_brain, _) = fake_brain(vec![
+            calls(&["ALOUD_OPEN_APP"]),
+            content("Opened."),
+            content("FINISHED"),
+        ]);
+        let tools = [
+            tool(aloud_screen::READ, true),
+            tool(aloud_screen::CLICK, false),
+            tool("ALOUD_OPEN_APP", false),
+        ];
+        let ran = std::sync::Mutex::new(Vec::new());
+        let mock = logging(&ran);
+        let (gate_up, answered, other_go) = (
+            tokio::sync::Notify::new(),
+            tokio::sync::Notify::new(),
+            tokio::sync::Notify::new(),
+        );
+
+        let (screen_brains, composio) = ([screen_brain], ComposioClient::new("").unwrap());
+        let screen_run = run(
+            &screen_brains,
+            &composio,
+            command("click the button", &tools),
+            Callbacks {
+                on_event: |_| {},
+                confirm: |call: ProposedCall| {
+                    let (gate_up, answered) = (&gate_up, &answered);
+                    async move {
+                        gate_up.notify_one();
+                        answered.notified().await;
+                        Verdict::Run(call.args)
+                    }
+                },
+                ask: |_: String| async { None },
+                cancelled: || false,
+                mock: Some(&mock),
+            },
+        );
+        let other_run = async {
+            other_go.notified().await;
+            play(&[other_brain], "open safari", &tools, &mock, |_| {}).await
+        };
+        let user = async {
+            gate_up.notified().await;
+            other_go.notify_one();
+            // Time for the other run to reach the screen, were it free.
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            assert_eq!(*ran.lock().unwrap(), [aloud_screen::READ]);
+            answered.notify_one();
+        };
+
+        let (screen, other, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(screen_run, other_run, user)
+        })
+        .await
+        .expect("deadlocked");
+        screen.unwrap();
+        other.unwrap();
+        assert_eq!(
+            *ran.lock().unwrap(),
+            [aloud_screen::READ, aloud_screen::CLICK, "ALOUD_OPEN_APP"]
+        );
+    }
+
+    /// The app is held up behind the screen, so the inbox read finishes first.
+    /// The model and the panel still get the app's result first, each matched
+    /// to its own call.
+    #[tokio::test]
+    async fn results_are_reported_in_call_order() {
+        let round = ["ALOUD_OPEN_APP", "GMAIL_FETCH_EMAILS"];
+        let (brain, requests) = fake_brain(vec![
+            calls(&round),
+            content("Opened it."),
+            content("FINISHED"),
+        ]);
+        let tools = [tool(round[0], false), tool(round[1], true)];
+        let ran = std::sync::Mutex::new(Vec::new());
+        let mock = |name: &str, _: &serde_json::Value| {
+            ran.lock().unwrap().push(name.to_string());
+            serde_json::json!({ "successful": true, "data": name }).to_string()
+        };
+        let mut finished = Vec::new();
+        let brains = [brain];
+
+        let (answer, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(
+                play(
+                    &brains,
+                    "open safari and check my mail",
+                    &tools,
+                    &mock,
+                    |e| {
+                        if let LoopEvent::ToolCallResult { step, name, .. } = e {
+                            finished.push((step, name));
+                        }
+                    }
+                ),
+                hold_the_screen_until(&ran, 1),
+            )
+        })
+        .await
+        .expect("the read queued behind the app");
+        answer.unwrap();
+
+        assert_eq!(
+            *ran.lock().unwrap(),
+            [round[1], round[0]],
+            "the read ran first"
+        );
+        assert_eq!(
+            finished,
+            [(0, round[0].to_string()), (1, round[1].to_string())]
+        );
+        let next: serde_json::Value = serde_json::from_str(&requests.lock().unwrap()[1]).unwrap();
+        let results: Vec<(&str, &str)> = next["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "tool")
+            .map(|m| {
+                (
+                    m["tool_call_id"].as_str().unwrap(),
+                    m["content"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, "0");
+        assert!(results[0].1.contains(round[0]), "{results:?}");
+        assert_eq!(results[1].0, "1");
+        assert!(results[1].1.contains(round[1]), "{results:?}");
+    }
+
+    /// Another command's 429 left the only brain cooling for a second: the
+    /// run waits it out before asking, rather than spending a request to be
+    /// told again.
+    #[tokio::test]
+    async fn a_cooled_down_model_waits_before_the_next_call() {
+        let (brain, requests) =
+            fake_brain(vec![rate_limited(1), content("Hi."), content("FINISHED")]);
+        let earlier = brain
+            .client
+            .chat_with_tools(brain.model, &[Message::user("hi")], None, None)
+            .await;
+        assert!(earlier.is_err(), "the 429 that starts the cooldown");
+        let mock = |_: &str, _: &serde_json::Value| String::new();
+        let mut waits = Vec::new();
+        let started = std::time::Instant::now();
+
+        let answer = play(std::slice::from_ref(&brain), "say hi", &[], &mock, |e| {
+            if let LoopEvent::RateLimited { seconds } = e {
+                waits.push((seconds, requests.lock().unwrap().len()));
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(answer, "Hi.");
+        assert_eq!(waits, [(1, 1)], "waited before its first request");
+        assert!(started.elapsed() >= Duration::from_millis(900));
+        assert_eq!(requests.lock().unwrap().len(), 3);
+    }
+
+    /// With another brain to hand, a model known to be out of budget is not
+    /// asked at all: the next command goes straight past it.
+    #[tokio::test]
+    async fn a_cooled_down_brain_hands_the_call_to_the_next_without_a_request() {
+        let (first, first_requests) = fake_brain(vec![rate_limited(60)]);
+        let (second, _) = fake_brain(vec![
+            content("Hi."),
+            content("FINISHED"),
+            content("Hi again."),
+            content("FINISHED"),
+        ]);
+        let brains = [first, second];
+        let mock = |_: &str, _: &serde_json::Value| String::new();
+
+        let one = play(&brains, "say hi", &[], &mock, |_| {}).await.unwrap();
+        let two = play(&brains, "say hi again", &[], &mock, |_| {})
+            .await
+            .unwrap();
+
+        assert_eq!((one.as_str(), two.as_str()), ("Hi.", "Hi again."));
+        assert_eq!(
+            first_requests.lock().unwrap().len(),
+            1,
+            "only the 429 itself reached the cooled brain"
+        );
+    }
+
+    /// NVIDIA's free endpoint sometimes accepts a request and never answers.
+    /// The run must move to the next brain when the turn times out, not fail.
+    #[tokio::test]
+    async fn a_brain_that_times_out_hands_the_command_to_the_next() {
+        let hung = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let silent = Brain {
+            client: aloud_llm::LlmClient::new(
+                "test",
+                Some(&format!("http://{}", hung.local_addr().unwrap())),
+            )
+            .unwrap()
+            .with_tool_timeout(Duration::from_millis(200)),
+            model: "fake",
+        };
+        let (next, _) = fake_brain(vec![content("It's sunny."), content("FINISHED")]);
+        let mock = |_: &str, _: &serde_json::Value| String::new();
+        let started = std::time::Instant::now();
+
+        let answer = play(&[silent, next], "what's the weather", &[], &mock, |_| {})
+            .await
+            .unwrap();
+
+        assert_eq!(answer, "It's sunny.");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        drop(hung);
+    }
+
     /// Plays `replies` through the loop with every tool mocked and every gate
     /// approved, returning the gates `confirm` was asked about.
     async fn gates_for(replies: Vec<serde_json::Value>, tools: &[ToolDef]) -> Vec<Option<Gate>> {
@@ -1627,13 +2193,15 @@ mod tests {
     }
 
     /// The caller decides from the saved grant, so the loop must hand it the
-    /// key and the named-app rule. Read before a send to an app the user never
-    /// named, the first send asks as outside content's; a yes clears Slack for
-    /// the rest of the run.
+    /// key and the named-app rule. A send chosen alongside the inbox read was
+    /// chosen before the inbox came back, so nothing in it could have asked
+    /// for it. The next round's send was chosen after, so it asks as outside
+    /// content's; a yes clears Slack for the rest of the run.
     #[tokio::test]
     async fn a_gated_write_reaches_confirm_with_its_gate() {
         let replies = vec![
             calls(&["GMAIL_FETCH_EMAILS", "SLACK_SEND_MESSAGE"]),
+            calls(&["SLACK_SEND_MESSAGE"]),
             calls(&["SLACK_SEND_MESSAGE"]),
             content("Posted the summary."),
             content("FINISHED"),
@@ -1643,13 +2211,15 @@ mod tests {
             tool("SLACK_SEND_MESSAGE", false),
         ];
         let gates = gates_for(replies, &tools).await;
-        assert_eq!(gates.len(), 2, "each send asks the caller: {gates:?}");
+        assert_eq!(gates.len(), 3, "each send asks the caller: {gates:?}");
         let first = gates[0].as_ref().expect("a write carries its gate");
         assert_eq!(first.key, "slack:send-and-share");
-        assert!(first.named_rule, "the inbox read was outside content");
-        assert!(first.reason.is_some());
+        assert!(!first.named_rule, "chosen before the inbox returned");
+        let second = gates[1].as_ref().unwrap();
+        assert!(second.named_rule, "the inbox read was outside content");
+        assert!(second.reason.is_some());
         assert!(
-            !gates[1].as_ref().unwrap().named_rule,
+            !gates[2].as_ref().unwrap().named_rule,
             "a yes cleared Slack"
         );
     }

@@ -73,6 +73,17 @@ fn is_current(run: u64) -> bool {
     CURRENT_RUN.load(std::sync::atomic::Ordering::SeqCst) == run
 }
 
+/// One card or question on screen at a time, across every run: a prompt waits
+/// its turn here, first come first served.
+static PROMPT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Waits for the screen's one prompt slot. None when the run stopped being
+/// `current` while it waited — its prompt would land over the new run's panel.
+async fn prompt_turn(current: impl Fn() -> bool) -> Option<tokio::sync::MutexGuard<'static, ()>> {
+    let turn = PROMPT.lock().await;
+    current().then_some(turn)
+}
+
 /// One run's claim on the panel and where its events go.
 struct Run {
     ticket: u64,
@@ -192,6 +203,10 @@ pub struct ToolCall {
     /// The gate may offer "Always allow": false for strict actions and for a
     /// write outside content asked for.
     pub can_always: bool,
+    /// The loop's step for this call: a round's calls all start before any
+    /// finishes, so a result finds its row by this. None on the fast path.
+    #[specta(optional)]
+    pub id: Option<u32>,
 }
 
 /// A question put to the user mid-run. `options` non-empty means the answer is
@@ -210,6 +225,9 @@ pub struct ToolResult {
     pub message: String,
     /// What the row's Show button brings back, when the step made something.
     pub show: Option<ShowTarget>,
+    /// The [`ToolCall::id`] this result finishes.
+    #[specta(optional)]
+    pub id: Option<u32>,
 }
 
 /// A note id in Notes, a saved file, a folder in the app that opened it — for
@@ -380,6 +398,7 @@ async fn execute(
                 said: transcript.to_string(),
                 names: Default::default(),
                 gate: None,
+                step: None,
             };
             return run_fast(app, run, name, call, done, context).await;
         }
@@ -443,6 +462,12 @@ async fn execute(
                     // The question goes out through this event before the loop waits on the reply, so
                     // the panel has to be up first.
                     aloud_agent::LoopEvent::Asked { .. } => run.surface(app),
+                    aloud_agent::LoopEvent::ToolCallResult {
+                        name,
+                        success,
+                        write_app: Some(write_app),
+                        ..
+                    } => audit(name, write_app, "ran", Some(*success)),
                     _ => {}
                 }
                 run.emit(app, event_of(event))
@@ -460,7 +485,7 @@ async fn execute(
                 // No key, no reads: the card names ids from the run's own reads only.
                 let composio = has_composio.then_some(&composio);
                 async move {
-                    match permit(app, run, call, toolkit, schema, composio).await {
+                    match permit_logged(app, run, call, toolkit, schema, composio).await {
                         Some(args) => aloud_agent::Verdict::Run(args),
                         None => aloud_agent::Verdict::Decline,
                     }
@@ -497,6 +522,7 @@ async fn run_fast(
             requires_confirmation: false,
             preview: None,
             can_always: false,
+            id: None,
         }),
     );
     // Untainted: the fast path parsed the user's own words, and no model read
@@ -509,13 +535,14 @@ async fn run_fast(
         context.front,
         &RunTaint::new(false),
     );
+    let write_app = gate.as_ref().map(|g| g.app.clone());
     let args = if gate.is_none() {
         call.args
     } else {
         // Native writes read nothing to name, so no connected services either.
         let schema = aloud_native::params(name);
         let call = aloud_agent::ProposedCall { gate, ..call };
-        match permit(app, run, call, "macOS".to_string(), schema, None).await {
+        match permit_logged(app, run, call, "macOS".to_string(), schema, None).await {
             Some(approved) => approved,
             None => {
                 run.emit(
@@ -524,6 +551,7 @@ async fn run_fast(
                         success: false,
                         message: format!("{name} declined"),
                         show: None,
+                        id: None,
                     }),
                 );
                 return Ok("Cancelled.".to_string());
@@ -550,8 +578,12 @@ async fn run_fast(
             success: result.is_ok(),
             message: format!("{name} {}", if result.is_ok() { "done" } else { "failed" }),
             show: show_of(show),
+            id: None,
         }),
     );
+    if let Some(write_app) = &write_app {
+        audit(name, write_app, "ran", Some(result.is_ok()));
+    }
     result
 }
 
@@ -575,6 +607,7 @@ async fn run_direct(
             requires_confirmation: false,
             preview: None,
             can_always: false,
+            id: None,
         }),
     );
     loop {
@@ -605,6 +638,7 @@ async fn run_direct(
                         success,
                         message: format!("{name} {}", if success { "done" } else { "failed" }),
                         show: None,
+                        id: None,
                     }),
                 );
                 if !success {
@@ -637,6 +671,7 @@ async fn run_direct(
 }
 
 async fn await_answer(app: &AppHandle, run: &Run) -> Option<String> {
+    let _turn = prompt_turn(|| is_current(run.ticket)).await?;
     // A superseded run asking would take the reply slot from the current one.
     if !is_current(run.ticket) {
         return None;
@@ -731,6 +766,7 @@ async fn confirm_write(
     composio: Option<&aloud_agent::ComposioClient>,
     can_always: bool,
 ) -> Option<serde_json::Value> {
+    let _turn = prompt_turn(|| is_current(run.ticket)).await?;
     // A superseded run must not open a gate: its prompt would appear over the
     // new run's panel, and it would occupy the single confirmation slot the
     // current run needs. Declining is right — the user has moved on.
@@ -752,6 +788,7 @@ async fn confirm_write(
         schema.as_ref(),
         &ctx,
     );
+    event.id = call.step;
     if let (Some(composio), Some(preview)) = (composio, event.preview.as_deref_mut()) {
         // Each read is cut off inside `enrich` (1.5s, all at once), so a slow
         // service leaves an id unnamed rather than holding the gate back.
@@ -798,6 +835,7 @@ fn gate_call(
         args: display_args(args),
         requires_confirmation: true,
         can_always: false,
+        id: None,
     }
 }
 
@@ -835,19 +873,24 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
         aloud_agent::LoopEvent::Asked { question, options } => {
             AgentEvent::Asked(Question { question, options })
         }
-        aloud_agent::LoopEvent::ToolCallStart { name, args } => AgentEvent::ToolCall(ToolCall {
-            app: tool_app(&name),
-            name,
-            args: display_args(&args),
-            // The gate is enforced in the loop; the panel just shows the call.
-            requires_confirmation: false,
-            preview: None,
-            can_always: false,
-        }),
+        aloud_agent::LoopEvent::ToolCallStart { step, name, args } => {
+            AgentEvent::ToolCall(ToolCall {
+                app: tool_app(&name),
+                name,
+                args: display_args(&args),
+                // The gate is enforced in the loop; the panel just shows the call.
+                requires_confirmation: false,
+                preview: None,
+                can_always: false,
+                id: Some(step),
+            })
+        }
         aloud_agent::LoopEvent::ToolCallResult {
+            step,
             name,
             success,
             show,
+            ..
         } => AgentEvent::ToolResult(ToolResult {
             success,
             message: if success {
@@ -856,6 +899,7 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
                 format!("{name} failed")
             },
             show: show_of(show),
+            id: Some(step),
         }),
         aloud_agent::LoopEvent::RateLimited { seconds } => {
             AgentEvent::Status(format!("Rate limited — retrying in {seconds}s…"))
@@ -868,6 +912,43 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
 /// The toolkit a Composio tool slug belongs to, for display.
 fn tool_app(slug: &str) -> String {
     aloud_agent::toolkit_of_slug(slug)
+}
+
+/// [`permit`], with its answer in the audit log.
+async fn permit_logged(
+    app: &AppHandle,
+    run: &Run,
+    call: aloud_agent::ProposedCall,
+    toolkit: String,
+    schema: Option<serde_json::Value>,
+    composio: Option<&aloud_agent::ComposioClient>,
+) -> Option<serde_json::Value> {
+    let tool = call.name.clone();
+    let scope = call
+        .gate
+        .as_ref()
+        .map_or_else(|| toolkit.clone(), |g| g.app.clone());
+    let allowed = permit(app, run, call, toolkit, schema, composio).await;
+    let decision = if allowed.is_some() {
+        "allowed"
+    } else {
+        "declined"
+    };
+    audit(&tool, &scope, decision, None);
+    allowed
+}
+
+/// One line in the audit log. Never stops the action it records.
+fn audit(tool: &str, app: &str, decision: &str, ok: Option<bool>) {
+    let entry = aloud_store::audit::Entry {
+        tool,
+        app,
+        decision,
+        ok,
+    };
+    if let Err(e) = aloud_store::audit::append(&entry) {
+        tracing::warn!(%e, "could not write the audit log");
+    }
 }
 
 /// Blocks until the panel approves or rejects. A dropped sender (panel closed,
@@ -993,6 +1074,36 @@ pub fn close_agent(app: AppHandle) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A round's calls run together, so two runs — or a gate and a browser
+    /// task's question — can reach for the screen at once. The second prompt
+    /// waits for the first; and if its run was replaced meanwhile, it shows
+    /// nothing at all.
+    #[test]
+    fn only_one_prompt_is_on_screen_at_a_time() {
+        tauri::async_runtime::block_on(async {
+            let first = prompt_turn(|| true).await.expect("a current run's turn");
+            let superseded = std::sync::Arc::new(AtomicBool::new(false));
+            let flag = superseded.clone();
+            let second = tauri::async_runtime::spawn(async move {
+                prompt_turn(move || !flag.load(Ordering::SeqCst))
+                    .await
+                    .is_some()
+            });
+            // Still waiting on the first card while its run is replaced.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            superseded.store(true, Ordering::SeqCst);
+            drop(first);
+            assert!(
+                !second.await.unwrap(),
+                "it waited, and then its run was gone"
+            );
+            assert!(
+                prompt_turn(|| true).await.is_some(),
+                "the slot is free again"
+            );
+        });
+    }
 
     /// A run is stopped only *between* tools, so a superseded one keeps
     /// executing and then emits — into the panel the next command already

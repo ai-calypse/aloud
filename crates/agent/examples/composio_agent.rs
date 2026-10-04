@@ -71,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
                 LoopEvent::Planned { names } => {
                     println!("  [plan] {}", names.join(" → "));
                 }
-                LoopEvent::ToolCallStart { name, args } => {
+                LoopEvent::ToolCallStart { name, args, .. } => {
                     println!("  [tool] {name}({args})");
                 }
                 LoopEvent::ToolCallResult { name, success, .. } => {

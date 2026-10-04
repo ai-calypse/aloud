@@ -1,6 +1,7 @@
 //! Settings, history and stats persistence: `settings.json` and
 //! `history.sqlite` in the app data directory.
 
+pub mod audit;
 pub mod grants;
 pub mod history;
 pub mod macros;

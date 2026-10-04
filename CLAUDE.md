@@ -109,6 +109,12 @@ all run one agent) and **Meeting**. A command goes:
 3. A run of Mac writes that all worked ends on the tool's own confirmation —
    no second model call.
 
+A round's calls are admitted one at a time (gates and questions in order, one
+prompt on screen), then run together, three at most, and are reported in call
+order. Anything that brings an app forward or types into the front one holds
+the process-wide UI lock (`tool_loop::UI`); a native tool that does must be
+listed in `aloud_native::takes_front`, or it races its siblings for the screen.
+
 Script user text into apps with `script::run_jxa` (one JSON argument, never
 interpolated). Routing changes are checked against the eval, not by feel:
 

@@ -235,6 +235,36 @@ pub fn low_risk(name: &str, args: &Value) -> bool {
     permission(name, args, None).is_some_and(|p| p.default_always && !p.strict)
 }
 
+/// Whether a native call brings an app forward, acts on whatever is in front,
+/// or sets the clipboard — so two at once would fight over the screen, and the
+/// loop runs them one at a time. Everything else here scripts its app in the
+/// background and runs alongside them.
+///
+/// A match beside `action_label` and `strict` rather than a flag on each
+/// catalogue entry: three of these depend on the arguments.
+pub fn takes_front(name: &str, args: &Value) -> bool {
+    let action = args.get("action").and_then(Value::as_str);
+    match name {
+        "ALOUD_PHOTO_BOOTH_TAKE_PHOTO"
+        | "ALOUD_DISCORD_MESSAGE"
+        | "ALOUD_PRESS_KEYS"
+        | "ALOUD_OPEN_APP"
+        | "ALOUD_WINDOW_ARRANGE"
+        | "ALOUD_FINDER_REVEAL"
+        // Opens a facetime:// URL, which brings FaceTime forward.
+        | "ALOUD_FACETIME_CALL"
+        // A shortcut can do anything, including bring an app forward.
+        | RUN_SHORTCUT => true,
+        // With no app it clicks in the frontmost one, which a sibling may have
+        // just changed.
+        "ALOUD_MENU" => catalogue::target_app(args).is_none(),
+        "ALOUD_CLIPBOARD" => action == Some("write"),
+        "ALOUD_BROWSER_TAB" => action == Some("open"),
+        "ALOUD_WRITE_FILE" => args.get("open_with").is_some_and(|w| !w.is_null()),
+        _ => false,
+    }
+}
+
 fn action_label(name: &str) -> &'static str {
     match name {
         "ALOUD_MUSIC" | "ALOUD_SPOTIFY" => "play music",
@@ -877,6 +907,44 @@ mod tests {
         );
         assert!(permission("ALOUD_FINDER_SEARCH", &json!({}), None).is_none());
         assert!(permission("GMAIL_SEND_EMAIL", &json!({}), None).is_none());
+    }
+
+    /// Only what moves the front app or the clipboard queues behind the other
+    /// screen tools; a note, a reminder or a song never waits for them.
+    #[test]
+    fn only_tools_that_take_the_front_queue_for_the_screen() {
+        for (name, args) in [
+            ("ALOUD_OPEN_APP", json!({ "names": ["Safari"] })),
+            ("ALOUD_PHOTO_BOOTH_TAKE_PHOTO", json!({})),
+            ("ALOUD_CLIPBOARD", json!({ "action": "write", "text": "x" })),
+            (
+                "ALOUD_BROWSER_TAB",
+                json!({ "action": "open", "url": "a.com" }),
+            ),
+            (
+                "ALOUD_WRITE_FILE",
+                json!({ "path": "a", "open_with": "cursor" }),
+            ),
+            ("ALOUD_MENU", json!({ "item": "New" })),
+        ] {
+            assert!(takes_front(name, &args), "{name} {args}");
+        }
+        for (name, args) in [
+            ("ALOUD_NOTES_CREATE", json!({ "title": "x" })),
+            ("ALOUD_REMINDERS_ADD", json!({ "text": "x" })),
+            ("ALOUD_MUSIC", json!({ "action": "play" })),
+            ("ALOUD_CLIPBOARD", json!({ "action": "read" })),
+            ("ALOUD_BROWSER_TAB", json!({ "action": "current" })),
+            ("ALOUD_WRITE_FILE", json!({ "path": "a", "text": "x" })),
+            // A named app's menu is pressed in the background.
+            (
+                "ALOUD_MENU",
+                json!({ "item": "New", "_front_app": "TextEdit" }),
+            ),
+            ("GMAIL_SEND_EMAIL", json!({})),
+        ] {
+            assert!(!takes_front(name, &args), "{name} {args}");
+        }
     }
 
     /// Creating a new file is undone by deleting it; overwriting one is not

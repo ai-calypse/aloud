@@ -131,6 +131,45 @@ describe("agent panel step folding", () => {
     expect(stepStatus(approved[0], false)).toBe("failed");
   });
 
+  /**
+   * A round's calls run together: every call starts (and a write's gate opens)
+   * before the first result comes back. Attaching to the last waiting step put
+   * the first call's result on the last call's row.
+   */
+  it("a_result_lands_on_its_own_step_when_events_interleave", () => {
+    const withId = (name: string, id: number, gate = false): ToolCall => ({
+      ...call(name, gate),
+      id,
+    });
+    const result = (id: number, success: boolean): ToolResult => ({
+      success,
+      message: "",
+      show: null,
+      id,
+    });
+    let steps: Step[] = [];
+    steps = withCall(steps, withId("SLACK_CHAT_POST_MESSAGE", 0));
+    steps = withCall(steps, withId("SLACK_CHAT_POST_MESSAGE", 0, true));
+    steps = withCall(steps, withId("ALOUD_BROWSER_TASK", 1));
+    // Same tool twice in one round: still two rows.
+    steps = withCall(steps, withId("ALOUD_NOTES_CREATE", 2));
+    steps = withCall(steps, withId("ALOUD_NOTES_CREATE", 3));
+    steps = withResult(steps, result(2, true));
+    steps = withResult(steps, result(0, false));
+    steps = withResult(steps, result(3, true));
+    steps = withResult(steps, result(1, true));
+
+    expect(steps.map((s) => [s.name, s.result?.success])).toEqual([
+      ["SLACK_CHAT_POST_MESSAGE", false],
+      ["ALOUD_BROWSER_TASK", true],
+      ["ALOUD_NOTES_CREATE", true],
+      ["ALOUD_NOTES_CREATE", true],
+    ]);
+    expect(steps[0].requiresConfirmation).toBe(true);
+    // A quiet run that surfaced mid-round never saw step 5's row.
+    expect(withResult(steps, result(5, true))).toEqual(steps);
+  });
+
   it("carries the gate's Always-allow offer onto the step", () => {
     const steps = withCall(withCall([], call("SLACK_SEND_MESSAGE", false)), {
       ...call("SLACK_SEND_MESSAGE", true),
