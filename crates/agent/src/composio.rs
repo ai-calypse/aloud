@@ -661,6 +661,34 @@ impl ComposioClient {
         Ok(out)
     }
 
+    /// A toolkit's logo, as its catalogue entry links it, for
+    /// [`crate::icons`]. Fetched without the API key: the logo sits on another
+    /// host, which has no business seeing it.
+    pub async fn logo(&self, toolkit: &str) -> Result<Vec<u8>> {
+        // A logo is a few KB; anything far past that is not one.
+        const MAX_BYTES: u64 = 256 * 1024;
+        let json = self.get(&format!("/toolkits/{toolkit}")).await?;
+        let url = json["meta"]["logo"]
+            .as_str()
+            .filter(|url| url.starts_with("https://"))
+            .context("the toolkit links no logo")?;
+        let response = self
+            .client
+            .get(url)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await?
+            .error_for_status()?;
+        if response.content_length().is_some_and(|n| n > MAX_BYTES) {
+            bail!("a logo too big to be one");
+        }
+        let bytes = response.bytes().await?;
+        if bytes.len() as u64 > MAX_BYTES {
+            bail!("a logo too big to be one");
+        }
+        Ok(bytes.to_vec())
+    }
+
     /// Starts an OAuth connection and returns the URL the user must visit.
     /// Composio needs an auth config per toolkit first; this reuses the
     /// project's or creates a managed one, so the user supplies no credentials.

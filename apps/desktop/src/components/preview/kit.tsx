@@ -1,5 +1,12 @@
 import { createContext, useContext } from "react";
-import { ChevronRightIcon } from "lucide-react";
+import {
+  AppWindowIcon,
+  ChevronRightIcon,
+  FileIcon,
+  FileSpreadsheetIcon,
+  FileTextIcon,
+  FolderIcon,
+} from "lucide-react";
 import type { Field, Origin } from "@/lib/bindings";
 import {
   Collapsible,
@@ -38,13 +45,41 @@ function useEditing(field: Field): CardEdits | null {
 }
 
 /**
+ * The acting app, as its own icon — the Mac app's, or the service's logo,
+ * always a `data:` URI from Rust (the overlay loads no other image). Without
+ * one, a neutral window glyph: never a guess at another app's mark.
+ */
+export function AppIcon({ app, icon }: { app: string; icon?: string | null }) {
+  return icon ? (
+    <img className="app-icon" src={icon} alt={app} draggable={false} />
+  ) : (
+    <span className="app-icon app-icon--glyph" role="img" aria-label={app}>
+      <AppWindowIcon size={12} />
+    </span>
+  );
+}
+
+/** Spreadsheets and text read apart at a glance in Finder; everything else is a file. */
+const SHEET = /\.(xlsx?|csv|numbers|tsv)$/i;
+const TEXT = /\.(pdf|docx?|pages|txt|md|rtf|key|pptx?)$/i;
+
+/** A file's type as Finder's list would mark it, or a folder. */
+export function FileGlyph({ name, folder }: { name: string; folder?: boolean }) {
+  if (folder) return <FolderIcon className="file-glyph file-glyph--folder" size={14} />;
+  const Glyph = SHEET.test(name) ? FileSpreadsheetIcon : TEXT.test(name) ? FileTextIcon : FileIcon;
+  return <Glyph className="file-glyph" size={14} />;
+}
+
+/**
  * A field taken as typed: a single line in its row. An empty one is what the
- * model could not fill — an address it never found — so it takes focus.
+ * model could not fill — an address it never found — so it takes focus. Who
+ * it goes to stays a chip while it is being corrected.
  */
 function FieldInput({ field, edits }: { field: Field; edits: CardEdits }) {
+  const chip = field.role === "person" || field.role === "destination";
   return (
     <Input
-      className="preview__input"
+      className={chip ? "preview__input preview__input--chip" : "preview__input"}
       value={edits.draft[field.path] ?? field.value}
       aria-label={field.label}
       placeholder={field.label}
@@ -103,6 +138,36 @@ export function TextBlock({ field }: { field: Field }) {
     <div className="preview__text">
       <MessageBody field={field} />
       {field.origin && <OriginTag origin={field.origin} />}
+    </div>
+  );
+}
+
+/** A message as its chat app draws one you send: a bubble, editable in place. */
+export function Bubble({ field }: { field: Field }) {
+  return (
+    <div className="preview__chat">
+      <div className="preview__bubble">
+        <MessageBody field={field} />
+      </div>
+      {field.origin && <OriginTag origin={field.origin} />}
+    </div>
+  );
+}
+
+/**
+ * Fields as labelled chips, the way an issue tracker shows priority, assignee
+ * and labels under the description.
+ */
+export function Tags({ fields }: { fields: Field[] }) {
+  if (fields.length === 0) return null;
+  return (
+    <div className="preview__tags">
+      {fields.map((field) => (
+        <span className="preview__tag" key={field.path}>
+          <span className="preview__faint">{field.label}</span>
+          <Value field={field} />
+        </span>
+      ))}
     </div>
   );
 }
@@ -252,7 +317,7 @@ export function UnresolvedId({ value }: { value: string }) {
   );
 }
 
-function Value({ field }: { field: Field }) {
+export function Value({ field }: { field: Field }) {
   const edits = useEditing(field);
   if (edits && field.role !== "text") return <FieldInput field={field} edits={edits} />;
   switch (field.role) {

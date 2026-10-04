@@ -8,6 +8,7 @@
 
 pub mod cache;
 pub mod composio;
+pub mod icons;
 pub mod permissions;
 pub mod preview;
 pub mod tool_loop;

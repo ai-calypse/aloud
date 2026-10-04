@@ -301,6 +301,28 @@ function Tuner() {
           </div>
         </Section>
 
+        <Section title="Results and toasts">
+          <div className="grid grid-cols-2 gap-1.5">
+            <Action onClick={() => send({ finder: "list" })}>Finder list</Action>
+            <Action onClick={() => send({ finder: "grid" })}>Finder grid</Action>
+            <Action onClick={() => send({ toast: "show" })}>Toast · Show</Action>
+            <Action onClick={() => send({ toast: "undo" })}>Toast · Undo</Action>
+            <Action onClick={() => send({ toast: "plain" })}>Toast · plain</Action>
+            <Action
+              onClick={() => {
+                send({ agent: "run" });
+                setTimeout(() => send({ toast: "show" }), 1200);
+              }}
+            >
+              Run → toast
+            </Action>
+          </div>
+          <p className="mt-2 mb-0 text-caption text-ink-2">
+            A toast sent at rest grows out of the notch; Run → toast plays a
+            run's panel collapsing into one. Each leaves after 4s, or on ×.
+          </p>
+        </Section>
+
         <Section title="Springs">
           {SLIDERS.map(({ key, ...slider }) => (
             <Slider

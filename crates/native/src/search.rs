@@ -198,6 +198,95 @@ fn build_predicate(query: Option<&str>, kind: &str) -> String {
     format!("({kind_clause} && {keyword})")
 }
 
+/// The longest name the notch's file list shows whole: what fits its Name
+/// column at the panel's fixed 480pt.
+const NAME_CHARS: usize = 30;
+
+/// One found file as the notch's list draws it, Finder's way: its name cut in
+/// the middle when long, its size, and when it last changed. None when the
+/// file has gone since the search.
+pub fn file_row(path: &str, name: &str) -> Option<(String, String, String)> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified: chrono::DateTime<chrono::Local> = meta.modified().ok()?.into();
+    // A folder's own length is its directory entry, not what it holds.
+    let size = if meta.is_dir() {
+        "--".to_string()
+    } else {
+        size_label(meta.len())
+    };
+    Some((
+        middle_truncate(name, NAME_CHARS),
+        size,
+        modified_label(&modified, &chrono::Local::now()),
+    ))
+}
+
+/// The list's header: what was searched for and how many matched.
+pub fn heading(query: &str, count: u32) -> String {
+    let what = if query.trim().is_empty() {
+        "Results"
+    } else {
+        query.trim()
+    };
+    let noun = if count == 1 { "item" } else { "items" };
+    format!("{what} — {count} {noun}")
+}
+
+/// Finder's Size column: decimal units, one place below ten.
+fn size_label(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if bytes < 1000 {
+        return format!("{bytes} bytes");
+    }
+    let mut value = bytes as f64 / 1000.0;
+    let mut unit = 0;
+    // 999.5 and up rounds to "1000 KB", which Finder writes as "1 MB".
+    while value >= 999.5 && unit < UNITS.len() - 1 {
+        value /= 1000.0;
+        unit += 1;
+    }
+    if value < 9.95 {
+        format!("{value:.1} {}", UNITS[unit])
+    } else {
+        format!("{value:.0} {}", UNITS[unit])
+    }
+}
+
+/// Finder's Date Modified column: the time today, "Yesterday", then the date —
+/// with the year only when it is not this one.
+fn modified_label<Tz: chrono::TimeZone>(
+    at: &chrono::DateTime<Tz>,
+    now: &chrono::DateTime<Tz>,
+) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    use chrono::Datelike;
+    let (day, today) = (at.date_naive(), now.date_naive());
+    if day == today {
+        at.format("%-I:%M %p").to_string()
+    } else if day.succ_opt() == Some(today) {
+        "Yesterday".to_string()
+    } else if day.year() == today.year() {
+        at.format("%b %-d").to_string()
+    } else {
+        at.format("%b %-d, %Y").to_string()
+    }
+}
+
+/// A long name cut in the middle, so both how it starts and its extension show.
+fn middle_truncate(name: &str, max: usize) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    if chars.len() <= max {
+        return name.to_string();
+    }
+    let tail = (max - 1) / 2;
+    let head = max - 1 - tail;
+    let start: String = chars[..head].iter().collect();
+    let end: String = chars[chars.len() - tail..].iter().collect();
+    format!("{start}…{end}")
+}
+
 /// Escapes a query for an `mdfind` single-quoted literal. Only `'` and `\` are
 /// special inside one; without this a query with an apostrophe truncates the
 /// predicate.
@@ -346,5 +435,56 @@ mod tests {
         assert!(!is_noise("/Users/x/Pictures/buddha-temple.jpg"));
         // A file merely named "build" is not in a build dir.
         assert!(!is_noise("/Users/x/Documents/build-plan.pdf"));
+    }
+
+    /// Finder's own units: decimal, so 4,900 bytes is the "4.9 KB" Finder
+    /// shows, and a rounding edge never reads "1000 KB".
+    #[test]
+    fn sizes_read_as_finder_writes_them() {
+        assert_eq!(size_label(0), "0 bytes");
+        assert_eq!(size_label(999), "999 bytes");
+        assert_eq!(size_label(4_900), "4.9 KB");
+        assert_eq!(size_label(123_456), "123 KB");
+        assert_eq!(size_label(999_600), "1.0 MB");
+        assert_eq!(size_label(2_400_000_000), "2.4 GB");
+    }
+
+    #[test]
+    fn a_date_drops_what_the_reader_already_knows() {
+        use chrono::TimeZone;
+        let zone = chrono::FixedOffset::east_opt(5 * 3600 + 1800).unwrap();
+        let now = zone.with_ymd_and_hms(2026, 10, 4, 21, 30, 0).unwrap();
+        let at = |m, d, y, h, min| zone.with_ymd_and_hms(y, m, d, h, min, 0).unwrap();
+        assert_eq!(modified_label(&at(10, 4, 2026, 20, 2), &now), "8:02 PM");
+        assert_eq!(modified_label(&at(10, 3, 2026, 23, 59), &now), "Yesterday");
+        assert_eq!(modified_label(&at(3, 15, 2026, 9, 0), &now), "Mar 15");
+        assert_eq!(
+            modified_label(&at(12, 31, 2025, 9, 0), &now),
+            "Dec 31, 2025"
+        );
+    }
+
+    /// The extension says what a file is, so a long name loses its middle.
+    #[test]
+    fn a_long_name_keeps_its_start_and_its_extension() {
+        let long = "2025 California Resident Income Tax Return.pdf";
+        let short = middle_truncate(long, 30);
+        assert_eq!(short.chars().count(), 30);
+        assert!(short.starts_with("2025 Californi"));
+        assert!(short.ends_with("Return.pdf"));
+        assert!(short.contains('…'));
+        assert_eq!(middle_truncate("W-2.pdf", 30), "W-2.pdf");
+        // Counted in characters, never cut through one.
+        assert_eq!(middle_truncate("ééééé", 3), "é…é");
+    }
+
+    #[test]
+    fn the_heading_counts_what_matched() {
+        assert_eq!(
+            heading("2025 Tax Returns", 10),
+            "2025 Tax Returns — 10 items"
+        );
+        assert_eq!(heading(" invoice ", 1), "invoice — 1 item");
+        assert_eq!(heading("", 3), "Results — 3 items");
     }
 }

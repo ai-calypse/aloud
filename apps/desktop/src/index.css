@@ -90,6 +90,11 @@
   --color-warning-bg: var(--warning-bg);
   --color-toggle-on: var(--toggle-on);
   --color-toggle-off: var(--toggle-off);
+  --color-app-action: var(--app-action);
+  --color-app-action-fg: var(--app-action-fg);
+  --color-bubble: var(--bubble);
+  --color-bubble-fg: var(--bubble-fg);
+  --color-folder: var(--folder);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

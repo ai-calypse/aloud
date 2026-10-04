@@ -777,6 +777,11 @@
   list-style: none;
 }
 
+/* A finished write's echo is a small window; the answer under it needs air. */
+.agent__steps:not(:last-child) {
+  margin-bottom: 8px;
+}
+
 .agent__step {
   display: flex;
   align-items: center;
@@ -876,9 +881,9 @@
   font-weight: 600;
 }
 
-/* "Slack · send and share": what a saved grant would cover. */
+/* "Slack · send and share": what a saved grant would cover, under the card. */
 .agent__scope {
-  margin: -4px 0 0;
+  margin: 0;
   font-size: 11px;
   color: rgb(255 255 255 / 0.45);
 }
@@ -924,21 +929,168 @@
   background: color-mix(in srgb, var(--sys-blue) 85%, white);
 }
 
-/* A strict write — money, a public post, a permanent delete — says so in red,
-   title and button both (the button through `.btn--allow` below). */
+/* A strict write — money, a public post, a permanent delete — says so in red:
+   the card's edge and its pill. */
 .agent__confirm-title--danger {
   color: var(--danger);
 }
 
-/* The card a write shows at its gate (components/preview/kit.tsx).
+/* The card a write shows at its gate (components/preview/cards.tsx), drawn as
+ * a small window of the app it writes to: the app's icon and its window title
+ * in a bar, the content laid out the app's way, and the app's own blue Send at
+ * the foot. A window rather than bare rows because the point is recognition —
+ * "this is a Gmail compose" lands before a single label is read.
  *
- * Rows on hairlines, the same idiom as the gate around it, rather than a
- * bordered box: a box inside the black panel reads as another surface dropped
- * in. Every value arrives as finished text; nothing here truncates one, because
+ * Every value arrives as finished text; nothing here truncates one, because
  * the clipped part of an address or a message is the part that gets sent. */
 .preview {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-solid);
+}
+
+.preview[data-strict] {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.preview__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--sep);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.preview__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview__sigil {
+  margin-right: 1px;
+  color: var(--text2);
+}
+
+.preview__content {
+  display: flex;
+  flex-direction: column;
+  padding: 0 12px 4px;
+}
+
+/* The app's own icon, or a neutral window glyph where none is known yet. */
+.app-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  object-fit: contain;
+}
+
+.app-icon--glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--field);
+  color: var(--text2);
+}
+
+/* Allow once, as the app draws its primary button; the decline and Always
+   allow are text beside it, quieter by design. */
+.preview__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px 10px 6px;
+}
+
+.gate__quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-row);
+  background: none;
+  color: var(--text2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.gate__quiet:hover,
+.gate__quiet:focus-visible {
+  background: var(--field);
+  color: var(--fg);
+  outline: none;
+}
+
+.app-pill {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 5px 14px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--app-action);
+  color: var(--app-action-fg);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.app-pill:hover {
+  background: color-mix(in srgb, var(--app-action) 85%, white);
+}
+
+.app-pill:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--app-action) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.app-pill:disabled {
+  opacity: 0.55;
+}
+
+.app-pill .btn__k {
+  color: color-mix(in srgb, var(--app-action-fg) 60%, transparent);
+}
+
+.app-pill[data-danger] {
+  background: var(--danger);
+}
+
+.app-pill[data-danger]:hover {
+  background: color-mix(in srgb, var(--danger) 85%, white);
+}
+
+/* The exact-words countdown, draining across the pill it ends by pressing.
+   The clock itself is `.motion-countdown` in motion.css — paused once held,
+   stepped under reduced motion — so this only paints the lighter fill it
+   shrinks, from the right, toward the label's start. */
+.app-pill.motion-countdown::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--app-action-fg) 22%, transparent);
+  transform-origin: left;
+  pointer-events: none;
 }
 
 .preview__row {
@@ -950,8 +1102,9 @@
   border-bottom: 1px solid var(--sep);
 }
 
-.preview__row:first-child {
-  padding-top: 0;
+/* A compose window's To and Cc: a short label, then the chips. */
+.preview__compose .preview__row {
+  grid-template-columns: max-content minmax(0, 1fr);
 }
 
 .preview__label {
@@ -974,11 +1127,12 @@
   gap: 4px 6px;
 }
 
+/* A recipient as Mail and Gmail draw one: a pill. */
 .preview__chip {
   display: inline-block;
   max-width: 100%;
-  padding: 1px 7px;
-  border-radius: var(--radius-chip);
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
   background: var(--field);
 }
 
@@ -991,6 +1145,150 @@
 .preview__when,
 .preview__heading {
   font-weight: 600;
+}
+
+/* A record's name as the line its app opens on. Doubled up to outrank the
+   lead's own size further down. */
+.preview__lead.preview__heading--big {
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+/* A chat message you send: a bubble at the right, its tail corner tucked. */
+.preview__chat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--sep);
+}
+
+.preview__bubble {
+  max-width: 86%;
+  padding: 6px 11px;
+  border-radius: 16px 16px 4px 16px;
+  background: var(--bubble);
+  color: var(--bubble-fg);
+  font-size: 13px;
+}
+
+/* The bubble's text is the field itself on the open card. A text box sized by
+   its own words wraps at every letter, and the bubble is sized by the box, so
+   one you can write in takes the bubble's full width instead. */
+.preview__bubble:has(.preview__input) {
+  width: 86%;
+}
+
+.preview__bubble .preview__input {
+  margin: -2px -5px;
+  color: inherit;
+}
+
+.preview__bubble .preview__input:hover,
+.preview__bubble .preview__input:focus {
+  background: color-mix(in srgb, var(--bubble-fg) 14%, transparent);
+  border-color: transparent;
+}
+
+/* A reminder: its empty circle, what to do, and when, under it. */
+.preview__task {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.preview__check {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 1.5px solid var(--text3);
+  border-radius: var(--radius-pill);
+}
+
+.preview__task-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.preview__due {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+/* An issue's fields as chips, label then value, under its description. */
+.preview__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--sep);
+  font-size: 12px;
+}
+
+.preview__tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--field);
+  color: var(--fg);
+}
+
+.preview__tag .preview__chip {
+  padding: 0;
+  background: none;
+}
+
+/* Files as Finder lists them: a type glyph, then the path. */
+.preview__finder {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.preview__finder-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.file-glyph {
+  flex: none;
+  color: var(--text2);
+}
+
+.file-glyph--folder {
+  color: var(--folder);
+}
+
+/* The finished step's echo: the window's bar and the one line that names it. */
+.preview__key {
+  margin: 0;
+  padding: 6px 12px 8px;
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--text2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview--compact .preview__bar {
+  padding: 5px 10px;
+  border-bottom: 0;
+  font-size: 12px;
+}
+
+.preview--compact .preview__key {
+  padding-top: 0;
 }
 
 .preview__money {
@@ -1062,16 +1360,16 @@
 .preview__text,
 .preview__sample {
   margin: 0;
-  padding: 7px 0;
+  padding: 8px 0;
   border-bottom: 1px solid var(--sep);
   font-size: 13px;
   color: var(--fg);
 }
 
-.preview__lead:first-child,
-.preview__text:first-child,
-.preview__sample:first-child {
-  padding-top: 0;
+/* The window's foot has the actions; a hairline above them is one too many. */
+.preview__content > :last-child,
+.preview__content > .preview__compose:last-child .preview__row:last-child {
+  border-bottom: 0;
 }
 
 .preview__text {
@@ -1244,30 +1542,21 @@ input.preview__input {
   color: var(--text2);
 }
 
-/* The exact-words countdown's track; the fill and its timing are
-   `.motion-countdown` in motion.css. */
-.countdown {
-  height: 2px;
-  overflow: hidden;
+/* Text you can write into, as the app's own window would take it: an I-beam,
+   and the app's blue caret once it is in. */
+textarea.preview__input {
+  cursor: text;
+  caret-color: var(--app-action);
+}
+
+/* A recipient being corrected stays the pill it was. */
+.preview__input--chip {
+  width: auto;
+  min-width: 18ch;
+  margin: 0;
+  padding: 1px 8px;
   border-radius: var(--radius-pill);
   background: var(--field);
-}
-
-.countdown::after {
-  content: "";
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  transform-origin: left;
-}
-
-/* A finished step's echo of its card: the write already happened, so here a
-   long message may fold to a few lines. */
-.preview--compact .preview__body {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 /* The Finder search result grid — Option 1, a dense 4-up thumbnail wall. Sits
@@ -1333,6 +1622,198 @@ input.preview__input {
   font-size: 11px;
   color: rgb(255 255 255 / 0.4);
   font-variant-numeric: tabular-nums;
+}
+
+/* Documents found, as Finder's list view: a window like the approval card's,
+   the search and its count in the bar, then Name, Size and Date Modified. */
+.finder-list {
+  margin: 6px 0 6px 22px;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-solid);
+  font-size: 12.5px;
+}
+
+.finder-list__bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--sep);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.finder-list__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finder-list__button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text2);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.finder-list__button:hover {
+  background: var(--field);
+  color: var(--fg);
+}
+
+.finder-list__button--close {
+  background: var(--field);
+}
+
+.finder-list__row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 54px 90px;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 4px 12px;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  /* Draggable out to other apps, like the grid's tiles. */
+  cursor: grab;
+  -webkit-user-drag: element;
+  /* The rows assemble top-down rather than the list landing as a block. */
+  animation: materialize var(--spring-dur) var(--spring) both;
+  animation-delay: calc(var(--i, 0) * 22ms);
+}
+
+/* Finder's alternating rows, faint enough to guide the eye along a line. */
+.finder-list__row:nth-child(even) {
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+
+.finder-list__row:hover {
+  background: var(--hover);
+}
+
+.finder-list__row--head {
+  padding-top: 5px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--sep);
+  color: var(--text2);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: default;
+  animation: none;
+}
+
+.finder-list__row--head:hover {
+  background: none;
+}
+
+.finder-list__name,
+.finder-list__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finder-list__meta {
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+
+.finder-list__thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: cover;
+}
+
+/* --- The toast -----------------------------------------------------------
+ *
+ * The chip a run of writes ends on (NotchToast.tsx). It is the notch panel's
+ * own content, so it grows out of the cutout — or the run's panel shrinks into
+ * it — on the panel's live spring, and goes back into the notch on its close.
+ * `max-content` so the panel hugs it; the cutout floor in useNotchPanel keeps
+ * it from ever settling narrower than the hole it hangs from.
+ */
+.drop-pill__body--toast {
+  gap: 0;
+  height: auto;
+  padding: 0;
+}
+
+/* Rises in a beat behind the shape, like the answer does. */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 440px;
+  padding: 6px 12px 12px 8px;
+  animation:
+    ask-rise var(--spring-pop-dur) var(--spring-pop) both,
+    ask-fade var(--dur-fast) var(--ease-out) both;
+}
+
+.toast .app-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.toast__close {
+  display: inline-flex;
+  flex: none;
+  align-self: flex-start;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--field);
+  color: var(--text2);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.toast__close:hover {
+  background: var(--sep);
+  color: var(--fg);
+}
+
+.toast__text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Gone before the panel closes over it, as the answer is: a chip sliced off by
+   the collapse would read as the window being killed. */
+.overlay-root[data-exiting] .toast {
+  animation: ask-out var(--dur-fast) var(--ease-in) both;
 }
 
 /* The last tool that ran — a "where is it up to" that survives the step list

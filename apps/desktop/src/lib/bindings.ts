@@ -371,7 +371,12 @@ export type AgentEvent =
  *  A transient status line (e.g. "rate limited, retrying in 30s") shown
  *  while the run is otherwise silent; cleared by the next event.
  */
-{ kind: "status"; value: string } | { kind: "runFinished"; value: string } | { kind: "runError"; value: string };
+{ kind: "status"; value: string } | 
+/**
+ *  A run of writes that all worked: the chip under the notch. Sent before
+ *  `RunFinished`, so a run's own panel collapses into it.
+ */
+{ kind: "toast"; value: Toast } | { kind: "runFinished"; value: string } | { kind: "runError"; value: string };
 
 /**
  *  One request awaiting an Approve / Deny. The notch opens itself on this and
@@ -712,18 +717,27 @@ export type Field = {
  */
 export type FinderResults = {
 	query: string,
+	/**  The list's header: "2025 Tax Returns — 10 items". */
+	heading: string,
 	/**  Total matches found, which may exceed `files.len()` when truncated. */
 	count: number,
 	files: FoundFile[],
 };
 
 /**
- *  One file the notch grid draws for a Finder search: its path, display name,
- *  and a Quick Look thumbnail if one could be rendered.
+ *  One file the notch draws for a Finder search: its path, display name,
+ *  and a Quick Look thumbnail if one could be rendered. A document's row reads
+ *  like Finder's list view, so its name, size and date arrive formatted.
  */
 export type FoundFile = {
 	path: string,
 	name: string,
+	/**  The name cut in the middle to fit the list's Name column. */
+	label: string,
+	/**  "4.9 KB"; "--" for a folder. */
+	size: string,
+	/**  "8:02 PM" today, "Yesterday", then the date. */
+	modified: string,
 	/**  A `data:image/png;base64,…` preview, or None when Quick Look has none. */
 	thumbnail: string | null,
 };
@@ -1207,14 +1221,43 @@ export type Tier = "confirm" |
 "strict";
 
 /**
+ *  The confirmation chip a run of writes that all worked ends on, under the
+ *  notch — always-listening runs included, which otherwise report only to the
+ *  bar's one line.
+ */
+export type Toast = {
+	/**
+	 *  What was done, in one line: the run's closing words — for Mac writes,
+	 *  the tool's own confirmation.
+	 */
+	text: string,
+	/**  The app the last write acted in, and its icon as a data URI. */
+	app: string,
+	icon: string | null,
+	action: ToastAction | null,
+};
+
+/**  The one thing a toast offers: what a finished row already could. */
+export type ToastAction = 
+/**  Brings back what the write made; see [`show_result`]. */
+{ kind: "show"; app: string; target: string } | 
+/**  Puts a tidied folder back; see [`undo_tidy`]. */
+{ kind: "undo"; folder: string };
+
+/**
  *  A tool call for display. Kept separate from `ParsedAction` so the UI
  *  contract does not leak parser internals.
  */
 export type ToolCall = {
 	/**  e.g. "github.create_issue". */
 	name: string,
-	/**  The target app, e.g. "github". */
+	/**
+	 *  The target app, e.g. "github". On a gate, the app as its permission
+	 *  names it: "Notes" rather than "macOS".
+	 */
 	app: string,
+	/**  The app's icon as a data URI, on a gate; None draws a neutral glyph. */
+	icon?: string | null,
 	/**
 	 *  Args as strings, not `serde_json::Value`: specta refuses to export its
 	 *  i64-backed number type. Non-string values keep their JSON form.

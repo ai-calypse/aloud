@@ -111,6 +111,30 @@ describe("agent panel step folding", () => {
     }
   });
 
+  /**
+   * The start event guesses the app from the tool's name ("macOS" for every
+   * Mac action); the gate names it as its permission does, with its icon. The
+   * card wears the gate's, whichever of the pair lands second.
+   */
+  it("the gate's app and icon survive the start event folding in", () => {
+    const preview = {} as ActionPreview;
+    const gate = {
+      ...call("ALOUD_NOTES_CREATE", true),
+      app: "Notes",
+      icon: "data:image/png;base64,AA",
+      preview,
+    };
+    const start = { ...call("ALOUD_NOTES_CREATE", false), app: "macOS" };
+
+    for (const steps of [
+      withCall(withCall([], start), gate),
+      withCall(withCall([], gate), start),
+    ]) {
+      expect(steps[0].app).toBe("Notes");
+      expect(steps[0].icon).toBe("data:image/png;base64,AA");
+    }
+  });
+
   it("treats a declined step as settled so it cannot re-open the gate", () => {
     let steps = startAndGate([], "GMAIL_SEND_EMAIL");
     steps = steps.map((s) => ({ ...s, confirmed: false }));

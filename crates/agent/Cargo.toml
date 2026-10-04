@@ -12,6 +12,7 @@ aloud-native = { path = "../native" }
 aloud-screen = { path = "../screen" }
 aloud-selection = { path = "../selection" }
 anyhow.workspace = true
+base64 = "0.22"
 chrono = "0.4"
 futures-util = "0.3"
 iana-time-zone = "0.1"

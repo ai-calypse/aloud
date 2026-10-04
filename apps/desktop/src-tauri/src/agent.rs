@@ -262,7 +262,23 @@ struct Run {
     /// Whether any tool ran. A quiet run that only answered still has to show
     /// the answer somewhere bigger than the bar's one line.
     acted: AtomicBool,
+    /// Whether any tool failed or was declined: a toast says it all worked.
+    failed: AtomicBool,
+    /// The writes that ran and worked, in order, for the toast.
+    wrote: Mutex<Vec<Wrote>>,
     transcript: String,
+}
+
+/// A write that ran and worked, for the toast a run of them ends on.
+#[derive(Debug, Clone)]
+struct Wrote {
+    /// The app as its permission names it: "Notes", "gmail".
+    app: String,
+    /// Where its icon comes from: a Mac app's own for "macOS" and "Screen",
+    /// else the connected service's logo by this slug.
+    toolkit: String,
+    show: Option<ShowTarget>,
+    tidied: Option<String>,
 }
 
 impl Run {
@@ -294,6 +310,141 @@ impl Run {
             self.emit(app, AgentEvent::RunStarted(self.transcript.clone()));
         }
     }
+
+    /// Records a tool's result for the toast: a write that worked, or anything
+    /// that did not.
+    fn record(&self, success: bool, wrote: Option<Wrote>) {
+        if !success {
+            self.failed.store(true, Ordering::SeqCst);
+        } else if let Some(wrote) = wrote {
+            self.wrote
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(wrote);
+        }
+    }
+
+    /// Puts up the toast. A quiet run's panel never opened, so its toast takes
+    /// the window only from nothing or from another toast — never from a panel
+    /// the user is in. Sent past `emit`, which keeps a quiet run silent.
+    fn toast(&self, app: &AppHandle, toast: Toast) {
+        let own_panel = !self.quiet.load(Ordering::SeqCst);
+        if is_current(self.ticket) && crate::overlay::show_toast(app, own_panel) {
+            emit(app, AgentEvent::Toast(toast));
+        }
+    }
+}
+
+/// The confirmation chip a run of writes that all worked ends on, under the
+/// notch — always-listening runs included, which otherwise report only to the
+/// bar's one line.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Toast {
+    /// What was done, in one line: the run's closing words — for Mac writes,
+    /// the tool's own confirmation.
+    pub text: String,
+    /// The app the last write acted in, and its icon as a data URI.
+    pub app: String,
+    pub icon: Option<String>,
+    pub action: Option<ToastAction>,
+}
+
+/// The one thing a toast offers: what a finished row already could.
+// ponytail: no Snooze — Reminders has no snooze tool to call; a
+// reminders-snooze tool is the upgrade, and then it is one more arm here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum ToastAction {
+    /// Brings back what the write made; see [`show_result`].
+    Show { app: String, target: String },
+    /// Puts a tidied folder back; see [`undo_tidy`].
+    Undo { folder: String },
+}
+
+/// The toast a finished run ends on, and the write it is about: only when every
+/// tool worked, at least one wrote, and the closing words fit one line — a run
+/// with anything to read keeps its panel instead. Undo outranks Show: a
+/// reverse is the rarer and the more urgent of the two.
+fn toast_for<'a>(wrote: &'a [Wrote], failed: bool, message: &str) -> Option<(&'a Wrote, Toast)> {
+    let last = wrote.last()?;
+    if failed || needs_reading(true, message) {
+        return None;
+    }
+    let action = wrote
+        .iter()
+        .rev()
+        .find_map(|w| w.tidied.clone())
+        .map(|folder| ToastAction::Undo { folder })
+        .or_else(|| {
+            wrote.iter().rev().find_map(|w| {
+                w.show.clone().map(|s| ToastAction::Show {
+                    app: s.app,
+                    target: s.target,
+                })
+            })
+        });
+    let text = match message.trim() {
+        "" => "Done".to_string(),
+        said => said.to_string(),
+    };
+    Some((
+        last,
+        Toast {
+            text,
+            app: last.app.clone(),
+            icon: None,
+            action,
+        },
+    ))
+}
+
+/// Where connected services' logos are kept.
+fn icons_dir() -> Option<std::path::PathBuf> {
+    aloud_notes::data_dir().ok().map(|dir| dir.join("icons"))
+}
+
+/// Whether a toolkit is a connected service rather than the Mac itself.
+fn is_service(toolkit: &str) -> bool {
+    !matches!(toolkit, "macOS" | "Screen" | "Browser")
+}
+
+/// The acting app's icon: a Mac app's own, else the service's kept logo.
+/// Never fetches; see [`fetch_logos`].
+fn icon_of(app: &str, toolkit: &str) -> Option<String> {
+    if is_service(toolkit) {
+        aloud_agent::icons::cached(&icons_dir()?, toolkit)
+    } else {
+        aloud_selection::app_icon(app)
+    }
+}
+
+/// [`icon_of`] off the calling task, started at once and given at most a beat
+/// once awaited: a card or toast is never held for its icon, which is the
+/// neutral glyph when the lookup runs late.
+fn icon_for(app: &str, toolkit: &str) -> impl std::future::Future<Output = Option<String>> {
+    let (app, toolkit) = (app.to_string(), toolkit.to_string());
+    let lookup = tauri::async_runtime::spawn_blocking(move || icon_of(&app, &toolkit));
+    async move {
+        tokio::time::timeout(Duration::from_millis(100), lookup)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .flatten()
+    }
+}
+
+/// Fetches, in the background, the logos of the services a command may use that
+/// are not kept yet, so its card can show them — the first command after a
+/// connection shows the glyph, every one after the logo.
+fn fetch_logos(composio_key: &str, toolkits: Vec<String>) {
+    let Some(dir) = icons_dir() else { return };
+    let Ok(composio) = aloud_agent::ComposioClient::new(composio_key) else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        aloud_agent::icons::fetch_missing(&dir, &composio, &toolkits).await;
+    });
 }
 
 /// What the user was looking at when they spoke, read before our panel took focus.
@@ -341,6 +492,9 @@ pub enum AgentEvent {
     /// A transient status line (e.g. "rate limited, retrying in 30s") shown
     /// while the run is otherwise silent; cleared by the next event.
     Status(String),
+    /// A run of writes that all worked: the chip under the notch. Sent before
+    /// `RunFinished`, so a run's own panel collapses into it.
+    Toast(Toast),
     RunFinished(String),
     RunError(String),
 }
@@ -361,8 +515,12 @@ pub struct PlannedCall {
 pub struct ToolCall {
     /// e.g. "github.create_issue".
     pub name: String,
-    /// The target app, e.g. "github".
+    /// The target app, e.g. "github". On a gate, the app as its permission
+    /// names it: "Notes" rather than "macOS".
     pub app: String,
+    /// The app's icon as a data URI, on a gate; None draws a neutral glyph.
+    #[specta(optional)]
+    pub icon: Option<String>,
     /// Args as strings, not `serde_json::Value`: specta refuses to export its
     /// i64-backed number type. Non-string values keep their JSON form.
     pub args: std::collections::BTreeMap<String, String>,
@@ -445,6 +603,8 @@ pub async fn run(
         ticket: claim_run(),
         quiet: AtomicBool::new(quiet),
         acted: AtomicBool::new(false),
+        failed: AtomicBool::new(false),
+        wrote: Mutex::new(Vec::new()),
         transcript: transcript.clone(),
     };
     let cancelled = || cancelled_or_superseded(run.ticket, &cancelled);
@@ -501,8 +661,20 @@ pub async fn run(
     };
     match execute(app, &run, &transcript, context, settings, cancelled).await {
         Ok(message) => {
-            if needs_reading(run.acted.load(Ordering::SeqCst), &message) {
-                run.surface(app);
+            let wrote = run
+                .wrote
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            match toast_for(&wrote, run.failed.load(Ordering::SeqCst), &message) {
+                Some((by, mut toast)) => {
+                    toast.icon = icon_for(&by.app, &by.toolkit).await;
+                    run.toast(app, toast);
+                }
+                None if needs_reading(run.acted.load(Ordering::SeqCst), &message) => {
+                    run.surface(app)
+                }
+                None => {}
             }
             run.emit(app, AgentEvent::RunFinished(message));
         }
@@ -610,6 +782,17 @@ async fn execute(
         aloud_agent::command_tools(transcript, &installed, has_composio.then_some(&composio)).await;
     tracing::Span::current().record("tool_count", tools.len());
     tracing::Span::current().record("route", "brain");
+    if has_composio {
+        let mut toolkits: Vec<String> = tools
+            .iter()
+            .map(|t| t.toolkit.clone())
+            .filter(|t| is_service(t))
+            .chain(more.iter().cloned())
+            .collect();
+        toolkits.sort();
+        toolkits.dedup();
+        fetch_logos(&settings.composio_api_key, toolkits);
+    }
 
     let command = aloud_agent::with_context(
         transcript,
@@ -644,9 +827,25 @@ async fn execute(
                     aloud_agent::LoopEvent::ToolCallResult {
                         name,
                         success,
-                        write_app: Some(write_app),
+                        write_app,
+                        show,
+                        tidied,
                         ..
-                    } => audit(name, write_app, "ran", Some(*success)),
+                    } => {
+                        if let Some(write_app) = write_app {
+                            audit(name, write_app, "ran", Some(*success));
+                        }
+                        let wrote = write_app.as_ref().map(|app| Wrote {
+                            app: app.clone(),
+                            toolkit: tools
+                                .iter()
+                                .find(|t| t.name == *name)
+                                .map_or_else(|| tool_app(name), |t| t.toolkit.clone()),
+                            show: show_of(show.clone()),
+                            tidied: tidied.clone(),
+                        });
+                        run.record(*success, wrote);
+                    }
                     _ => {}
                 }
                 run.emit(app, event_of(event))
@@ -691,6 +890,7 @@ async fn run_fast(
         app,
         AgentEvent::ToolCall(ToolCall {
             app: "macOS".to_string(),
+            icon: None,
             name: name.to_string(),
             args: display_args(&call.args),
             requires_confirmation: false,
@@ -752,12 +952,22 @@ async fn run_fast(
             None,
         ),
     };
+    let show = show_of(show);
+    run.record(
+        result.is_ok(),
+        write_app.clone().map(|app| Wrote {
+            app,
+            toolkit: "macOS".to_string(),
+            show: show.clone(),
+            tidied: None,
+        }),
+    );
     run.emit(
         app,
         AgentEvent::ToolResult(ToolResult {
             success: result.is_ok(),
             message: format!("{name} {}", if result.is_ok() { "done" } else { "failed" }),
-            show: show_of(show),
+            show,
             note: None,
             tidied: None,
             id: None,
@@ -784,6 +994,7 @@ async fn run_direct(
         app,
         AgentEvent::ToolCall(ToolCall {
             app: "Browser".to_string(),
+            icon: None,
             name: name.clone(),
             args: [("goal".to_string(), transcript.to_string())].into(),
             requires_confirmation: false,
@@ -966,13 +1177,14 @@ async fn confirm_write(
         said: &call.said,
         names: &call.names,
     };
-    let mut event = gate_call(
-        call.name.clone(),
-        toolkit,
-        &call.args,
-        schema.as_ref(),
-        &ctx,
-    );
+    // The card wears the app as its permission names it — Notes, not macOS.
+    let named = call
+        .gate
+        .as_ref()
+        .map_or_else(|| toolkit.clone(), |g| g.app.clone());
+    // Looked up beside the card's reads, never ahead of them.
+    let icon = icon_for(&named, &toolkit);
+    let mut event = gate_call(call.name.clone(), named, &call.args, schema.as_ref(), &ctx);
     event.id = call.step;
     if let (Some(composio), Some(preview)) = (composio, event.preview.as_deref_mut()) {
         // Each read is cut off inside `enrich` (1.5s, all at once), so a slow
@@ -987,6 +1199,7 @@ async fn confirm_write(
             return None;
         }
     }
+    event.icon = icon.await;
     asks_for(&mut event, call.gate.as_ref(), can_always);
     // After `enrich`, whose lookups may be what names the destination. A card
     // offering "Always allow" is exactly one the grant left to the card: Ask,
@@ -1012,7 +1225,7 @@ fn asks_for(call: &mut ToolCall, gate: Option<&Gate>, can_always: bool) {
 /// offline from the arguments and what the run's reads already named.
 fn gate_call(
     name: String,
-    toolkit: String,
+    app: String,
     args: &serde_json::Value,
     schema: Option<&serde_json::Value>,
     ctx: &aloud_agent::preview::Context,
@@ -1021,7 +1234,8 @@ fn gate_call(
         preview: Some(Box::new(aloud_agent::preview::render(
             &name, args, schema, ctx,
         ))),
-        app: toolkit,
+        app,
+        icon: None,
         name,
         args: display_args(args),
         requires_confirmation: true,
@@ -1067,6 +1281,7 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
         aloud_agent::LoopEvent::ToolCallStart { step, name, args } => {
             AgentEvent::ToolCall(ToolCall {
                 app: tool_app(&name),
+                icon: None,
                 name,
                 args: display_args(&args),
                 // The gate is enforced in the loop; the panel just shows the call.
@@ -1675,6 +1890,71 @@ mod tests {
         // Drawn by its hand mapping now, which names what it quits.
         assert_eq!(preview.title, "Quit Safari");
         assert_eq!(preview.fields[0].value, "Safari");
+    }
+
+    fn wrote(app: &str, show: Option<(&str, &str)>, tidied: Option<&str>) -> Wrote {
+        Wrote {
+            app: app.into(),
+            toolkit: "macOS".into(),
+            show: show.map(|(app, target)| ShowTarget {
+                app: app.into(),
+                target: target.into(),
+            }),
+            tidied: tidied.map(Into::into),
+        }
+    }
+
+    /// A toast says it all worked, so it is only due when it did: a write ran,
+    /// nothing failed or was declined, and the closing words fit one line.
+    #[test]
+    fn a_toast_is_due_only_when_every_write_worked_and_nothing_needs_reading() {
+        let note = [wrote("Notes", Some(("Notes", "x-coredata://n/p1")), None)];
+        let (by, toast) = toast_for(&note, false, "Created the note “Groceries”.").expect("due");
+        assert_eq!(by.app, "Notes");
+        assert_eq!(toast.text, "Created the note “Groceries”.");
+        assert_eq!(toast.app, "Notes");
+
+        assert!(
+            toast_for(&[], false, "It is 4pm in Tokyo.").is_none(),
+            "an answer, no write"
+        );
+        assert!(
+            toast_for(&note, true, "Created the note.").is_none(),
+            "something failed"
+        );
+        assert!(
+            toast_for(&note, false, "Created the note.\nIt has 3 items.").is_none(),
+            "two lines are read in the panel"
+        );
+        assert!(toast_for(&note, false, &"long ".repeat(30)).is_none());
+    }
+
+    /// One action at most: Undo where a reverse exists, else Show, from the
+    /// latest write that offers either; none when nothing does.
+    #[test]
+    fn a_toast_offers_undo_over_show_and_nothing_it_cannot_do() {
+        let action = |writes: &[Wrote]| toast_for(writes, false, "Done.").unwrap().1.action;
+        let tidy = wrote("Finder", Some(("Finder", "~/Downloads")), Some("Downloads"));
+        let note = wrote("Notes", Some(("Notes", "x-coredata://n/p1")), None);
+        assert_eq!(
+            action(&[tidy.clone(), note.clone()]),
+            Some(ToastAction::Undo {
+                folder: "Downloads".into()
+            })
+        );
+        assert_eq!(
+            action(std::slice::from_ref(&note)),
+            Some(ToastAction::Show {
+                app: "Notes".into(),
+                target: "x-coredata://n/p1".into()
+            })
+        );
+        assert_eq!(action(&[wrote("Slack", None, None)]), None);
+        // The toast wears the last write's app, whatever offered the action.
+        let both = [note, wrote("Slack", None, None)];
+        assert_eq!(toast_for(&both, false, "Done.").unwrap().0.app, "Slack");
+        // Silence is still a line.
+        assert_eq!(toast_for(&[tidy], false, "  ").unwrap().1.text, "Done");
     }
 
     fn slack_send(named_rule: bool) -> Gate {
