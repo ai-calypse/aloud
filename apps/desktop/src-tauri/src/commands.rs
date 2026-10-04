@@ -551,7 +551,7 @@ fn warm_previews(app: &AppHandle, key: String) {
         .lock()
         .ok()
         .and_then(|s| {
-            aloud_agent::brains(&s.groq_api_key, &s.nvidia_api_key, &s.gemini_api_key).ok()
+            aloud_agent::brains(&s.groq_api_key, &s.gemini_api_key, &s.nvidia_api_key).ok()
         })
         .unwrap_or_default();
     tauri::async_runtime::spawn(async move {

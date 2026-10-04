@@ -108,7 +108,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     if brains.is_empty() {
-        anyhow::bail!("no brain to evaluate: set GROQ_API_KEY, NVIDIA_API_KEY or GEMINI_API_KEY");
+        anyhow::bail!("no brain to evaluate: set GROQ_API_KEY, GEMINI_API_KEY or NVIDIA_API_KEY");
     }
 
     let cases: Vec<Case> = include_str!("../evals/commands.jsonl")

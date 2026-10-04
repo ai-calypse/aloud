@@ -101,9 +101,10 @@ all run one agent) and **Meeting**. A command goes:
    play/pause/next, volume, and obvious web commands ("go to youtube", "search
    lofi on youtube") straight to the browser engine.
 2. **The brain** — one tool-calling model at a time, best first
-   (`aloud_agent::brains`): Groq `openai/gpt-oss-120b`, then NVIDIA's
-   `nemotron-3.5-lightning` (thinking switched off in `aloud_llm`), then Gemini
-   Flash-Lite. A 429, a 5xx, a dead key or an unreachable endpoint moves the
+   (`aloud_agent::brains`): Groq `openai/gpt-oss-120b`, then Gemini
+   Flash-Lite, then NVIDIA's `nemotron-3.5-lightning` (fast, but it wanders
+   over a long run). The ~9,000-token prompt is past Groq's free 8,000 a
+   minute, so on a free key Gemini does most of the work. A 429, a 5xx, a dead key or an unreachable endpoint moves the
    command to the next brain mid-run; a tool turn times out at 12s, and a brain
    still cooling down is skipped without a request. Tools, in the order the
    prompt gives them: `ALOUD_*` Mac intent tools (the model writes content into

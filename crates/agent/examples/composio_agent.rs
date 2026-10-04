@@ -24,11 +24,11 @@ async fn main() -> anyhow::Result<()> {
     let settings = Settings::load();
     let brains = aloud_agent::brains(
         &settings.groq_api_key,
-        &settings.nvidia_api_key,
         &settings.gemini_api_key,
+        &settings.nvidia_api_key,
     )?;
     if brains.is_empty() {
-        anyhow::bail!("no GROQ_API_KEY, NVIDIA_API_KEY or GEMINI_API_KEY (settings or .env)");
+        anyhow::bail!("no GROQ_API_KEY, GEMINI_API_KEY or NVIDIA_API_KEY (settings or .env)");
     }
     if settings.composio_api_key.trim().is_empty() {
         anyhow::bail!("no COMPOSIO_API_KEY (settings or .env)");

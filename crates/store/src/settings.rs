@@ -49,13 +49,13 @@ pub enum OverlayDisplay {
 pub struct Settings {
     pub groq_api_key: String,
     pub composio_api_key: String,
-    /// Gemini key: the last brain commands fall back to — see
-    /// `aloud_agent::brains` for the order.
+    /// Gemini key: the brain behind Groq — see `aloud_agent::brains` for the
+    /// order.
     pub gemini_api_key: String,
     /// Cerebras key. Off the brain list while its account is unpaid; the eval
     /// still reaches it by name.
     pub cerebras_api_key: String,
-    /// NVIDIA key: the brain behind Groq, for when Groq's per-minute budget trips.
+    /// NVIDIA key: the last brain, for when Groq's and Gemini's budgets trip.
     pub nvidia_api_key: String,
     /// Deepgram key. Always-listening streams the mic to Deepgram's Flux, which
     /// decides where a spoken request ends; without it the mode falls back to a
