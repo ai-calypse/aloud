@@ -1,9 +1,12 @@
 import {
   AppWindowIcon,
   ArrowDownToLineIcon,
+  BatteryIcon,
   BellIcon,
   BotIcon,
+  CameraIcon,
   CheckIcon,
+  MicIcon,
   MusicIcon,
   TimerIcon,
   type LucideIcon,
@@ -18,8 +21,11 @@ import { cn } from "@/lib/utils";
 export const GLYPHS: Record<string, LucideIcon> = {
   agents: BotIcon,
   alert: BellIcon,
+  battery: BatteryIcon,
+  camera: CameraIcon,
   done: CheckIcon,
   download: ArrowDownToLineIcon,
+  mic: MicIcon,
   music: MusicIcon,
   timer: TimerIcon,
 };

@@ -78,6 +78,18 @@ export const ACTIONS: NotchAction[] = [
       return true;
     },
   },
+  {
+    // Also what the battery islands' Show button names.
+    id: "mac.power",
+    title: "Show battery",
+    keywords: ["battery", "charge", "power", "cycles", "health"],
+    section: "mac",
+    subsection: "power",
+    run: (ctx) => {
+      ctx.open("mac", "power");
+      return true;
+    },
+  },
   // notch-mac: actions end
   {
     // What a finished row's Show does: bring back what a write made.
