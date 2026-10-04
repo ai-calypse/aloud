@@ -1,4 +1,4 @@
-import type { PlannedCall, ToolCall, ToolResult } from "./bindings";
+import type { ActionPreview, PlannedCall, ToolCall, ToolResult } from "./bindings";
 import type { ToolArgs } from "./tool-views";
 
 /**
@@ -13,6 +13,8 @@ export type Step = {
   /** The tool's own argument object; views pick the fields worth showing. */
   args: ToolArgs;
   requiresConfirmation: boolean;
+  /** The gate's card, built in Rust from the real arguments. Only a write has one. */
+  preview?: ActionPreview | null;
   /** Set by Confirm/Cancel; undefined while this step's gate is open. */
   confirmed?: boolean;
   /** Kept whole: its `show` is what the finished row's Show button brings back. */
@@ -58,6 +60,9 @@ export function withCall(steps: Step[], call: ToolCall): Step[] {
         ...open,
         args: asArgs(call.args),
         requiresConfirmation: open.requiresConfirmation || call.requiresConfirmation,
+        // Only the gate event carries one; whichever of the pair lands second
+        // must not wipe it.
+        preview: call.preview ?? open.preview,
       },
     ];
   }
@@ -68,6 +73,7 @@ export function withCall(steps: Step[], call: ToolCall): Step[] {
       app: call.app,
       args: asArgs(call.args),
       requiresConfirmation: call.requiresConfirmation,
+      preview: call.preview,
     },
   ];
 }

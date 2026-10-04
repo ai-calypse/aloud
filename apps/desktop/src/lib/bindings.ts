@@ -287,6 +287,31 @@ export const events = {
 };
 
 /* Types */
+export type ActionPreview = {
+	kind: CardKind,
+	tier: Tier,
+	/**  The confirm button's label: Send, Create, Delete… */
+	verb: string,
+	/**  Verb plus resolved target. Never argument prose. */
+	title: string,
+	fields: Field[],
+	/**  Every shown argument past the main fields. Nothing set is dropped. */
+	more: Field[],
+	/**  Arguments the call passed, empties and defaults included. */
+	set: number,
+	/**  Arguments the tool takes: its schema's properties plus any extras passed. */
+	total: number,
+	risks: string[],
+	pickedBy: string | null,
+	recoverable: string | null,
+	safer: Safer | null,
+	/**  Exact-words countdown, in ms. */
+	autoMs: number | null,
+	revision: number,
+	/**  Permission scope label, e.g. "Slack · send messages". */
+	scope: string | null,
+};
+
 /**
  *  Which CLI to open in the worktree. Serde/specta so this is the one type the
  *  Tauri command and its TS binding use — no parallel enum to keep in sync.
@@ -541,6 +566,9 @@ export type BuildInfo = {
 	date: string,
 };
 
+/**  Which card layout draws the preview. */
+export type CardKind = "message" | "email" | "event" | "task" | "note" | "issue" | "row" | "file" | "share" | "update" | "delete" | "money" | "fallback";
+
 export type Config = {
 	hold: Binding | null,
 	toggle: Binding | null,
@@ -624,6 +652,22 @@ export type Entry = {
 	 *  The transcript outlives the WAV, so this is often null.
 	 */
 	audioPath: string | null,
+};
+
+export type Field = {
+	role: Role,
+	/**  RFC 6901 pointer into the call's arguments. */
+	path: string,
+	label: string,
+	value: string,
+	items: string[],
+	count: number,
+	/**  The display name an id resolved to. */
+	name: string | null,
+	unresolved: boolean,
+	before: string | null,
+	origin: Origin | null,
+	editable: boolean,
 };
 
 /**
@@ -745,6 +789,13 @@ export type Note = {
 	content: string,
 };
 
+/**  Whose words a text field holds. */
+export type Origin = 
+/**  The user said it. */
+"yours" | 
+/**  The model wrote it. */
+"aloud";
+
 /**
  *  Tells the overlay to play its exit, ahead of the window actually going away:
  *  the pill collapses while the window is still up, and [`hide`] takes the
@@ -848,6 +899,38 @@ export type QuotaWindow = {
 	 *  without a refetch.
 	 */
 	resetsAt: string | null,
+};
+
+/**  What a field is, which decides how the card draws it. */
+export type Role = 
+/**  Where a message goes: a channel or chat. */
+"destination" | 
+/**  Who it goes to: an address or attendee list. */
+"person" | "heading" | 
+/**  A date or time, already formatted. */
+"when" | 
+/**  Body text, shown in full and never truncated. */
+"text" | 
+/**  An amount with its currency folded in, in major units. */
+"money" | "path" | 
+/**  `value` is the full host; `items[0]` the whole URL. */
+"url" | 
+/**  An opaque identifier nothing has named yet. */
+"id" | 
+/**  One of a schema `enum`. */
+"pill" | 
+/**  An array or object: `count` entries, the first few in `items`. */
+"list" | 
+/**  A boolean that differs from its default. */
+"flag" | "plain";
+
+/**
+ *  A less destructive tool the card can offer instead, e.g. Trash over a
+ *  permanent delete.
+ */
+export type Safer = {
+	label: string,
+	tool: string,
 };
 
 export type SearchResult = {
@@ -1061,6 +1144,14 @@ export type StatsView = {
 } & Stats;
 
 /**
+ *  How hard the card makes it to say yes. Default-Always grants never reach a
+ *  card, so there is no tier below Confirm.
+ */
+export type Tier = "confirm" | 
+/**  Red, needs a click, never auto-runs, and "Always allow" cannot cover it. */
+"strict";
+
+/**
  *  A tool call for display. Kept separate from `ParsedAction` so the UI
  *  contract does not leak parser internals.
  */
@@ -1076,6 +1167,12 @@ export type ToolCall = {
 	args: { [key in string]: string },
 	/**  Whether this call pauses for confirmation before it runs (every write). */
 	requiresConfirmation: boolean,
+	/**
+	 *  What the gate's card shows, read from the real arguments. Only on the
+	 *  gate event; the start event and reads carry none. Boxed so every other
+	 *  event is not sized to the card.
+	 */
+	preview: ActionPreview | null,
 };
 
 export type ToolResult = {

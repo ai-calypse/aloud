@@ -6,13 +6,14 @@ import {
   withResult,
   type Step,
 } from "./agent-steps";
-import type { ToolCall, ToolResult } from "./bindings";
+import type { ActionPreview, ToolCall, ToolResult } from "./bindings";
 
 const call = (name: string, requiresConfirmation: boolean): ToolCall => ({
   name,
   app: "gmail",
   args: { subject: name, body: "hello", user_id: "me" },
   requiresConfirmation,
+  preview: null,
 });
 const ok: ToolResult = { success: true, message: "done", show: null };
 
@@ -67,6 +68,44 @@ describe("agent panel step folding", () => {
 
     expect(steps[0].result?.show).toEqual(show);
     expect(steps[1].result?.show).toBeNull();
+  });
+
+  /**
+   * Only the gate event carries the card. Folding the other event of the pair
+   * over it must keep it, or the gate falls back to a title and nothing else —
+   * the blank approval card the preview exists to end.
+   */
+  it("the gate keeps its preview when the start event folds in", () => {
+    const preview: ActionPreview = {
+      kind: "message",
+      tier: "confirm",
+      verb: "Send",
+      title: "Send message to general",
+      fields: [],
+      more: [],
+      set: 2,
+      total: 12,
+      risks: [],
+      pickedBy: null,
+      recoverable: null,
+      safer: null,
+      autoMs: null,
+      revision: 0,
+      scope: null,
+    };
+    const gate = { ...call("SLACK_CHAT_POST_MESSAGE", true), preview };
+    const start = call("SLACK_CHAT_POST_MESSAGE", false);
+
+    const inOrder = withCall(withCall([], start), gate);
+    const reversed = withCall(withCall([], gate), start);
+
+    for (const steps of [inOrder, reversed]) {
+      expect(steps).toHaveLength(1);
+      expect(steps[0].preview).toEqual(preview);
+      expect(pendingStep({ heard: "", steps })?.preview?.title).toBe(
+        "Send message to general",
+      );
+    }
   });
 
   it("treats a declined step as settled so it cannot re-open the gate", () => {

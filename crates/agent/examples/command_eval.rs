@@ -30,6 +30,8 @@
 //! An argument matcher is a case-insensitive substring, `{"eq": v}` or
 //! `{"or": [..]}`. `fast` asserts whether the no-model path takes it. A case
 //! whose tool this machine or account doesn't offer is skipped, not failed.
+//! A brain write that passes arguments its approval card would not show fails
+//! as "blank preview", however right the call.
 
 use aloud_agent::{Brain, ComposioClient};
 use aloud_native::fast::Fast;
@@ -235,6 +237,7 @@ async fn judge(
         with_prose: false,
         waited: Duration::ZERO,
     };
+    let mut blank = false;
     let fast = aloud_native::fast::route(&case.input, installed);
     if let Some(want) = case.fast {
         if want != fast.is_some() {
@@ -305,7 +308,7 @@ async fn judge(
                 tokio::time::sleep(wait).await;
                 turn = aloud_agent::first_turn(brain, &command, &tools, &more).await;
             }
-            match turn {
+            let called = match turn {
                 Ok(turn) => {
                     trace.with_prose = !turn.tool_calls.is_empty()
                         && turn
@@ -319,10 +322,29 @@ async fn judge(
                     })
                 }
                 Err(e) => return (Verdict::Fail(format!("error: {e:#}")), trace),
-            }
+            };
+            blank = called.as_ref().is_some_and(|(name, args)| {
+                tools
+                    .iter()
+                    .find(|t| &t.name == name && !t.read_only)
+                    .is_some_and(|tool| blank_preview(name, args, &tool.parameters))
+            });
+            called
         }
     };
-    (check(case, trace.called.as_ref()), trace)
+    // Right tool, right arguments, and still an approval card with nothing on
+    // it: the user would be confirming a write they cannot read.
+    match check(case, trace.called.as_ref()) {
+        Verdict::Pass if blank => (Verdict::Fail("blank preview".into()), trace),
+        verdict => (verdict, trace),
+    }
+}
+
+/// A write passed arguments, yet its card would show none of them.
+fn blank_preview(name: &str, args: &Value, schema: &Value) -> bool {
+    let passed = args.as_object().is_some_and(|a| !a.is_empty());
+    let preview = aloud_agent::preview::build(name, args, Some(schema));
+    passed && preview.fields.iter().all(|f| f.value.trim().is_empty())
 }
 
 #[derive(Deserialize)]

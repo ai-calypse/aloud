@@ -270,6 +270,7 @@ function Tuner() {
             </Action>
             <Action onClick={() => send({ agent: "planned" })}>Agent (queued)</Action>
             <Action onClick={() => send({ agent: "pending" })}>Agent (approve)</Action>
+            <Action onClick={() => send({ agent: "fallback" })}>Agent (schema card)</Action>
             <Action onClick={() => send({ agent: "run" })}>Agent (done)</Action>
             <Action onClick={() => send({ dismissing: true })}>Dismiss</Action>
             <Action

@@ -41,3 +41,66 @@ export const AGENT_PREVIEW: Run = {
     },
   ],
 };
+
+const slackText = "Standup moves to 10:30 tomorrow.\nSame link as always.";
+
+/**
+ * A write no hand view draws, so its gate shows the schema-built card. The
+ * preview is what `aloud_agent::preview::build` makes of these arguments
+ * against Slack's live chat.postMessage schema (the Rust test fixture).
+ */
+export const FALLBACK_PREVIEW: Run = {
+  heard: "Tell general on Slack that standup moves to 10:30",
+  steps: [
+    {
+      name: "SLACK_CHAT_POST_MESSAGE",
+      app: "slack",
+      args: { channel: "general", markdown_text: slackText },
+      requiresConfirmation: true,
+      preview: {
+        kind: "message",
+        tier: "confirm",
+        verb: "Send",
+        title: "Send message to general",
+        fields: [
+          {
+            role: "destination",
+            path: "/channel",
+            label: "Channel",
+            value: "general",
+            items: [],
+            count: 0,
+            name: null,
+            unresolved: false,
+            before: null,
+            origin: null,
+            editable: false,
+          },
+          {
+            role: "text",
+            path: "/markdown_text",
+            label: "Markdown Text",
+            value: slackText,
+            items: [],
+            count: 0,
+            name: null,
+            unresolved: false,
+            before: null,
+            origin: null,
+            editable: false,
+          },
+        ],
+        more: [],
+        set: 2,
+        total: 12,
+        risks: [],
+        pickedBy: null,
+        recoverable: null,
+        safer: null,
+        autoMs: null,
+        revision: 0,
+        scope: null,
+      },
+    },
+  ],
+};

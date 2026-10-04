@@ -129,22 +129,11 @@ pub fn tools(installed: &[aloud_selection::InstalledApp]) -> Vec<NativeTool> {
         let mut tools: Vec<NativeTool> = catalogue::ACTIONS
             .iter()
             .filter(|action| app_installed(action.app, installed))
-            .map(|action| {
-                let mut parameters = (action.params)();
-                if action.repeatable {
-                    parameters["properties"]["times"] = json!({
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": MAX_TIMES,
-                        "description": "How many times to do it; default 1"
-                    });
-                }
-                NativeTool {
-                    name: action.name.to_string(),
-                    description: action.description.to_string(),
-                    parameters,
-                    read_only: action.read_only,
-                }
+            .map(|action| NativeTool {
+                name: action.name.to_string(),
+                description: action.description.to_string(),
+                parameters: schema(action),
+                read_only: action.read_only,
             })
             .collect();
 
@@ -174,6 +163,30 @@ pub fn tools(installed: &[aloud_selection::InstalledApp]) -> Vec<NativeTool> {
 
         tools
     }
+}
+
+/// The JSON schema a native action takes, exactly as the model is offered it,
+/// so a gate the fast path reaches without any model can still read its
+/// arguments. `None` for anything not in the catalogue, the Shortcuts tool
+/// included.
+pub fn params(name: &str) -> Option<Value> {
+    catalogue::ACTIONS
+        .iter()
+        .find(|action| action.name == name)
+        .map(schema)
+}
+
+fn schema(action: &catalogue::Action) -> Value {
+    let mut parameters = (action.params)();
+    if action.repeatable {
+        parameters["properties"]["times"] = json!({
+            "type": "integer",
+            "minimum": 1,
+            "maximum": MAX_TIMES,
+            "description": "How many times to do it; default 1"
+        });
+    }
+    parameters
 }
 
 /// Runs a native tool by name. Returns `None` when `name` is not one of ours,

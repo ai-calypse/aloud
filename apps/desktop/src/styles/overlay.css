@@ -910,6 +910,132 @@
   background: color-mix(in srgb, var(--sys-blue) 85%, white);
 }
 
+/* The card a write shows at its gate (components/preview/kit.tsx).
+ *
+ * Rows on hairlines, the same idiom as the gate around it, rather than a
+ * bordered box: a box inside the black panel reads as another surface dropped
+ * in. Every value arrives as finished text; nothing here truncates one, because
+ * the clipped part of an address or a message is the part that gets sent. */
+.preview {
+  display: flex;
+  flex-direction: column;
+}
+
+.preview__row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--sep);
+}
+
+.preview__row:first-child {
+  padding-top: 0;
+}
+
+.preview__label {
+  font-size: 11px;
+  color: var(--text2);
+  overflow-wrap: anywhere;
+}
+
+.preview__value {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.preview__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+}
+
+.preview__chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px 7px;
+  border-radius: var(--radius-chip);
+  background: var(--field);
+}
+
+.preview__body {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.preview__when,
+.preview__heading {
+  font-weight: 600;
+}
+
+.preview__money {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.preview__path {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 12px;
+}
+
+.preview__id {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* A value standing in for a name nobody looked up: flagged, never hidden. */
+.preview__flag {
+  padding: 0 6px;
+  border-radius: var(--radius-chip);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.preview__faint,
+.preview__foot {
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.preview__foot {
+  margin: 0;
+  padding-top: 7px;
+}
+
+.preview__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 0 0;
+  border: 0;
+  background: none;
+  color: var(--text2);
+  font: inherit;
+  font-size: 11px;
+  cursor: default;
+}
+
+/* The panel springs its own height to the rows that open, so the chevron is
+   the only thing here that moves. */
+.preview__chevron {
+  transition: rotate var(--dur-fast) var(--ease-out);
+}
+
+.preview__more[data-state="open"] .preview__chevron {
+  rotate: 90deg;
+}
+
 /* The Finder search result grid — Option 1, a dense 4-up thumbnail wall. Sits
    in a step body, so it inherits the panel's black ground; no card chrome, the
    same rule the confirm gate follows. The panel measures its own new height
