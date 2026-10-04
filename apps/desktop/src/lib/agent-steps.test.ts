@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   groupSteps,
   pendingStep,
+  stepStatus,
   withCall,
+  withDecision,
   withResult,
   type Step,
 } from "./agent-steps";
@@ -14,6 +16,7 @@ const call = (name: string, requiresConfirmation: boolean): ToolCall => ({
   args: { subject: name, body: "hello", user_id: "me" },
   requiresConfirmation,
   preview: null,
+  canAlways: false,
 });
 const ok: ToolResult = { success: true, message: "done", show: null };
 
@@ -112,6 +115,28 @@ describe("agent panel step folding", () => {
     let steps = startAndGate([], "GMAIL_SEND_EMAIL");
     steps = steps.map((s) => ({ ...s, confirmed: false }));
     expect(pendingStep({ heard: "", steps })).toBeUndefined();
+  });
+
+  /** Rust reports a declined write as a failed result; the user said no. */
+  it("reads a declined gate as cancelled, not failed", () => {
+    let steps = startAndGate([], "SLACK_SEND_MESSAGE");
+    steps = withDecision(steps, false);
+    steps = withResult(steps, { success: false, message: "failed", show: null });
+    expect(stepStatus(steps[0], false)).toBe("cancelled");
+    expect(pendingStep({ heard: "", steps })).toBeUndefined();
+
+    // A real failure after a yes still reads as one.
+    let approved = withDecision(startAndGate([], "SLACK_SEND_MESSAGE"), true);
+    approved = withResult(approved, { success: false, message: "failed", show: null });
+    expect(stepStatus(approved[0], false)).toBe("failed");
+  });
+
+  it("carries the gate's Always-allow offer onto the step", () => {
+    const steps = withCall(withCall([], call("SLACK_SEND_MESSAGE", false)), {
+      ...call("SLACK_SEND_MESSAGE", true),
+      canAlways: true,
+    });
+    expect(steps[0].canAlways).toBe(true);
   });
 });
 

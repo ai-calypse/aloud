@@ -10,6 +10,7 @@
 //! graded against the original command before it is accepted — see [`verify`].
 
 use crate::composio::{ComposioClient, ToolDef};
+use crate::permissions::{Gate, RunTaint};
 use crate::preview::Names;
 use crate::Brain;
 use aloud_llm::{LlmError, Message};
@@ -488,6 +489,9 @@ pub struct Command<'a> {
     pub front: Option<&'a str>,
     pub document: Option<&'a str>,
     pub project: Option<&'a str>,
+    /// Text was selected when the user spoke: outside content from the first
+    /// round, for the named-app rule (see `permissions::RunTaint`).
+    pub selection: bool,
 }
 
 /// A write the gate is asked about: the call as the model made it, and the
@@ -502,6 +506,9 @@ pub struct ProposedCall {
     /// What the run's reads have named so far, so the card shows "#launch"
     /// rather than the id the model copied out of a list.
     pub names: Names,
+    /// The app and action its saved grant is keyed by, and whether the
+    /// named-app rule fired. The caller holds the grants, so it decides.
+    pub gate: Option<Gate>,
 }
 
 /// The gate's answer: run with these arguments (the user may have edited
@@ -561,6 +568,7 @@ where
         front,
         document,
         project,
+        selection,
     } = command;
     // A command with several steps can't end on its first round's writes:
     // "take 5 photos" ended after one.
@@ -595,6 +603,7 @@ where
     // Screen control asks once per run, not per click; see `screen_gate`.
     let mut screen_approved = false;
     let mut screen = ScreenSession(false);
+    let mut taint = RunTaint::new(selection);
 
     let mut round = 0usize;
     while round < max_rounds {
@@ -928,22 +937,29 @@ where
                 // A mocked run drove no screen, so there is no session to end.
                 screen.0 = mock.is_none();
             }
-            let gate_needed = if aloud_screen::is_screen_write(&name) {
-                screen_gate(&mut screen_approved)
-            } else {
-                !aloud_engine::is_engine_tool(&name)
-                    && !aloud_native::low_risk(&name, &args)
-                    && is_write(&name, &tools)
-            };
+            // Every other write reaches `confirm`, default-Always ones included:
+            // the saved grants live with the caller, which decides whether a
+            // card is shown. Screen control still asks once per run.
+            let tool = tools.iter().find(|t| t.name == name).cloned();
+            let gate = crate::permissions::gate(&name, &args, tool.as_ref(), said, front, &taint);
+            let gate_needed = gate.is_some()
+                && (!aloud_screen::is_screen_write(&name) || screen_gate(&mut screen_approved));
 
             let mut args = args;
             let declined = if gate_needed {
+                // A yes to what outside content asked for names that app for
+                // the rest of the run.
+                let named = gate
+                    .as_ref()
+                    .filter(|g| g.named_rule)
+                    .map(|g| g.app.clone());
                 let proposed = ProposedCall {
                     name: name.clone(),
                     args: args.clone(),
-                    tool: tools.iter().find(|t| t.name == name).cloned(),
+                    tool,
                     said: said.to_string(),
                     names: names.clone(),
+                    gate,
                 };
                 match confirm(proposed)
                     .instrument(tracing::info_span!("confirm", tool = %name, toolkit))
@@ -951,6 +967,9 @@ where
                 {
                     Verdict::Run(approved) => {
                         args = approved;
+                        if let Some(app) = named {
+                            taint.clear(&app);
+                        }
                         false
                     }
                     Verdict::Decline => {
@@ -1004,6 +1023,12 @@ where
                 .await;
                 let success = tool_succeeded(&result);
                 span.record("ok", success);
+                // Text someone else wrote is in the context from here on.
+                taint.saw(
+                    !is_write(&name, &tools)
+                        || aloud_engine::is_engine_tool(&name)
+                        || aloud_screen::is_screen_tool(&name),
+                );
                 any_failed |= !success;
                 round_native_ok &= success;
                 let show = if success {
@@ -1426,6 +1451,7 @@ mod tests {
                 front: Some("Safari"),
                 document: Some("/Users/me/page.html"),
                 project: None,
+                selection: false,
             },
             Callbacks {
                 on_event: |event| {
@@ -1515,6 +1541,7 @@ mod tests {
                 front: None,
                 document: None,
                 project: None,
+                selection: false,
             },
             Callbacks {
                 on_event: |_| {},
@@ -1546,6 +1573,104 @@ mod tests {
             (Some("launch"), false)
         );
         assert_eq!(card.fields[1].origin, Some(crate::preview::Origin::Yours));
+    }
+
+    fn calls(names: &[&str]) -> serde_json::Value {
+        let calls: Vec<serde_json::Value> = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                serde_json::json!({ "id": i.to_string(), "type": "function",
+                    "function": { "name": name, "arguments": "{}" } })
+            })
+            .collect();
+        serde_json::json!({ "choices": [{ "message": { "tool_calls": calls } }] })
+    }
+
+    fn content(text: &str) -> serde_json::Value {
+        serde_json::json!({ "choices": [{ "message": { "content": text } }] })
+    }
+
+    /// Plays `replies` through the loop with every tool mocked and every gate
+    /// approved, returning the gates `confirm` was asked about.
+    async fn gates_for(replies: Vec<serde_json::Value>, tools: &[ToolDef]) -> Vec<Option<Gate>> {
+        let (brain, _) = fake_brain(replies);
+        let mock = |_: &str, _: &serde_json::Value| r#"{"successful":true}"#.to_string();
+        let gated = std::sync::Mutex::new(Vec::new());
+        run(
+            &[brain],
+            &ComposioClient::new("").unwrap(),
+            Command {
+                said: "summarise my inbox",
+                prompt: "summarise my inbox",
+                tools,
+                more: &[],
+                front: None,
+                document: None,
+                project: None,
+                selection: false,
+            },
+            Callbacks {
+                on_event: |_| {},
+                confirm: |call: ProposedCall| {
+                    gated.lock().unwrap().push(call.gate);
+                    async move { Verdict::Run(call.args) }
+                },
+                ask: |_: String| async { None },
+                cancelled: || false,
+                mock: Some(&mock),
+            },
+        )
+        .await
+        .unwrap();
+        gated.into_inner().unwrap()
+    }
+
+    /// The caller decides from the saved grant, so the loop must hand it the
+    /// key and the named-app rule. Read before a send to an app the user never
+    /// named, the first send asks as outside content's; a yes clears Slack for
+    /// the rest of the run.
+    #[tokio::test]
+    async fn a_gated_write_reaches_confirm_with_its_gate() {
+        let replies = vec![
+            calls(&["GMAIL_FETCH_EMAILS", "SLACK_SEND_MESSAGE"]),
+            calls(&["SLACK_SEND_MESSAGE"]),
+            content("Posted the summary."),
+            content("FINISHED"),
+        ];
+        let tools = [
+            tool("GMAIL_FETCH_EMAILS", true),
+            tool("SLACK_SEND_MESSAGE", false),
+        ];
+        let gates = gates_for(replies, &tools).await;
+        assert_eq!(gates.len(), 2, "each send asks the caller: {gates:?}");
+        let first = gates[0].as_ref().expect("a write carries its gate");
+        assert_eq!(first.key, "slack:send-and-share");
+        assert!(first.named_rule, "the inbox read was outside content");
+        assert!(first.reason.is_some());
+        assert!(
+            !gates[1].as_ref().unwrap().named_rule,
+            "a yes cleared Slack"
+        );
+    }
+
+    #[tokio::test]
+    async fn reads_and_engine_tools_never_reach_the_gate() {
+        let replies = vec![
+            calls(&[
+                "GMAIL_FETCH_EMAILS",
+                aloud_engine::BROWSER_TASK,
+                aloud_screen::READ,
+            ]),
+            content("Here is the summary."),
+            content("FINISHED"),
+        ];
+        let tools = [
+            tool("GMAIL_FETCH_EMAILS", true),
+            tool(aloud_engine::BROWSER_TASK, false),
+            tool(aloud_screen::READ, true),
+        ];
+        assert_eq!(gates_for(replies, &tools).await, Vec::new());
     }
 
     #[test]

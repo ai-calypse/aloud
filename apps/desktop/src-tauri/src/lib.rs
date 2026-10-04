@@ -113,6 +113,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hotkeys_permitted,
             commands::permissions,
             commands::open_permission_settings,
+            commands::list_permissions,
+            commands::set_permission,
             commands::build_info,
             commands::overlay_displays,
             commands::recent_timings,

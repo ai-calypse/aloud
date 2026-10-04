@@ -6,7 +6,12 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
-import { commands, type FinderResults, type ShowTarget } from "@/lib/bindings";
+import {
+  commands,
+  type FinderResults,
+  type GateDecision,
+  type ShowTarget,
+} from "@/lib/bindings";
 import { Button } from "@/components/ui/button";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
@@ -14,11 +19,13 @@ import { PreviewCard } from "@/components/preview/cards";
 import {
   groupSteps,
   pendingStep,
+  stepStatus,
   type Run,
   type Step,
 } from "@/lib/agent-steps";
 import {
   askFor,
+  asksFirst,
   editsFor,
   gateFor,
   labelFor,
@@ -35,10 +42,13 @@ export function AgentRun({
   run,
   bodyRef,
   onAddTab,
+  onDecide,
 }: {
   run: Run;
   bodyRef: React.RefObject<HTMLDivElement | null>;
   onAddTab?: () => void;
+  /** The open gate was answered: `confirmed` false is a decline. */
+  onDecide?: (confirmed: boolean) => void;
 }) {
   const pending = pendingStep(run);
 
@@ -133,7 +143,13 @@ export function AgentRun({
 
       {/* Keyed on the step, so a second gate in one run starts from its own
           arguments instead of inheriting the first one's draft. */}
-      {pending && <ConfirmGate key={`${pending.name}-${run.steps.length}`} step={pending} />}
+      {pending && (
+        <ConfirmGate
+          key={`${pending.name}-${run.steps.length}`}
+          step={pending}
+          onDecide={onDecide}
+        />
+      )}
 
       {/* Keyed on the question so a second one clears the first one's answer. */}
       {run.question && !pending && (
@@ -299,35 +315,69 @@ function AskGate({ asked }: { asked: { question: string; options: string[] } }) 
  * Every other write shows the card Rust drew from its real arguments
  * (`PreviewCard`), so no write is ever approved from a title alone.
  */
-function ConfirmGate({ step }: { step: Step }) {
+function ConfirmGate({
+  step,
+  onDecide,
+}: {
+  step: Step;
+  onDecide?: (confirmed: boolean) => void;
+}) {
   const fields = editsFor(step.name);
   const [draft, setDraft] = useState<ToolArgs>(step.args);
-  // A form is a demand, and the agent reaches this one on its own initiative.
-  // Ask first; the fields only appear for someone who said yes.
+  // A form is a demand, and the agent reaches the contact one on its own
+  // initiative. Ask first; the fields only appear for someone who said yes.
+  // A send with an editable recipient has no question and shows them at once.
   const [filling, setFilling] = useState(false);
-  const asking = fields.length > 0 && !filling;
+  const asking = asksFirst(step.name, draft) && !filling;
   const card = fields.length === 0 ? step.preview : null;
-  const strict = card?.tier === "strict";
+  // Strict cards take a click: no Enter, focus on Don't allow, no Always.
+  const strict = step.preview?.tier === "strict";
 
   // Only what the user could have changed. Rust folds it back into the real
   // nested arguments; anything untouched keeps the value the model chose.
-  const confirm = (approved: boolean) =>
+  const decide = (decision: GateDecision) => {
+    const approved = decision !== "decline";
     void commands.confirmAgent(
-      approved,
+      decision,
       approved && fields.length > 0 ? asStrings(draft) : null,
     );
+    onDecide?.(approved);
+  };
+
+  // ApprovalCard's keys: Enter allows once, Escape declines. Capture phase so
+  // the panel's own Escape does not also fire; a form keeps its own Enter.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        decide("decline");
+      } else if (e.key === "Enter" && !strict && !asking && fields.length === 0) {
+        // Not also the focused button's own click.
+        e.preventDefault();
+        decide("allowOnce");
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
 
   return (
-    <div className="agent__confirm" role="group">
+    <div className="agent__confirm" role="group" data-danger={strict || undefined}>
       <p
         className={strict ? "agent__confirm-title agent__confirm-title--danger" : "agent__confirm-title"}
       >
-        {asking && askFor(step.name, draft)
+        {asking
           ? askFor(step.name, draft)
           : gateFor(step.name, draft) ||
             card?.title ||
             `${labelFor(step.name, draft)} — this writes to ${step.app}.`}
       </p>
+      {step.preview?.scope && <p className="agent__scope">{step.preview.scope}</p>}
+      {step.preview?.risks.map((risk) => (
+        <p className="agent__reason" key={risk}>
+          {risk}
+        </p>
+      ))}
       {/* Approving a write without seeing what it will do is not a gate, so the
           body shows here even though the step list is otherwise quiet. */}
       {asking ? null : fields.length > 0 ? (
@@ -351,34 +401,39 @@ function ConfirmGate({ step }: { step: Step }) {
       ) : (
         card && <PreviewCard preview={card} />
       )}
-      <div className="agent__actions">
-        <button className="agent__action" onClick={() => confirm(false)}>
-          {asking ? "No thanks" : "Cancel"}
-        </button>
-        {asking ? (
-          <button
-            className="agent__action agent__action--go"
-            autoFocus
-            onClick={() => setFilling(true)}
-          >
+      {asking ? (
+        <div className="perm__acts">
+          <button className="btn btn--allow" autoFocus onClick={() => setFilling(true)}>
             Save contact
           </button>
-        ) : (
-          <button
-            className={
-              strict
-                ? "agent__action agent__action--go agent__action--danger"
-                : "agent__action agent__action--go"
-            }
-            // A strict write takes a click: Enter left on it is a payment or a
-            // permanent delete made by reflex.
-            autoFocus={fields.length === 0 && !strict}
-            onClick={() => confirm(true)}
-          >
-            {card?.verb || "Confirm"}
+          <button className="btn btn--deny" onClick={() => decide("decline")}>
+            No thanks
           </button>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="perm__acts">
+          <button
+            className="btn btn--allow"
+            autoFocus={fields.length === 0 && !strict}
+            onClick={() => decide("allowOnce")}
+          >
+            {step.preview?.verb || "Allow"} once
+            {!strict && fields.length === 0 && <span className="btn__k">⏎</span>}
+          </button>
+          {step.canAlways && !strict && (
+            <button className="btn btn--always" onClick={() => decide("allowAlways")}>
+              Always allow
+            </button>
+          )}
+          <button
+            className="btn btn--deny"
+            autoFocus={strict}
+            onClick={() => decide("decline")}
+          >
+            Don't allow <span className="btn__k">esc</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -411,6 +466,9 @@ function ShowButton({ show }: { show: ShowTarget }) {
 }
 
 function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
+  // Before the result: a declined write's result is a failure, but the user
+  // said no — a neutral mark, not the red one.
+  if (step.confirmed === false) return <XIcon className="agent__icon" size={14} />;
   if (step.result) {
     return step.result.success ? (
       <CheckIcon className="agent__icon" size={14} />
@@ -418,7 +476,6 @@ function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
       <XIcon className="agent__icon agent__icon--bad" size={14} />
     );
   }
-  if (step.confirmed === false) return <XIcon className="agent__icon" size={14} />;
   if (pending)
     return <TriangleAlertIcon className="agent__icon agent__icon--warn" size={14} />;
   return <LoaderCircleIcon className="agent__icon animate-spin" size={14} />;
@@ -430,11 +487,4 @@ function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
  */
 function rowKey(step: Step, pending: boolean): string {
   return `${labelFor(step.name, step.args)}|${stepStatus(step, pending)}`;
-}
-
-function stepStatus(step: Step, pending: boolean): string {
-  if (step.result) return step.result.success ? "done" : "failed";
-  if (step.confirmed === false) return "cancelled";
-  if (pending) return "needs approval";
-  return "running…";
 }

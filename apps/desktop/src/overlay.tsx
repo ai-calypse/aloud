@@ -18,6 +18,7 @@ import {
 } from "./lib/bindings";
 import {
   withCall,
+  withDecision,
   withResult,
   withoutPlanned,
   type Run,
@@ -1110,6 +1111,9 @@ function Overlay() {
                   run={agent}
                   bodyRef={answerRef}
                   onAddTab={tabs.length < MAX_TABS ? addTab : undefined}
+                  onDecide={(confirmed) =>
+                    setAgent((r) => r && { ...r, steps: withDecision(r.steps, confirmed) })
+                  }
                 />
               ) : null}
             </>

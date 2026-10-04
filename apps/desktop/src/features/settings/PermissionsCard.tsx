@@ -55,7 +55,7 @@ export function PermissionsCard() {
   if (statuses.length === 0) return null;
 
   return (
-    <Group title="Permissions">
+    <Group title="System access">
       {statuses.map(({ permission, granted }) => (
         <Row
           key={permission}

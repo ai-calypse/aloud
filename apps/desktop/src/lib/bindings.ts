@@ -64,6 +64,13 @@ export const commands = {
 	permissions: () => __TAURI_INVOKE<PermissionStatus[]>("permissions"),
 	/**  Opens the System Settings pane that grants `permission`. */
 	openPermissionSettings: (permission: Permission) => typedError<null, string>(__TAURI_INVOKE("open_permission_settings", { permission })),
+	/**
+	 *  Every write this Mac's apps offer, at its default unless saved otherwise,
+	 *  plus every saved grant — a connected service shows up once a card's
+	 *  "Always allow" has saved one.
+	 */
+	listPermissions: () => typedError<PermissionRow[], string>(__TAURI_INVOKE("list_permissions")),
+	setPermission: (key: string, app: string, action: string, grant: Grant) => typedError<null, string>(__TAURI_INVOKE("set_permission", { key, app, action, grant })),
 	buildInfo: () => __TAURI_INVOKE<BuildInfo>("build_info"),
 	/**
 	 *  Monitor names, to fill the overlay's "Show on" picker. Unnamed monitors are
@@ -248,11 +255,12 @@ export const commands = {
 	 */
 	agentQuota: () => typedError<Quota, string>(__TAURI_INVOKE("agent_quota")),
 	/**
-	 *  Resolves the pending confirmation. Called by the panel's Cancel/Confirm
-	 *  buttons; `edits` carries any field the user filled in or corrected before
-	 *  approving, in the same flattened form the panel was given.
+	 *  Resolves the pending confirmation. Called by the gate's buttons; `edits`
+	 *  carries any field the user filled in or corrected before approving, in the
+	 *  same flattened form the panel was given. "Always allow" also saves the
+	 *  grant, so the next call like it runs with no card.
 	 */
-	confirmAgent: (approved: boolean, edits: { [key in string]: string } | null) => __TAURI_INVOKE<void>("confirm_agent", { approved, edits }),
+	confirmAgent: (decision: GateDecision, edits: { [key in string]: string } | null) => __TAURI_INVOKE<void>("confirm_agent", { decision, edits }),
 	/**
 	 *  Resolves the pending question. `None` is the user dismissing it, which the
 	 *  loop reports to the model as unanswered rather than as an error.
@@ -694,6 +702,12 @@ export type FoundFile = {
 	thumbnail: string | null,
 };
 
+/**  The panel's answer to a gate. */
+export type GateDecision = "allowOnce" | "allowAlways" | "decline";
+
+/**  What the user chose for one app and action. */
+export type Grant = "always" | "ask" | "never";
+
 /**
  *  What the settings pane needs to draw: whether ours are in, and who owns
  *  approvals if anyone.
@@ -846,6 +860,16 @@ export type OverlayStyleChanged = {
 export type Permission = 
 /**  Global hotkeys, synthetic paste, and reading the focused selection. */
 "accessibility" | "microphone";
+
+/**  One app and action in the Settings pane, with what Aloud may do there. */
+export type PermissionRow = {
+	key: string,
+	app: string,
+	action: string,
+	grant: Grant,
+	/**  "Always allow" can never apply, so the row offers Ask or Never only. */
+	strict: boolean,
+};
 
 export type PermissionStatus = {
 	permission: Permission,
@@ -1173,6 +1197,11 @@ export type ToolCall = {
 	 *  event is not sized to the card.
 	 */
 	preview: ActionPreview | null,
+	/**
+	 *  The gate may offer "Always allow": false for strict actions and for a
+	 *  write outside content asked for.
+	 */
+	canAlways: boolean,
 };
 
 export type ToolResult = {
