@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notch Sections</title>
+<style>
+/* Layout prototype for Aloud's expanded notch panel. Palette and curves are
+   copied from apps/desktop/src/styles/{tokens,motion}.css (floating surface),
+   so what reads right here reads right in the overlay. */
+:root {
+  --notch-fill: #000;
+  --bg: #1e1e20;
+  --surface: #161618;
+  --card: #232325;
+  --fg: #f5f5f7;
+  --text2: #a1a1a6;
+  --text3: #8a8a90;
+  --sep: rgb(255 255 255 / 0.1);
+  --field: rgb(255 255 255 / 0.07);
+  --field-hi: rgb(255 255 255 / 0.13);
+  --action: #0a84ff;
+  --action-fg: #fff;
+  --green: #30d158;
+  --orange: #ff9f0a;
+  --red: #ff453a;
+  --teal: #64d2ff;
+  --purple: #bf5af2;
+  --desk: #2a2b30;
+
+  --radius-panel: 26px;
+  --radius-card: 12px;
+  --radius-row: 8px;
+  --radius-pill: 999px;
+
+  --dur-fast: 160ms;
+  --dur-base: 240ms;
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  /* Critically damped spring, response 0.31 (motion.css). */
+  --spring: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --spring: linear(0, 0.0439, 0.1421, 0.2607, 0.3804, 0.4912, 0.5887, 0.6716, 0.7404, 0.7964, 0.8415, 0.8773, 0.9055, 0.9276, 0.9447, 0.9579, 0.9681, 0.9758, 0.9818, 0.9863, 0.9897, 0.9923, 0.9942, 0.9957, 0.9968, 0.9976, 0.9982, 0.9987, 1);
+  --spring-dur: 456ms;
+
+  --z-panel: 10;
+  --z-notch: 20;
+  --z-palette: 30;
+
+  color-scheme: dark;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #0e0e10; color: var(--fg); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--action); outline-offset: 2px; border-radius: 6px;
+}
+kbd { font: 500 11px/1 -apple-system, system-ui, sans-serif; color: var(--text2); padding: 3px 5px; border-radius: 5px; background: var(--field); }
+
+/* ---- Desktop stage ---------------------------------------------------- */
+.stage {
+  position: relative;
+  height: 640px;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 30% 110%, #3a2f2a 0%, transparent 60%),
+    radial-gradient(90% 80% at 85% 0%, #23303d 0%, transparent 55%),
+    var(--desk);
+}
+.menubar {
+  position: absolute; inset: 0 0 auto 0; height: 32px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 18px; font-size: 13px; color: rgb(255 255 255 / 0.92);
+  background: rgb(0 0 0 / 0.22);
+}
+.menubar__left, .menubar__right { display: flex; gap: 18px; align-items: center; }
+.menubar__left b { font-weight: 600; }
+.window {
+  position: absolute; left: 6%; top: 120px; width: 46%; height: 420px;
+  border-radius: 12px; background: #1b1c1f; border: 1px solid rgb(255 255 255 / 0.06);
+  box-shadow: 0 30px 60px rgb(0 0 0 / 0.35);
+}
+.window::before {
+  content: ""; position: absolute; left: 14px; top: 13px; width: 52px; height: 12px;
+  background: radial-gradient(circle at 6px 6px, #ff5f57 5.5px, transparent 6px),
+              radial-gradient(circle at 26px 6px, #febc2e 5.5px, transparent 6px),
+              radial-gradient(circle at 46px 6px, #28c840 5.5px, transparent 6px);
+}
+.window__lines { position: absolute; inset: 52px 24px; display: grid; gap: 12px; align-content: start; }
+.window__lines i { display: block; height: 9px; border-radius: 4px; background: rgb(255 255 255 / 0.06); }
+
+/* ---- The island: one black shape that morphs between states ------------- */
+.island {
+  position: absolute; top: 0; left: 50%;
+  width: var(--w); height: var(--h);
+  transform: translateX(-50%);
+  background: var(--notch-fill);
+  border-radius: 0 0 var(--r) var(--r);
+  z-index: var(--z-panel);
+  transition:
+    width var(--spring-dur) var(--spring),
+    height var(--spring-dur) var(--spring),
+    border-radius var(--spring-dur) var(--spring);
+  --w: 200px; --h: 32px; --r: 10px;
+}
+/* Close slower than open: equal timings read as a box toggling. */
+.island[data-closing] { transition-duration: calc(var(--spring-dur) * 1.2); }
+/* Concave shoulders weld it to the menu bar, as the hardware cutout is. */
+.island::before, .island::after {
+  content: ""; position: absolute; top: 0; width: 12px; height: 12px;
+  background: radial-gradient(circle at var(--sx) 100%, transparent 11.5px, var(--notch-fill) 12px);
+}
+.island::before { left: -12px; --sx: 0; }
+.island::after { right: -12px; --sx: 100%; }
+.island[data-state="closed"] { --w: 200px; --h: 32px; --r: 10px; }
+.island[data-state="live"]   { --w: 340px; --h: 32px; --r: 12px; }
+.island[data-state="hud"]    { --w: 300px; --h: 44px; --r: 16px; }
+.island[data-state="toast"]  { --w: 400px; --h: 70px; --r: 22px; }
+.island[data-state="open"]   { --w: 780px; --h: 468px; --r: var(--radius-panel); }
+
+/* Each state's content: visible only in its state, fading in once the shape
+   has mostly arrived so text never rides a moving edge. */
+.face {
+  position: absolute; inset: 0; opacity: 0; pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-in);
+}
+.island[data-state="live"] .face--live,
+.island[data-state="hud"] .face--hud,
+.island[data-state="toast"] .face--toast,
+.island[data-state="open"] .face--open {
+  opacity: 1; pointer-events: auto;
+  transition: opacity var(--dur-base) var(--ease-out) 90ms;
+}
+.cutout-hit { position: absolute; top: 0; left: 50%; width: 200px; height: 32px; transform: translateX(-50%); z-index: var(--z-notch); }
+
+/* Collapsed live activities: either side of the camera, never under it. */
+.face--live { display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 10px; }
+.live-left, .live-right { display: flex; align-items: center; gap: 7px; font: 600 12px/1 -apple-system, system-ui; font-variant-numeric: tabular-nums; }
+.art { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #ff7a59, #a33ea1); flex: none; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--orange); }
+.eq { display: flex; gap: 2px; align-items: flex-end; height: 12px; }
+.eq i { width: 2px; border-radius: 1px; background: var(--fg); animation: eq 0.9s var(--ease-out) infinite alternate; }
+.eq i:nth-child(2) { animation-delay: -0.3s; } .eq i:nth-child(3) { animation-delay: -0.6s; }
+@keyframes eq { from { height: 3px; } to { height: 12px; } }
+
+.face--hud { display: flex; align-items: center; gap: 10px; padding: 12px 18px 0; }
+.hud-bar { flex: 1; height: 5px; border-radius: 3px; background: var(--field-hi); overflow: hidden; }
+.hud-bar i { display: block; height: 100%; width: 62%; background: var(--fg); border-radius: 3px; }
+
+.face--toast { display: flex; align-items: center; gap: 12px; padding: 30px 14px 0 12px; }
+.app-icon { width: 30px; height: 30px; border-radius: 8px; flex: none; display: grid; place-items: center; font: 700 13px/1 -apple-system, system-ui; }
+.toast-text { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn-action { height: 28px; padding: 0 14px; border-radius: var(--radius-pill); background: var(--action); color: var(--action-fg); font-weight: 600; }
+.btn-action:active { transform: scale(0.97); }
+.btn-close { width: 20px; height: 20px; border-radius: 50%; background: var(--field-hi); display: grid; place-items: center; color: var(--text2); font-size: 11px; flex: none; }
+
+/* ---- Expanded panel --------------------------------------------------- */
+.face--open { display: grid; grid-template-rows: auto auto 1fr auto; padding: 38px 0 0; }
+.head { display: flex; align-items: flex-end; gap: 6px; padding: 0 16px; border-bottom: 1px solid var(--sep); }
+.sections { position: relative; display: flex; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.sections::-webkit-scrollbar { display: none; }
+.section-tab {
+  position: relative; height: 38px; padding: 0 11px; white-space: nowrap;
+  color: var(--text2); font-weight: 500; font-size: 13px;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.section-tab:hover { color: var(--fg); }
+.section-tab[aria-selected="true"] { color: var(--fg); }
+.section-tab .k { display: none; }
+.indicator {
+  position: absolute; bottom: -1px; left: 0; height: 2px; width: 10px;
+  border-radius: 2px 2px 0 0; background: var(--fg);
+  transform-origin: 0 0; will-change: transform;
+}
+.head-tools { display: flex; align-items: center; gap: 4px; padding-bottom: 6px; }
+.tool { height: 26px; padding: 0 8px; border-radius: var(--radius-row); color: var(--text2); display: flex; gap: 6px; align-items: center; }
+.tool:hover { background: var(--field); color: var(--fg); }
+
+.subs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px 0; }
+.subs { position: relative; display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--radius-pill); background: var(--field); }
+.sub {
+  position: relative; z-index: 1; height: 26px; padding: 0 12px; border-radius: var(--radius-pill);
+  color: var(--text2); font-weight: 500; white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.sub:hover { color: var(--fg); }
+.sub[aria-selected="true"] { color: var(--fg); }
+/* Width, not scaleX: a scaled pill stretches its round ends. A 26px-tall
+   absolutely placed chip is cheap to lay out. */
+.sub-pill { position: absolute; top: 3px; left: 0; height: 26px; width: 0; border-radius: var(--radius-pill); background: var(--field-hi); }
+.status { color: var(--text3); font-size: 12px; white-space: nowrap; }
+
+.content { position: relative; overflow: hidden; padding: 14px 16px 0; }
+.view { position: absolute; inset: 14px 16px 0; overflow: auto; scrollbar-width: none; }
+.view::-webkit-scrollbar { display: none; }
+.foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 16px 12px; color: var(--text3); font-size: 11.5px; border-top: 1px solid var(--sep); }
+.foot .includes { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.foot .keys { display: flex; gap: 10px; align-items: center; flex: none; }
+
+/* Content vocabulary: rows on hairlines, one lead per view, no nested cards. */
+.cols { display: grid; grid-template-columns: 1.15fr 1fr; gap: 18px; height: 100%; }
+.lead { font: 600 30px/1.1 -apple-system, system-ui; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.lead-sub { color: var(--text2); margin-top: 4px; }
+.label { color: var(--text3); font-size: 11.5px; font-weight: 500; margin: 0 0 6px; }
+.rows { list-style: none; margin: 0; padding: 0; }
+.row { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 2px; border-bottom: 1px solid var(--sep); }
+.row:last-child { border-bottom: 0; }
+.row .grow { flex: 1; min-width: 0; }
+.row .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .s { color: var(--text2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .v { color: var(--text2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ico { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; flex: none; font: 600 11px/1 -apple-system, system-ui; color: #fff; }
+.chip { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: var(--radius-pill); background: var(--field); color: var(--text2); font-size: 12px; white-space: nowrap; }
+.chip--go { background: var(--action); color: var(--action-fg); font-weight: 600; }
+.chip--ok { color: var(--green); }
+.chip--warn { color: var(--orange); }
+.btn-quiet { height: 26px; padding: 0 10px; border-radius: var(--radius-row); color: var(--text2); }
+.btn-quiet:hover { background: var(--field); color: var(--fg); }
+.bar { height: 6px; border-radius: 3px; background: var(--field-hi); overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 3px; background: var(--fg); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+.tile { display: grid; gap: 6px; justify-items: center; padding: 10px 6px; border-radius: var(--radius-card); text-align: center; }
+.tile:hover { background: var(--field); }
+.tile .thumb { width: 54px; height: 54px; border-radius: 10px; display: grid; place-items: center; font: 600 12px/1 -apple-system, system-ui; color: #fff; }
+.tile span { font-size: 12px; color: var(--text2); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mono { font: 12px/1.55 ui-monospace, "SF Mono", Menlo, monospace; color: #d6d6da; white-space: pre; }
+.ring { width: 150px; height: 150px; border-radius: 50%; display: grid; place-items: center;
+  background: conic-gradient(var(--orange) 0 62%, var(--field-hi) 62% 100%); }
+.ring > div { width: 132px; height: 132px; border-radius: 50%; background: var(--notch-fill); display: grid; place-items: center; text-align: center; }
+.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--field); }
+.seg span { padding: 4px 11px; border-radius: var(--radius-pill); color: var(--text2); font-size: 12px; }
+.seg span.on { background: var(--field-hi); color: var(--fg); }
+.toggle { width: 34px; height: 20px; border-radius: 10px; background: var(--field-hi); position: relative; flex: none; }
+.toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform var(--dur-fast) var(--ease-out); }
+.toggle.on { background: var(--green); }
+.toggle.on::after { transform: translateX(14px); }
+.slider { flex: 1; height: 4px; border-radius: 2px; background: var(--field-hi); position: relative; }
+.slider i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--fg); }
+.editor { width: 100%; height: 100%; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: 14px/1.6 -apple-system, system-ui; }
+.zone-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.zone { height: 56px; border-radius: 8px; border: 1.5px dashed rgb(255 255 255 / 0.18); display: grid; place-items: center; color: var(--text2); font-size: 11.5px; }
+.zone.on { border-style: solid; border-color: var(--action); background: rgb(10 132 255 / 0.15); color: var(--fg); }
+
+/* ---- ⌘K palette: inside the panel, never a page-level modal ------------ */
+.palette {
+  position: absolute; left: 50%; top: 84px; width: 440px; transform: translateX(-50%);
+  background: #1c1c1f; border: 1px solid var(--sep); border-radius: 14px;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.55); z-index: var(--z-palette);
+  opacity: 0; scale: 0.98; pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-in), scale var(--dur-fast) var(--ease-in);
+}
+.palette[data-open] { opacity: 1; scale: 1; pointer-events: auto; transition: opacity var(--dur-base) var(--ease-out), scale var(--spring-dur) var(--spring); }
+.palette input { width: 100%; height: 44px; border: 0; outline: 0; padding: 0 14px; background: transparent; color: var(--fg); font: 15px -apple-system, system-ui; border-bottom: 1px solid var(--sep); }
+.palette ul { list-style: none; margin: 0; padding: 6px; max-height: 260px; overflow: auto; }
+.palette li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--text2); }
+.palette li b { color: var(--fg); font-weight: 500; }
+.palette li[aria-selected="true"] { background: var(--field-hi); }
+
+/* ---- Controls under the stage ----------------------------------------- */
+.controls { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; justify-content: center; padding: 16px; border-bottom: 1px solid #1f1f22; }
+.states { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--field); }
+.states button { height: 28px; padding: 0 13px; border-radius: var(--radius-pill); color: var(--text2); font-weight: 500; }
+.states button[aria-pressed="true"] { background: var(--field-hi); color: var(--fg); }
+.hint { color: var(--text3); font-size: 12px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+
+/* ---- Feature map ------------------------------------------------------ */
+.map { max-width: 1120px; margin: 0 auto; padding: 36px 20px 80px; }
+.map h2 { font: 600 22px/1.2 -apple-system, system-ui; letter-spacing: -0.01em; margin: 0 0 6px; text-wrap: balance; }
+.map > p { color: var(--text2); margin: 0 0 22px; max-width: 70ch; }
+.map-sec { display: grid; grid-template-columns: 170px 1fr; gap: 18px; padding: 16px 0; border-top: 1px solid #222226; }
+.map-sec h3 { margin: 0; font: 600 15px/1.3 -apple-system, system-ui; }
+.map-sec h3 small { display: block; color: var(--text3); font-weight: 400; font-size: 12px; margin-top: 2px; }
+.map-subs { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px 20px; }
+.map-sub > button { font-weight: 600; color: var(--fg); margin-bottom: 6px; }
+.map-sub > button:hover { color: var(--action); }
+.feat { display: flex; flex-wrap: wrap; gap: 5px; }
+.feat span { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: var(--radius-pill); background: #1a1a1d; color: #c9c9ce; font-size: 12px; }
+.feat span em { font-style: normal; font-size: 10.5px; font-weight: 600; color: var(--text3); }
+.feat span.have { color: var(--fg); }
+.feat span.have::before { content: "✓"; color: var(--green); font-size: 11px; }
+.feat span.L em { color: var(--orange); }
+.legend { display: flex; gap: 14px; color: var(--text3); font-size: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+
+@media (max-width: 860px) {
+  .island[data-state="open"] { --w: calc(100vw - 16px); }
+  .map-sec { grid-template-columns: 1fr; }
+  .cols { grid-template-columns: 1fr; }
+  .window { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .island, .island[data-closing] { transition-duration: 1ms; }
+  .eq i { animation: none; height: 8px; }
+  .face, .palette { transition-duration: 1ms !important; transition-delay: 0ms !important; }
+}
+</style>
+</head>
+<body>
+
+<section class="stage" aria-label="Desktop with the notch">
+  <div class="menubar">
+    <div class="menubar__left"><span aria-hidden="true"></span><b>Cursor</b><span>File</span><span>Edit</span><span>View</span><span>Go</span></div>
+    <div class="menubar__right"><span>82%</span><span>Wi-Fi</span><span id="clock">Sat 9:41 AM</span></div>
+  </div>
+  <div class="window" aria-hidden="true"><div class="window__lines"><i style="width:62%"></i><i style="width:80%"></i><i style="width:44%"></i><i style="width:70%"></i><i style="width:56%"></i><i style="width:76%"></i><i style="width:38%"></i></div></div>
+
+  <div class="island" id="island" data-state="closed">
+    <div class="face face--live" aria-hidden="true">
+      <div class="live-left"><span class="art"></span><span class="eq"><i></i><i></i><i></i></span></div>
+      <div class="live-right"><span class="dot" title="Agent needs you"></span><span>18:42</span></div>
+    </div>
+    <div class="face face--hud" aria-hidden="true">
+      <span aria-hidden="true">🔊</span><div class="hud-bar"><i></i></div><span style="font-variant-numeric:tabular-nums;color:var(--text2)">62</span>
+    </div>
+    <div class="face face--toast" aria-hidden="true">
+      <button class="btn-close" aria-label="Dismiss">✕</button>
+      <span class="app-icon" style="background:#ff9f0a">✓</span>
+      <span class="toast-text">Reminder: Send Maya the deck</span>
+      <button class="btn-action">Show</button>
+    </div>
+
+    <div class="face face--open">
+      <div class="head">
+        <div class="sections" role="tablist" aria-label="Sections" id="sections">
+          <span class="indicator" id="indicator" aria-hidden="true"></span>
+        </div>
+        <div class="head-tools">
+          <button class="tool" id="openPalette" aria-label="Search everything">⌕ <kbd>⌘K</kbd></button>
+          <button class="tool" aria-label="Settings">⚙︎</button>
+        </div>
+      </div>
+      <div class="subs-row">
+        <div class="subs" role="tablist" aria-label="Subsections" id="subs"><span class="sub-pill" id="subPill" aria-hidden="true"></span></div>
+        <span class="status" id="status"></span>
+      </div>
+      <div class="content" id="content"></div>
+      <div class="foot">
+        <span class="includes" id="includes"></span>
+        <span class="keys"><span><kbd>⌘1–9</kbd> sections</span><span><kbd>⇥</kbd> next</span><span><kbd>esc</kbd> close</span></span>
+      </div>
+      <div class="palette" id="palette" role="dialog" aria-label="Search everything">
+        <input id="paletteInput" placeholder="Search features, sections, actions…" autocomplete="off" spellcheck="false">
+        <ul id="paletteList" role="listbox"></ul>
+      </div>
+    </div>
+  </div>
+  <button class="cutout-hit" id="cutout" aria-label="Open the notch"></button>
+</section>
+
+<div class="controls">
+  <div class="states" role="group" aria-label="Island state" id="states">
+    <button data-s="closed">Closed</button><button data-s="live">Live activities</button><button data-s="hud">HUD</button><button data-s="toast">Toast</button><button data-s="open">Open</button>
+  </div>
+  <div class="hint"><span>Click the notch to open</span><span><kbd>⌘1–9</kbd> switch section</span><span><kbd>←</kbd><kbd>→</kbd> sections</span><span><kbd>⇥</kbd> subsection</span><span><kbd>⌘K</kbd> search</span></div>
+</div>
+
+<main class="map" id="map">
+  <h2>Every feature, and where it lives</h2>
+  <p>Nine sections across the top, each with its subsections as a segmented control. Things that interrupt (HUDs, alerts, calls) are islands, not tabs. Things you set once live in Settings. Click any subsection to jump there in the panel above.</p>
+  <div class="legend"><span><b style="color:var(--green)">✓</b> already in Aloud</span><span><em style="font-style:normal">S M L</em> effort, from docs/notchy-features.md</span><span style="color:var(--orange)">L = hard or risky</span></div>
+  <div id="mapBody"></div>
+</main>
+
+<script>
+/* ---------------------------------------------------------------------------
+ * The information architecture. Every Notchy feature appears exactly once,
+ * in a section, as an island, or in Settings. `f` is [name, effort, have].
+ * ------------------------------------------------------------------------- */
+const SECTIONS = [
+  { id: "now", name: "Now", blurb: "the glance", status: "3 live · Design sync in 25 min", subs: [
+    { id: "overview", name: "Overview", f: [["Multiple Live Activities","M",1]], view: "overview" },
+    { id: "activity", name: "Activity", f: [["Shell Activity","S"],["Developer API","S",1]], view: "activity" },
+  ]},
+  { id: "agents", name: "Agents", blurb: "voice + coding agents", status: "1 waiting for you", subs: [
+    { id: "voice", name: "Voice", f: [["Aloud commands (ours)","—",1]], view: "voice" },
+    { id: "coding", name: "Coding", f: [["Agent Activity","S",1],["Agent Approvals","S",1]], view: "coding" },
+    { id: "usage", name: "Usage", f: [["AI Usage Tracker","S",1]], view: "usage" },
+    { id: "prs", name: "Pull requests", f: [["GitHub PRs","S",1]], view: "prs" },
+    { id: "terminal", name: "Terminal", f: [["Notch Terminal","M"]], view: "terminal" },
+  ]},
+  { id: "media", name: "Media", blurb: "what's playing", status: "Spotify · AirPods Pro", subs: [
+    { id: "playing", name: "Now Playing", f: [["Now Playing","M",1],["Live Audio Spectrum","M"],["Peek on Hover","S",1]], view: "playing" },
+    { id: "lyrics", name: "Lyrics", f: [["Synced Lyrics","S"]], view: "lyrics" },
+    { id: "sound", name: "Sound", f: [["Audio Switcher","S",1],["Sound Mixer","L"],["Mic Mute","S",1]], view: "sound" },
+    { id: "devices", name: "Devices", f: [["AirPods Manager","M"],["Device Battery","S"]], view: "devices" },
+  ]},
+  { id: "focus", name: "Focus", blurb: "deep work", status: "Focus: Work", subs: [
+    { id: "timer", name: "Timer", f: [["Pomodoro Timer","M"],["Drift-free Stopwatch","S"],["Timer Mascots","S",1]], view: "timer" },
+    { id: "awake", name: "Keep Awake", f: [["Keep Awake","S"],["Focus Mode","M"]], view: "awake" },
+    { id: "notes", name: "Notes", f: [["Quick Notes","S",1]], view: "notes" },
+    { id: "call", name: "Call prep", f: [["Zoom Teleprompter","S"],["Camera Mirror","S"]], view: "call" },
+  ]},
+  { id: "shelf", name: "Shelf", blurb: "files in flight", status: "4 items", subs: [
+    { id: "files", name: "Files", f: [["File Shelf","M",1],["AirDrop from the Shelf","S"],["Image Converter","S"],["Zip & Unzip","S"]], view: "files" },
+    { id: "shots", name: "Screenshots", f: [["Screenshot Shelf","S"],["Screen Capture","S"]], view: "shots" },
+    { id: "downloads", name: "Downloads", f: [["Download Alerts","S"]], view: "downloads" },
+    { id: "drives", name: "Drives", f: [["Drive Eject","S"]], view: "drives" },
+  ]},
+  { id: "clip", name: "Clipboard", blurb: "everything you copied", status: "128 clips · 3 pinned", subs: [
+    { id: "history", name: "History", f: [["Clipboard History","M",1],["Clipboard Smart Actions","S"],["OCR & Search","M"]], view: "history" },
+    { id: "snippets", name: "Snippets", f: [["Text Snippets","S"]], view: "snippets" },
+    { id: "colors", name: "Colors", f: [["Color Eyedropper","S"]], view: "colors" },
+  ]},
+  { id: "today", name: "Today", blurb: "time and the world", status: "21° · 3 events", subs: [
+    { id: "calendar", name: "Calendar", f: [["Menu Bar Calendar","S"]], view: "calendar" },
+    { id: "reminders", name: "Reminders", f: [["Apple Reminders","S",1]], view: "reminders" },
+    { id: "weather", name: "Weather", f: [["Live Weather","S"]], view: "weather" },
+    { id: "stocks", name: "Stocks", f: [["Stocks Ticker","S"]], view: "stocks" },
+    { id: "inbox", name: "Inbox", f: [["Notification Mirror","M"]], view: "inbox" },
+  ]},
+  { id: "mac", name: "Mac", blurb: "the machine", status: "CPU 18% · 82%", subs: [
+    { id: "stats", name: "Stats", f: [["System Stats","S"]], view: "stats" },
+    { id: "power", name: "Power", f: [["Full Charge Island","S"]], view: "power" },
+    { id: "privacy", name: "Privacy", f: [["Privacy Indicator","S"]], view: "privacy" },
+    { id: "windows", name: "Windows", f: [["Window Snapping","M",1]], view: "windows" },
+    { id: "display", name: "Display", f: [["Keyboard Backlight","M"],["External Display Control","L"]], view: "display" },
+    { id: "menubar", name: "Menu bar", f: [["Menu Bar Icon Hiding","M"],["Menu Bar Detach","M"]], view: "menubar" },
+  ]},
+  { id: "launch", name: "Launch", blurb: "start anything", status: "", subs: [
+    { id: "apps", name: "Apps", f: [["App Launcher","S",1]], view: "apps" },
+    { id: "shortcuts", name: "Shortcuts", f: [["Apple Shortcuts","S",1]], view: "shortcuts" },
+    { id: "search", name: "Search", f: [["Search & Translate","S"],["Command Palette","M"]], view: "search" },
+  ]},
+];
+const ISLANDS = [["System HUDs","M",1],["Alt HUD Styles","S"],["Battery HUD","S"],["Caps Lock HUD","S"],["Keystroke HUD","S"],["Keyboard Cleaning Lock","S"],["Call Island","M"],["Message Island","M",1]];
+const SETTINGS = [["Hide the Notch","M"],["Hidden from Screen Capture","S"],["Custom Idle Animation","S"],["Pill on Any Mac","S",1],["Gestures & Hover Open","S",1],["Liquid Glass UI","S",1],["Automatic Updates","S",1],["Knock to Control","S/L",1],["100% Native","—"]];
+const SKIPPED = [["Face Unlock","L"],["Desktop Widgets","L"],["Lock Screen Widgets","L"]];
+
+/* ---------------------------------------------------------------------------
+ * Views: one lead per view, rows on hairlines. Fixture data only.
+ * ------------------------------------------------------------------------- */
+const ic = (bg, t) => `<span class="ico" style="background:${bg}">${t}</span>`;
+const row = (lead, t, s, v) => `<li class="row">${lead || ""}<div class="grow"><div class="t">${t}</div>${s ? `<div class="s">${s}</div>` : ""}</div>${v || ""}</li>`;
+const VIEWS = {
+  overview: () => `<div class="cols"><div><p class="label">Live now</p><ul class="rows">
+      ${row('<span class="art" style="width:26px;height:26px;border-radius:7px"></span>', "Blinding Lights", "The Weeknd · Spotify", '<span class="v">1:42 / 3:20</span>')}
+      ${row(ic("#ff9f0a", "◷"), "Focus session", "2 of 4 · ends 10:24", '<span class="v">18:42</span>')}
+      ${row(ic("#1c1c1e;border:1px solid var(--sep)", "C"), "Claude · aloud-tauri", "Wants to run cargo test", '<span class="chip chip--go">Review</span>')}
+      ${row(ic("#30d158", "↓"), "report-q3.pdf", "Downloading · 74%", '<span class="v">12 MB</span>')}
+    </ul></div><div><p class="label">Next</p><div class="lead">2:30 PM</div><div class="lead-sub">Design sync · in 25 min · Zoom</div>
+    <ul class="rows" style="margin-top:14px">${row(ic("#64d2ff", "☀"), "21° Partly cloudy", "High 24° · rain at 6 PM")}${row(ic("#30d158", "⚡"), "Battery 82%", "About 6 hrs left")}</ul></div></div>`,
+  activity: () => `<p class="label">Long-running, from your shell and scripts</p><ul class="rows">
+      ${row(ic("#2c2c2e", "$"), "pnpm build", "aloud-tauri · 1m 12s", '<span class="chip">Running</span>')}
+      ${row(ic("#2c2c2e", "$"), "cargo test --workspace", "Finished · 544 passed", '<span class="chip chip--ok">Done</span>')}
+      ${row(ic("#5e5ce6", "API"), "deploy.sh → Developer API", "Posted “Deploy finished” 4m ago", '<span class="v">4m</span>')}</ul>`,
+  voice: () => `<div class="cols"><div><p class="label">Last command</p><div style="font-size:15px;font-weight:500">“email david the project update and ask to sync thursday”</div>
+      <ul class="rows" style="margin-top:10px">${row('<span style="color:var(--green)">✓</span>', "Drafted an email to david@company.com")}${row('<span style="color:var(--orange)">!</span>', "Sending an email to david", "", '<span class="chip">Needs approval</span>')}</ul></div>
+      <div><p class="label">Earlier</p><ul class="rows">${row("", "Took 3 photos", "Photo Booth · 9:12 AM")}${row("", "Created note Groceries", "Notes · 9:03 AM")}${row("", "Opened aloud-tauri in Cursor", "8:51 AM")}</ul></div></div>`,
+  coding: () => `<ul class="rows">
+      ${row(ic("#d97757", "C"), "Claude · aloud-tauri", "Wants to run: cargo test --workspace", '<span style="display:flex;gap:6px"><button class="btn-quiet">Deny</button><span class="chip chip--go">Allow</span></span>')}
+      ${row(ic("#10a37f", "X"), "Codex · website", "Editing faq.tsx · turn 6 · $0.42", '<span class="chip">Working</span>')}
+      ${row(ic("#d97757", "C"), "Claude · evals", "Finished · 12 turns · $1.10", '<span class="chip chip--ok">Done</span>')}</ul>`,
+  usage: () => `<div class="cols"><div><p class="label">Claude · 5-hour window</p><div class="lead">42%</div><div class="lead-sub">Resets 11:40 AM</div><div class="bar" style="margin-top:10px"><i style="width:42%"></i></div></div>
+      <div><ul class="rows">${row("", "Weekly", "Resets Mon", '<span class="v">61%</span>')}${row("", "Codex", "Plus plan", '<span class="v">18%</span>')}${row("", "Cursor", "Pro · fast requests", '<span class="v">203 / 500</span>')}</ul></div></div>`,
+  prs: () => `<ul class="rows">${row(ic("#2c2c2e", "#61"), "Gate replies: revisioned answers", "ai-calypse/aloud · checks passing", '<span class="chip chip--ok">Ready</span>')}${row(ic("#2c2c2e", "#62"), "Parallel steps in a round", "1 review requested", '<span class="chip chip--warn">Review</span>')}${row(ic("#2c2c2e", "#63"), "App-style previews", "Checks failing: clippy", '<span class="chip" style="color:var(--red)">Failing</span>')}</ul>`,
+  terminal: () => `<div class="mono">~/aloud-tauri on main
+❯ cargo test -p aloud-agent preview
+   Compiling aloud-agent v0.1.0
+    Finished test profile in 6.2s
+test result: ok. 42 passed; 0 failed
+❯ <span style="background:var(--fg);color:#000"> </span></div>`,
+  playing: () => `<div style="display:flex;gap:18px;align-items:center;height:100%">
+      <div style="width:150px;height:150px;border-radius:14px;background:linear-gradient(135deg,#ff7a59,#a33ea1);flex:none"></div>
+      <div style="flex:1;min-width:0"><div class="lead" style="font-size:24px">Blinding Lights</div><div class="lead-sub">The Weeknd · After Hours</div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:16px"><span class="v" style="color:var(--text2);font-size:12px">1:42</span><div class="slider"><i style="width:51%"></i></div><span class="v" style="color:var(--text2);font-size:12px">−1:38</span></div>
+      <div style="display:flex;gap:22px;justify-content:center;margin-top:14px;font-size:20px"><button aria-label="Previous">⏮</button><button aria-label="Pause">⏸</button><button aria-label="Next">⏭</button></div>
+      <div class="eq" style="height:22px;gap:3px;margin-top:12px;justify-content:center">${'<i style="width:3px"></i>'.repeat(14)}</div></div></div>`,
+  lyrics: () => `<div style="display:grid;gap:10px;font:600 20px/1.3 -apple-system,system-ui;letter-spacing:-0.01em">
+      <div style="color:var(--text3)">I've been tryna call</div><div style="color:var(--text3)">I've been on my own for long enough</div><div>Maybe you can show me how to love, maybe</div><div style="color:var(--text3)">I'm going through withdrawals</div></div><p class="label" style="margin-top:14px">Synced · LRCLIB</p>`,
+  sound: () => `<div class="cols"><div><p class="label">Output</p><ul class="rows">${row("", "AirPods Pro", "Connected", '<span style="color:var(--action)">●</span>')}${row("", "MacBook Pro Speakers", "")}${row("", "Studio Display", "")}</ul>
+      <ul class="rows" style="margin-top:8px">${row("", "Mute microphone", "Every meeting app at once", '<span class="toggle"></span>')}</ul></div>
+      <div><p class="label">Per app</p><ul class="rows">${row("", "Spotify", "", '<div class="slider" style="max-width:120px"><i style="width:70%"></i></div>')}${row("", "Zoom", "", '<div class="slider" style="max-width:120px"><i style="width:90%"></i></div>')}${row("", "Chrome", "", '<div class="slider" style="max-width:120px"><i style="width:35%"></i></div>')}</ul></div></div>`,
+  devices: () => `<div class="cols"><div><p class="label">AirPods Pro</p><div style="display:flex;gap:22px"><div><div class="lead">88%</div><div class="lead-sub">Left</div></div><div><div class="lead">91%</div><div class="lead-sub">Right</div></div><div><div class="lead">54%</div><div class="lead-sub">Case</div></div></div></div>
+      <div><ul class="rows">${row("", "Magic Keyboard", "", '<span class="v">76%</span>')}${row("", "Magic Mouse", "Charge soon", '<span class="v" style="color:var(--orange)">12%</span>')}${row("", "Sony WH-1000XM5", "", '<span class="v">63%</span>')}</ul></div></div>`,
+  timer: () => `<div style="display:flex;gap:26px;align-items:center;height:100%"><div class="ring"><div><div class="lead">18:42</div><div class="lead-sub">Focus 2 of 4</div></div></div>
+      <div style="flex:1"><div class="seg"><span class="on">Pomodoro</span><span>Stopwatch</span></div><ul class="rows" style="margin-top:10px">${row("", "Today", "3 sessions · 1h 15m", '<span class="v">🔥 5 days</span>')}${row("", "Next", "Break · 5 min")}</ul>
+      <div style="display:flex;gap:8px;margin-top:10px"><span class="chip chip--go">Pause</span><button class="btn-quiet">Skip</button><button class="btn-quiet">Reset</button></div></div></div>`,
+  awake: () => `<div class="lead">Awake</div><div class="lead-sub">Until 11:30 AM · display stays on</div><div class="seg" style="margin-top:14px"><span>Off</span><span>30 min</span><span class="on">2 hrs</span><span>Until…</span><span>Always</span></div>
+      <ul class="rows" style="margin-top:14px">${row("", "Focus", "Work · silences low-priority islands", '<span class="toggle on"></span>')}</ul>`,
+  notes: () => `<textarea class="editor" aria-label="Quick note">Ship checklist
+- push main
+- tag v0.4
+- tell Maya the deck is in Drive</textarea>`,
+  call: () => `<div class="cols"><div><p class="label">Teleprompter · under the camera</p><div style="font:500 17px/1.6 -apple-system,system-ui">Thanks everyone. Quick update: approvals now count down, and voice replies work on every card…</div><div class="seg" style="margin-top:10px"><span>Slow</span><span class="on">Medium</span><span>Fast</span></div></div>
+      <div><p class="label">Camera mirror</p><div style="aspect-ratio:4/3;border-radius:12px;background:linear-gradient(160deg,#3b3b40,#1d1d20);display:grid;place-items:center;color:var(--text3)">Camera preview</div></div></div>`,
+  files: () => `<div class="tiles">${[["#64d2ff","PDF","deck.pdf"],["#30d158","XLS","budget.xlsx"],["#bf5af2","PNG","hero@2x.png"],["#ff9f0a","ZIP","assets.zip"]].map(([c,k,n])=>`<div class="tile"><div class="thumb" style="background:${c}">${k}</div><span>${n}</span></div>`).join("")}</div>
+      <div style="display:flex;gap:8px;margin-top:12px"><span class="chip">AirDrop</span><span class="chip">Convert to JPEG</span><span class="chip">Zip</span><span class="chip">Clear</span></div>`,
+  shots: () => `<div class="tiles">${["9:31","9:18","Yesterday","Yesterday"].map(t=>`<div class="tile"><div class="thumb" style="background:linear-gradient(135deg,#2f3540,#1c1d22);width:84px">▭</div><span>Screenshot ${t}</span></div>`).join("")}</div><div style="margin-top:10px"><span class="chip">Capture region</span></div>`,
+  downloads: () => `<ul class="rows">${row(ic("#30d158", "↓"), "report-q3.pdf", "Chrome · 74%", '<div class="bar" style="width:110px"><i style="width:74%"></i></div>')}${row(ic("#64d2ff", "✓"), "invoice-0912.pdf", "Safari · just now", '<button class="btn-quiet">Reveal</button>')}${row(ic("#64d2ff", "✓"), "Figma.dmg", "Brave · 2h ago", '<button class="btn-quiet">Reveal</button>')}</ul>`,
+  drives: () => `<ul class="rows">${row(ic("#8e8e93", "⏏"), "Backup SSD", "512 GB · 41% used", '<span class="chip chip--go">Eject</span>')}${row(ic("#8e8e93", "⏏"), "SD Card", "Safe to disconnect", '<span class="chip chip--ok">Ejected</span>')}</ul>`,
+  history: () => `<input class="chip" style="width:100%;height:30px;border:0;outline:0;color:var(--fg);font-size:13px;margin-bottom:6px" placeholder="Search clips, including text inside images" aria-label="Search clips">
+      <ul class="rows">${row(ic("#0a84ff", "↗"), "https://notchy.dev/#features", "Link · 2m", '<span class="chip">Open</span>')}${row('<span class="ico" style="background:#ff7a59"></span>', "#FF7A59", "Color · 6m", '<span class="chip">Copy hex</span>')}${row(ic("#5e5ce6", "@"), "david@company.com", "Email · 12m", '<span class="chip">Compose</span>')}${row(ic("#2c2c2e", "T"), "Screenshot 9:31 · “Q3 revenue grew 12%”", "Image · text found", '<span class="v">📌</span>')}</ul>`,
+  snippets: () => `<ul class="rows">${row("", "Address", "221B Baker Street, London", '<kbd>;addr</kbd>')}${row("", "Thanks reply", "Thanks! I'll take a look today.", '<kbd>;ty</kbd>')}${row("", "PR template", "## What · ## Verified · ## Not verified", '<kbd>;pr</kbd>')}</ul>`,
+  colors: () => `<div style="display:flex;gap:10px;flex-wrap:wrap">${["#FF7A59","#0A84FF","#30D158","#1C1C1E","#F5F5F7","#BF5AF2"].map(c=>`<div style="display:grid;gap:6px;justify-items:center"><div style="width:52px;height:52px;border-radius:12px;background:${c};border:1px solid var(--sep)"></div><span style="font-size:11.5px;color:var(--text2)">${c}</span></div>`).join("")}</div><div style="margin-top:12px"><span class="chip chip--go">Pick a color</span></div>`,
+  calendar: () => `<ul class="rows">${row('<span class="v" style="width:62px">9:30 AM</span>', "Standup", "Google Meet")}${row('<span class="v" style="width:62px;color:var(--fg)">2:30 PM</span>', "Design sync", "Zoom · in 25 min", '<span class="chip chip--go">Join</span>')}${row('<span class="v" style="width:62px">5:00 PM</span>', "Gym", "")}</ul>`,
+  reminders: () => `<ul class="rows">${row('<span style="width:16px;height:16px;border-radius:50%;border:1.5px solid var(--text3)"></span>', "Send Maya the deck", "Today · 11:00 AM")}${row('<span style="width:16px;height:16px;border-radius:50%;border:1.5px solid var(--text3)"></span>', "Renew passport", "Friday")}${row('<span style="width:16px;height:16px;border-radius:50%;background:var(--orange)"></span>', "Book flights", "Done", "")}</ul>`,
+  weather: () => `<div style="display:flex;gap:24px;align-items:flex-end"><div><div class="lead" style="font-size:44px">21°</div><div class="lead-sub">Partly cloudy · Toronto</div></div>
+      <div style="display:flex;gap:16px;color:var(--text2);font-size:12px;text-align:center">${[["Now","21°"],["11","22°"],["12","23°"],["1","24°"],["2","23°"],["6","☂ 18°"]].map(([h,t])=>`<div><div>${h}</div><div style="color:var(--fg);font-weight:600;margin-top:4px">${t}</div></div>`).join("")}</div></div>`,
+  stocks: () => `<ul class="rows">${row("", "AAPL", "Apple · pre-market", '<span class="v">232.14 <span style="color:var(--green)">+0.8%</span></span>')}${row("", "NVDA", "NVIDIA", '<span class="v">141.02 <span style="color:var(--red)">−1.2%</span></span>')}${row("", "BTC", "Bitcoin", '<span class="v">68,210 <span style="color:var(--green)">+2.1%</span></span>')}</ul>`,
+  inbox: () => `<ul class="rows">${row(ic("#30d158", "✉"), "Suhani", "Messages · “on my way!”", '<button class="btn-quiet">Reply</button>')}${row(ic("#4a154b", "#"), "#launch", "Slack · Alex: shipping at 3")}${row(ic("#0a84ff", "↓"), "Download finished", "invoice-0912.pdf")}</ul>`,
+  stats: () => `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">${[["CPU","18%",18],["Memory","11.2 GB",62],["Network","↓ 4.1 MB/s",34]].map(([k,v,p])=>`<div><p class="label">${k}</p><div class="lead" style="font-size:24px">${v}</div><div class="bar" style="margin-top:8px"><i style="width:${p}%"></i></div></div>`).join("")}</div>`,
+  power: () => `<div class="lead">82%</div><div class="lead-sub">On battery · about 6 hrs left</div><ul class="rows" style="margin-top:12px">${row("", "Full-charge island at", "Tells you when to unplug", '<div class="seg"><span>80%</span><span class="on">90%</span><span>100%</span></div>')}${row("", "Low-battery sound", "", '<span class="toggle on"></span>')}</ul>`,
+  privacy: () => `<ul class="rows">${row('<span class="dot" style="background:var(--orange)"></span>', "Microphone in use", "Zoom · 12 min")}${row('<span class="dot" style="background:var(--field-hi)"></span>', "Camera off", "")}</ul>`,
+  windows: () => `<p class="label">Drag a window to the notch, release on a zone</p><div class="zone-grid"><div class="zone">Left half</div><div class="zone on">Right half</div><div class="zone">Full</div><div class="zone">Center</div><div class="zone">Top left</div><div class="zone">Top right</div><div class="zone">Bottom left</div><div class="zone">Bottom right</div></div>`,
+  display: () => `<ul class="rows">${row("", "Built-in display", "", '<div class="slider" style="max-width:160px"><i style="width:70%"></i></div>')}${row("", "Studio Display", "DDC/CI", '<div class="slider" style="max-width:160px"><i style="width:55%"></i></div>')}${row("", "Keyboard backlight", "", '<div class="slider" style="max-width:160px"><i style="width:30%"></i></div>')}</ul>`,
+  menubar: () => `<ul class="rows">${row("", "Hide menu bar icons", "⌘-drag icons past the divider", '<span class="toggle on"></span>')}${row("", "Detach Clipboard to the menu bar", "", '<span class="toggle"></span>')}${row("", "Detach Timer to the menu bar", "", '<span class="toggle on"></span>')}</ul>`,
+  apps: () => `<div class="tiles">${[["#0a84ff","Cursor"],["#30d158","Messages"],["#ff9f0a","Notes"],["#5e5ce6","Linear"],["#1db954","Spotify"],["#e01e5a","Slack"]].map(([c,n])=>`<div class="tile"><div class="thumb" style="background:${c}">${n[0]}</div><span>${n}</span></div>`).join("")}</div>`,
+  shortcuts: () => `<div style="display:flex;gap:8px;flex-wrap:wrap">${["Start my day","Log water","Focus 25","Resize images","Share Wi-Fi"].map((s,i)=>`<span class="chip" style="height:30px;padding:0 12px;${i===2?"color:var(--fg)":""}">${i===2?"◌ ":""}${s}</span>`).join("")}</div>`,
+  search: () => `<input class="chip" style="width:100%;height:34px;border:0;outline:0;color:var(--fg);font-size:14px" placeholder="Search, translate or calculate" aria-label="Search">
+      <ul class="rows" style="margin-top:6px">${row("", "15% of 80", "Calculator", '<span class="v" style="color:var(--fg)">12</span>')}${row("", "“good morning” in Japanese", "Translate", '<span class="v" style="color:var(--fg)">おはようございます</span>')}${row("", "Search Kagi for “tauri overlay”", "Search", '<kbd>↩</kbd>')}</ul>`,
+};
+
+/* ---------------------------------------------------------------------------
+ * A live spring, as lib/spring.ts does it: a retarget mid-flight keeps its
+ * velocity instead of restarting from zero (a baked linear() cannot).
+ * Damping 1.0, response 0.31 — the app's critically damped default.
+ * ------------------------------------------------------------------------- */
+const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+function spring(apply, { response = 0.31, damping = 1 } = {}) {
+  const k = (2 * Math.PI / response) ** 2, c = 2 * damping * Math.sqrt(k);
+  let x = null, v = null, target = null, raf = 0, last = 0;
+  const step = (now) => {
+    const dt = Math.min(0.032, (now - last) / 1000); last = now;
+    let moving = false;
+    for (let i = 0; i < x.length; i++) {
+      v[i] += (-k * (x[i] - target[i]) - c * v[i]) * dt;
+      x[i] += v[i] * dt;
+      if (Math.abs(v[i]) > 0.05 || Math.abs(x[i] - target[i]) > 0.05) moving = true;
+    }
+    if (!moving) x = target.slice(), v = v.map(() => 0);
+    apply(x);
+    raf = moving ? requestAnimationFrame(step) : 0;
+  };
+  return (to, { jump = false } = {}) => {
+    target = to.slice();
+    if (x === null || jump || reduce.matches) { x = to.slice(); v = to.map(() => 0); apply(x); return; }
+    if (!raf) { last = performance.now(); raf = requestAnimationFrame(step); }
+  };
+}
+
+/* ---------------------------------------------------------------------------
+ * State and rendering.
+ * ------------------------------------------------------------------------- */
+const $ = (s) => document.querySelector(s);
+const island = $("#island"), sectionsEl = $("#sections"), subsEl = $("#subs");
+const indicatorTo = spring(([x, w]) => { $("#indicator").style.transform = `translateX(${x}px) scaleX(${w / 10})`; });
+const pillTo = spring(([x, w]) => { const p = $("#subPill"); p.style.transform = `translateX(${x}px)`; p.style.width = `${w}px`; });
+let secIdx = 0, subBySec = SECTIONS.map(() => 0);
+
+SECTIONS.forEach((s, i) => {
+  const b = document.createElement("button");
+  b.className = "section-tab"; b.role = "tab"; b.id = `tab-${s.id}`;
+  b.textContent = s.name; b.title = `${s.name} — ${s.blurb} (⌘${i + 1})`;
+  b.addEventListener("click", () => go(i));
+  sectionsEl.appendChild(b);
+});
+
+function placeIndicators(jump) {
+  const tab = sectionsEl.children[secIdx + 1];
+  indicatorTo([tab.offsetLeft + 10, tab.offsetWidth - 20], { jump });
+  const sub = subsEl.querySelector('[aria-selected="true"]');
+  if (sub) pillTo([sub.offsetLeft, sub.offsetWidth], { jump });
+}
+
+function renderSubs(jump) {
+  const sec = SECTIONS[secIdx];
+  subsEl.querySelectorAll(".sub").forEach((n) => n.remove());
+  sec.subs.forEach((sub, j) => {
+    const b = document.createElement("button");
+    b.className = "sub"; b.role = "tab"; b.textContent = sub.name;
+    b.setAttribute("aria-selected", j === subBySec[secIdx]);
+    b.addEventListener("click", () => goSub(j));
+    subsEl.appendChild(b);
+  });
+  $("#status").textContent = sec.status;
+}
+
+/* Content swaps by crossfade with a short slide in the direction of travel,
+   so the frames hint where things went. Interrupting cancels cleanly. */
+let lastDir = 0;
+function renderView(dir) {
+  const sec = SECTIONS[secIdx], sub = sec.subs[subBySec[secIdx]];
+  const content = $("#content");
+  const old = content.querySelector(".view:not([data-leaving])");
+  const view = document.createElement("div");
+  view.className = "view"; view.innerHTML = VIEWS[sub.view](); view.setAttribute("role", "tabpanel");
+  content.appendChild(view);
+  $("#includes").textContent = "Includes: " + sub.f.map((f) => f[0]).join(" · ");
+  if (reduce.matches || dir === null) { old?.remove(); return; }
+  const dx = dir * 14;
+  view.animate([{ opacity: 0, transform: `translateX(${dx}px)`, filter: "blur(4px)" }, { opacity: 1, transform: "none", filter: "blur(0)" }],
+    { duration: 280, easing: getComputedStyle(document.documentElement).getPropertyValue("--spring").trim() || "ease-out", fill: "both" });
+  if (old) {
+    old.dataset.leaving = "";
+    old.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: `translateX(${-dx * 0.6}px)` }], { duration: 140, easing: "cubic-bezier(0.4,0,1,1)", fill: "forwards" })
+      .finished.then(() => old.remove(), () => old.remove());
+  }
+  content.querySelectorAll(".view[data-leaving]").forEach((n) => { if (n !== old) n.remove(); });
+}
+
+function go(i, { sub = null, jump = false } = {}) {
+  const dir = i === secIdx ? (sub !== null ? Math.sign(sub - subBySec[i]) : 0) : Math.sign(i - secIdx);
+  secIdx = (i + SECTIONS.length) % SECTIONS.length;
+  if (sub !== null) subBySec[secIdx] = sub;
+  [...sectionsEl.querySelectorAll(".section-tab")].forEach((t, j) => t.setAttribute("aria-selected", j === secIdx));
+  renderSubs(jump);
+  sectionsEl.children[secIdx + 1].scrollIntoView({ block: "nearest", inline: "nearest" });
+  requestAnimationFrame(() => placeIndicators(jump));
+  renderView(jump ? null : dir || 1);
+  try { localStorage.setItem("notch-proto", JSON.stringify([secIdx, subBySec])); } catch {}
+}
+function goSub(j) {
+  const n = SECTIONS[secIdx].subs.length, next = (j + n) % n;
+  if (next === subBySec[secIdx]) return;
+  const dir = Math.sign(next - subBySec[secIdx]);
+  subBySec[secIdx] = next;
+  subsEl.querySelectorAll(".sub").forEach((b, k) => b.setAttribute("aria-selected", k === next));
+  placeIndicators(false);
+  renderView(dir);
+}
+
+/* Island states. The shape is one element; only its target changes. */
+function setState(s) {
+  const was = island.dataset.state;
+  if (was === s) return;
+  const order = ["closed", "live", "hud", "toast", "open"];
+  island.toggleAttribute("data-closing", order.indexOf(s) < order.indexOf(was));
+  island.dataset.state = s;
+  document.querySelectorAll("#states button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.s === s));
+  if (s === "open") setTimeout(() => placeIndicators(true), 0);
+  else closePalette();
+}
+document.querySelectorAll("#states button").forEach((b) => b.addEventListener("click", () => setState(b.dataset.s)));
+$("#cutout").addEventListener("click", () => setState(island.dataset.state === "open" ? "closed" : "open"));
+
+/* ⌘K: every feature, subsection and section by name. */
+const entries = SECTIONS.flatMap((s, i) => [
+  { label: s.name, hint: "Section", i, j: 0 },
+  ...s.subs.flatMap((sub, j) => [{ label: sub.name, hint: s.name, i, j }, ...sub.f.map((f) => ({ label: f[0], hint: `${s.name} › ${sub.name}`, i, j }))]),
+]);
+let pal = [], palSel = 0;
+function renderPalette() {
+  const q = $("#paletteInput").value.trim().toLowerCase();
+  pal = entries.filter((e) => !q || e.label.toLowerCase().includes(q) || e.hint.toLowerCase().includes(q)).slice(0, 40);
+  palSel = Math.min(palSel, Math.max(0, pal.length - 1));
+  $("#paletteList").innerHTML = pal.length
+    ? pal.map((e, k) => `<li role="option" aria-selected="${k === palSel}" data-k="${k}"><b>${e.label}</b><span>${e.hint}</span></li>`).join("")
+    : `<li><span>No feature by that name. Try a section: Media, Shelf, Mac…</span></li>`;
+}
+function openPalette() { setState("open"); $("#palette").setAttribute("data-open", ""); $("#paletteInput").value = ""; palSel = 0; renderPalette(); setTimeout(() => $("#paletteInput").focus(), 30); }
+function closePalette() { $("#palette").removeAttribute("data-open"); }
+function pick(k) { const e = pal[k]; if (!e) return; closePalette(); go(e.i, { sub: e.j }); }
+$("#openPalette").addEventListener("click", openPalette);
+$("#paletteInput").addEventListener("input", () => { palSel = 0; renderPalette(); });
+$("#paletteList").addEventListener("click", (e) => { const li = e.target.closest("[data-k]"); if (li) pick(+li.dataset.k); });
+$("#paletteInput").addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown") { palSel = Math.min(pal.length - 1, palSel + 1); renderPalette(); e.preventDefault(); }
+  else if (e.key === "ArrowUp") { palSel = Math.max(0, palSel - 1); renderPalette(); e.preventDefault(); }
+  else if (e.key === "Enter") { pick(palSel); e.preventDefault(); }
+  else if (e.key === "Escape") { closePalette(); e.stopPropagation(); }
+});
+
+document.addEventListener("keydown", (e) => {
+  const typing = e.target.matches("input, textarea");
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openPalette(); return; }
+  if ((e.metaKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) { e.preventDefault(); setState("open"); go(+e.key - 1); return; }
+  if (e.key === "Escape") { if ($("#palette").hasAttribute("data-open")) closePalette(); else setState("closed"); return; }
+  if (typing || island.dataset.state !== "open") return;
+  if (e.key === "ArrowRight") go(secIdx + 1);
+  else if (e.key === "ArrowLeft") go(secIdx - 1);
+  else if (e.key === "Tab" && !e.target.closest(".face--open")) { e.preventDefault(); goSub(subBySec[secIdx] + (e.shiftKey ? -1 : 1)); }
+});
+
+/* The map below: the same data, so it can never drift from the panel. */
+const chips = (fs) => `<div class="feat">${fs.map(([n, e, h]) => `<span class="${h ? "have" : ""} ${String(e).includes("L") ? "L" : ""}">${n} <em>${e}</em></span>`).join("")}</div>`;
+$("#mapBody").innerHTML = SECTIONS.map((s, i) => `<section class="map-sec"><h3>${s.name} <small>⌘${i + 1} · ${s.blurb}</small></h3><div class="map-subs">${
+  s.subs.map((sub, j) => `<div class="map-sub"><button data-go="${i},${j}">${sub.name}</button>${chips(sub.f)}</div>`).join("")}</div></section>`).join("")
+  + `<section class="map-sec"><h3>Islands <small>interrupt, then go away</small></h3><div>${chips(ISLANDS)}<p style="color:var(--text3);font-size:12px;margin:8px 0 0">Also surfaced as islands: downloads, screenshots, drives, focus changes, privacy, full charge, the write toast.</p></div></section>`
+  + `<section class="map-sec"><h3>Settings <small>set once</small></h3><div>${chips(SETTINGS)}</div></section>`
+  + `<section class="map-sec"><h3>Not building <small>see notchy-features.md</small></h3><div>${chips(SKIPPED)}</div></section>`;
+document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => {
+  const [i, j] = b.dataset.go.split(",").map(Number);
+  window.scrollTo({ top: 0, behavior: reduce.matches ? "auto" : "smooth" });
+  setState("open"); go(i, { sub: j });
+}));
+
+/* Start open on the last place visited, so a reload keeps your spot. */
+try { const saved = JSON.parse(localStorage.getItem("notch-proto")); if (saved) { secIdx = saved[0]; subBySec = saved[1]; } } catch {}
+go(secIdx, { jump: true });
+setState(new URLSearchParams(location.search).get("state") || "open");
+addEventListener("resize", () => placeIndicators(true));
+</script>
+</body>
+</html>
