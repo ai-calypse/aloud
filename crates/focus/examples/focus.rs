@@ -29,7 +29,7 @@ fn holding(pid: u32) -> bool {
 fn main() {
     let me = std::process::id();
     let mut awake = Awake::default();
-    awake.start(Some(120), now_ms()).unwrap();
+    awake.start(Some(2), now_ms()).unwrap();
     std::thread::sleep(Duration::from_millis(500));
     println!(
         "awake started: state {:?}, pmset holds for us: {}",

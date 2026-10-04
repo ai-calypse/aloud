@@ -173,6 +173,7 @@ mod tests {
         let on = |until| AwakeState {
             active: true,
             until,
+            minutes: None,
         };
         assert_eq!(
             awake(&on(Some(5_400_000)), 0).unwrap().detail.as_deref(),

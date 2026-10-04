@@ -193,3 +193,47 @@ pub fn focus_stats(focus: State<'_, Focus>) -> Result<FocusStats, String> {
     log.stats(chrono::Local::now().date_naive())
         .map_err(|e| e.to_string())
 }
+
+/// Keeps the Mac (and its display) awake for `minutes`, or until stopped.
+/// Off macOS there is no `caffeinate`, and the error says so.
+#[tauri::command]
+#[specta::specta]
+pub fn awake_start(
+    app: AppHandle,
+    focus: State<'_, Focus>,
+    minutes: Option<u32>,
+) -> Result<(), String> {
+    lock(&focus.awake)
+        .start(minutes, now_ms())
+        .map_err(|e| format!("could not run caffeinate: {e}"))?;
+    publish(&app, &focus, true);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn awake_stop(app: AppHandle, focus: State<'_, Focus>) {
+    lock(&focus.awake).stop();
+    publish(&app, &focus, true);
+}
+
+/// The notch's own notes, newest first.
+#[tauri::command]
+#[specta::specta]
+pub fn quick_notes() -> Result<Vec<aloud_notes::Note>, String> {
+    let dir = aloud_notes::directory().map_err(|e| e.to_string())?;
+    Ok(aloud_notes::quick_notes(&dir))
+}
+
+/// Saves a quick note, creating its file on the first call (`path` None) and
+/// returning the path to pass on the next. The notes folder is the only place
+/// it will write.
+#[tauri::command]
+#[specta::specta]
+pub fn save_quick_note(path: Option<String>, text: String) -> Result<String, String> {
+    let dir = aloud_notes::directory().map_err(|e| e.to_string())?;
+    let path = path.map(std::path::PathBuf::from);
+    aloud_notes::save_quick(&dir, path.as_deref(), &text, chrono::Utc::now())
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| e.to_string())
+}

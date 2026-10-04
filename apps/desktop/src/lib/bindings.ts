@@ -209,6 +209,20 @@ export const commands = {
 	/**  Stops and clears. A stopwatch that ran a real while is kept for the streak. */
 	focusStop: () => __TAURI_INVOKE<void>("focus_stop"),
 	focusStats: () => typedError<FocusStats, string>(__TAURI_INVOKE("focus_stats")),
+	/**
+	 *  Keeps the Mac (and its display) awake for `minutes`, or until stopped.
+	 *  Off macOS there is no `caffeinate`, and the error says so.
+	 */
+	awakeStart: (minutes: number | null) => typedError<null, string>(__TAURI_INVOKE("awake_start", { minutes })),
+	awakeStop: () => __TAURI_INVOKE<void>("awake_stop"),
+	/**  The notch's own notes, newest first. */
+	quickNotes: () => typedError<Note[], string>(__TAURI_INVOKE("quick_notes")),
+	/**
+	 *  Saves a quick note, creating its file on the first call (`path` None) and
+	 *  returning the path to pass on the next. The notes folder is the only place
+	 *  it will write.
+	 */
+	saveQuickNote: (path: string | null, text: string) => typedError<string, string>(__TAURI_INVOKE("save_quick_note", { path, text })),
 	agentHookStatus: () => typedError<HookStatus, string>(__TAURI_INVOKE("agent_hook_status")),
 	/**
 	 *  Installs our hooks, copying the sidecar out of the bundle first.
@@ -596,6 +610,11 @@ export type AwakeState = {
 	active: boolean,
 	/**  When it lets go, in unix ms; None while active means "until stopped". */
 	until: number | null,
+	/**
+	 *  The length it was started with, so the segmented control can show which
+	 *  choice is live after the panel was closed and reopened.
+	 */
+	minutes: number | null,
 };
 
 /**

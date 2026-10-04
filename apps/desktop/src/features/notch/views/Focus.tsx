@@ -1,9 +1,11 @@
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Lead } from "@/components/notch/list";
+import { useEffect, useRef, useState } from "react";
+import { Button, NOTCH_FOCUS } from "@/components/ui/button";
+import { Empty, Label, Lead, List, Row } from "@/components/notch/list";
 import { Ring } from "@/components/notch/meters";
 import { Segmented } from "@/components/notch/segmented";
-import { commands, type FocusDay, type TimerMode, type TimerState } from "@/lib/bindings";
+import { commands, type FocusDay, type Note, type TimerMode, type TimerState } from "@/lib/bindings";
+import { createAutosaver } from "@/lib/autosave";
+import { formatDate } from "@/lib/format";
 import { clock, timerTitle, timerValueMs } from "@/lib/focus";
 import { cn } from "@/lib/utils";
 import { useFocus, useFocusStats } from "../useFocus";
@@ -164,6 +166,159 @@ function Week({ days, streak }: { days: FocusDay[]; streak: number }) {
         {streak > 0 ? `${streak}-day streak` : "No streak yet"}
         {today.sessions > 0 && ` · ${today.sessions} today`}
       </p>
+    </div>
+  );
+}
+
+const AWAKE_CHOICES = [
+  { id: "off", label: "Off" },
+  { id: "30", label: "30 min" },
+  { id: "120", label: "2 hrs" },
+  { id: "480", label: "8 hrs" },
+  { id: "always", label: "Always" },
+];
+
+/**
+ * Focus › Keep Awake: `caffeinate` while it is on, and the closed notch says
+ * so. The display stays on too, which is the point for a call or a long read.
+ */
+export function FocusAwake() {
+  const { snap } = useFocus();
+  const [error, setError] = useState<string | null>(null);
+  const awake = snap?.awake;
+  const choice = !awake?.active ? "off" : awake.minutes == null ? "always" : String(awake.minutes);
+
+  const choose = async (id: string) => {
+    setError(null);
+    if (id === "off") return void commands.awakeStop();
+    const r = await commands.awakeStart(id === "always" ? null : Number(id));
+    if (r.status === "error") setError(r.error);
+  };
+
+  const until =
+    awake?.active && awake.until != null
+      ? new Date(awake.until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      : null;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Lead
+        sub={
+          awake?.active
+            ? `${until ? `Until ${until}` : "Until you turn it off"} · the display stays on`
+            : "Your Mac sleeps on its usual schedule."
+        }
+      >
+        {awake?.active ? "Awake" : "Off"}
+      </Lead>
+      <Segmented label="Keep awake for" items={AWAKE_CHOICES} value={choice} onChange={(id) => void choose(id)} />
+      {error && <p className="m-0 text-notch-meta text-notch-danger">{error}</p>}
+    </div>
+  );
+}
+
+/** First non-empty line, without markdown's `#`: what a note is called in the list. */
+function noteTitle(text: string): string {
+  const line = text.split("\n").find((l) => l.trim() !== "") ?? "";
+  return line.replace(/^#+\s*/, "").trim() || "Empty note";
+}
+
+/**
+ * Focus › Notes: type, and it is saved — a markdown file in the notes folder
+ * (the same one voice notes and meetings use), written after every pause and
+ * when you leave. No save button, no title to invent.
+ */
+export function FocusNotes() {
+  const [text, setText] = useState("");
+  const [notes, setNotes] = useState<Note[]>([]);
+  const path = useRef<string | null>(null);
+  const latest = useRef("");
+
+  const reload = () =>
+    commands
+      .quickNotes()
+      .then((r) => r.status === "ok" && setNotes(r.data.filter((n) => n.content.trim() !== "")))
+      .catch(() => {});
+
+  const [saver] = useState(() =>
+    createAutosaver(async (body) => {
+      // A blank note that was never saved is not worth a file.
+      if (path.current === null && body.trim() === "") return;
+      const r = await commands.saveQuickNote(path.current, body);
+      if (r.status === "ok") {
+        path.current = r.data;
+        void reload();
+      }
+    }),
+  );
+
+  useEffect(() => {
+    void reload();
+    // Leaving the tab or closing the panel inside the debounce must not lose
+    // the last words typed.
+    return () => void saver.flush();
+  }, [saver]);
+
+  const edit = (body: string) => {
+    setText(body);
+    latest.current = body;
+    saver.schedule(body);
+  };
+
+  const open = async (note: Note) => {
+    await saver.flush();
+    path.current = note.path;
+    latest.current = note.content;
+    setText(note.content);
+  };
+
+  const fresh = async () => {
+    await saver.flush();
+    path.current = null;
+    latest.current = "";
+    setText("");
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <textarea
+        aria-label="Quick note"
+        value={text}
+        onChange={(e) => edit(e.target.value)}
+        placeholder="Type a thought. It saves itself."
+        rows={4}
+        className={cn(
+          "w-full resize-none rounded-notch-row border border-notch-edge bg-notch-well px-3 py-2 font-notch",
+          "text-notch-body text-notch-ink outline-none placeholder:text-notch-ink-3",
+          NOTCH_FOCUS,
+        )}
+      />
+      {notes.length === 0 ? (
+        <Empty title="No quick notes yet">
+          Notes you type here are kept as markdown in your Aloud notes folder, beside your meeting
+          notes.
+        </Empty>
+      ) : (
+        <div>
+          <div className="flex items-center justify-between">
+            <Label>Recent</Label>
+            <Button variant="notch-quiet" size="notch" className="-mt-1.5" onClick={() => void fresh()}>
+              New note
+            </Button>
+          </div>
+          <List label="Quick notes">
+            {notes.slice(0, 5).map((note) => (
+              <Row
+                key={note.path}
+                title={noteTitle(note.content)}
+                subtitle={formatDate(note.date)}
+                selected={note.path === path.current}
+                onClick={() => void open(note)}
+              />
+            ))}
+          </List>
+        </div>
+      )}
     </div>
   );
 }

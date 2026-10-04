@@ -125,6 +125,40 @@ export const ACTIONS: NotchAction[] = [
       return true;
     },
   },
+  {
+    id: "focus.awake",
+    title: "Keep my Mac awake for 2 hours",
+    keywords: ["caffeinate", "sleep", "awake", "display"],
+    section: "focus",
+    subsection: "awake",
+    run: async (ctx) => {
+      ctx.open("focus", "awake");
+      return (await commands.awakeStart(120)).status === "ok";
+    },
+  },
+  // Island button on the keep-awake island.
+  {
+    id: "focus.awakeOff",
+    title: "Let my Mac sleep again",
+    keywords: ["caffeinate", "stop", "awake"],
+    section: "focus",
+    subsection: "awake",
+    run: async () => {
+      await commands.awakeStop();
+      return true;
+    },
+  },
+  {
+    id: "focus.note",
+    title: "Write a quick note",
+    keywords: ["note", "jot", "write"],
+    section: "focus",
+    subsection: "notes",
+    run: (ctx) => {
+      ctx.open("focus", "notes");
+      return true;
+    },
+  },
   // notch-today-focus: Focus actions end
   {
     // What a finished row's Show does: bring back what a write made.

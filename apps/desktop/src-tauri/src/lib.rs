@@ -152,6 +152,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             focus::focus_skip,
             focus::focus_stop,
             focus::focus_stats,
+            focus::awake_start,
+            focus::awake_stop,
+            focus::quick_notes,
+            focus::save_quick_note,
             // notch-today-focus: commands end
             sessions::agent_hook_status,
             sessions::install_agent_hooks,
