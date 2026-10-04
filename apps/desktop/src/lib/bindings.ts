@@ -1002,8 +1002,8 @@ export type Settings = {
 	groqApiKey?: string,
 	composioApiKey?: string,
 	/**
-	 *  Gemini key: the last brain commands fall back to — see
-	 *  `aloud_agent::brains` for the order.
+	 *  Gemini key: the brain behind Groq — see `aloud_agent::brains` for the
+	 *  order.
 	 */
 	geminiApiKey?: string,
 	/**
@@ -1011,7 +1011,7 @@ export type Settings = {
 	 *  still reaches it by name.
 	 */
 	cerebrasApiKey?: string,
-	/**  NVIDIA key: the brain behind Groq, for when Groq's per-minute budget trips. */
+	/**  NVIDIA key: the last brain, for when Groq's and Gemini's budgets trip. */
 	nvidiaApiKey?: string,
 	/**
 	 *  Deepgram key. Always-listening streams the mic to Deepgram's Flux, which
