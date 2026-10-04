@@ -15,7 +15,9 @@ export type Step = {
   requiresConfirmation: boolean;
   /** The gate's card, built in Rust from the real arguments. Only a write has one. */
   preview?: ActionPreview | null;
-  /** Set by Confirm/Cancel; undefined while this step's gate is open. */
+  /** The gate may offer "Always allow"; false for strict and outside-content cards. */
+  canAlways?: boolean;
+  /** Set by the gate's buttons; undefined while this step's gate is open. */
   confirmed?: boolean;
   /** Kept whole: its `show` is what the finished row's Show button brings back. */
   result?: ToolResult;
@@ -63,6 +65,7 @@ export function withCall(steps: Step[], call: ToolCall): Step[] {
         // Only the gate event carries one; whichever of the pair lands second
         // must not wipe it.
         preview: call.preview ?? open.preview,
+        canAlways: open.canAlways || call.canAlways,
       },
     ];
   }
@@ -74,8 +77,27 @@ export function withCall(steps: Step[], call: ToolCall): Step[] {
       args: asArgs(call.args),
       requiresConfirmation: call.requiresConfirmation,
       preview: call.preview,
+      canAlways: call.canAlways,
     },
   ];
+}
+
+/**
+ * Records the answer to the open gate. A decline marks the step cancelled
+ * before Rust's failed result arrives, so the row says what the user did
+ * rather than "failed".
+ */
+export function withDecision(steps: Step[], confirmed: boolean): Step[] {
+  const open = pendingStep({ heard: "", steps });
+  return steps.map((s) => (s === open ? { ...s, confirmed } : s));
+}
+
+/** What a step's row says about how it went. */
+export function stepStatus(step: Step, pending: boolean): string {
+  if (step.confirmed === false) return "cancelled";
+  if (step.result) return step.result.success ? "done" : "failed";
+  if (pending) return "needs approval";
+  return "running…";
 }
 
 /**

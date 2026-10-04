@@ -306,6 +306,93 @@ pub fn open_permission_settings(permission: aloud_permissions::Permission) -> Cm
     to_string_err(aloud_permissions::open_settings(permission))
 }
 
+/// One app and action in the Settings pane, with what Aloud may do there.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionRow {
+    pub key: String,
+    pub app: String,
+    pub action: String,
+    pub grant: aloud_store::Grant,
+    /// "Always allow" can never apply, so the row offers Ask or Never only.
+    pub strict: bool,
+}
+
+/// Every write this Mac's apps offer, at its default unless saved otherwise,
+/// plus every saved grant — a connected service shows up once a card's
+/// "Always allow" has saved one.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_permissions() -> CmdResult<Vec<PermissionRow>> {
+    // Installed apps and the Shortcuts library are a disk scan and a subprocess.
+    tauri::async_runtime::spawn_blocking(|| {
+        let natives = aloud_native::tools(&aloud_selection::installed_apps());
+        permission_rows(&natives, aloud_store::grants::all())
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_permission(
+    key: String,
+    app: String,
+    action: String,
+    grant: aloud_store::Grant,
+) -> CmdResult<()> {
+    to_string_err(aloud_store::grants::set(&key, &app, &action, grant))
+}
+
+/// The native rows at their defaults, then the saved grants over them. A key
+/// several tools share reads Always only if every one of them defaults to it.
+fn permission_rows(
+    natives: &[aloud_native::NativeTool],
+    saved: aloud_store::Grants,
+) -> Vec<PermissionRow> {
+    use aloud_store::Grant;
+    let mut rows = std::collections::BTreeMap::new();
+    let permissions = natives
+        .iter()
+        .filter(|t| !t.read_only)
+        .filter_map(|t| aloud_native::permission(&t.name, &serde_json::json!({}), None));
+    for p in permissions {
+        let grant = if p.default_always {
+            Grant::Always
+        } else {
+            Grant::Ask
+        };
+        let key = aloud_agent::permissions::key(&p.app, &p.action);
+        rows.entry(key.clone())
+            .and_modify(|row: &mut PermissionRow| {
+                if grant == Grant::Ask {
+                    row.grant = Grant::Ask;
+                }
+            })
+            .or_insert(PermissionRow {
+                key,
+                app: p.app,
+                action: p.action,
+                grant,
+                strict: p.strict,
+            });
+    }
+    for (key, s) in saved {
+        let strict = aloud_agent::permissions::always_strict(&s.action);
+        rows.insert(
+            key.clone(),
+            PermissionRow {
+                key,
+                app: s.app,
+                action: s.action,
+                grant: s.grant,
+                strict,
+            },
+        );
+    }
+    rows.into_values().collect()
+}
+
 /// Version, commit and build date, for pasting into a bug report. Baked in by
 /// `build.rs`; a tarball with no `.git` reports "unknown" rather than failing.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
@@ -700,5 +787,57 @@ pub fn debug_overlay(app: AppHandle, phase: crate::pipeline::Phase) {
             crate::overlay::send_error(&app, "Preview: something went wrong");
         }
         _ => crate::overlay::show(&app, phase),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aloud_store::{Grant, SavedGrant};
+
+    fn native(name: &str) -> aloud_native::NativeTool {
+        aloud_native::NativeTool {
+            name: name.into(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            read_only: false,
+        }
+    }
+
+    /// Notes defaults to Always; a saved Ask must win, and a connected service
+    /// appears once it has a saved grant.
+    #[test]
+    fn a_saved_grant_replaces_the_default_row() {
+        let natives = [native("ALOUD_NOTES_CREATE"), native("ALOUD_MESSAGES_SEND")];
+        let saved = [
+            (
+                "notes:create-and-edit",
+                "Notes",
+                "create and edit",
+                Grant::Ask,
+            ),
+            (
+                "slack:send-and-share",
+                "Slack",
+                "send and share",
+                Grant::Always,
+            ),
+        ]
+        .into_iter()
+        .map(|(key, app, action, grant)| {
+            let saved = SavedGrant {
+                app: app.into(),
+                action: action.into(),
+                grant,
+            };
+            (key.to_string(), saved)
+        })
+        .collect();
+        let rows = permission_rows(&natives, saved);
+        let grant = |key: &str| rows.iter().find(|r| r.key == key).map(|r| r.grant);
+        assert_eq!(grant("notes:create-and-edit"), Some(Grant::Ask));
+        assert_eq!(grant("messages:send-messages"), Some(Grant::Ask));
+        assert_eq!(grant("slack:send-and-share"), Some(Grant::Always));
+        assert_eq!(rows.len(), 3);
     }
 }

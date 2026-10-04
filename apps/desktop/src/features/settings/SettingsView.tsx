@@ -18,6 +18,7 @@ import { RunLogView } from "./RunLogView";
 import { MeetingsView } from "./MeetingsView";
 import { DebugView } from "./DebugView";
 import { PermissionsCard } from "./PermissionsCard";
+import { PermissionsPane } from "./PermissionsPane";
 import { AUTO_DETECT, LANGUAGES, SAME_AS_SPOKEN } from "./languages";
 import {
   Group,
@@ -63,6 +64,7 @@ export type SettingsSection =
   | "rules"
   | "prompts"
   | "connectors"
+  | "permissions"
   | "runlog"
   | "meetings"
   /** Behind `developer_tools`; the sidebar hides the row when it is off. */
@@ -987,8 +989,9 @@ export function SettingsView({
         />
       )}
 
-      {/* These three own their data and their titles: they read history and
-          timings, not `settings`. */}
+      {/* These own their data and their titles: they read history, timings
+          and grants, not `settings`. */}
+      {section === "permissions" && <PermissionsPane />}
       {section === "runlog" && <RunLogView />}
       {section === "meetings" && <MeetingsView />}
       {section === "debug" && <DebugView />}

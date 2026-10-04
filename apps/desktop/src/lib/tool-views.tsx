@@ -660,3 +660,12 @@ export function askFor(name: string, args: ToolArgs): string {
     return "";
   }
 }
+
+/**
+ * Whether a gate opens on a question before its fields. Only a tool with an
+ * `ask` — the agent offering to save a contact it could not find — does; a send
+ * with an editable recipient shows its fields and the permission buttons at once.
+ */
+export function asksFirst(name: string, args: ToolArgs): boolean {
+  return editsFor(name).length > 0 && askFor(name, args) !== "";
+}

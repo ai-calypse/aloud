@@ -7,7 +7,8 @@
 //! drop-down panel, like Ask, but this one collects a decision — hence the
 //! one-shot channel the approve/reject commands resolve.
 
-use aloud_store::Settings;
+use aloud_agent::permissions::{Gate, RunTaint};
+use aloud_store::{grants, Decision, Grant, Settings};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,6 +34,18 @@ pub struct PendingConfirmation(Mutex<Option<Pending>>);
 struct Pending {
     reply: oneshot::Sender<Option<serde_json::Value>>,
     args: serde_json::Value,
+    /// The grant an "Always allow" saves; None where the card offered none
+    /// (strict, or asked for by outside content), whatever the panel sends.
+    always: Option<Gate>,
+}
+
+/// The panel's answer to a gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum GateDecision {
+    AllowOnce,
+    AllowAlways,
+    Decline,
 }
 
 /// The pending question's reply channel. Separate from the confirmation above:
@@ -176,6 +189,9 @@ pub struct ToolCall {
     /// gate event; the start event and reads carry none. Boxed so every other
     /// event is not sized to the card.
     pub preview: Option<Box<aloud_agent::preview::ActionPreview>>,
+    /// The gate may offer "Always allow": false for strict actions and for a
+    /// write outside content asked for.
+    pub can_always: bool,
 }
 
 /// A question put to the user mid-run. `options` non-empty means the answer is
@@ -404,6 +420,7 @@ async fn execute(
             front: context.front,
             document: context.document,
             project: context.project,
+            selection: context.selection.is_some_and(|s| !s.trim().is_empty()),
         },
         aloud_agent::Callbacks {
             on_event: |event| {
@@ -429,7 +446,7 @@ async fn execute(
                     .unwrap_or_else(|| tool_app(&call.name));
                 let schema = call.tool.map(|t| t.parameters);
                 async move {
-                    match confirm_write(app, run, call.name, toolkit, schema, call.args).await {
+                    match permit(app, run, call.name, toolkit, schema, call.args, call.gate).await {
                         Some(args) => aloud_agent::Verdict::Run(args),
                         None => aloud_agent::Verdict::Decline,
                     }
@@ -456,32 +473,40 @@ async fn run_fast(
     context: Context<'_>,
 ) -> Result<String> {
     run.acted.store(true, Ordering::SeqCst);
-    let args = if aloud_native::low_risk(name, &args) {
-        run.emit(
-            app,
-            AgentEvent::ToolCall(ToolCall {
-                app: "macOS".to_string(),
-                name: name.to_string(),
-                args: display_args(&args),
-                requires_confirmation: false,
-                preview: None,
-            }),
-        );
+    // The row first, like the loop's start event; a gate's card folds into it.
+    run.emit(
+        app,
+        AgentEvent::ToolCall(ToolCall {
+            app: "macOS".to_string(),
+            name: name.to_string(),
+            args: display_args(&args),
+            requires_confirmation: false,
+            preview: None,
+            can_always: false,
+        }),
+    );
+    // Untainted: the fast path parsed the user's own words, and no model read
+    // anything on the way here.
+    let gate =
+        aloud_agent::permissions::gate(name, &args, None, "", context.front, &RunTaint::new(false));
+    let args = if gate.is_none() {
         args
     } else {
         let schema = aloud_native::params(name);
-        match confirm_write(
-            app,
-            run,
-            name.to_string(),
-            "macOS".to_string(),
-            schema,
-            args,
-        )
-        .await
-        {
+        let toolkit = "macOS".to_string();
+        match permit(app, run, name.to_string(), toolkit, schema, args, gate).await {
             Some(approved) => approved,
-            None => return Ok("Cancelled.".to_string()),
+            None => {
+                run.emit(
+                    app,
+                    AgentEvent::ToolResult(ToolResult {
+                        success: false,
+                        message: format!("{name} declined"),
+                        show: None,
+                    }),
+                );
+                return Ok("Cancelled.".to_string());
+            }
         }
     };
     // After the gate, like the loop's: the row and the confirmation show what was asked.
@@ -528,6 +553,7 @@ async fn run_direct(
             args: [("goal".to_string(), transcript.to_string())].into(),
             requires_confirmation: false,
             preview: None,
+            can_always: false,
         }),
     );
     loop {
@@ -624,9 +650,57 @@ pub fn answer_agent(app: AppHandle, answer: Option<String>) {
     }
 }
 
+/// What the gate does with a write, given its saved grant. The named-app rule
+/// outranks an Always: outside content asked for this, so the user's yes to the
+/// app is not a yes to this. Never still refuses — that is safer, not riskier.
+/// Such a card offers no "Always allow": it is the wrong moment to widen one.
+fn decision(gate: &Gate, stored: Option<Grant>) -> Decision {
+    match grants::decide(stored, gate.default_always, gate.strict) {
+        Decision::Refuse => Decision::Refuse,
+        _ if gate.named_rule => Decision::Prompt { can_always: false },
+        decided => decided,
+    }
+}
+
+fn blocked(gate: &Gate) -> String {
+    format!("Blocked in Settings: {} · {}", gate.app, gate.action)
+}
+
+/// A gated write: runs with no card when its grant allows, refuses without one
+/// when the grant is Never, and otherwise asks. A call with no gate asks with
+/// no "Always allow" — the loop always sends one, so this is only fail-safe.
+async fn permit(
+    app: &AppHandle,
+    run: &Run,
+    name: String,
+    toolkit: String,
+    schema: Option<serde_json::Value>,
+    args: serde_json::Value,
+    gate: Option<Gate>,
+) -> Option<serde_json::Value> {
+    let decided = gate
+        .as_ref()
+        .map_or(Decision::Prompt { can_always: false }, |g| {
+            decision(g, grants::get(&g.key))
+        });
+    match decided {
+        Decision::Run => Some(args),
+        Decision::Refuse => {
+            if let Some(gate) = &gate {
+                run.emit(app, AgentEvent::Status(blocked(gate)));
+            }
+            None
+        }
+        Decision::Prompt { can_always } => {
+            confirm_write(app, run, name, toolkit, schema, args, gate, can_always).await
+        }
+    }
+}
+
 /// Surfaces a write tool for confirmation and awaits the panel's decision. Takes
 /// owned args so the returned future doesn't borrow the loop's transient data.
 /// `schema` is the tool's JSON schema, which the card reads its fields against.
+#[allow(clippy::too_many_arguments)]
 async fn confirm_write(
     app: &AppHandle,
     run: &Run,
@@ -634,6 +708,8 @@ async fn confirm_write(
     toolkit: String,
     schema: Option<serde_json::Value>,
     args: serde_json::Value,
+    gate: Option<Gate>,
+    can_always: bool,
 ) -> Option<serde_json::Value> {
     // A superseded run must not open a gate: its prompt would appear over the
     // new run's panel, and it would occupy the single confirmation slot the
@@ -644,11 +720,20 @@ async fn confirm_write(
     }
     // A gate needs the panel even on a quiet run: it is a question.
     run.surface(app);
-    run.emit(
-        app,
-        AgentEvent::ToolCall(gate_call(name, toolkit, &args, schema.as_ref())),
-    );
-    await_confirmation(app, args).await
+    let mut call = gate_call(name, toolkit, &args, schema.as_ref());
+    asks_for(&mut call, gate.as_ref(), can_always);
+    run.emit(app, AgentEvent::ToolCall(call));
+    await_confirmation(app, args, gate.filter(|_| can_always)).await
+}
+
+/// The permission the card asks for: its scope line, why it asks when a grant
+/// would otherwise have let it run, and whether "Always allow" is on offer.
+fn asks_for(call: &mut ToolCall, gate: Option<&Gate>, can_always: bool) {
+    call.can_always = can_always;
+    if let (Some(preview), Some(gate)) = (call.preview.as_mut(), gate) {
+        preview.scope = Some(format!("{} · {}", gate.app, gate.action));
+        preview.risks.extend(gate.reason.clone());
+    }
 }
 
 /// The gate event for a write: the call plus the card that previews it.
@@ -664,6 +749,7 @@ fn gate_call(
         name,
         args: display_args(args),
         requires_confirmation: true,
+        can_always: false,
     }
 }
 
@@ -708,6 +794,7 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
             // The gate is enforced in the loop; the panel just shows the call.
             requires_confirmation: false,
             preview: None,
+            can_always: false,
         }),
         aloud_agent::LoopEvent::ToolCallResult {
             name,
@@ -738,7 +825,11 @@ fn tool_app(slug: &str) -> String {
 /// Blocks until the panel approves or rejects. A dropped sender (panel closed,
 /// new command started) or a timeout reads as a rejection — a gate that can
 /// hang wedges the whole agent, and declining fails in the safe direction.
-async fn await_confirmation(app: &AppHandle, args: serde_json::Value) -> Option<serde_json::Value> {
+async fn await_confirmation(
+    app: &AppHandle,
+    args: serde_json::Value,
+    always: Option<Gate>,
+) -> Option<serde_json::Value> {
     let (tx, rx) = oneshot::channel();
     if let Some(state) = app.try_state::<PendingConfirmation>() {
         let mut slot = state.0.lock().unwrap();
@@ -751,7 +842,11 @@ async fn await_confirmation(app: &AppHandle, args: serde_json::Value) -> Option<
             tracing::warn!("a confirmation is already open; declining the second");
             return None;
         }
-        *slot = Some(Pending { reply: tx, args });
+        *slot = Some(Pending {
+            reply: tx,
+            args,
+            always,
+        });
     } else {
         tracing::error!("PendingConfirmation state missing");
         return None;
@@ -765,18 +860,25 @@ async fn await_confirmation(app: &AppHandle, args: serde_json::Value) -> Option<
     }
 }
 
-/// Resolves the pending confirmation. Called by the panel's Cancel/Confirm
-/// buttons; `edits` carries any field the user filled in or corrected before
-/// approving, in the same flattened form the panel was given.
+/// Resolves the pending confirmation. Called by the gate's buttons; `edits`
+/// carries any field the user filled in or corrected before approving, in the
+/// same flattened form the panel was given. "Always allow" also saves the
+/// grant, so the next call like it runs with no card.
 #[tauri::command]
 #[specta::specta]
 pub fn confirm_agent(
     app: AppHandle,
-    approved: bool,
+    decision: GateDecision,
     edits: Option<std::collections::BTreeMap<String, String>>,
 ) {
+    let approved = decision != GateDecision::Decline;
     if let Some(state) = app.try_state::<PendingConfirmation>() {
         if let Some(pending) = state.0.lock().unwrap().take() {
+            if let (GateDecision::AllowAlways, Some(gate)) = (decision, &pending.always) {
+                if let Err(e) = grants::set(&gate.key, &gate.app, &gate.action, Grant::Always) {
+                    tracing::warn!(%e, key = %gate.key, "could not save the grant; allowed once");
+                }
+            }
             let answer = approved.then(|| match edits {
                 Some(edits) => apply_edits(&pending.args, &edits),
                 None => pending.args.clone(),
@@ -969,6 +1071,70 @@ mod tests {
         let preview = call.preview.expect("a preview");
         assert_eq!(preview.title, "Quit app");
         assert_eq!(preview.fields[0].value, "Safari");
+    }
+
+    fn slack_send(named_rule: bool) -> Gate {
+        Gate {
+            key: "slack:send-and-share".into(),
+            app: "Slack".into(),
+            action: "send and share".into(),
+            default_always: false,
+            strict: false,
+            reason: named_rule
+                .then(|| "Outside content asked for this, and you didn't mention Slack".into()),
+            named_rule,
+        }
+    }
+
+    #[test]
+    fn an_always_allowed_send_shows_no_card() {
+        assert_eq!(
+            decision(&slack_send(false), Some(Grant::Always)),
+            Decision::Run
+        );
+        assert_eq!(
+            decision(&slack_send(false), None),
+            Decision::Prompt { can_always: true }
+        );
+    }
+
+    #[test]
+    fn never_refuses_without_asking() {
+        assert_eq!(
+            decision(&slack_send(false), Some(Grant::Never)),
+            Decision::Refuse
+        );
+        assert_eq!(
+            decision(&slack_send(true), Some(Grant::Never)),
+            Decision::Refuse,
+            "outside content cannot reopen a Never"
+        );
+        assert_eq!(
+            blocked(&slack_send(false)),
+            "Blocked in Settings: Slack · send and share"
+        );
+    }
+
+    /// The silent defence against injected instructions: a saved Always must
+    /// not let outside content send to an app the user never named.
+    #[test]
+    fn a_named_rule_gate_prompts_even_when_always_allowed() {
+        let gate = slack_send(true);
+        assert_eq!(
+            decision(&gate, Some(Grant::Always)),
+            Decision::Prompt { can_always: false }
+        );
+        let mut call = gate_call(
+            "SLACK_SEND_MESSAGE".into(),
+            "slack".into(),
+            &json!({ "channel": "general", "markdown_text": "hi" }),
+            None,
+        );
+        asks_for(&mut call, Some(&gate), false);
+        let preview = call.preview.expect("a preview");
+        assert_eq!(preview.scope.as_deref(), Some("Slack · send and share"));
+        assert!(preview.risks.iter().any(|r| r.contains("Outside content")));
+        assert!(!call.can_always);
     }
 
     #[test]

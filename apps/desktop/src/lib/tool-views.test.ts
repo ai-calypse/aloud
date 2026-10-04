@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bodyFor, humanise, labelFor, viewFor } from "./tool-views";
+import { asksFirst, bodyFor, humanise, labelFor, viewFor } from "./tool-views";
 
 describe("tool views", () => {
   it("says what the tool is doing, not what it is called", () => {
@@ -94,6 +94,18 @@ describe("tool views", () => {
       expect(labelFor("GOOGLECONTACTS_CREATE_CONTACT", dad)).toBe(
         "Saving Dad to your contacts",
       );
+    });
+
+    /**
+     * The ask-first flow is the agent offering to save someone it could not
+     * find. A text with an editable recipient used to open on "Save contact".
+     */
+    it("is the only editable gate that asks before showing its fields", () => {
+      expect(asksFirst("GOOGLECONTACTS_CREATE_CONTACT", dad)).toBe(true);
+      expect(asksFirst("ALOUD_MESSAGES_SEND", { to: "+15551234567", text: "hi" })).toBe(
+        false,
+      );
+      expect(asksFirst("ALOUD_DISCORD_MESSAGE", { to: "sam", text: "hi" })).toBe(false);
     });
 
     /**

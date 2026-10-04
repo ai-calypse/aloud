@@ -60,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
             front: None,
             document: None,
             project: None,
+            selection: false,
         },
         aloud_agent::Callbacks {
             on_event: |event| match event {
