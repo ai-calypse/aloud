@@ -47,7 +47,7 @@ import {
   PARTIAL_PREVIEW,
   PARTIAL_MS,
   AGENT_PREVIEW,
-  FALLBACK_PREVIEW,
+  CARD_PREVIEWS,
 } from "./features/overlay/previews";
 import { useNotchPanel } from "./features/overlay/useNotchPanel";
 // Streamdown styles the agent's answer with Tailwind utilities — see the
@@ -674,7 +674,7 @@ function Overlay() {
           ...AGENT_PREVIEW,
           steps: [AGENT_PREVIEW.steps[0]],
           finished:
-            "Sent the release notes to Priya. The reply to Sam is drafted and waiting in Gmail.",
+            "Said hi in #launch. The reply to Priya is ready whenever you are.",
         });
       }
       if (command.agent === "pending") {
@@ -788,7 +788,7 @@ function Overlay() {
           },
         });
       }
-      if (command.agent === "fallback") setAgent(FALLBACK_PREVIEW);
+      if (command.card) setAgent(CARD_PREVIEWS[command.card]);
       if (command.agent === "close") setAgent(null);
       if (command.partial === "clear") {
         clearInterval(typing);

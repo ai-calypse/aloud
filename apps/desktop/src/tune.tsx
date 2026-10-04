@@ -2,7 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { overshoot, springCurve } from "./lib/spring-curve";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
+import type { CardKind } from "./lib/bindings";
+import { CARD_PREVIEWS } from "./features/overlay/previews";
 import "./index.css";
+
+const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
 
 /**
  * The motion tuner. Dev-only: not a Tauri window, not a build input, served
@@ -270,7 +274,6 @@ function Tuner() {
             </Action>
             <Action onClick={() => send({ agent: "planned" })}>Agent (queued)</Action>
             <Action onClick={() => send({ agent: "pending" })}>Agent (approve)</Action>
-            <Action onClick={() => send({ agent: "fallback" })}>Agent (schema card)</Action>
             <Action onClick={() => send({ agent: "run" })}>Agent (done)</Action>
             <Action onClick={() => send({ dismissing: true })}>Dismiss</Action>
             <Action
@@ -286,6 +289,16 @@ function Tuner() {
             (done) → Dismiss. The transcript preview includes the revisions
             whisper really makes, which is what can shrink the panel mid-flight.
           </p>
+        </Section>
+
+        <Section title="Approval cards">
+          <div className="grid grid-cols-3 gap-1.5">
+            {CARD_KINDS.map((card) => (
+              <Action key={card} onClick={() => send({ card })}>
+                {card}
+              </Action>
+            ))}
+          </div>
         </Section>
 
         <Section title="Springs">

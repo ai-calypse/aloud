@@ -357,7 +357,14 @@ async fn execute(
     match aloud_native::fast::route(transcript, &installed) {
         Some(aloud_native::fast::Fast::Tool { name, args, done }) => {
             tracing::Span::current().record("route", "fast");
-            return run_fast(app, run, name, args, done, context).await;
+            let call = aloud_agent::ProposedCall {
+                name: name.to_string(),
+                args,
+                tool: None,
+                said: transcript.to_string(),
+                names: Default::default(),
+            };
+            return run_fast(app, run, name, call, done, context).await;
         }
         Some(aloud_native::fast::Fast::Web { query }) => {
             let goal = serde_json::json!({ "goal": transcript, "query": query });
@@ -427,9 +434,11 @@ async fn execute(
                     .as_ref()
                     .map(|t| t.toolkit.clone())
                     .unwrap_or_else(|| tool_app(&call.name));
-                let schema = call.tool.map(|t| t.parameters);
+                let schema = call.tool.as_ref().map(|t| t.parameters.clone());
+                // No key, no reads: the card names ids from the run's own reads only.
+                let composio = has_composio.then_some(&composio);
                 async move {
-                    match confirm_write(app, run, call.name, toolkit, schema, call.args).await {
+                    match confirm_write(app, run, call, toolkit, schema, composio).await {
                         Some(args) => aloud_agent::Verdict::Run(args),
                         None => aloud_agent::Verdict::Decline,
                     }
@@ -451,12 +460,13 @@ async fn run_fast(
     app: &AppHandle,
     run: &Run,
     name: &'static str,
-    args: serde_json::Value,
+    call: aloud_agent::ProposedCall,
     done: String,
     context: Context<'_>,
 ) -> Result<String> {
     run.acted.store(true, Ordering::SeqCst);
-    let args = if aloud_native::low_risk(name, &args) {
+    let args = if aloud_native::low_risk(name, &call.args) {
+        let args = call.args;
         run.emit(
             app,
             AgentEvent::ToolCall(ToolCall {
@@ -469,17 +479,9 @@ async fn run_fast(
         );
         args
     } else {
+        // Native writes read nothing to name, so no connected services either.
         let schema = aloud_native::params(name);
-        match confirm_write(
-            app,
-            run,
-            name.to_string(),
-            "macOS".to_string(),
-            schema,
-            args,
-        )
-        .await
-        {
+        match confirm_write(app, run, call, "macOS".to_string(), schema, None).await {
             Some(approved) => approved,
             None => return Ok("Cancelled.".to_string()),
         }
@@ -625,41 +627,68 @@ pub fn answer_agent(app: AppHandle, answer: Option<String>) {
 }
 
 /// Surfaces a write tool for confirmation and awaits the panel's decision. Takes
-/// owned args so the returned future doesn't borrow the loop's transient data.
-/// `schema` is the tool's JSON schema, which the card reads its fields against.
+/// the call owned so the returned future doesn't borrow the loop's transient data.
+/// `schema` is the tool's JSON schema, which the card reads its fields against;
+/// `composio` makes the reads the card's mapping names, if any.
 async fn confirm_write(
     app: &AppHandle,
     run: &Run,
-    name: String,
+    call: aloud_agent::ProposedCall,
     toolkit: String,
     schema: Option<serde_json::Value>,
-    args: serde_json::Value,
+    composio: Option<&aloud_agent::ComposioClient>,
 ) -> Option<serde_json::Value> {
     // A superseded run must not open a gate: its prompt would appear over the
     // new run's panel, and it would occupy the single confirmation slot the
     // current run needs. Declining is right — the user has moved on.
     if !is_current(run.ticket) {
-        tracing::info!(%name, run = run.ticket, "declining a write from a superseded run");
+        tracing::info!(name = %call.name, run = run.ticket, "declining a write from a superseded run");
         return None;
     }
-    // A gate needs the panel even on a quiet run: it is a question.
+    // A gate needs the panel even on a quiet run: it is a question. Up before
+    // the card's reads, so the wait for them is spent on screen.
     run.surface(app);
-    run.emit(
-        app,
-        AgentEvent::ToolCall(gate_call(name, toolkit, &args, schema.as_ref())),
+    let ctx = aloud_agent::preview::Context {
+        said: &call.said,
+        names: &call.names,
+    };
+    let mut event = gate_call(
+        call.name.clone(),
+        toolkit,
+        &call.args,
+        schema.as_ref(),
+        &ctx,
     );
-    await_confirmation(app, args).await
+    if let (Some(composio), Some(preview)) = (composio, event.preview.as_deref_mut()) {
+        // Each read is cut off inside `enrich` (1.5s, all at once), so a slow
+        // service leaves an id unnamed rather than holding the gate back.
+        aloud_agent::preview::enrich(preview, &call.name, &call.args, |slug, args| {
+            let slug = slug.to_string();
+            async move { composio.read_cached(&slug, &args).await }
+        })
+        .await;
+        // A new command during those reads has the panel now.
+        if !is_current(run.ticket) {
+            return None;
+        }
+    }
+    run.emit(app, AgentEvent::ToolCall(event));
+    await_confirmation(app, call.args).await
 }
 
-/// The gate event for a write: the call plus the card that previews it.
+/// The gate event for a write: the call plus the card that previews it, drawn
+/// offline from the arguments and what the run's reads already named.
 fn gate_call(
     name: String,
     toolkit: String,
     args: &serde_json::Value,
     schema: Option<&serde_json::Value>,
+    ctx: &aloud_agent::preview::Context,
 ) -> ToolCall {
     ToolCall {
-        preview: Some(Box::new(aloud_agent::preview::build(&name, args, schema))),
+        preview: Some(Box::new(aloud_agent::preview::render(
+            &name, args, schema, ctx,
+        ))),
         app: toolkit,
         name,
         args: display_args(args),
@@ -942,11 +971,17 @@ mod tests {
             }
         });
         let args = json!({ "channel": "general", "markdown_text": "Standup moves to 10:30" });
+        let names = aloud_agent::preview::Names::default();
+        let ctx = aloud_agent::preview::Context {
+            said: "",
+            names: &names,
+        };
         let call = gate_call(
             "SLACK_CHAT_POST_MESSAGE".into(),
             "slack".into(),
             &args,
             Some(&schema),
+            &ctx,
         );
         assert!(call.requires_confirmation);
         let sent = serde_json::to_value(&call).expect("serialises");
@@ -965,9 +1000,11 @@ mod tests {
             "macOS".into(),
             &json!({ "name": "Safari" }),
             Some(&schema),
+            &ctx,
         );
         let preview = call.preview.expect("a preview");
-        assert_eq!(preview.title, "Quit app");
+        // Drawn by its hand mapping now, which names what it quits.
+        assert_eq!(preview.title, "Quit Safari");
         assert_eq!(preview.fields[0].value, "Safari");
     }
 

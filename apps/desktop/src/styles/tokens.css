@@ -44,6 +44,9 @@
   /* --- Component-specific ------------------------------------------------ */
   --toggle-on: var(--sys-green);
   --toggle-off: #e9e9ea;
+  /* Whose words an approval card's text is: the user's, or Aloud's own. */
+  --origin-yours: var(--sys-teal);
+  --origin-aloud: var(--sys-purple);
 
   /* --- Radii ------------------------------------------------------------- */
   /* Named for what they wrap, because macOS radii are not a linear scale. */
@@ -123,6 +126,7 @@
   --sys-blue: #0a84ff;
   --sys-green: #30d158;
   --sys-red: #ff453a;
+  --sys-purple: #bf5af2;
   --warning: #fbbf24;
   --warning-bg: #422006;
 

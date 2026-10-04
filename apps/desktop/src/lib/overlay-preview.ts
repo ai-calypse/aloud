@@ -1,4 +1,4 @@
-import type { OverlayStyle, Phase } from "./bindings";
+import type { CardKind, OverlayStyle, Phase } from "./bindings";
 
 /**
  * The contract between the motion tuner (tune.html) and the overlay window.
@@ -22,7 +22,7 @@ export type PreviewCommand = {
   /**
    * An agent run. `pending` stops on the approval gate; `contact` stops on the
    * editable one, which is otherwise only reachable by asking the agent for
-   * someone it cannot find; `fallback` on a gate drawn from the tool's schema.
+   * someone it cannot find.
    */
   agent?:
     | "run"
@@ -31,8 +31,9 @@ export type PreviewCommand = {
     | "contact"
     | "asked"
     | "choose"
-    | "fallback"
     | "close";
+  /** A run stopped on the gate of one card kind; see `CARD_PREVIEWS`. */
+  card?: CardKind;
   dismissing?: boolean;
   /** Rebuilds the panel's springs, which is how a changed --panel-* applies. */
   restart?: boolean;
