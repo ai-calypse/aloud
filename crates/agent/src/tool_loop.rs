@@ -470,7 +470,7 @@ pub enum Verdict {
 
 /// Stands in for every tool when a run is evaluated: the canned result for a
 /// name and its arguments, so a whole run can be scored with nothing executed.
-pub type Mock = dyn Fn(&str, &serde_json::Value) -> String + Sync;
+pub type Mock<'a> = dyn Fn(&str, &serde_json::Value) -> String + Sync + 'a;
 
 /// How the loop reaches the outside world.
 ///
@@ -485,7 +485,7 @@ pub struct Callbacks<'a, E, C, A, X> {
     pub ask: A,
     pub cancelled: X,
     /// Eval only; see [`Mock`].
-    pub mock: Option<&'a Mock>,
+    pub mock: Option<&'a Mock<'a>>,
 }
 
 /// Runs the loop for `command`. Returns the model's final answer.
@@ -1009,7 +1009,7 @@ async fn dispatch<A>(
     name: &str,
     args: &serde_json::Value,
     composio: &ComposioClient,
-    mock: Option<&Mock>,
+    mock: Option<&Mock<'_>>,
     on_event: &mut impl FnMut(LoopEvent),
     ask: &impl Fn(String) -> A,
     cancelled: &impl Fn() -> bool,

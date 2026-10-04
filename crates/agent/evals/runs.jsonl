@@ -1,0 +1,6 @@
+{"input":"take 3 photos","expected":[{"callsTool":{"name":"ALOUD_PHOTO_BOOTH_TAKE_PHOTO","count":3}}]}
+{"input":"skip 3 songs","front":"Spotify","expected":[{"callsTool":{"name":["ALOUD_SPOTIFY","ALOUD_MUSIC"],"arguments":{"action":"next"},"count":3}}]}
+{"input":"press tab 4 times","front":"Safari","expected":[{"callsTool":{"name":"ALOUD_PRESS_KEYS","arguments":{"keys":"tab"},"count":4}}]}
+{"input":"open aloud-tauri in Cursor","expected":[{"callsTool":{"name":"ALOUD_OPEN_APP","arguments":{"open":"aloud-tauri"}}}]}
+{"input":"find my tax pdf and open it in Preview","mocks":{"ALOUD_FINDER_SEARCH":{"results":[{"path":"/Users/me/Documents/tax-2025.pdf","name":"tax-2025.pdf"}]}},"expected":[{"callsTool":{"name":"ALOUD_FINDER_SEARCH"}},{"callsTool":{"name":"ALOUD_OPEN_APP","arguments":{"open":"tax-2025.pdf"}}}]}
+{"input":"create a note called groceries then set volume to 20","expected":[{"callsTool":{"name":"ALOUD_NOTES_CREATE","arguments":{"title":"groceries"}}},{"callsTool":{"name":"ALOUD_SYSTEM_VOLUME"}}]}
