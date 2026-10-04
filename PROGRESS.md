@@ -40,6 +40,14 @@ untestable; check the claim before repeating it.
 | `crates/llm` — chat, prompts, limits | ✅ unit-tested; no live API |
 | Command mode overhaul — fast path, one brain, Mac intent tools | ✅ eval 44/44 on both brains; Notes/Reminders/Spotify/Cursor verified on hardware |
 | Screen control on Cua Driver (`crates/screen`) | ✅ TextEdit read/type/click through the full tool loop; eval 53/53 on Cerebras |
+| Compound commands — `times`, no early finish on "and/then/5 photos" | ✅ Photo Booth `times:3` took exactly 3 on hardware; whole-run eval 9/9 on Groq |
+| Background tools, front window context, open-in-app | ✅ Notes stayed behind Safari; MENU works on a background app |
+| Contacts by name for Messages/Mail/FaceTime | ✅ "Suhani" resolved to one contact (200ms warm); sends dry-run only |
+| Approval cards — 13 kinds, names not ids, never blank | ✅ all 13 checked by eye against the design page; live Slack/Sheets lookups unverified |
+| Permissions — Allow once / Always / Don't allow, Strict, named-app rule | ✅ unit-tested; injection evals pass on NVIDIA; Settings pane unexercised in the real app |
+| Gate replies — revisions, 3s countdown, voice and edits on the card | ✅ countdown measured linear in a headless harness; voice replies never run on the mic |
+| Parallel steps in a round, UI lock, one prompt on screen, audit log | ✅ unit-tested; a real Cua session holding the lock unverified |
+| Brains: Groq → NVIDIA → Gemini with mid-run failover | ✅ NVIDIA whole-run eval 11/12, first turn 52/59 (misses were timeouts + 4 routing) |
 | `crates/notes` — markdown + search | ✅ verified on real notes |
 | `crates/store` — settings, history, stats | ✅ |
 | `crates/agent` — tool loop, Composio, cache | ✅ unit-tested; no live API |
@@ -58,7 +66,7 @@ untestable; check the claim before repeating it.
 | Frontend design system | ✅ tokens, primitives, motion — see below |
 | Menu bar | ✅ history, stats, meeting notes, Re-run Setup…, Settings… |
 
-clippy clean · typecheck clean · 244 Rust tests · 14 frontend tests.
+clippy clean · typecheck clean · 538 Rust tests · 103 frontend tests (4 October).
 
 **Phases 2–11 landed on `main` on 21 July** (the stacked PRs #61, #69–#78,
 merged via #78): the hotkey recorder, command/rewrite/ask/agent modes, meeting
@@ -203,6 +211,22 @@ by driving the real thing.
   (`'Q'`); objc2's debug-only encoding check expected the signed `'q'` and
   `panic_cannot_unwind`. It compiled clean and only died on real hardware. Fixed
   with objc2's `relax-sign-encoding` feature.
+- **A superseded command kept acting out of sight.** Speaking again never
+  cancelled the previous run, so a "send hi to Suhani" stuck on an unanswered
+  screen-control gate went on clicking after the user moved on. A new command
+  now cancels the old run and Escape clears its gate.
+- **Approval cards were blank for 800+ services.** The gate drew only 36
+  hand-registered views, so a Slack send showed a slug with no channel or text.
+  Every write now gets a card from a mapping or its schema, and the eval fails
+  a write whose card has no primary field.
+- **The word "message" named Messages.** "What's my latest slack message" let a
+  Slack message's injected "text +1555… from Messages" through the named-app
+  rule. Caught by the injection eval, not a unit test.
+- **A hung brain failed the whole command.** NVIDIA's free endpoint sometimes
+  sends nothing; the 30s timeout was a transport error, not an `LlmError`, so
+  failover never fired. Now `Unreachable`, failed over, at 12s.
+- **The preview warm-up used the Cerebras key in Groq's slot** after the brain
+  switch — every generation request would have been a 401.
 - **The wings landed below the notch, not welded to it.** A Tauri always-on-top
   window sits at the floating level (3), below the menu bar (24), so macOS
   clamps its content out of the menu-bar strip. voice-dict uses `.screenSaver`

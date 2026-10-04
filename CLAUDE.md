@@ -100,14 +100,44 @@ all run one agent) and **Meeting**. A command goes:
 1. **Fast path, no model** — `aloud_native::fast`: open/quit installed apps,
    play/pause/next, volume, and obvious web commands ("go to youtube", "search
    lofi on youtube") straight to the browser engine.
-2. **The brain** — one tool-calling model, Cerebras `qwen-3.8-27b` then Gemini
-   Flash-Lite on failover (`aloud_agent::brains`). Tools, in the order the prompt
-   gives them: `ALOUD_*` Mac intent tools (the model writes content into their
-   arguments), the connected services the command is about (Composio; others
-   load on demand via `ALOUD_MORE_TOOLS`), `ALOUD_BROWSER_TASK`, screen control
-   for a Mac app nothing else covers, else an answer.
+2. **The brain** — one tool-calling model at a time, best first
+   (`aloud_agent::brains`): Groq `openai/gpt-oss-120b`, then NVIDIA's
+   `nemotron-3.5-lightning` (thinking switched off in `aloud_llm`), then Gemini
+   Flash-Lite. A 429, a 5xx, a dead key or an unreachable endpoint moves the
+   command to the next brain mid-run; a tool turn times out at 12s, and a brain
+   still cooling down is skipped without a request. Tools, in the order the
+   prompt gives them: `ALOUD_*` Mac intent tools (the model writes content into
+   their arguments), the connected services the command is about (Composio;
+   others load on demand via `ALOUD_MORE_TOOLS`), `ALOUD_BROWSER_TASK`, screen
+   control for a Mac app nothing else covers, else an answer.
 3. A run of Mac writes that all worked ends on the tool's own confirmation —
-   no second model call.
+   no second model call. A command naming several actions ("take 5 photos",
+   "… then …") never ends early; repeatable tools take `times`.
+
+Mac intent tools act in the background without bringing their app forward.
+The app, document and project the user was in are merged into a native tool's
+arguments after the gate, so neither the model nor the card sees them.
+
+**The gate.** Every write goes through `permissions::gate`, which keys it by app
+and action (`slack:send-and-share`), then `agent::permit` reads `grants.json`:
+
+- **Always** runs with no card; **Never** refuses, and the row says "Blocked in
+  Settings"; **Ask** shows the approval card. Settings → Permissions edits them.
+- **Strict** — paying, permanent deletes, public posting, sharing passwords or
+  codes — always asks, never offers Always allow, and ignores Enter.
+- **The named-app rule** is the silent defence against injected instructions.
+  Once outside content is in the run (the selection, or any read, browser or
+  screen result), a write to an app the user never named asks even when it is
+  always allowed. The front app counts as named.
+- **The card** comes from `preview::render`: a `hand.json` mapping, else a
+  generated one (`action-previews.json`), else the schema. `enrich` then names
+  ids with reads cut off at 1.5s. The user's exact words to a resolved contact
+  or channel count down 3s with Undo instead of waiting for a click.
+- **Answers** are revisioned, and whichever comes first wins: a click, a spoken
+  reply ("send it", "cancel", "make it …"), the countdown, or the gate being
+  cleared. A spoken reply is tried before speech claims a new run, so a card can
+  be answered by voice without cancelling its run. Each decision and write is
+  logged to `audit.jsonl` (tool, app, decision, never content).
 
 A round's calls are admitted one at a time (gates and questions in order, one
 prompt on screen), then run together, three at most, and are reported in call
@@ -119,7 +149,8 @@ Script user text into apps with `script::run_jxa` (one JSON argument, never
 interpolated). Routing changes are checked against the eval, not by feel:
 
 ```sh
-cargo run -p aloud-agent --example command_eval            # every brain with a key
+cargo run -p aloud-agent --example command_eval            # first turn, every brain with a key
+cargo run -p aloud-agent --example command_eval -- runs nvidia  # whole runs, tools mocked
 cargo run -p aloud-native --example demo -- fast "<said>"  # what the fast path does
 pnpm evals                                                 # the dashboard, 127.0.0.1:8091
 ```
