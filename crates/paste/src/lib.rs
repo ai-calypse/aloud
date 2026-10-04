@@ -11,6 +11,28 @@ use anyhow::{Context, Result};
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use std::{thread::sleep, time::Duration};
 
+/// When Aloud last wrote the clipboard itself. A clipboard history watching
+/// `changeCount` cannot tell our dictation paste (and the restore after it)
+/// from something the user copied; this is how it keeps Aloud's own traffic
+/// out of the history. A time window rather than a write count: each backend
+/// bumps `changeCount` a different number of times per write.
+static OWN_WRITE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+fn note_own_write() {
+    *OWN_WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+}
+
+/// Whether Aloud wrote the clipboard within `window` — the caller treats any
+/// change seen in that span as ours.
+pub fn wrote_within(window: Duration) -> bool {
+    OWN_WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .is_some_and(|at| at.elapsed() < window)
+}
+
 /// Bounded so a process with no main run loop (tests, examples) errors rather
 /// than hangs.
 #[cfg(target_os = "macos")]
@@ -23,7 +45,7 @@ const MAIN_THREAD_WAIT: Duration = Duration::from_secs(2);
 /// queue. Every synthetic key chord must hop here first — pasting happens on a
 /// tokio worker, the rewrite read on the event-tap thread.
 #[cfg(target_os = "macos")]
-fn on_main_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+pub fn on_main_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
     use std::ffi::c_void;
 
     #[repr(C)]
@@ -65,7 +87,7 @@ fn on_main_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 }
 
 #[cfg(not(target_os = "macos"))]
-fn on_main_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+pub fn on_main_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
     Ok(f())
 }
 
@@ -141,7 +163,9 @@ pub fn paste_text(text: &str, press_enter: bool, preserve_clipboard: bool) -> Re
     // Only worth reading the old clipboard if it is going back afterwards.
     let saved = preserve_clipboard.then(|| Snapshot::capture(&mut clipboard));
 
+    note_own_write();
     clipboard.set_text(text).context("writing transcript")?;
+    note_own_write();
     let result = send_paste(press_enter);
 
     // Restore even if the paste failed, so a failure never eats the clipboard.
@@ -150,6 +174,7 @@ pub fn paste_text(text: &str, press_enter: bool, preserve_clipboard: bool) -> Re
     if let Some(saved) = saved {
         std::thread::spawn(move || {
             sleep(PASTE_SETTLE);
+            note_own_write();
             // A second handle: arboard's is not Send on every platform.
             match arboard::Clipboard::new() {
                 Ok(mut clipboard) => {
@@ -168,10 +193,31 @@ pub fn paste_text(text: &str, press_enter: bool, preserve_clipboard: bool) -> Re
 /// the tray's history menu: a menu closes by moving focus, so a synthesised
 /// paste would land in whatever happened to be in front.
 pub fn set_clipboard(text: &str) -> Result<()> {
+    note_own_write();
     arboard::Clipboard::new()
         .context("opening clipboard")?
         .set_text(text)
         .context("writing to clipboard")
+}
+
+/// Puts an RGBA image on the clipboard and leaves it there, like [`set_clipboard`].
+pub fn set_clipboard_image(width: usize, height: usize, rgba: Vec<u8>) -> Result<()> {
+    note_own_write();
+    arboard::Clipboard::new()
+        .context("opening clipboard")?
+        .set_image(arboard::ImageData {
+            width,
+            height,
+            bytes: rgba.into(),
+        })
+        .context("writing image to clipboard")
+}
+
+/// Sends the paste chord for whatever is on the clipboard now. For a caller
+/// that already put its content there (a history entry, a snippet) and has
+/// handed focus back.
+pub fn paste_clipboard() -> Result<()> {
+    send_paste(false)
 }
 
 /// Reads the clipboard as text. An image or empty board errors rather than
@@ -319,6 +365,7 @@ pub fn copy_selection() -> Result<String> {
     // Sentinel first: a copy that silently failed, or that matches the existing
     // clipboard, is otherwise indistinguishable from a real result.
     let sentinel = "\u{0}aloud-selection-probe";
+    note_own_write();
     clipboard.set_text(sentinel).ok();
 
     on_main_thread(|| -> Result<()> {
@@ -331,7 +378,9 @@ pub fn copy_selection() -> Result<String> {
 
     sleep(PASTE_SETTLE);
     let selection = clipboard.get_text().unwrap_or_default();
+    note_own_write();
     saved.restore(&mut clipboard).ok();
+    note_own_write();
 
     if selection == sentinel {
         return Ok(String::new()); // nothing was selected
@@ -358,6 +407,15 @@ mod tests {
 
         saved.restore(&mut clipboard).unwrap();
         assert_eq!(clipboard.get_text().unwrap(), "original");
+    }
+
+    #[test]
+    fn an_own_write_is_remembered_only_for_its_window() {
+        // The clipboard history relies on this to skip Aloud's own paste and
+        // restore; a window that never closes would hide the user's copies.
+        note_own_write();
+        assert!(wrote_within(Duration::from_secs(5)));
+        assert!(!wrote_within(Duration::ZERO));
     }
 
     #[test]

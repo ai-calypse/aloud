@@ -163,6 +163,71 @@ export const ACTIONS: NotchAction[] = [
       return true;
     },
   },
+  // -- Clipboard section --
+  {
+    id: "clipboard.history",
+    title: "Open clipboard history",
+    keywords: ["copy", "paste", "copied", "ocr"],
+    section: "clipboard",
+    subsection: "history",
+    run: (ctx) => {
+      ctx.open("clipboard", "history");
+      return true;
+    },
+  },
+  {
+    id: "clipboard.snippets",
+    title: "Open snippets",
+    keywords: ["text", "template", "boilerplate"],
+    section: "clipboard",
+    subsection: "snippets",
+    run: (ctx) => {
+      ctx.open("clipboard", "snippets");
+      return true;
+    },
+  },
+  {
+    id: "colors.pick",
+    title: "Pick a color from the screen",
+    keywords: ["eyedropper", "hex", "rgb", "sample"],
+    section: "clipboard",
+    subsection: "colors",
+    run: async () => (await commands.colorPick()).status === "ok",
+  },
+  // -- Launch section --
+  {
+    id: "launch.apps",
+    title: "Open the app launcher",
+    keywords: ["open", "start", "applications"],
+    section: "launch",
+    subsection: "apps",
+    run: (ctx) => {
+      ctx.open("launch", "apps");
+      return true;
+    },
+  },
+  {
+    id: "launch.shortcuts",
+    title: "Run an Apple Shortcut",
+    keywords: ["automation", "workflow"],
+    section: "launch",
+    subsection: "shortcuts",
+    run: (ctx) => {
+      ctx.open("launch", "shortcuts");
+      return true;
+    },
+  },
+  {
+    id: "launch.search",
+    title: "Search apps, notes and files",
+    keywords: ["find", "spotlight", "open"],
+    section: "launch",
+    subsection: "search",
+    run: (ctx) => {
+      ctx.open("launch", "search");
+      return true;
+    },
+  },
   {
     // What a finished row's Show does: bring back what a write made.
     id: "result.show",

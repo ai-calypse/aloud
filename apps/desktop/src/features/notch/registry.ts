@@ -15,6 +15,8 @@ import { MediaDevices } from "./views/MediaDevices";
 import { MediaLyrics } from "./views/MediaLyrics";
 import { MediaSound } from "./views/MediaSound";
 import { MediaPlaying } from "./views/MediaPlaying";
+import { ClipboardColors, ClipboardHistory, ClipboardSnippets } from "./views/Clipboard";
+import { LaunchApps, LaunchSearch, LaunchShortcuts } from "./views/Launch";
 import { NowOverview } from "./views/Now";
 import { ShelfDownloads, ShelfDrives, ShelfFiles, ShelfShots } from "./views/Shelf";
 
@@ -135,9 +137,27 @@ export const SECTIONS: Section[] = [
     name: "Clipboard",
     icon: ClipboardIcon,
     subsections: [
-      { id: "history", name: "History", features: ["Clipboard history", "Smart actions", "OCR"], ready: false },
-      { id: "snippets", name: "Snippets", features: ["Text snippets"], ready: false },
-      { id: "colors", name: "Colors", features: ["Color eyedropper"], ready: false },
+      {
+        id: "history",
+        name: "History",
+        features: ["Clipboard history", "Smart actions", "OCR"],
+        ready: true,
+        view: ClipboardHistory,
+      },
+      {
+        id: "snippets",
+        name: "Snippets",
+        features: ["Text snippets"],
+        ready: true,
+        view: ClipboardSnippets,
+      },
+      {
+        id: "colors",
+        name: "Colors",
+        features: ["Color eyedropper"],
+        ready: true,
+        view: ClipboardColors,
+      },
     ],
   },
   {
@@ -170,9 +190,21 @@ export const SECTIONS: Section[] = [
     name: "Launch",
     icon: LayoutGridIcon,
     subsections: [
-      { id: "apps", name: "Apps", features: ["App launcher"], ready: false },
-      { id: "shortcuts", name: "Shortcuts", features: ["Apple Shortcuts"], ready: false },
-      { id: "search", name: "Search", features: ["Search and translate"], ready: false },
+      { id: "apps", name: "Apps", features: ["App launcher"], ready: true, view: LaunchApps },
+      {
+        id: "shortcuts",
+        name: "Shortcuts",
+        features: ["Apple Shortcuts"],
+        ready: true,
+        view: LaunchShortcuts,
+      },
+      {
+        id: "search",
+        name: "Search",
+        features: ["Search apps, notes and files"],
+        ready: true,
+        view: LaunchSearch,
+      },
     ],
   },
 ];
