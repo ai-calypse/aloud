@@ -248,13 +248,14 @@ A live activity any crate can show. `crates/islands` owns the logic and the type
 ```rust
 Island { id, kind: Live | Alert, priority: Low | Normal | High | Urgent,
          icon: Option<String>, title, detail: Option<String>,
-         actions: Vec<IslandAction { label, action, args }>, expires: Option<u32 /* ms */> }
+         actions: Vec<IslandAction { label, action, args }>, expires: Option<u32 /* ms */>,
+         dismissible: bool /* serde default false */ }
 ```
 
 - **Push** with `crate::islands::push(app, island)`; **remove** with `crate::islands::remove(app, id)`. Same id updates in place and keeps its place among equals; an identical re-push sends nothing but renews `expires`. Ranking: priority, then arrival.
 - **Kinds:** `Live` draws beside the camera in the closed notch (`IslandPill`: ranked, alternating sides, never under the cutout, a count past four) and as a row in Now › Overview. `Alert` is the chip that drops from the notch for four seconds (paused while pointed at) — the write toast is one; it goes through `overlay::show_toast` so it never takes the window from a panel the user is in.
 - **icon:** a `data:` URI, or a glyph name the webview knows (`agents`, `download`, `timer`…; add to `GLYPHS`). **detail** is short enough for the pill ("2 running", "18:42").
-- **Wire:** one `island` event per change, `{ change: { op: add | update | remove, value }, order }` — the webview applies it with `applyIsland` and orders by Rust's ranking; `islands()` is the snapshot for a late mount; `dismiss_island(id)` is the user being done with one.
+- **Wire:** one `island` event per change, `{ change: { op: add | update | remove, value }, order }` — the webview applies it with `applyIsland` and orders by Rust's ranking; `islands()` is the snapshot for a late mount; `dismiss_island(id)` is the user being done with one. An island with `dismissible: true` gets a × in Now › Overview (not on the closed pill, which has no room for a target); its owner must remember the dismissal or its next poll re-pushes it — the battery's pinned island does (`aloud_mac::power::Watch::dismiss`).
 
 ### The action registry and ⌘K (signature)
 `features/notch/actions.ts` is one list of things the notch can do: `{ id, title, keywords, section, subsection, args, run(ctx, args) }`. Island buttons name an id (Rust sends names, never code), ⌘K lists every action that needs no arguments, and the voice agent can call ids next. `run` resolves true when it did what it says, which is when an island that offered it may go. `runAction` fails — never throws — for an unknown id, missing arguments or a throwing run.

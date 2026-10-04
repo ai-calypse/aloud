@@ -94,5 +94,6 @@ pub fn islands() -> Vec<Island> {
 #[tauri::command]
 #[specta::specta]
 pub fn dismiss_island(app: AppHandle, id: String) {
+    crate::mac::island_dismissed(&id);
     remove(&app, &id);
 }

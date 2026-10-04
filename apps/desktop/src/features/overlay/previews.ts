@@ -634,6 +634,7 @@ const alert = (id: string, title: string, app: string, actions: Island["actions"
   detail: app,
   actions,
   expires: 30_000,
+  dismissible: false,
 });
 
 /** The chips a run of writes ends on, one per action a toast can offer. */
@@ -672,6 +673,7 @@ const LIVE_PREVIEWS: Island[] = [
     detail: "18:42",
     actions: [],
     expires: null,
+    dismissible: false,
   },
   {
     id: "agents",
@@ -682,6 +684,7 @@ const LIVE_PREVIEWS: Island[] = [
     detail: "2 running",
     actions: [{ label: "Open", action: "agents.open", args: {} }],
     expires: null,
+    dismissible: false,
   },
   {
     id: "download",
@@ -692,5 +695,6 @@ const LIVE_PREVIEWS: Island[] = [
     detail: "74%",
     actions: [],
     expires: null,
+    dismissible: false,
   },
 ];

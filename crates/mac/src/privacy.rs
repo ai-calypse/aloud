@@ -92,6 +92,7 @@ pub fn island(u: &PrivacyUse) -> Island {
         detail,
         actions: vec![IslandAction::new("Show", "mac.privacy")],
         expires: None,
+        dismissible: false,
     }
 }
 

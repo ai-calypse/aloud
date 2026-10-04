@@ -154,6 +154,7 @@ fn alert(
         detail: Some(detail.to_string()),
         actions,
         expires: Some(ALERT_BACKSTOP_MS),
+        dismissible: false,
     }
 }
 

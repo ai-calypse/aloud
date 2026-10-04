@@ -74,6 +74,7 @@ pub fn timer(s: &TimerState, now: i64) -> Option<Island> {
         detail: Some(detail),
         actions: vec![action],
         expires: None,
+        dismissible: false,
     })
 }
 
@@ -92,6 +93,7 @@ pub fn finished(f: &Finished) -> Island {
         detail: Some(detail),
         actions: vec![IslandAction::new("Start", "focus.resume")],
         expires: Some(8_000),
+        dismissible: false,
     }
 }
 
@@ -114,6 +116,7 @@ pub fn awake(s: &AwakeState, now: i64) -> Option<Island> {
         detail: Some(detail),
         actions: vec![IslandAction::new("Stop", "focus.awakeOff")],
         expires: None,
+        dismissible: false,
     })
 }
 

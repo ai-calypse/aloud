@@ -1,7 +1,18 @@
+import { XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Empty, Label, List, Row } from "@/components/notch/list";
+import { commands } from "@/lib/bindings";
 import { IslandIcon } from "../IslandPill";
 import { useNotch } from "../context";
+
+/** The × on an island that opted in: the queue drops it and its owner is told. */
+function dismiss(id: string) {
+  try {
+    void commands.dismissIsland(id);
+  } catch {
+    /* browser preview: no queue to tell */
+  }
+}
 
 /**
  * Now › Overview: everything live, in the order the closed notch ranks it,
@@ -35,15 +46,29 @@ export function NowOverview() {
               title={island.title}
               subtitle={island.detail}
               trailing={
-                action && (
-                  // What needs the user gets the panel's one inverted button.
-                  <Button
-                    variant={island.priority === "urgent" ? "notch" : "notch-quiet"}
-                    size="notch"
-                    onClick={() => void act(action)}
-                  >
-                    {action.label}
-                  </Button>
+                (action || island.dismissible) && (
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {action && (
+                      // What needs the user gets the panel's one inverted button.
+                      <Button
+                        variant={island.priority === "urgent" ? "notch" : "notch-quiet"}
+                        size="notch"
+                        onClick={() => void act(action)}
+                      >
+                        {action.label}
+                      </Button>
+                    )}
+                    {island.dismissible && (
+                      <Button
+                        variant="notch-quiet"
+                        size="notch-icon"
+                        aria-label={`Dismiss ${island.title}`}
+                        onClick={() => dismiss(island.id)}
+                      >
+                        <XIcon />
+                      </Button>
+                    )}
+                  </span>
                 )
               }
             />

@@ -449,6 +449,7 @@ fn agents_island(rows: &[AgentSession], asking: usize) -> Option<aloud_islands::
             "agents.open",
         )],
         expires: None,
+        dismissible: false,
     })
 }
 

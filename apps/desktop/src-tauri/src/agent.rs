@@ -370,6 +370,7 @@ impl Toast {
             detail: Some(self.app),
             actions,
             expires: Some(ALERT_BACKSTOP_MS),
+            dismissible: false,
         }
     }
 }

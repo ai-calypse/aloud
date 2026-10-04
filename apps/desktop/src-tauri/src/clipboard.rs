@@ -236,6 +236,7 @@ pub async fn color_pick(
                     detail: Some("Color picker".into()),
                     actions: Vec::new(),
                     expires: Some(30_000),
+                    dismissible: false,
                 },
             );
         }

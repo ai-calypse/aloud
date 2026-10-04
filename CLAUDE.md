@@ -249,6 +249,13 @@ short version:
 - **Islands:** live state crosses from Rust as an `Island` pushed through
   `crate::islands::push`; ranking, dedupe and expiry are `crates/islands`'
   and tested there. The write toast is an alert island.
+- **Battery:** `aloud_mac::power::Watch` drops one alert chip when the Mac
+  starts discharging at or below 20% (again only after it recovered or was
+  plugged in), pins an `Urgent` island only at or below 10%, and drops the
+  full-charge chip on the transition to 100%. The pinned island is
+  `dismissible` — a × in Now › Overview — and the watcher remembers the
+  dismissal (`dismiss_island` → `mac::island_dismissed`) until the battery
+  recovers, since it re-pushes every ~30s.
 - **Actions:** `features/notch/actions.ts` is the one registry ⌘K, island
   buttons and (next) the voice agent share. Rust names an action; it never
   sends code.

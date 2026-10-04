@@ -25,6 +25,9 @@ static WATCHERS: Mutex<Watchers> = Mutex::new(Watchers {
     privacy: true,
     battery: true,
 });
+/// Shared, not the thread's own: `dismiss_island` tells it the user closed the
+/// critical island, and the next poll must not put it back.
+static BATTERY: Mutex<power::Watch> = Mutex::new(power::Watch::new());
 static SAMPLER: Mutex<Option<Sampler>> = Mutex::new(None);
 
 fn watchers() -> Watchers {
@@ -41,7 +44,6 @@ pub fn start(app: &AppHandle) {
         .name("mac-watch".into())
         .spawn(move || {
             let mut privacy = privacy::Watch::default();
-            let mut battery = power::Watch::default();
             let mut tick = 0u32;
             loop {
                 let on = watchers();
@@ -51,7 +53,12 @@ pub fn start(app: &AppHandle) {
                     }
                 }
                 if on.battery && tick.is_multiple_of(BATTERY_EVERY_TICKS) {
-                    for step in battery.update(power::read().as_ref()) {
+                    let read = power::read();
+                    let steps = BATTERY
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .update(read.as_ref());
+                    for step in steps {
                         apply(&app, step);
                     }
                 }
@@ -61,6 +68,13 @@ pub fn start(app: &AppHandle) {
         });
     if let Err(e) = spawned {
         tracing::warn!(%e, "could not start the mac watchers");
+    }
+}
+
+/// The user closed an island. Only the battery's remembers it.
+pub fn island_dismissed(id: &str) {
+    if id == power::LOW_ID {
+        BATTERY.lock().unwrap_or_else(|e| e.into_inner()).dismiss();
     }
 }
 
@@ -175,7 +189,11 @@ pub fn set_mac_watcher(app: AppHandle, watcher: Watcher, on: bool) -> Result<(),
     if !on {
         match watcher {
             Watcher::Privacy => crate::islands::remove(&app, privacy::ID),
-            Watcher::Battery => crate::islands::remove(&app, power::LOW_ID),
+            Watcher::Battery => {
+                crate::islands::remove(&app, power::LOW_ID);
+                crate::islands::remove(&app, power::LOW_CHIP_ID);
+                crate::islands::remove(&app, power::FULL_ID);
+            }
         }
     }
     Watchers::path()

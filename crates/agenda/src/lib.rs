@@ -278,6 +278,7 @@ pub fn island(events: &[Event], now: i64) -> Option<Island> {
             .map(|url| IslandAction::new("Join", "calendar.join").arg("url", url))
             .collect(),
         expires: None,
+        dismissible: false,
     })
 }
 

@@ -91,6 +91,11 @@ pub struct Island {
     /// `u32` and not a duration type: specta refuses 64-bit integers, which
     /// would reach the webview as a BigInt.
     pub expires: Option<u32>,
+    /// Draws a × in Now › Overview that takes it down (`dismiss_island`). Only
+    /// for an island whose owner remembers the dismissal, or its next poll
+    /// puts it straight back.
+    #[serde(default)]
+    pub dismissible: bool,
 }
 
 /// What a push, a removal or the clock did to the queue — the `island`
@@ -220,6 +225,7 @@ mod tests {
             detail: None,
             actions: Vec::new(),
             expires: None,
+            dismissible: false,
         }
     }
 

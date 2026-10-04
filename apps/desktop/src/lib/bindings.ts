@@ -1194,6 +1194,12 @@ export type Island = {
 	 *  would reach the webview as a BigInt.
 	 */
 	expires: number | null,
+	/**
+	 *  Draws a × in Now › Overview that takes it down (`dismiss_island`). Only
+	 *  for an island whose owner remembers the dismissal, or its next poll
+	 *  puts it straight back.
+	 */
+	dismissible?: boolean,
 };
 
 /**  A button on an island. */

@@ -224,6 +224,7 @@ fn island(now: &NowPlaying, art: Option<String>) -> Island {
         detail: Some(now.title.clone()),
         actions: vec![IslandAction::new("Pause", "media.toggle").arg("player", action_player(now))],
         expires: None,
+        dismissible: false,
     }
 }
 

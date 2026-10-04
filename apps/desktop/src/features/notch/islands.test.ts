@@ -11,6 +11,7 @@ const island = (id: string, detail = ""): Island => ({
   detail,
   actions: [],
   expires: null,
+  dismissible: false,
 });
 
 describe("applyIsland", () => {

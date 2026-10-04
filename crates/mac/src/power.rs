@@ -1,5 +1,5 @@
-//! Battery state for Mac › Power, and the two islands it can raise: low, and
-//! fully charged.
+//! Battery state for Mac › Power, and what it raises: a chip at 20%, a pinned
+//! dismissible island below 10%, and a chip when fully charged.
 //!
 //! `pmset -g batt` is the charge, state and time estimate — the same numbers
 //! as the menu bar, which `ioreg`'s own `TimeRemaining` is not (it read 178
@@ -123,34 +123,52 @@ pub fn parse_ioreg(text: &str) -> (Option<u32>, Option<u8>) {
     (value("CycleCount"), health)
 }
 
-/// At or below this on battery the notch says so, like the system alert does.
+/// At or below this on battery the notch drops a chip, like the system alert.
 pub const LOW: u8 = 20;
-/// Below this it is urgent: the machine is about to sleep.
+/// At or below this it stays up beside the camera: the machine is about to
+/// sleep.
 pub const CRITICAL: u8 = 10;
 
+/// The pinned island, only while critical.
 pub const LOW_ID: &str = "mac:battery";
+pub const LOW_CHIP_ID: &str = "mac:battery-low";
 pub const FULL_ID: &str = "mac:battery-full";
 
 fn open_power() -> IslandAction {
     IslandAction::new("Show", "mac.power")
 }
 
-/// The low-battery island: live while it lasts, so it rides beside the camera
-/// until the Mac is plugged in.
-fn low_island(b: &Battery) -> Island {
+/// The critical-battery island: live until the Mac is plugged in or the user
+/// dismisses it, so it is the one thing here that can sit beside the camera.
+fn critical_island(b: &Battery) -> Island {
     Island {
         id: LOW_ID.into(),
         kind: IslandKind::Live,
-        priority: if b.percent <= CRITICAL {
-            IslandPriority::Urgent
-        } else {
-            IslandPriority::High
-        },
+        priority: IslandPriority::Urgent,
         icon: Some("battery".into()),
         title: "Battery low".into(),
         detail: Some(format!("{}%", b.percent)),
         actions: vec![open_power()],
         expires: None,
+        dismissible: true,
+    }
+}
+
+/// The chip at 20%. An alert, so it drops once from the notch and goes; the
+/// pinned island above is for when it is truly urgent.
+fn low_chip(b: &Battery) -> Island {
+    Island {
+        id: LOW_CHIP_ID.into(),
+        kind: IslandKind::Alert,
+        priority: IslandPriority::Normal,
+        icon: Some("battery".into()),
+        title: "Battery low".into(),
+        detail: Some(format!("{}%", b.percent)),
+        actions: vec![open_power()],
+        // The webview ends an alert after its own four seconds; this is only
+        // the backstop (see agent.rs ALERT_BACKSTOP_MS).
+        expires: Some(30_000),
+        dismissible: false,
     }
 }
 
@@ -164,21 +182,40 @@ fn full_island() -> Island {
         title: "Fully charged".into(),
         detail: Some("100%".into()),
         actions: vec![open_power()],
-        // The webview ends an alert after its own four seconds; this is only
-        // the backstop (see agent.rs ALERT_BACKSTOP_MS).
         expires: Some(30_000),
+        dismissible: false,
     }
 }
 
-/// Decides which islands the battery wants. The full chip fires on the
-/// *transition* to full, so launching Aloud on an already-full Mac is silent
-/// and a Mac sitting at 100% for a day does not chirp every poll.
+/// Decides which islands the battery wants. Both chips fire on a
+/// *transition* — into full, into low — so a Mac sitting at 100% or at 15%
+/// for a day does not chirp every poll. Launching already low is a
+/// transition from "unknown", so it still tells the user once.
 #[derive(Debug, Default)]
 pub struct Watch {
     was_full: Option<bool>,
+    /// Discharging at or below [`LOW`] on the last read: the chip is spent
+    /// until the battery recovers or is plugged in.
+    was_low: bool,
+    /// The user closed the critical island. The watcher re-pushes every few
+    /// polls, so it is remembered here until the battery recovers.
+    dismissed: bool,
 }
 
 impl Watch {
+    pub const fn new() -> Self {
+        Self {
+            was_full: None,
+            was_low: false,
+            dismissed: false,
+        }
+    }
+
+    /// The user dismissed the pinned island (`dismiss_island` for [`LOW_ID`]).
+    pub fn dismiss(&mut self) {
+        self.dismissed = true;
+    }
+
     pub fn update(&mut self, battery: Option<&Battery>) -> Vec<Step> {
         let Some(b) = battery else {
             return vec![Step::Remove(LOW_ID)];
@@ -187,11 +224,23 @@ impl Watch {
         let just_filled = full && self.was_full == Some(false);
         self.was_full = Some(full);
 
+        let discharging = b.state == ChargeState::Discharging;
+        let low = discharging && b.percent <= LOW;
+        let just_low = low && !self.was_low;
+        self.was_low = low;
+        let critical = discharging && b.percent <= CRITICAL;
+        if !critical {
+            self.dismissed = false;
+        }
+
         let mut steps = Vec::new();
-        if b.state == ChargeState::Discharging && b.percent <= LOW {
-            steps.push(Step::Push(low_island(b)));
+        if critical && !self.dismissed {
+            steps.push(Step::Push(critical_island(b)));
         } else {
             steps.push(Step::Remove(LOW_ID));
+        }
+        if just_low {
+            steps.push(Step::Push(low_chip(b)));
         }
         if just_filled {
             steps.push(Step::Push(full_island()));
@@ -251,20 +300,114 @@ mod tests {
         assert_eq!(parse_ioreg("nothing here"), (None, None));
     }
 
+    fn pushes(steps: &[Step], id: &str) -> bool {
+        steps
+            .iter()
+            .any(|s| matches!(s, Step::Push(i) if i.id == id))
+    }
+
+    /// The failure: a "Battery low" island pinned beside the camera from 20%
+    /// down, forever.
     #[test]
-    fn low_battery_is_live_only_while_unplugged() {
+    fn twenty_percent_is_a_chip_and_only_critical_is_pinned() {
         let mut watch = Watch::default();
-        let steps = watch.update(Some(&battery(18, ChargeState::Discharging)));
-        assert!(
-            matches!(&steps[0], Step::Push(i) if i.id == LOW_ID && i.priority == IslandPriority::High)
-        );
-        // Plugged in at the same 18%: the island goes.
-        assert_eq!(
-            watch.update(Some(&battery(18, ChargeState::Charging))),
-            vec![Step::Remove(LOW_ID)]
-        );
-        let steps = watch.update(Some(&battery(8, ChargeState::Discharging)));
-        assert!(matches!(&steps[0], Step::Push(i) if i.priority == IslandPriority::Urgent));
+        watch.update(Some(&battery(50, ChargeState::Discharging)));
+        let steps = watch.update(Some(&battery(20, ChargeState::Discharging)));
+        assert!(pushes(&steps, LOW_CHIP_ID));
+        assert!(!pushes(&steps, LOW_ID), "not pinned above 10%");
+        assert!(matches!(&steps[..], [Step::Remove(LOW_ID), Step::Push(i)]
+                if i.kind == IslandKind::Alert));
+
+        let steps = watch.update(Some(&battery(10, ChargeState::Discharging)));
+        assert!(matches!(&steps[0], Step::Push(i)
+            if i.id == LOW_ID && i.kind == IslandKind::Live
+                && i.priority == IslandPriority::Urgent && i.dismissible));
+        assert!(!pushes(&steps, LOW_CHIP_ID), "the chip is not repeated");
+    }
+
+    #[test]
+    fn the_low_chip_does_not_repeat_on_every_poll() {
+        let mut watch = Watch::default();
+        watch.update(Some(&battery(30, ChargeState::Discharging)));
+        assert!(pushes(
+            &watch.update(Some(&battery(20, ChargeState::Discharging))),
+            LOW_CHIP_ID
+        ));
+        for percent in [19, 18, 15, 12] {
+            assert!(!pushes(
+                &watch.update(Some(&battery(percent, ChargeState::Discharging))),
+                LOW_CHIP_ID
+            ));
+        }
+    }
+
+    #[test]
+    fn launching_already_low_raises_the_chip_once() {
+        let mut watch = Watch::default();
+        assert!(pushes(
+            &watch.update(Some(&battery(14, ChargeState::Discharging))),
+            LOW_CHIP_ID
+        ));
+        assert!(!pushes(
+            &watch.update(Some(&battery(14, ChargeState::Discharging))),
+            LOW_CHIP_ID
+        ));
+    }
+
+    /// Plugging in, or recovering above 20, re-arms the chip for the next fall.
+    #[test]
+    fn the_chip_rearms_after_a_charge_or_a_recovery() {
+        let mut watch = Watch::default();
+        watch.update(Some(&battery(19, ChargeState::Discharging)));
+        // Plugged in at the same 19%.
+        let steps = watch.update(Some(&battery(19, ChargeState::Charging)));
+        assert_eq!(steps, vec![Step::Remove(LOW_ID)]);
+        assert!(pushes(
+            &watch.update(Some(&battery(19, ChargeState::Discharging))),
+            LOW_CHIP_ID
+        ));
+        // Recovered above 20 while still reading as discharging.
+        watch.update(Some(&battery(25, ChargeState::Discharging)));
+        assert!(pushes(
+            &watch.update(Some(&battery(20, ChargeState::Discharging))),
+            LOW_CHIP_ID
+        ));
+    }
+
+    /// The failure: the watcher re-pushing the island the user just closed
+    /// every ~30 seconds.
+    #[test]
+    fn a_dismissed_critical_island_stays_gone_until_the_battery_recovers() {
+        let mut watch = Watch::default();
+        assert!(pushes(
+            &watch.update(Some(&battery(8, ChargeState::Discharging))),
+            LOW_ID
+        ));
+        watch.dismiss();
+        for percent in [8, 7, 6] {
+            let steps = watch.update(Some(&battery(percent, ChargeState::Discharging)));
+            assert!(!pushes(&steps, LOW_ID), "dismissed at {percent}%");
+        }
+        // Plugged in: the memory clears, so the next fall raises it again.
+        watch.update(Some(&battery(6, ChargeState::Charging)));
+        assert!(pushes(
+            &watch.update(Some(&battery(9, ChargeState::Discharging))),
+            LOW_ID
+        ));
+
+        // Recovery by percentage alone clears it too.
+        watch.dismiss();
+        watch.update(Some(&battery(11, ChargeState::Discharging)));
+        assert!(pushes(
+            &watch.update(Some(&battery(10, ChargeState::Discharging))),
+            LOW_ID
+        ));
+    }
+
+    #[test]
+    fn no_battery_takes_the_pinned_island_down() {
+        let mut watch = Watch::default();
+        watch.update(Some(&battery(5, ChargeState::Discharging)));
         assert_eq!(watch.update(None), vec![Step::Remove(LOW_ID)]);
     }
 
