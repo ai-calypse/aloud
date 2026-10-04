@@ -9,6 +9,7 @@
 //! way `notch.rs` and `aloud_volume` do.
 
 mod catalogue;
+pub mod contacts;
 pub mod fast;
 mod keys;
 mod media;

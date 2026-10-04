@@ -10,9 +10,20 @@
 //! cargo run -p aloud-native --example demo -- organize   # DRY RUN, prints the plan
 //! cargo run -p aloud-native --example demo -- call ALOUD_NOTES_CREATE '{"title":"Cake","body":"- flour"}'
 //! cargo run -p aloud-native --example demo -- fast "open calculator app"   # the no-model route
+//! cargo run -p aloud-native --example demo -- contacts Suhani   # lookup timing, handles masked
 //! ```
 
+use aloud_native::contacts::{self, Match};
 use serde_json::json;
+
+/// Contact output may land in logs, so all but the last two characters go.
+fn mask(s: &str) -> String {
+    let n = s.chars().count();
+    s.chars()
+        .enumerate()
+        .map(|(i, c)| if i + 2 < n { '•' } else { c })
+        .collect()
+}
 
 fn call(name: &str, args: serde_json::Value) {
     let started = std::time::Instant::now();
@@ -69,6 +80,28 @@ fn main() {
                     println!("→ browser task (engine), query {query:?}")
                 }
                 None => println!("→ the brain"),
+            }
+        }
+        [cmd, query] if cmd == "contacts" => {
+            let started = std::time::Instant::now();
+            let people = match contacts::find(query) {
+                Ok(people) => people,
+                Err(e) => return println!("✗ contacts ({:?})\n  {e}", started.elapsed()),
+            };
+            println!("{} match(es) in {:?}", people.len(), started.elapsed());
+            for (i, p) in people.iter().enumerate() {
+                let masked = |v: &[String]| v.iter().map(|s| mask(s)).collect::<Vec<_>>();
+                println!(
+                    "  #{} phones {:?} emails {:?}",
+                    i + 1,
+                    masked(&p.phones),
+                    masked(&p.emails)
+                );
+            }
+            match contacts::rank(query, people) {
+                Match::One(_) => println!("→ One"),
+                Match::Many(people) => println!("→ Many ({})", people.len()),
+                Match::None => println!("→ None"),
             }
         }
         // Any tool with literal arguments: what the model would send, minus the model.
