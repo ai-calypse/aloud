@@ -12,6 +12,7 @@ import {
 import { readySections, type Section } from "./sections";
 import { AgentsCoding, AgentsUsage, AgentsVoice } from "./views/Agents";
 import { MediaLyrics } from "./views/MediaLyrics";
+import { MediaSound } from "./views/MediaSound";
 import { MediaPlaying } from "./views/MediaPlaying";
 import { NowOverview } from "./views/Now";
 
@@ -82,7 +83,14 @@ export const SECTIONS: Section[] = [
         view: MediaPlaying,
       },
       { id: "lyrics", name: "Lyrics", features: ["Synced lyrics"], ready: true, view: MediaLyrics },
-      { id: "sound", name: "Sound", features: ["Audio switcher", "Sound mixer", "Mic mute"], ready: false },
+      {
+        id: "sound",
+        name: "Sound",
+        // No "Sound mixer": per-app volume needs Core Audio process taps.
+        features: ["Audio switcher", "Mic mute"],
+        ready: true,
+        view: MediaSound,
+      },
       { id: "devices", name: "Devices", features: ["AirPods", "Device battery"], ready: false },
     ],
   },

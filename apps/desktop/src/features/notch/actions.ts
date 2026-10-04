@@ -130,6 +130,29 @@ export const ACTIONS: NotchAction[] = [
     },
   },
   {
+    id: "sound.micMute",
+    title: "Mute or unmute the microphone",
+    keywords: ["mic", "meeting", "zoom", "silence", "audio"],
+    section: "media",
+    subsection: "sound",
+    run: async () => {
+      const { micMuted } = await commands.soundState();
+      // No switch on this microphone: say so rather than pretend.
+      return micMuted !== null && (await commands.soundSetMicMuted(!micMuted)).status === "ok";
+    },
+  },
+  {
+    id: "sound.open",
+    title: "Choose an audio output or input",
+    keywords: ["speakers", "headphones", "airpods", "switch", "audio device"],
+    section: "media",
+    subsection: "sound",
+    run: (ctx) => {
+      ctx.open("media", "sound");
+      return true;
+    },
+  },
+  {
     // What a finished row's Show does: bring back what a write made.
     id: "result.show",
     title: "Show what was made",
