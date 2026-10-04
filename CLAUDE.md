@@ -252,6 +252,16 @@ short version:
 - **Actions:** `features/notch/actions.ts` is the one registry ⌘K, island
   buttons and (next) the voice agent share. Rust names an action; it never
   sends code.
+- **Web video:** Now Playing also reads `<video>`/`<audio>` in Brave, Chrome,
+  Edge and Safari (`aloud_media::browser`), by running one small script in each
+  tab through the browser's own scripting. It needs "Allow JavaScript from
+  Apple Events" on in each browser, which Aloud can only point at; while it is
+  off the view says which menu holds it (`Reading.browsers`), rechecked every
+  few minutes, not every poll. A tab the browser has discarded or not loaded
+  never answers `execute javascript`, so the scan is AppleScript with a
+  one-second timeout per tab and skips silent tabs for ten minutes (JXA has no
+  timeout). Only media tabs leave the scan, and only title, host and position.
+  Settings › "Web video in the notch" turns it off.
 - **Clipboard history:** off until the user flips it, local only (SQLite and
   PNGs under `<data>/clipboard`), never logged or shown to a model. It polls
   `changeCount`, skips `org.nspasteboard.ConcealedType` and friends, and skips

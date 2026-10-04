@@ -4,6 +4,7 @@
 //!   cargo run -p aloud-media --example browser -- scan "Brave Verify"   # one app by name (Chromium dictionary)
 //!   cargo run -p aloud-media --example browser -- scan Safari safari    # ...or a Safari-style one
 //!   cargo run -p aloud-media --example browser -- watch "Brave Verify"  # once a second, full walk then targeted
+//!   cargo run -p aloud-media --example browser -- icon "Brave Browser"   # the badge icon
 //!   cargo run -p aloud-media --example browser -- control "Brave Verify" toggle|seek 30|speed 150
 //!
 //! Needs "Allow JavaScript from Apple Events" on in the browser; without it
@@ -51,6 +52,26 @@ fn main() {
             );
             issues.iter().for_each(|i| println!("  issue: {i}"));
             hits.iter().for_each(|h| println!("{h:#?}"));
+            if let Some(now) = hits.first() {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let art = rt.block_on(aloud_media::artwork(now));
+                println!(
+                    "artwork: {}",
+                    art.map_or("none".into(), |u| format!("{} bytes of data: URI", u.len()))
+                );
+            }
+        }
+        Some("icon") => {
+            let t = Instant::now();
+            let icon = now_playing::app_icon(app.expect("icon <app>"));
+            println!(
+                "{:?} in {:?}",
+                icon.map(|i| format!("{} bytes", i.len())),
+                t.elapsed()
+            );
         }
         Some("watch") => {
             let app = app.expect("watch <app>");
