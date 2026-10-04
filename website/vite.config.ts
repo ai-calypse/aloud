@@ -47,8 +47,8 @@ function seo(site: string, gscToken: string): Plugin {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
-  // ponytail: aloud.app is a guess from the releases.aloud.app hint in the copy doc; set SITE_URL.
-  const site = (env.SITE_URL || "https://aloud.app").replace(/\/+$/, "");
+  // ponytail: the default is the owned domain; set SITE_URL if it ever differs (preview deploys).
+  const site = (env.SITE_URL || "https://speakos.app").replace(/\/+$/, "");
   return {
     plugins: [react(), tailwindcss(), seo(site, env.GSC_TOKEN || "")],
     server: { port: 1430 },

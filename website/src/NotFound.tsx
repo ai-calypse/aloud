@@ -8,7 +8,7 @@ import { GlossyButton, MacWindow } from "./components/ds";
 // The 404 text is baked into the image; the page only adds a way home.
 export default function NotFound() {
   const c = useCopy();
-  useMeta("page not found · aloud", { noindex: true });
+  useMeta("page not found · SpeakOS", { noindex: true });
   return (
     <main className="flex min-h-svh flex-col items-center justify-center gap-10 px-5 py-12">
       <div className="relative w-full max-w-[760px]">

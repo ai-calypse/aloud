@@ -16,7 +16,7 @@ const memes = [
   { src: hand, name: "hand-on-computer.png", tilt: -1, alt: "A giant hand reaching out of an old computer screen" },
   { src: grass, name: "touch-grass.png", tilt: 2, alt: "A cat on a pink television in a field, with the words touch grass" },
   { src: less, name: "less-stress.png", tilt: -1.5, alt: "A cat on a laptop on a small island, with the words less stress, more creativity" },
-  { src: adam, name: "everyone-points-at-aloud.png", tilt: 1, alt: "Many people and cartoon characters pointing at each other, in the style of a famous painting" },
+  { src: adam, name: "everyone-points-at-speakos.png", tilt: 1, alt: "Many people and cartoon characters pointing at each other, in the style of a famous painting" },
 ];
 
 const Meme = ({ m, className }: { m: (typeof memes)[number]; className?: string }) => (

@@ -1,4 +1,4 @@
-// Ports of the aloud design system's components (bundle.js there is a global
+// Ports of the SpeakOS design system's components (bundle.js there is a global
 // script on React 18; these are the same markup and class names, typed).
 import { useId, type CSSProperties, type ReactNode } from "react";
 import SmartLink from "./SmartLink";
@@ -223,7 +223,7 @@ export function ApprovalCard({ agent = "claude code", command = "npm test" }: { 
   );
 }
 
-// The aloud mark: three bars of different heights, single ink.
+// The SpeakOS mark: three bars of different heights, single ink.
 export function LogoMark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 16 20" aria-hidden="true" fill="currentColor">

@@ -43,12 +43,13 @@ export default function Closing() {
         </div>
       </section>
 
-      {/* The wall of tvs already spells "aloud", so it replaces the pixel wordmark.
-          It fades into the page at the top; the links sit on its dark floor. */}
+      {/* The wall of tvs replaces the pixel wordmark. It fades into the page at the top; the
+          links sit on its dark floor. ponytail: the picture still spells "ALOUD", the old name;
+          regenerate it before launch. */}
       <footer className="relative isolate overflow-hidden text-neutral-0">
         <img
           src={tvWall}
-          alt="A wall of blue retro televisions whose screens spell out aloud, with a Windows Media Player style tv in front"
+          alt="A wall of blue retro televisions with a Windows Media Player style tv in front"
           width={2400}
           height={1339}
           loading="lazy"
@@ -56,7 +57,7 @@ export default function Closing() {
         />
         <div className="bg-blue-950 px-5 pb-20 pt-5 md:absolute md:inset-x-0 md:bottom-0 md:bg-transparent md:bg-gradient-to-t md:from-blue-950 md:via-blue-950/70 md:to-transparent md:pb-6 md:pt-24">
           <p className="flex flex-wrap justify-center gap-x-3 text-[13px]">
-            <span>aloud</span>·<span>{c.closing.madeFor}</span>·
+            <span>SpeakOS</span>·<span>{c.closing.madeFor}</span>·
             <SmartLink href="/privacy" className="link-u pb-0.5">
               {c.common.privacy}
             </SmartLink>

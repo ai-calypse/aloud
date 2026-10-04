@@ -152,7 +152,7 @@ export default function Features() {
           title={c.approve.title}
           blip={c.approve.blip}
           visual={
-            <MacWindow title="aloud" className="w-full max-w-[440px]">
+            <MacWindow title="SpeakOS" className="w-full max-w-[440px]">
               <Field label="to">#team</Field>
               <Field label="slack">hey team, shipping at five.</Field>
               <div className="flex items-center gap-3 px-4 py-4">

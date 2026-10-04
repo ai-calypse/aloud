@@ -1,4 +1,4 @@
-# Aloud website copy
+# SpeakOS website copy
 
 > **The live copy now lives in `src/copy.ts`** (normal voice and bro mode side by side). This document is the original plan and fact check; it is no longer kept in sync with the site.
 
@@ -9,8 +9,8 @@
 **Voice:** plain, short and confident, matching the app's own copy ("Hold a key, speak, and clean text lands wherever you're typing."). Use active verbs and no hype words. Show real commands rather than adjectives.
 
 ## Page meta
-- **Title:** Aloud: talk to your Mac
-- **Meta description:** Hold a key and speak. Aloud types clean text into any app, and does what you ask: reminders, messages, files, music and your connected apps. You see every action before it happens.
+- **Title:** SpeakOS: talk to your Mac
+- **Meta description:** Hold a key and speak. SpeakOS types clean text into any app, and does what you ask: reminders, messages, files, music and your connected apps. You see every action before it happens.
 - **Social card:** "Hold a key. Say it. It's typed, or it's done."
 
 ## Navigation
@@ -26,9 +26,9 @@ Alternatives:
 - Talk to your Mac. It types, and it does.
 - Your voice, in every app on your Mac.
 
-**Subhead:** Aloud is dictation and an agent in one. It types clean text into any app, and does what you ask across your Mac's apps, connected services like Gmail and Slack, and the web in your browser.
+**Subhead:** SpeakOS is dictation and an agent in one. It types clean text into any app, and does what you ask across your Mac's apps, connected services like Gmail and Slack, and the web in your browser.
 
-(Replaces the earlier subhead: "Aloud turns speech into clean text in whatever app you're using. When you'd rather do something than write something, say that instead: set a reminder, text someone, sort a folder, play a song. It lives in your menu bar and shows you what it's about to do before it does it.")
+(Replaces the earlier subhead: "SpeakOS turns speech into clean text in whatever app you're using. When you'd rather do something than write something, say that instead: set a reminder, text someone, sort a folder, play a song. It lives in your menu bar and shows you what it's about to do before it does it.")
 
 **Primary button:** Download for Mac
 **Secondary button:** See what you can say
@@ -40,7 +40,7 @@ Alternatives:
 
 **Dictate.** Hold Right Option, talk, let go. Clean text appears where your cursor is: in Mail, Slack, Notion, your code editor, anywhere you can type.
 
-**Command.** Hold your Command key, or start a dictation with "hey flow" [name to confirm], and say what you want done. Aloud picks the right app and does it.
+**Command.** Hold your Command key, or start a dictation with "hey flow" [name to confirm], and say what you want done. SpeakOS picks the right app and does it.
 
 **Meetings.** Start meeting notes from the menu bar. When you stop, a summary with key points, decisions and action items is saved as a note.
 
@@ -50,17 +50,17 @@ Alternatives:
 
 **Section headline:** Clean text, not a transcript.
 
-**Intro:** People don't talk the way they write. Aloud removes the "um"s, the false starts and the repeated words, and follows your corrections. Say "Thursday, no actually Wednesday" and it writes "Wednesday".
+**Intro:** People don't talk the way they write. SpeakOS removes the "um"s, the false starts and the repeated words, and follows your corrections. Say "Thursday, no actually Wednesday" and it writes "Wednesday".
 
 **Feature points:**
 - **Works in any app.** Text is pasted where your cursor is, and your clipboard is put back afterwards.
-- **Fix what you just wrote.** Select some text, hold the key and say how to change it. Aloud rewrites the selection instead of typing over it.
-- **Say "press enter".** End a message with it and Aloud submits it for you.
+- **Fix what you just wrote.** Select some text, hold the key and say how to change it. SpeakOS rewrites the selection instead of typing over it.
+- **Say "press enter".** End a message with it and SpeakOS submits it for you.
 - **Words to get right.** Teach it the names and terms it keeps mishearing.
-- **Say it, keep it.** Phrases Aloud types exactly as you say them, never tidied.
+- **Say it, keep it.** Phrases SpeakOS types exactly as you say them, never tidied.
 - **Shortcuts.** Say something short, get something long, like your address or a sign-off you use every day.
 - **A style for each app.** Word for word in Terminal, brief in Slack, polished in Mail. You set the rule once per app.
-- **100+ languages.** Pick your language, or let Aloud detect it. It can also translate before it pastes.
+- **100+ languages.** Pick your language, or let SpeakOS detect it. It can also translate before it pastes.
 
 **Line under the section:** Escape cancels a recording at any time.
 
@@ -87,9 +87,9 @@ Alternatives:
 
 **And the services you connect:** Gmail, Google Calendar, Slack, GitHub, Notion, Linear and hundreds more. Connect each one once, in Settings, through its own sign-in page.
 
-**In your browser:** Ask for something on the web, like "check the price of a Raspberry Pi 5 on adafruit.com", and Aloud does it in your own browser. Anything that would buy, send, delete or sign in asks you first.
+**In your browser:** Ask for something on the web, like "check the price of a Raspberry Pi 5 on adafruit.com", and SpeakOS does it in your own browser. Anything that would buy, send, delete or sign in asks you first.
 
-**Always listening (optional).** Turn it on from the menu bar and just talk; Aloud handles each request in turn. Say "stop listening" to turn it off.
+**Always listening (optional).** Turn it on from the menu bar and just talk; SpeakOS handles each request in turn. Say "stop listening" to turn it off.
 
 ---
 
@@ -97,14 +97,14 @@ Alternatives:
 
 **Section headline:** You see it before it happens.
 
-**Intro:** Before Aloud sends, posts or changes anything, it shows you exactly what it will do: who it's going to, what it says and when. That comes from the real details of the action, never a summary written by the AI.
+**Intro:** Before SpeakOS sends, posts or changes anything, it shows you exactly what it will do: who it's going to, what it says and when. That comes from the real details of the action, never a summary written by the AI.
 
 **Points:**
 - **Edit before it goes.** Fix a word, a name or the time right on the card.
 - **Answer out loud.** Say "send it", "cancel" or "make it 'hey team'".
 - **Your words, sent on time.** A message that is exactly what you said, going exactly where you said, sends after a three-second countdown you can undo.
 - **The big things always ask.** Payments, permanent deletes, public posts and passwords always need your click.
-- **You set the rules.** Choose what Aloud may do in each app without asking.
+- **You set the rules.** Choose what SpeakOS may do in each app without asking.
 - **Undo a folder sort.** A folder tidy can be reversed with "undo that".
 
 ---
@@ -114,9 +114,9 @@ Alternatives:
 **Section headline:** Your Mac, your words.
 
 - **Dictation runs on your Mac.** Speech is transcribed on-device by default, and it works with no internet. A faster cloud option is there if you want it, and it falls back to on-device when it can't connect.
-- **No tracking.** Aloud has no analytics, no telemetry and no crash reporting.
-- **Your notes are files.** Meeting notes are plain Markdown on your disk. Search them in Aloud or open them in any editor.
-- **History you control.** Aloud keeps your last 50 dictations. It saves no recordings unless you turn that on, and those expire after 30 days. Clear everything with one click.
+- **No tracking.** SpeakOS has no analytics, no telemetry and no crash reporting.
+- **Your notes are files.** Meeting notes are plain Markdown on your disk. Search them in SpeakOS or open them in any editor.
+- **History you control.** SpeakOS keeps your last 50 dictations. It saves no recordings unless you turn that on, and those expire after 30 days. Clear everything with one click.
 - **What does go online, plainly:**
   - tidying a dictation sends its text, not your audio, to an AI model;
   - commands go to an AI model, along with the name and window title of the app you're in;
@@ -128,7 +128,7 @@ Alternatives:
 
 **Headline:** Talk. Get notes.
 
-**Body:** Start meeting notes from the menu bar and keep talking. Aloud transcribes as you go. When you stop, it writes a note with a summary, key points, decisions, action items and the full transcript. If your Mac quits halfway through, the meeting is saved as a note the next time you open Aloud.
+**Body:** Start meeting notes from the menu bar and keep talking. SpeakOS transcribes as you go. When you stop, it writes a note with a summary, key points, decisions, action items and the full transcript. If your Mac quits halfway through, the meeting is saved as a note the next time you open SpeakOS.
 
 **Small print:** Records your microphone. People on a call are captured when your speakers play them aloud.
 
@@ -149,7 +149,7 @@ Alternatives:
 
 **Body:** See every Claude Code and Codex session running on your Mac, what each one is doing, and how much of your Claude plan you've used. When Claude Code needs permission, approve it from the notch without hunting for the terminal. Start a new agent on its own branch by saying what it should do.
 
-**Small print:** Approvals from the notch work with Claude Code and need a one-time hook install from Aloud.
+**Small print:** Approvals from the notch work with Claude Code and need a one-time hook install from SpeakOS.
 
 ---
 
@@ -159,13 +159,13 @@ Alternatives:
 Not when you dictate with the default on-device engine. If you switch to cloud transcription, audio is sent to that service. Tidying the text and running commands send text, not audio, to an AI model.
 
 **Does it work offline?**
-Dictation does. If Aloud can't reach the tidy-up model, you get your words exactly as transcribed. Commands and connected services need a connection.
+Dictation does. If SpeakOS can't reach the tidy-up model, you get your words exactly as transcribed. Commands and connected services need a connection.
 
 **Which apps can I dictate into?**
-Any app where you can type. Aloud pastes at your cursor and puts your clipboard back afterwards.
+Any app where you can type. SpeakOS pastes at your cursor and puts your clipboard back afterwards.
 
 **Which languages?**
-More than 100. Pick yours in Settings for the best on-device results, or let Aloud detect it.
+More than 100. Pick yours in Settings for the best on-device results, or let SpeakOS detect it.
 
 **Will it send things without asking?**
 Only a message that is exactly what you said, to the exact person or channel you named, and only after a three-second countdown you can undo. Payments, deletes, public posts and passwords always ask.
@@ -174,7 +174,7 @@ Only a message that is exactly what you said, to the exact person or channel you
 Open and quit apps, play music, change the volume, set reminders, write and add to notes, send messages, email and FaceTime calls, find and sort files, arrange windows, run your Shortcuts, and work with services you connect, like Gmail, Calendar, Slack and GitHub.
 
 **What do I need?**
-A Mac running macOS 13 or later. Aloud asks for Microphone and Accessibility access, so it can hear you and paste for you.
+A Mac running macOS 13 or later. SpeakOS asks for Microphone and Accessibility access, so it can hear you and paste for you.
 
 **Is there a Windows version?**
 It's on the way. [confirm timing]
@@ -191,26 +191,26 @@ It's on the way. [confirm timing]
 **Button:** Download for Mac
 
 ## Footer
-Aloud · Made for the Mac · Privacy · [Contact] · [GitHub, if open source]
+SpeakOS · Made for the Mac · Privacy · [Contact] · [GitHub, if open source]
 
 ## Small copy
-- Download button states: "Download for Mac", "Downloading…", "Open the .dmg and drag Aloud to Applications"
-- Permission explainers (use the app's own words): "Aloud records your voice so it can transcribe what you say and paste the text into the app you are using." · "Global hotkeys, pasting, and reading the selected text. Nothing works without it."
-- Image alt text: "The Aloud pill under the MacBook notch, transcribing as someone speaks." · "An approval card showing a Slack message, its channel, and Send and Cancel buttons."
+- Download button states: "Download for Mac", "Downloading…", "Open the .dmg and drag SpeakOS to Applications"
+- Permission explainers (use the app's own words): "SpeakOS records your voice so it can transcribe what you say and paste the text into the app you are using." · "Global hotkeys, pasting, and reading the selected text. Nothing works without it."
+- Image alt text: "The SpeakOS pill under the MacBook notch, transcribing as someone speaks." · "An approval card showing a Slack message, its channel, and Send and Cancel buttons."
 
 ---
 
 ## Open questions (answer before this goes live)
 1. **Pricing and distribution.** There are no payments or accounts in the code.
-   - Is Aloud free, paid or open source? The code says MIT, but the repo has no LICENSE file.
+   - Is SpeakOS free, paid or open source? The code says MIT, but the repo has no LICENSE file.
 2. **API keys.** Today keys come only from a `.env` bundled into the app ("readable by anyone with the .app"), and there's no place in Settings to enter one.
    - A public build needs your own server in front of the model providers, or a key field in Settings, before the copy can say "nothing to set up".
    - The README's "bring your own AI" is not in the app, so the copy doesn't promise it.
 3. **Signing.** Builds are ad-hoc signed, not notarised, and the updater has no key. A public download needs both.
-4. **Wake phrase.** "Hey flow" is a leftover name for a product called Aloud. Rename it to "hey aloud"? The copy marks it [name to confirm].
+4. **Wake phrase.** "Hey flow" is a leftover name for a product called SpeakOS. Rename it to "hey SpeakOS"? The copy marks it [name to confirm].
 5. **The Command key ships unbound.** The copy says "hold your Command key", so onboarding should set one up. It currently has 3 steps and none of them is hotkeys.
 6. **Browser tasks need Node.js** on the user's Mac. Either bundle it, or add "requires Node.js" to the copy.
-7. **Windows timing, the domain** (`releases.aloud.app` suggests aloud.app), the contact address, and any screenshots or testimonials.
+7. **Windows timing, the domain** (`releases.speakos.app` suggests speakos.app), the contact address, and any screenshots or testimonials.
 
 ## Fact check (code on `main`, Oct 4)
 | Claim in the copy | Where it's confirmed |

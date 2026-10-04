@@ -61,7 +61,7 @@ export default function Hero() {
           className="flex items-center gap-[9px] font-head text-[26px] font-semibold leading-none tracking-[-0.03em]"
         >
           <LogoMark className="h-[22px] w-[17px]" />
-          aloud
+          SpeakOS
         </SmartLink>
         <ul className="hidden items-center gap-8 text-[15px] md:flex">
           {links.map(([key, href]) => (

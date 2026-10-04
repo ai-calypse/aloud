@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "./components/ds.css";
 
-/* The aloud design system (claude.ai/artifact/WyucYiCt8GbDbBQGeh8G3X).
+/* The SpeakOS design system (claude.ai/artifact/WyucYiCt8GbDbBQGeh8G3X).
    Colours are its light theme: the site ships locked to light. Plain vars feed
    ds.css; the @theme block below exposes the same names as Tailwind utilities. */
 :root {
