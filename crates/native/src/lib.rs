@@ -220,6 +220,19 @@ pub fn confirmation(name: &str, args: &Value, result: &Value) -> Option<String> 
         "ALOUD_WRITE_FILE" => format!("Saved {}.", got("wrote")?),
         "ALOUD_PRESS_KEYS" => format!("Pressed {}.", arg("keys")?),
         "ALOUD_MENU" if result.get("clicked").is_some() => format!("Chose {}.", got("clicked")?),
+        // Only with `open`: a bare open is so often the first step of a screen
+        // task that finishing the run on it would stop before the task.
+        "ALOUD_OPEN_APP"
+            if result["not_installed"]
+                .as_array()
+                .is_some_and(Vec::is_empty) =>
+        {
+            format!(
+                "Opened {} in {}.",
+                arg("open")?,
+                result["opened"].as_array()?.last()?.as_str()?
+            )
+        }
         _ => return None,
     })
 }
@@ -308,6 +321,33 @@ mod tests {
         );
         assert_eq!(
             confirmation("ALOUD_FINDER_SEARCH", &json!({}), &json!({})),
+            None
+        );
+        assert_eq!(
+            confirmation(
+                "ALOUD_OPEN_APP",
+                &json!({ "names": ["Cursor"], "open": "components" }),
+                &json!({ "opened": ["Cursor"], "not_installed": [], "target": "/x/components" })
+            )
+            .as_deref(),
+            Some("Opened components in Cursor.")
+        );
+        // A bare open is often step one of a screen task; the run must go on.
+        assert_eq!(
+            confirmation(
+                "ALOUD_OPEN_APP",
+                &json!({ "names": ["Notes"] }),
+                &json!({ "opened": ["Notes"], "not_installed": [] })
+            ),
+            None
+        );
+        // Candidates mean the model still has to ask.
+        assert_eq!(
+            confirmation(
+                "ALOUD_OPEN_APP",
+                &json!({ "names": ["Cursor"], "open": "components" }),
+                &json!({ "opened": false, "candidates": ["/a/components", "/b/components"] })
+            ),
             None
         );
         assert_eq!(

@@ -44,10 +44,10 @@ pub fn run(args: &Value) -> Result<Value, ScriptError> {
     // A request with neither a keyword, a specific kind, nor a location is not
     // actionable — "find my files" everywhere would return the whole disk. Ask
     // the model to narrow rather than dumping the home folder.
-    let has_kind = matches!(kind, "image" | "document" | "screenshot");
+    let has_kind = matches!(kind, "image" | "document" | "screenshot" | "folder");
     if query.is_none() && location.is_none() && !has_kind {
         return Err(ScriptError::Failed(
-            "give a search term, a kind (image/document/screenshot), or a \
+            "give a search term, a kind (image/document/screenshot/folder), or a \
              location (desktop/downloads/…) — 'find everything' is too broad"
                 .into(),
         ));
@@ -122,7 +122,7 @@ fn scope_dir(location: Option<&str>) -> Option<std::path::PathBuf> {
 
 /// A path inside a directory that is machine noise, not the user's content.
 /// Matched as `/segment/` so it never trips on a file merely named "build".
-fn is_noise(path: &str) -> bool {
+pub(crate) fn is_noise(path: &str) -> bool {
     // Substring match on the boundaried segment. Cheap and good enough — a real
     // photo is not inside any of these. `Library/` is the big one: editor
     // backups (Cursor/VSCode History), caches, and app support account for most
@@ -159,6 +159,8 @@ fn build_predicate(query: Option<&str>, kind: &str) -> String {
     let kind_clause = match kind {
         "image" => "kMDItemContentTypeTree == 'public.image'".to_string(),
         "screenshot" => "kMDItemIsScreenCapture == 1".to_string(),
+        // "open the components folder" — no other kind can return a folder.
+        "folder" => "kMDItemContentType == 'public.folder'".to_string(),
         "document" => "(kMDItemContentTypeTree == 'public.content' \
                         || kMDItemContentTypeTree == 'com.adobe.pdf')"
             .to_string(),
@@ -199,7 +201,7 @@ fn build_predicate(query: Option<&str>, kind: &str) -> String {
 /// Escapes a query for an `mdfind` single-quoted literal. Only `'` and `\` are
 /// special inside one; without this a query with an apostrophe truncates the
 /// predicate.
-fn escape_mdfind(s: &str) -> String {
+pub(crate) fn escape_mdfind(s: &str) -> String {
     s.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
@@ -259,6 +261,24 @@ mod tests {
         // OCR-matched here (that path is image-kind).
         assert!(p.contains("kMDItemDisplayName == '*error*'cd"));
         assert!(!p.contains("kMDItemTextContent"), "screenshots: {p}");
+    }
+
+    /// "Open the components folder in Cursor" found nothing: every kind was a
+    /// file type, so no search could return a folder.
+    #[test]
+    fn folders_are_a_searchable_kind() {
+        let p = build_predicate(Some("components"), "folder");
+        assert!(p.contains("kMDItemContentType == 'public.folder'"), "{p}");
+        assert!(p.contains("kMDItemDisplayName == '*components*'cd"), "{p}");
+        let search = crate::catalogue::ACTIONS
+            .iter()
+            .find(|a| a.name == "ALOUD_FINDER_SEARCH")
+            .unwrap();
+        let kinds = (search.params)()["properties"]["kind"]["enum"].clone();
+        assert!(
+            kinds.as_array().unwrap().iter().any(|k| k == "folder"),
+            "the model must be offered the kind: {kinds}"
+        );
     }
 
     #[test]

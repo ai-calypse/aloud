@@ -70,9 +70,18 @@ pub fn frontmost_app() -> Option<FocusedApp> {
 /// signal about what the user is looking at, for the cleanup prompt's context
 /// clause. None for the many windows, menus and sheets with no title.
 pub fn frontmost_window_title() -> Option<String> {
+    frontmost_window()
+        .map(|(title, _)| title)
+        .filter(|t| !t.trim().is_empty())
+}
+
+/// The focused window's title (empty when it has none) and, when it shows a
+/// file, that file's path from `AXDocument` — which project the user is in, so
+/// "open components" can mean the one in it. None when no window has focus.
+pub fn frontmost_window() -> Option<(String, Option<String>)> {
     #[cfg(target_os = "macos")]
     {
-        macos::frontmost_window_title().filter(|t| !t.trim().is_empty())
+        macos::frontmost_window()
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -160,8 +169,9 @@ mod macos {
     //! `AXUIElementCopyAttributeValue(kAXSelectedTextAttribute)` on the focused
     //! element. Needs the Accessibility permission hotkeys already require.
 
-    use core_foundation::base::{CFTypeRef, TCFType};
+    use core_foundation::base::{CFGetTypeID, CFTypeRef, TCFType};
     use core_foundation::string::{CFString, CFStringRef};
+    use core_foundation::url::{CFURLCreateWithString, CFURL};
     use std::ffi::c_void;
 
     type AXUIElementRef = *const c_void;
@@ -196,6 +206,12 @@ mod macos {
             AXUIElementCopyAttributeValue(element, attr.as_concrete_TypeRef(), &mut value)
         };
         if err != AX_SUCCESS || value.is_null() {
+            return None;
+        }
+        // An app may answer with a URL or number where a string is documented;
+        // reading that as a CFString is undefined behaviour, not a None.
+        if unsafe { CFGetTypeID(value) } != CFString::type_id() {
+            unsafe { CFRelease(value) };
             return None;
         }
         let text = unsafe { CFString::wrap_under_get_rule(value as CFStringRef) }.to_string();
@@ -245,10 +261,11 @@ mod macos {
         })
     }
 
-    /// The focused window's `AXTitle`, read off `AXFocusedWindow` of the focused
-    /// *application* element: nothing implements the system-wide
-    /// `AXFocusedWindow`, so asking for it returns None for every app.
-    pub(super) fn frontmost_window_title() -> Option<String> {
+    /// The focused window's `AXTitle` and `AXDocument`, read off
+    /// `AXFocusedWindow` of the focused *application* element: nothing
+    /// implements the system-wide `AXFocusedWindow`, so asking for it returns
+    /// None for every app.
+    pub(super) fn frontmost_window() -> Option<(String, Option<String>)> {
         let pid = frontmost_pid()?;
         // SAFETY: an application element for a live pid; released below.
         let app = unsafe { AXUIElementCreateApplication(pid) };
@@ -259,9 +276,33 @@ mod macos {
         unsafe { CFRelease(app as CFTypeRef) };
         let window = window?;
 
-        let title = copy_string(window, "AXTitle");
+        let title = copy_string(window, "AXTitle").unwrap_or_default();
+        let document = copy_string(window, "AXDocument").and_then(|url| file_path(&url));
         unsafe { CFRelease(window as CFTypeRef) };
-        title
+        Some((title, document))
+    }
+
+    /// The path a `file://` URL names, percent-decoded. `AXDocument` is a URL
+    /// string, and a caller walking up to a repo root needs the path.
+    pub(super) fn file_path(url: &str) -> Option<String> {
+        if !url.starts_with("file:") {
+            return None;
+        }
+        let string = CFString::new(url);
+        // SAFETY: a null allocator is the default one; a non-null result is a
+        // +1 CFURL, wrapped under the create rule so it is released on drop.
+        let raw = unsafe {
+            CFURLCreateWithString(
+                std::ptr::null(),
+                string.as_concrete_TypeRef(),
+                std::ptr::null(),
+            )
+        };
+        if raw.is_null() {
+            return None;
+        }
+        let url = unsafe { CFURL::wrap_under_create_rule(raw) };
+        url.to_path().map(|p| p.display().to_string())
     }
 
     /// The focused application's process id. Which attribute answers varies with
@@ -585,6 +626,18 @@ mod cache_tests {
             plist_string("bplist00\u{0}\u{1}", "CFBundleIdentifier"),
             None
         );
+    }
+
+    /// TextEdit reports `file:///…/ax%20test/probe%20file.txt`; walking that up
+    /// to a repo root needs the decoded path, and a web page is no document.
+    #[test]
+    fn an_ax_document_url_becomes_a_path() {
+        use super::macos::file_path;
+        assert_eq!(
+            file_path("file:///tmp/ax%20test/probe%20file.txt").as_deref(),
+            Some("/tmp/ax test/probe file.txt")
+        );
+        assert_eq!(file_path("https://example.com/a"), None);
     }
 
     /// Outermost, for the same reason the name is: an Electron helper declares a
