@@ -117,6 +117,8 @@ kbd { font: 500 11px/1 -apple-system, system-ui, sans-serif; color: var(--text2)
 .island[data-state="live"]   { --w: 340px; --h: 32px; --r: 12px; }
 .island[data-state="hud"]    { --w: 300px; --h: 44px; --r: 16px; }
 .island[data-state="toast"]  { --w: 400px; --h: 70px; --r: 22px; }
+.island[data-state="reminder"] { --w: 400px; --h: 70px; --r: 22px; }
+.island[data-state="nearby"] { --w: 420px; --h: 150px; --r: 32px; }
 .island[data-state="open"]   { --w: 780px; --h: 468px; --r: var(--radius-panel); }
 
 /* Each state's content: visible only in its state, fading in once the shape
@@ -128,6 +130,8 @@ kbd { font: 500 11px/1 -apple-system, system-ui, sans-serif; color: var(--text2)
 .island[data-state="live"] .face--live,
 .island[data-state="hud"] .face--hud,
 .island[data-state="toast"] .face--toast,
+.island[data-state="reminder"] .face--reminder,
+.island[data-state="nearby"] .face--nearby,
 .island[data-state="open"] .face--open {
   opacity: 1; pointer-events: auto;
   transition: opacity var(--dur-base) var(--ease-out) 90ms;
@@ -148,7 +152,14 @@ kbd { font: 500 11px/1 -apple-system, system-ui, sans-serif; color: var(--text2)
 .hud-bar { flex: 1; height: 5px; border-radius: 3px; background: var(--field-hi); overflow: hidden; }
 .hud-bar i { display: block; height: 100%; width: 62%; background: var(--fg); border-radius: 3px; }
 
-.face--toast { display: flex; align-items: center; gap: 12px; padding: 30px 14px 0 12px; }
+.face--toast, .face--reminder { display: flex; align-items: center; gap: 12px; padding: 30px 14px 0 12px; }
+.face--nearby { display: flex; gap: 16px; padding: 44px 20px 16px 22px; }
+.pods { position: relative; width: 74px; height: 74px; flex: none; }
+.pods i { position: absolute; top: 4px; width: 22px; height: 40px; border-radius: 11px 11px 8px 8px; background: linear-gradient(#fff, #d9d9de); }
+.pods i:first-child { left: 12px; } .pods i:nth-child(2) { right: 12px; }
+.pods b { position: absolute; left: 6px; right: 6px; bottom: 0; height: 30px; border-radius: 9px; background: linear-gradient(#f3f3f5, #c9c9ce); }
+.pod-batt { display: flex; gap: 16px; margin-top: 10px; font-size: 11.5px; color: var(--text2); }
+.pod-batt b { display: block; color: var(--fg); font-size: 15px; font-variant-numeric: tabular-nums; }
 .app-icon { width: 30px; height: 30px; border-radius: 8px; flex: none; display: grid; place-items: center; font: 700 13px/1 -apple-system, system-ui; }
 .toast-text { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .btn-action { height: 28px; padding: 0 14px; border-radius: var(--radius-pill); background: var(--action); color: var(--action-fg); font-weight: 600; }
@@ -242,6 +253,48 @@ kbd { font: 500 11px/1 -apple-system, system-ui, sans-serif; color: var(--text2)
 .zone { height: 56px; border-radius: 8px; border: 1.5px dashed rgb(255 255 255 / 0.18); display: grid; place-items: center; color: var(--text2); font-size: 11.5px; }
 .zone.on { border-style: solid; border-color: var(--action); background: rgb(10 132 255 / 0.15); color: var(--fg); }
 
+/* Now Playing controls: a toggled control is lit and dotted, like Music's. */
+.ctls { display: flex; align-items: center; gap: 18px; flex: 1; justify-content: center; }
+.ctl { position: relative; font-size: 15px; color: var(--text3); line-height: 1; }
+.ctl--big { font-size: 20px; color: var(--fg); }
+.ctl[aria-pressed="true"] { color: var(--fg); }
+.ctl[aria-pressed="true"]::after { content: ""; position: absolute; left: 50%; bottom: -7px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--fg); }
+.ctl sup { font-size: 8px; }
+.appvol { display: flex; align-items: center; gap: 8px; width: 120px; color: var(--text2); }
+.fav { width: 30px; height: 30px; border-radius: 50%; background: var(--field); color: var(--text2); font-size: 15px; flex: none; }
+.fav[aria-pressed="true"] { color: #fa586a; background: rgb(250 88 106 / 0.14); }
+.fav:active { transform: scale(0.92); }
+/* Seven days of focus: today's bar takes the timer's colour. */
+.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; height: 92px; }
+.day { display: grid; grid-template-rows: 1fr auto; gap: 5px; justify-items: center; }
+.day .col { width: 100%; max-width: 22px; display: flex; align-items: flex-end; border-radius: 5px; background: var(--field); overflow: hidden; }
+.day .col i { display: block; width: 100%; border-radius: 5px; background: rgb(255 255 255 / 0.55); }
+.day span { font-size: 10.5px; color: var(--text3); }
+.day--today .col i { background: var(--orange); }
+.day--today span { color: var(--fg); }
+/* A burst of copies reads as a stack: two offset edges under the row. */
+.row--stack { position: relative; margin-bottom: 8px; background: var(--field); border-radius: 10px; padding: 8px 10px; border-bottom: 0; }
+.row--stack::before, .row--stack::after { content: ""; position: absolute; left: 8px; right: 8px; height: 6px; border-radius: 0 0 8px 8px; background: rgb(255 255 255 / 0.05); z-index: -1; }
+.row--stack::before { bottom: -5px; }
+.row--stack::after { left: 16px; right: 16px; bottom: -10px; background: rgb(255 255 255 / 0.03); }
+.check { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--text3); flex: none; }
+.check--done { border-color: var(--orange); background: var(--orange); }
+
+/* Teleprompter detached into a menu bar popover, anchored under its item. */
+.mb-item { display: none; padding: 2px 8px; border-radius: 5px; background: rgb(255 255 255 / 0.18); }
+.stage[data-detached] .mb-item { display: inline-block; }
+.mb-pop {
+  position: absolute; top: 38px; right: 150px; width: 300px; z-index: var(--z-palette);
+  background: #1c1c1f; border: 1px solid var(--sep); border-radius: 14px; padding: 12px 14px;
+  box-shadow: 0 22px 50px rgb(0 0 0 / 0.5);
+  opacity: 0; translate: 0 -6px; scale: 0.98; transform-origin: 70% 0; pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-in), translate var(--dur-fast) var(--ease-in), scale var(--dur-fast) var(--ease-in);
+}
+.stage[data-detached] .mb-pop { opacity: 1; translate: 0 0; scale: 1; pointer-events: auto; transition: opacity var(--dur-base) var(--ease-out), translate var(--spring-dur) var(--spring), scale var(--spring-dur) var(--spring); }
+.mb-pop .scroll { height: 96px; overflow: hidden; mask-image: linear-gradient(transparent, #000 25%, #000 75%, transparent); font: 500 15px/1.6 -apple-system, system-ui; }
+.mb-pop .scroll div { animation: prompt 14s linear infinite; }
+@keyframes prompt { from { transform: translateY(40px); } to { transform: translateY(-150px); } }
+
 /* ---- ⌘K palette: inside the panel, never a page-level modal ------------ */
 .palette {
   position: absolute; left: 50%; top: 84px; width: 440px; transform: translateX(-50%);
@@ -291,6 +344,8 @@ kbd { font: 500 11px/1 -apple-system, system-ui, sans-serif; color: var(--text2)
 @media (prefers-reduced-motion: reduce) {
   .island, .island[data-closing] { transition-duration: 1ms; }
   .eq i { animation: none; height: 8px; }
+  .mb-pop .scroll div { animation: none; }
+  .mb-pop { transition-duration: 1ms !important; }
   .face, .palette { transition-duration: 1ms !important; transition-delay: 0ms !important; }
 }
 </style>
@@ -300,7 +355,7 @@ kbd { font: 500 11px/1 -apple-system, system-ui, sans-serif; color: var(--text2)
 <section class="stage" aria-label="Desktop with the notch">
   <div class="menubar">
     <div class="menubar__left"><span aria-hidden="true"></span><b>Cursor</b><span>File</span><span>Edit</span><span>View</span><span>Go</span></div>
-    <div class="menubar__right"><span>82%</span><span>Wi-Fi</span><span id="clock">Sat 9:41 AM</span></div>
+    <div class="menubar__right"><span class="mb-item" title="Teleprompter, detached">▤ Prompter</span><span>82%</span><span>Wi-Fi</span><span id="clock">Sat 9:41 AM</span></div>
   </div>
   <div class="window" aria-hidden="true"><div class="window__lines"><i style="width:62%"></i><i style="width:80%"></i><i style="width:44%"></i><i style="width:70%"></i><i style="width:56%"></i><i style="width:76%"></i><i style="width:38%"></i></div></div>
 
@@ -314,9 +369,24 @@ kbd { font: 500 11px/1 -apple-system, system-ui, sans-serif; color: var(--text2)
     </div>
     <div class="face face--toast" aria-hidden="true">
       <button class="btn-close" aria-label="Dismiss">✕</button>
-      <span class="app-icon" style="background:#ff9f0a">✓</span>
-      <span class="toast-text">Reminder: Send Maya the deck</span>
+      <span class="app-icon" style="background:#ffd60a;color:#1c1c1e">✎</span>
+      <span class="toast-text">Created note Groceries</span>
       <button class="btn-action">Show</button>
+    </div>
+    <div class="face face--reminder" aria-hidden="true">
+      <button class="btn-close" aria-label="Dismiss">✕</button>
+      <span class="app-icon" style="background:#ff9f0a">🔔</span>
+      <span class="toast-text">Send Maya the deck</span>
+      <button class="btn-action">Snooze 10 min</button>
+    </div>
+    <div class="face face--nearby" aria-hidden="true">
+      <div class="pods" aria-hidden="true"><i></i><i></i><b></b></div>
+      <div style="flex:1;min-width:0">
+        <div style="font:600 16px/1.2 -apple-system,system-ui">AirPods Pro</div>
+        <div style="color:var(--text2);font-size:12px;margin-top:2px">Case opened nearby</div>
+        <div class="pod-batt"><span><b>88%</b>Left</span><span><b>91%</b>Right</span><span><b>54%</b>Case</span></div>
+      </div>
+      <button class="btn-action" style="align-self:center">Connect</button>
     </div>
 
     <div class="face face--open">
@@ -345,11 +415,15 @@ kbd { font: 500 11px/1 -apple-system, system-ui, sans-serif; color: var(--text2)
     </div>
   </div>
   <button class="cutout-hit" id="cutout" aria-label="Open the notch"></button>
+  <div class="mb-pop" role="dialog" aria-label="Teleprompter">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b style="font-weight:600">Teleprompter</b><button class="btn-quiet" data-detach>Reattach</button></div>
+    <div class="scroll"><div>Thanks everyone. Quick update: approvals now count down, and voice replies work on every card. Next week we ship the notch sections, starting with Media and Shelf…</div></div>
+  </div>
 </section>
 
 <div class="controls">
   <div class="states" role="group" aria-label="Island state" id="states">
-    <button data-s="closed">Closed</button><button data-s="live">Live activities</button><button data-s="hud">HUD</button><button data-s="toast">Toast</button><button data-s="open">Open</button>
+    <button data-s="closed">Closed</button><button data-s="live">Live activities</button><button data-s="hud">HUD</button><button data-s="toast">Write toast</button><button data-s="reminder">Reminder</button><button data-s="nearby">AirPods nearby</button><button data-s="open">Open</button>
   </div>
   <div class="hint"><span>Click the notch to open</span><span><kbd>⌘1–9</kbd> switch section</span><span><kbd>←</kbd><kbd>→</kbd> sections</span><span><kbd>⇥</kbd> subsection</span><span><kbd>⌘K</kbd> search</span></div>
 </div>
@@ -378,7 +452,7 @@ const SECTIONS = [
     { id: "prs", name: "Pull requests", f: [["GitHub PRs","S",1]], view: "prs" },
     { id: "terminal", name: "Terminal", f: [["Notch Terminal","M"]], view: "terminal" },
   ]},
-  { id: "media", name: "Media", blurb: "what's playing", status: "Spotify · AirPods Pro", subs: [
+  { id: "media", name: "Media", blurb: "what's playing", status: "Apple Music · AirPods Pro", subs: [
     { id: "playing", name: "Now Playing", f: [["Now Playing","M",1],["Live Audio Spectrum","M"],["Peek on Hover","S",1]], view: "playing" },
     { id: "lyrics", name: "Lyrics", f: [["Synced Lyrics","S"]], view: "lyrics" },
     { id: "sound", name: "Sound", f: [["Audio Switcher","S",1],["Sound Mixer","L"],["Mic Mute","S",1]], view: "sound" },
@@ -459,12 +533,18 @@ const VIEWS = {
     Finished test profile in 6.2s
 test result: ok. 42 passed; 0 failed
 ❯ <span style="background:var(--fg);color:#000"> </span></div>`,
-  playing: () => `<div style="display:flex;gap:18px;align-items:center;height:100%">
-      <div style="width:150px;height:150px;border-radius:14px;background:linear-gradient(135deg,#ff7a59,#a33ea1);flex:none"></div>
-      <div style="flex:1;min-width:0"><div class="lead" style="font-size:24px">Blinding Lights</div><div class="lead-sub">The Weeknd · After Hours</div>
-      <div style="display:flex;gap:10px;align-items:center;margin-top:16px"><span class="v" style="color:var(--text2);font-size:12px">1:42</span><div class="slider"><i style="width:51%"></i></div><span class="v" style="color:var(--text2);font-size:12px">−1:38</span></div>
-      <div style="display:flex;gap:22px;justify-content:center;margin-top:14px;font-size:20px"><button aria-label="Previous">⏮</button><button aria-label="Pause">⏸</button><button aria-label="Next">⏭</button></div>
-      <div class="eq" style="height:22px;gap:3px;margin-top:12px;justify-content:center">${'<i style="width:3px"></i>'.repeat(14)}</div></div></div>`,
+  playing: () => `<div style="display:flex;gap:18px">
+      <div style="width:132px;height:132px;border-radius:14px;background:linear-gradient(135deg,#fa233b,#fb5c74);flex:none"></div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:flex-start;gap:10px"><div style="flex:1;min-width:0"><div class="lead" style="font-size:24px">Blinding Lights</div><div class="lead-sub">The Weeknd · After Hours · <span style="color:#fa586a">Apple Music</span></div></div>
+          <button class="fav" aria-pressed="true" aria-label="Favorite in Apple Music" title="Favorite in Apple Music">♥</button></div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px"><span class="v" style="color:var(--text2);font-size:12px">1:42</span><div class="slider"><i style="width:51%"></i></div><span class="v" style="color:var(--text2);font-size:12px">−1:38</span></div>
+        <div style="display:flex;align-items:center;margin-top:10px">
+          <div class="ctls"><button class="ctl" aria-pressed="true" aria-label="Shuffle" title="Shuffle">⤮</button><button class="ctl ctl--big" aria-label="Previous">⏮</button><button class="ctl ctl--big" aria-label="Pause">⏸</button><button class="ctl ctl--big" aria-label="Next">⏭</button><button class="ctl" aria-pressed="true" aria-label="Repeat one" title="Repeat one">↻<sup>1</sup></button></div>
+          <div class="appvol" title="Apple Music's own volume, not the system's"><span aria-hidden="true">🔈</span><div class="slider"><i style="width:64%"></i></div></div>
+        </div>
+      </div></div>
+      <ul class="rows" style="margin-top:12px;border-top:1px solid var(--sep)">${row(ic("#fb542b", "▶"), "Rust ownership in 10 minutes", "Brave · YouTube · 4:12 / 10:03", '<div class="seg" role="group" aria-label="Playback speed"><span>1×</span><span>1.25×</span><span class="on">1.5×</span><span>2×</span></div>')}</ul>`,
   lyrics: () => `<div style="display:grid;gap:10px;font:600 20px/1.3 -apple-system,system-ui;letter-spacing:-0.01em">
       <div style="color:var(--text3)">I've been tryna call</div><div style="color:var(--text3)">I've been on my own for long enough</div><div>Maybe you can show me how to love, maybe</div><div style="color:var(--text3)">I'm going through withdrawals</div></div><p class="label" style="margin-top:14px">Synced · LRCLIB</p>`,
   sound: () => `<div class="cols"><div><p class="label">Output</p><ul class="rows">${row("", "AirPods Pro", "Connected", '<span style="color:var(--action)">●</span>')}${row("", "MacBook Pro Speakers", "")}${row("", "Studio Display", "")}</ul>
@@ -473,7 +553,9 @@ test result: ok. 42 passed; 0 failed
   devices: () => `<div class="cols"><div><p class="label">AirPods Pro</p><div style="display:flex;gap:22px"><div><div class="lead">88%</div><div class="lead-sub">Left</div></div><div><div class="lead">91%</div><div class="lead-sub">Right</div></div><div><div class="lead">54%</div><div class="lead-sub">Case</div></div></div></div>
       <div><ul class="rows">${row("", "Magic Keyboard", "", '<span class="v">76%</span>')}${row("", "Magic Mouse", "Charge soon", '<span class="v" style="color:var(--orange)">12%</span>')}${row("", "Sony WH-1000XM5", "", '<span class="v">63%</span>')}</ul></div></div>`,
   timer: () => `<div style="display:flex;gap:26px;align-items:center;height:100%"><div class="ring"><div><div class="lead">18:42</div><div class="lead-sub">Focus 2 of 4</div></div></div>
-      <div style="flex:1"><div class="seg"><span class="on">Pomodoro</span><span>Stopwatch</span></div><ul class="rows" style="margin-top:10px">${row("", "Today", "3 sessions · 1h 15m", '<span class="v">🔥 5 days</span>')}${row("", "Next", "Break · 5 min")}</ul>
+      <div style="flex:1;min-width:0"><div class="seg"><span class="on">Pomodoro</span><span>Stopwatch</span></div>
+      <p class="label" style="margin-top:14px">Last 7 days · 🔥 5-day streak</p>
+      <div class="week" role="img" aria-label="Focus minutes, last 7 days">${[["Sun",40],["Mon",95],["Tue",120],["Wed",70],["Thu",150],["Fri",110],["Sat",75,1]].map(([d,m,today])=>`<div class="day${today?" day--today":""}"><div class="col"><i style="height:${Math.round(m/150*100)}%" title="${m} min"></i></div><span>${d}</span></div>`).join("")}</div>
       <div style="display:flex;gap:8px;margin-top:10px"><span class="chip chip--go">Pause</span><button class="btn-quiet">Skip</button><button class="btn-quiet">Reset</button></div></div></div>`,
   awake: () => `<div class="lead">Awake</div><div class="lead-sub">Until 11:30 AM · display stays on</div><div class="seg" style="margin-top:14px"><span>Off</span><span>30 min</span><span class="on">2 hrs</span><span>Until…</span><span>Always</span></div>
       <ul class="rows" style="margin-top:14px">${row("", "Focus", "Work · silences low-priority islands", '<span class="toggle on"></span>')}</ul>`,
@@ -481,7 +563,8 @@ test result: ok. 42 passed; 0 failed
 - push main
 - tag v0.4
 - tell Maya the deck is in Drive</textarea>`,
-  call: () => `<div class="cols"><div><p class="label">Teleprompter · under the camera</p><div style="font:500 17px/1.6 -apple-system,system-ui">Thanks everyone. Quick update: approvals now count down, and voice replies work on every card…</div><div class="seg" style="margin-top:10px"><span>Slow</span><span class="on">Medium</span><span>Fast</span></div></div>
+  call: () => `<div class="cols"><div><p class="label">Teleprompter · under the camera</p><div style="font:500 17px/1.6 -apple-system,system-ui">Thanks everyone. Quick update: approvals now count down, and voice replies work on every card…</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap"><div class="seg"><span>Slow</span><span class="on">Medium</span><span>Fast</span></div><button class="btn-quiet" data-detach>⇱ Detach to menu bar</button></div></div>
       <div><p class="label">Camera mirror</p><div style="aspect-ratio:4/3;border-radius:12px;background:linear-gradient(160deg,#3b3b40,#1d1d20);display:grid;place-items:center;color:var(--text3)">Camera preview</div></div></div>`,
   files: () => `<div class="tiles">${[["#64d2ff","PDF","deck.pdf"],["#30d158","XLS","budget.xlsx"],["#bf5af2","PNG","hero@2x.png"],["#ff9f0a","ZIP","assets.zip"]].map(([c,k,n])=>`<div class="tile"><div class="thumb" style="background:${c}">${k}</div><span>${n}</span></div>`).join("")}</div>
       <div style="display:flex;gap:8px;margin-top:12px"><span class="chip">AirDrop</span><span class="chip">Convert to JPEG</span><span class="chip">Zip</span><span class="chip">Clear</span></div>`,
@@ -489,11 +572,13 @@ test result: ok. 42 passed; 0 failed
   downloads: () => `<ul class="rows">${row(ic("#30d158", "↓"), "report-q3.pdf", "Chrome · 74%", '<div class="bar" style="width:110px"><i style="width:74%"></i></div>')}${row(ic("#64d2ff", "✓"), "invoice-0912.pdf", "Safari · just now", '<button class="btn-quiet">Reveal</button>')}${row(ic("#64d2ff", "✓"), "Figma.dmg", "Brave · 2h ago", '<button class="btn-quiet">Reveal</button>')}</ul>`,
   drives: () => `<ul class="rows">${row(ic("#8e8e93", "⏏"), "Backup SSD", "512 GB · 41% used", '<span class="chip chip--go">Eject</span>')}${row(ic("#8e8e93", "⏏"), "SD Card", "Safe to disconnect", '<span class="chip chip--ok">Ejected</span>')}</ul>`,
   history: () => `<input class="chip" style="width:100%;height:30px;border:0;outline:0;color:var(--fg);font-size:13px;margin-bottom:6px" placeholder="Search clips, including text inside images" aria-label="Search clips">
-      <ul class="rows">${row(ic("#0a84ff", "↗"), "https://notchy.dev/#features", "Link · 2m", '<span class="chip">Open</span>')}${row('<span class="ico" style="background:#ff7a59"></span>', "#FF7A59", "Color · 6m", '<span class="chip">Copy hex</span>')}${row(ic("#5e5ce6", "@"), "david@company.com", "Email · 12m", '<span class="chip">Compose</span>')}${row(ic("#2c2c2e", "T"), "Screenshot 9:31 · “Q3 revenue grew 12%”", "Image · text found", '<span class="v">📌</span>')}</ul>`,
+      <ul class="rows">${row("", "Auto-paste into the front app", "Pick a clip and it lands in Cursor, no ⌘V", '<span class="toggle on"></span>')}
+      <li class="row row--stack">${ic("#5e5ce6", "3")}<div class="grow"><div class="t">3 clips, copied in a burst</div><div class="s">221B Baker St · +44 20 7946 0958 · sherlock@bakerst.co</div></div><span style="display:flex;gap:6px"><button class="btn-quiet">Expand</button><span class="chip chip--go">Paste all</span></span></li>
+      ${row(ic("#0a84ff", "↗"), "https://notchy.dev/#features", "Link · 2m", '<span class="chip">Open</span>')}${row('<span class="ico" style="background:#ff7a59"></span>', "#FF7A59", "Color · 6m", '<span class="chip">Copy hex</span>')}${row(ic("#2c2c2e", "T"), "Screenshot 9:31 · “Q3 revenue grew 12%”", "Image · text found", '<span class="v">📌</span>')}</ul>`,
   snippets: () => `<ul class="rows">${row("", "Address", "221B Baker Street, London", '<kbd>;addr</kbd>')}${row("", "Thanks reply", "Thanks! I'll take a look today.", '<kbd>;ty</kbd>')}${row("", "PR template", "## What · ## Verified · ## Not verified", '<kbd>;pr</kbd>')}</ul>`,
   colors: () => `<div style="display:flex;gap:10px;flex-wrap:wrap">${["#FF7A59","#0A84FF","#30D158","#1C1C1E","#F5F5F7","#BF5AF2"].map(c=>`<div style="display:grid;gap:6px;justify-items:center"><div style="width:52px;height:52px;border-radius:12px;background:${c};border:1px solid var(--sep)"></div><span style="font-size:11.5px;color:var(--text2)">${c}</span></div>`).join("")}</div><div style="margin-top:12px"><span class="chip chip--go">Pick a color</span></div>`,
   calendar: () => `<ul class="rows">${row('<span class="v" style="width:62px">9:30 AM</span>', "Standup", "Google Meet")}${row('<span class="v" style="width:62px;color:var(--fg)">2:30 PM</span>', "Design sync", "Zoom · in 25 min", '<span class="chip chip--go">Join</span>')}${row('<span class="v" style="width:62px">5:00 PM</span>', "Gym", "")}</ul>`,
-  reminders: () => `<ul class="rows">${row('<span style="width:16px;height:16px;border-radius:50%;border:1.5px solid var(--text3)"></span>', "Send Maya the deck", "Today · 11:00 AM")}${row('<span style="width:16px;height:16px;border-radius:50%;border:1.5px solid var(--text3)"></span>', "Renew passport", "Friday")}${row('<span style="width:16px;height:16px;border-radius:50%;background:var(--orange)"></span>', "Book flights", "Done", "")}</ul>`,
+  reminders: () => `<ul class="rows">${row('<span class="check"></span>', "Send Maya the deck", '<span style="color:var(--orange)">Due now</span>', '<span style="display:flex;gap:6px"><button class="btn-quiet">Done</button><span class="chip chip--go">Snooze 10 min</span></span>')}${row('<span class="check"></span>', "Renew passport", "Friday", '<button class="btn-quiet">Snooze</button>')}${row('<span class="check check--done"></span>', "Book flights", "Done", "")}</ul>`,
   weather: () => `<div style="display:flex;gap:24px;align-items:flex-end"><div><div class="lead" style="font-size:44px">21°</div><div class="lead-sub">Partly cloudy · Toronto</div></div>
       <div style="display:flex;gap:16px;color:var(--text2);font-size:12px;text-align:center">${[["Now","21°"],["11","22°"],["12","23°"],["1","24°"],["2","23°"],["6","☂ 18°"]].map(([h,t])=>`<div><div>${h}</div><div style="color:var(--fg);font-weight:600;margin-top:4px">${t}</div></div>`).join("")}</div></div>`,
   stocks: () => `<ul class="rows">${row("", "AAPL", "Apple · pre-market", '<span class="v">232.14 <span style="color:var(--green)">+0.8%</span></span>')}${row("", "NVDA", "NVIDIA", '<span class="v">141.02 <span style="color:var(--red)">−1.2%</span></span>')}${row("", "BTC", "Bitcoin", '<span class="v">68,210 <span style="color:var(--green)">+2.1%</span></span>')}</ul>`,
@@ -506,8 +591,8 @@ test result: ok. 42 passed; 0 failed
   menubar: () => `<ul class="rows">${row("", "Hide menu bar icons", "⌘-drag icons past the divider", '<span class="toggle on"></span>')}${row("", "Detach Clipboard to the menu bar", "", '<span class="toggle"></span>')}${row("", "Detach Timer to the menu bar", "", '<span class="toggle on"></span>')}</ul>`,
   apps: () => `<div class="tiles">${[["#0a84ff","Cursor"],["#30d158","Messages"],["#ff9f0a","Notes"],["#5e5ce6","Linear"],["#1db954","Spotify"],["#e01e5a","Slack"]].map(([c,n])=>`<div class="tile"><div class="thumb" style="background:${c}">${n[0]}</div><span>${n}</span></div>`).join("")}</div>`,
   shortcuts: () => `<div style="display:flex;gap:8px;flex-wrap:wrap">${["Start my day","Log water","Focus 25","Resize images","Share Wi-Fi"].map((s,i)=>`<span class="chip" style="height:30px;padding:0 12px;${i===2?"color:var(--fg)":""}">${i===2?"◌ ":""}${s}</span>`).join("")}</div>`,
-  search: () => `<input class="chip" style="width:100%;height:34px;border:0;outline:0;color:var(--fg);font-size:14px" placeholder="Search, translate or calculate" aria-label="Search">
-      <ul class="rows" style="margin-top:6px">${row("", "15% of 80", "Calculator", '<span class="v" style="color:var(--fg)">12</span>')}${row("", "“good morning” in Japanese", "Translate", '<span class="v" style="color:var(--fg)">おはようございます</span>')}${row("", "Search Kagi for “tauri overlay”", "Search", '<kbd>↩</kbd>')}</ul>`,
+  search: () => `<input class="chip" style="width:100%;height:34px;border:0;outline:0;color:var(--fg);font-size:14px" placeholder="Search, translate, calculate or paste a video link" aria-label="Search">
+      <ul class="rows" style="margin-top:6px">${row("", "15% of 80", "Calculator", '<span class="v" style="color:var(--fg)">12</span>')}${row("", "“good morning” in Japanese", "Translate", '<span class="v" style="color:var(--fg)">おはようございます</span>')}${row(ic("#ff0033", "▶"), "youtu.be/dQw4w9WgXcQ", "Video link · saves with yt-dlp, opt-in in Settings", '<span style="display:flex;gap:6px;align-items:center"><div class="seg"><span class="on">MP4 1080p</span><span>Audio</span></div><span class="chip chip--go">Save</span></span>')}${row("", "Search Kagi for “tauri overlay”", "Search", '<kbd>↩</kbd>')}</ul>`,
 };
 
 /* ---------------------------------------------------------------------------
@@ -623,8 +708,9 @@ function goSub(j) {
 function setState(s) {
   const was = island.dataset.state;
   if (was === s) return;
-  const order = ["closed", "live", "hud", "toast", "open"];
-  island.toggleAttribute("data-closing", order.indexOf(s) < order.indexOf(was));
+  // Shrinking is closing, whichever two states it is between.
+  const area = { closed: 1, live: 2, hud: 3, toast: 4, reminder: 4, nearby: 5, open: 9 };
+  island.toggleAttribute("data-closing", area[s] < area[was]);
   island.dataset.state = s;
   document.querySelectorAll("#states button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.s === s));
   if (s === "open") setTimeout(() => placeIndicators(true), 0);
@@ -633,11 +719,29 @@ function setState(s) {
 document.querySelectorAll("#states button").forEach((b) => b.addEventListener("click", () => setState(b.dataset.s)));
 $("#cutout").addEventListener("click", () => setState(island.dataset.state === "open" ? "closed" : "open"));
 
+/* Detaching the teleprompter moves it under its own menu bar item. */
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("[data-detach]")) return;
+  const stage = document.querySelector(".stage");
+  const detached = stage.toggleAttribute("data-detached");
+  // It left the notch, so the notch closes; reattaching brings you back to it.
+  if (detached) setState("closed");
+  else { setState("open"); go(3, { sub: 3 }); }
+  document.querySelectorAll(".view [data-detach]").forEach((b) => (b.textContent = stage.hasAttribute("data-detached") ? "⇲ Back to the notch" : "⇱ Detach to menu bar"));
+});
+
 /* ⌘K: every feature, subsection and section by name. */
 const entries = SECTIONS.flatMap((s, i) => [
   { label: s.name, hint: "Section", i, j: 0 },
   ...s.subs.flatMap((sub, j) => [{ label: sub.name, hint: s.name, i, j }, ...sub.f.map((f) => ({ label: f[0], hint: `${s.name} › ${sub.name}`, i, j }))]),
 ]);
+// Details inside features, findable by the words people would use.
+[["Shuffle and repeat","media",0],["Favorite in Apple Music","media",0],["Playback speed for browser video","media",0],["App volume","media",0],
+ ["AirPods nearby popup","media",3],["Save a video from a link","launch",2],["Snooze a reminder","today",1],["7-day focus chart","focus",0],
+ ["Detach teleprompter to the menu bar","focus",3],["Auto-paste","clip",0],["Burst stacking","clip",0]].forEach(([label, sec, j]) => {
+  const i = SECTIONS.findIndex((s) => s.id === sec);
+  entries.push({ label, hint: `${SECTIONS[i].name} › ${SECTIONS[i].subs[j].name}`, i, j });
+});
 let pal = [], palSel = 0;
 function renderPalette() {
   const q = $("#paletteInput").value.trim().toLowerCase();
