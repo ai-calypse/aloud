@@ -4,6 +4,7 @@ import {
   BellIcon,
   BotIcon,
   CheckIcon,
+  CoffeeIcon,
   MusicIcon,
   TimerIcon,
   type LucideIcon,
@@ -18,6 +19,7 @@ import { cn } from "@/lib/utils";
 export const GLYPHS: Record<string, LucideIcon> = {
   agents: BotIcon,
   alert: BellIcon,
+  awake: CoffeeIcon,
   done: CheckIcon,
   download: ArrowDownToLineIcon,
   music: MusicIcon,

@@ -1,5 +1,8 @@
 mod agent;
 mod commands;
+// notch-today-focus: wiring begins
+mod focus;
+// notch-today-focus: wiring ends
 mod islands;
 mod listen;
 mod meeting;
@@ -141,6 +144,15 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::close_browse,
             islands::islands,
             islands::dismiss_island,
+            // notch-today-focus: commands begin
+            focus::focus_state,
+            focus::focus_start,
+            focus::focus_pause,
+            focus::focus_resume,
+            focus::focus_skip,
+            focus::focus_stop,
+            focus::focus_stats,
+            // notch-today-focus: commands end
             sessions::agent_hook_status,
             sessions::install_agent_hooks,
             sessions::uninstall_agent_hooks,
@@ -170,6 +182,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::OverlayDismiss,
             overlay::NotchHover,
             islands::IslandChanged,
+            // notch-today-focus: events begin
+            focus::FocusSnapshot,
+            // notch-today-focus: events end
             sessions::AgentSessions,
             sessions::AgentPermission,
             sessions::AgentPermissionResolved,
@@ -273,6 +288,10 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             }
 
             sessions::start(app.handle());
+
+            // notch-today-focus: setup begin
+            focus::init(app.handle());
+            // notch-today-focus: setup end
 
             tray::init(app)?;
 

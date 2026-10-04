@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { readySections, type Section } from "./sections";
 import { AgentsCoding, AgentsUsage, AgentsVoice } from "./views/Agents";
+import { FocusTimer } from "./views/Focus";
 import { NowOverview } from "./views/Now";
 
 /**
@@ -83,7 +84,7 @@ export const SECTIONS: Section[] = [
     name: "Focus",
     icon: TimerIcon,
     subsections: [
-      { id: "timer", name: "Timer", features: ["Pomodoro", "Stopwatch"], ready: false },
+      { id: "timer", name: "Timer", features: ["Pomodoro", "Stopwatch"], ready: true, view: FocusTimer },
       { id: "awake", name: "Keep Awake", features: ["Keep awake", "Focus mode"], ready: false },
       { id: "notes", name: "Notes", features: ["Quick notes"], ready: false },
       { id: "call", name: "Call prep", features: ["Teleprompter", "Camera mirror"], ready: false },

@@ -66,6 +66,66 @@ export const ACTIONS: NotchAction[] = [
       return true;
     },
   },
+  // notch-today-focus: Focus actions begin
+  {
+    id: "focus.start",
+    title: "Start a focus timer",
+    keywords: ["pomodoro", "timer", "focus", "work"],
+    section: "focus",
+    subsection: "timer",
+    run: async (ctx) => {
+      ctx.open("focus", "timer");
+      await commands.focusStart("pomodoro", { focus: 25, rest: 5 });
+      return true;
+    },
+  },
+  {
+    id: "focus.stopwatch",
+    title: "Start the stopwatch",
+    keywords: ["timer", "count up", "time"],
+    section: "focus",
+    subsection: "timer",
+    run: async (ctx) => {
+      ctx.open("focus", "timer");
+      await commands.focusStart("stopwatch", { focus: 25, rest: 5 });
+      return true;
+    },
+  },
+  // Island buttons: Pause on a running timer, Resume on a paused one or a
+  // phase that is waiting to start.
+  {
+    id: "focus.pause",
+    title: "Pause the timer",
+    section: "focus",
+    subsection: "timer",
+    run: async () => {
+      await commands.focusPause();
+      return true;
+    },
+  },
+  {
+    id: "focus.resume",
+    title: "Resume the timer",
+    keywords: ["start break", "continue"],
+    section: "focus",
+    subsection: "timer",
+    run: async () => {
+      await commands.focusResume();
+      return true;
+    },
+  },
+  {
+    id: "focus.stop",
+    title: "Stop the timer",
+    keywords: ["end", "reset", "cancel"],
+    section: "focus",
+    subsection: "timer",
+    run: async () => {
+      await commands.focusStop();
+      return true;
+    },
+  },
+  // notch-today-focus: Focus actions end
   {
     // What a finished row's Show does: bring back what a write made.
     id: "result.show",

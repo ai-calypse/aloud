@@ -201,6 +201,14 @@ export const commands = {
 	 *  registry; this is the half of it the queue has to hear.
 	 */
 	dismissIsland: (id: string) => __TAURI_INVOKE<void>("dismiss_island", { id }),
+	focusState: () => __TAURI_INVOKE<FocusSnapshot>("focus_state"),
+	focusStart: (mode: TimerMode, preset: TimerPreset) => __TAURI_INVOKE<void>("focus_start", { mode, preset }),
+	focusPause: () => __TAURI_INVOKE<void>("focus_pause"),
+	focusResume: () => __TAURI_INVOKE<void>("focus_resume"),
+	focusSkip: () => __TAURI_INVOKE<void>("focus_skip"),
+	/**  Stops and clears. A stopwatch that ran a real while is kept for the streak. */
+	focusStop: () => __TAURI_INVOKE<void>("focus_stop"),
+	focusStats: () => typedError<FocusStats, string>(__TAURI_INVOKE("focus_stats")),
 	agentHookStatus: () => typedError<HookStatus, string>(__TAURI_INVOKE("agent_hook_status")),
 	/**
 	 *  Installs our hooks, copying the sidecar out of the bundle first.
@@ -311,6 +319,7 @@ export const events = {
 	connectorsUpdated: makeEvent<ConnectorsUpdated>("connectors-updated"),
 	dictationPartial: makeEvent<DictationPartial>("dictation-partial"),
 	dictationPhase: makeEvent<Phase>("dictation-phase"),
+	focus: makeEvent<FocusSnapshot>("focus"),
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
 	island: makeEvent<IslandChanged>("island"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
@@ -583,6 +592,12 @@ export type AudioDevice = {
 /**  Live input level, 0.0–1.0, driving the pill's waveform. Only while recording. */
 export type AudioLevel = number | null;
 
+export type AwakeState = {
+	active: boolean,
+	/**  When it lets go, in unix ms; None while active means "until stopped". */
+	until: number | null,
+};
+
 /**
  *  What triggers a binding.
  * 
@@ -729,6 +744,35 @@ export type FinderResults = {
 	/**  Total matches found, which may exceed `files.len()` when truncated. */
 	count: number,
 	files: FoundFile[],
+};
+
+/**  One day of the chart. */
+export type FocusDay = {
+	/**  `YYYY-MM-DD`, local. */
+	day: string,
+	/**  Finished sessions that day. */
+	sessions: number,
+	minutes: number,
+};
+
+/**
+ *  The timer and keep-awake as the webview draws them. Pushed whenever either
+ *  changes by anything other than the clock; the webview counts the seconds
+ *  itself against `TimerState`'s wall-clock fields.
+ */
+export type FocusSnapshot = {
+	timer: TimerState,
+	awake: AwakeState,
+};
+
+export type FocusStats = {
+	/**
+	 *  Consecutive days with a session, ending today — or yesterday, while
+	 *  today is still young.
+	 */
+	streak: number,
+	/**  Seven days, oldest first, ending today; empty days included. */
+	week: FocusDay[],
 };
 
 /**
@@ -1306,6 +1350,46 @@ export type StatsView = {
 export type Tier = "confirm" | 
 /**  Red, needs a click, never auto-runs, and "Always allow" cannot cover it. */
 "strict";
+
+export type TimerMode = "pomodoro" | "stopwatch";
+
+export type TimerPhase = "focus" | "shortBreak" | "longBreak";
+
+/**  Minutes, so the two common rhythms are one tap each. */
+export type TimerPreset = {
+	focus: number,
+	rest: number,
+};
+
+/**
+ *  Everything the webview needs to draw the timer, with no clock of its own to
+ *  drift: it reads `Date.now()` against `at` / `held_ms`.
+ */
+export type TimerState = {
+	mode: TimerMode,
+	phase: TimerPhase,
+	status: TimerStatus,
+	/**  1…=`rounds`. */
+	round: number,
+	rounds: number,
+	preset: TimerPreset,
+	/**
+	 *  Running: when a countdown ends, or when a stopwatch (net of pauses)
+	 *  began, in unix ms.
+	 */
+	at: number,
+	/**  Not running: milliseconds left (countdown) or elapsed (stopwatch). */
+	heldMs: number,
+	/**  The phase's full length, for the ring; 0 for a stopwatch. */
+	totalMs: number,
+};
+
+export type TimerStatus = "idle" | "running" | "paused" | 
+/**
+ *  A phase just ended and the next one waits for the user: coming back
+ *  from lunch must not find the whole break already spent.
+ */
+"ready";
 
 /**
  *  A tool call for display. Kept separate from `ParsedAction` so the UI

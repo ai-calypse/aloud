@@ -1,0 +1,13 @@
+[package]
+name = "aloud-focus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Focus section's logic: the Pomodoro/stopwatch timer and keep-awake, without Tauri"
+
+[dependencies]
+aloud-islands = { path = "../islands" }
+serde.workspace = true
+specta.workspace = true
+specta-typescript = "0.0.12"
+tracing.workspace = true

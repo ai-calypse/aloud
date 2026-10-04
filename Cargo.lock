@@ -48,6 +48,7 @@ dependencies = [
  "aloud-bridge",
  "aloud-drag",
  "aloud-engine",
+ "aloud-focus",
  "aloud-hotkey",
  "aloud-islands",
  "aloud-llm",
@@ -162,6 +163,17 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "aloud-focus"
+version = "0.1.0"
+dependencies = [
+ "aloud-islands",
+ "serde",
+ "specta",
+ "specta-typescript",
  "tracing",
 ]
 
