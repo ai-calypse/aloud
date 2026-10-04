@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("now") => {
-            let reading = now_playing::read();
+            let reading = now_playing::read(true);
             println!("{reading:#?}");
             if let Some(now) = reading.now {
                 println!(
@@ -57,7 +57,15 @@ async fn main() -> anyhow::Result<()> {
                 album: args.get(4).cloned().unwrap_or_default(),
                 duration_ms: args[3].parse::<u32>()? * 1000,
                 position_ms: 0,
+                speed_pct: 100,
                 artwork_url: None,
+                song: None,
+                source: aloud_media::Source {
+                    app: "Spotify".into(),
+                    bundle_id: None,
+                    host: None,
+                    tab: None,
+                },
             };
             match lyrics::lyrics(&now).await? {
                 Some(l) => {

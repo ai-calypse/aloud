@@ -35,11 +35,14 @@ export type NotchAction = {
 
 /**
  * The player a media action means: the one an island names (Rust sends the
- * app's name), else whichever is on — ⌘K has no island to ask.
+ * app's name, a browser's included), else whichever is on — ⌘K has no island
+ * to ask.
  */
 async function mediaPlayer(args: Record<string, string>): Promise<Player | null> {
   if (args.player === "Spotify") return "spotify";
   if (args.player === "Music") return "music";
+  if (args.player === "mediaRemote") return "mediaRemote";
+  if (args.player) return "browser";
   return (await commands.mediaNowPlaying()).now?.player ?? null;
 }
 
@@ -87,7 +90,7 @@ export const ACTIONS: NotchAction[] = [
   {
     id: "media.toggle",
     title: "Play or pause",
-    keywords: ["music", "spotify", "song", "resume", "stop"],
+    keywords: ["music", "spotify", "song", "resume", "stop", "youtube", "video", "browser"],
     section: "media",
     subsection: "playing",
     run: (_, args) => transport(args, "toggle"),

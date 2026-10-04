@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { commands, events, type NowPlaying, type Reading } from "@/lib/bindings";
+import { commands, events, type BrowserIssue, type NowPlaying, type Reading } from "@/lib/bindings";
 
 /**
  * The Media views' shared ground: the player's state with a clock that keeps
@@ -19,11 +19,12 @@ export function formatTime(ms: number): string {
 
 /**
  * Where in the track it is at `at`, given the reading taken at `readAt`.
- * Rust polls once a second; between polls a playing track keeps moving, and a
- * paused one does not. Clamped to the track, which a late poll could outrun.
+ * Rust polls once a second; between polls a playing track keeps moving (at the
+ * page's speed, for a web video), and a paused one does not. Clamped to the
+ * track, which a late poll could outrun.
  */
 export function positionAt(now: NowPlaying, readAt: number, at: number): number {
-  const elapsed = now.state === "playing" ? Math.max(0, at - readAt) : 0;
+  const elapsed = now.state === "playing" ? (Math.max(0, at - readAt) * now.speedPct) / 100 : 0;
   const end = now.durationMs > 0 ? now.durationMs : Number.POSITIVE_INFINITY;
   return Math.min(end, now.positionMs + elapsed);
 }
@@ -48,7 +49,55 @@ export function lowest(batteries: { percent: number }[]): number | null {
   return batteries.length ? Math.min(...batteries.map((b) => b.percent)) : null;
 }
 
-const NOTHING: Reading = { now: null, denied: null };
+/** The speeds the chip steps through, in percent, ending back at normal. */
+const SPEEDS = [100, 125, 150, 175, 200, 75];
+
+/** The next speed after `pct`: 1× → 1.25× → … → 2× → 0.75× → 1×. Anything off the list goes to 1×. */
+export function nextSpeed(pct: number): number {
+  const i = SPEEDS.indexOf(pct);
+  return i < 0 ? 100 : SPEEDS[(i + 1) % SPEEDS.length];
+}
+
+/** `1×`, `1.25×`, `0.75×`. */
+export function formatSpeed(pct: number): string {
+  return `${Number((pct / 100).toFixed(2))}×`;
+}
+
+/**
+ * Whether lyrics need the source to have named a clean song: a web video or an
+ * arbitrary app's title is not a track, a Spotify or Music one is.
+ */
+export function needsSong(now: NowPlaying): boolean {
+  return now.player === "browser" || now.player === "mediaRemote";
+}
+
+/** The host without a leading `www.`, for a line under the title. */
+export function plainHost(host: string | null): string {
+  return (host ?? "").replace(/^www\./, "");
+}
+
+/** The name the user knows a browser by: "Brave Browser" is "Brave". */
+export function shortName(app: string): string {
+  return app.replace(/^(Google|Microsoft) /, "").replace(/ Browser$/, "");
+}
+
+/**
+ * What a browser needs before Aloud can read its tabs. Safari hides the menu
+ * until Settings › Advanced › "Show features for web developers" is on.
+ */
+export function jsOffFix(app: string): string {
+  return app === "Safari"
+    ? "Safari › Develop › Allow JavaScript from Apple Events. If there is no Develop menu, turn on Safari › Settings › Advanced › Show features for web developers first."
+    : `${shortName(app)} › View › Developer › Allow JavaScript from Apple Events.`;
+}
+
+/** "Brave", "Brave and Safari", "Brave, Chrome and Safari". */
+export function joinNames(issues: BrowserIssue[]): string {
+  const names = issues.map((i) => shortName(i.app));
+  return names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+const NOTHING: Reading = { now: null, denied: null, browsers: [] };
 
 /**
  * The player's state, live. Tells Rust a Media view is on screen (so it
@@ -98,10 +147,40 @@ export function useNowPlaying() {
   return { ...state, patch };
 }
 
+const ICONS = new Map<string, string | null>();
+
+/** An app's own icon, fetched once per app: Rust caches it too, but the round trip is not free. */
+export function useSourceIcon(app: string | null): string | null {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    if (!app || ICONS.has(app)) return;
+    let live = true;
+    try {
+      commands
+        .mediaSourceIcon(app)
+        .then((uri) => {
+          ICONS.set(app, uri);
+          if (live) bump((n) => n + 1);
+        })
+        .catch(() => {});
+    } catch {
+      /* browser preview */
+    }
+    return () => {
+      live = false;
+    };
+  }, [app]);
+  return (app && ICONS.get(app)) || null;
+}
+
 /** The cover of the track, once Rust has fetched it; null while it has not. */
 export function useArtwork(now: NowPlaying | null): string | null {
   const [art, setArt] = useState<{ key: string; uri: string | null } | null>(null);
-  const key = now ? `${now.player}|${now.title}|${now.artist}|${Math.floor(now.durationMs / 1000)}` : null;
+  // The cover URL is in the key because a MediaRemote cover arrives after the
+  // title and changes this opaque address when it does.
+  const key = now
+    ? `${now.player}|${now.title}|${now.artist}|${Math.floor(now.durationMs / 1000)}|${now.artworkUrl ?? ""}`
+    : null;
   const latest = useRef(now);
   latest.current = now;
 

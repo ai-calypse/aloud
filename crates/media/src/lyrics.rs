@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::now_playing::NowPlaying;
+use crate::now_playing::{NowPlaying, Player};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -38,11 +38,15 @@ const MISS_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 /// Lyrics for `now`: the disk cache, else LRCLIB. `Ok(None)` is a definite
 /// "no lyrics"; `Err` is a network failure and is not cached.
 pub async fn lyrics(now: &NowPlaying) -> Result<Option<Lyrics>> {
+    // A web video with no clean song in its title has no lyrics to look up.
+    let Some((title, artist)) = now.lyrics_query() else {
+        return Ok(None);
+    };
     let path = cache_path(&now.key())?;
     if let Some(cached) = read_cache(&path) {
         return Ok(cached);
     }
-    let found = fetch(now).await?;
+    let found = fetch(now, title, artist).await?;
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -91,7 +95,7 @@ struct Record {
     synced_lyrics: Option<String>,
 }
 
-async fn fetch(now: &NowPlaying) -> Result<Option<Lyrics>> {
+async fn fetch(now: &NowPlaying, title: &str, artist: &str) -> Result<Option<Lyrics>> {
     let client = reqwest::Client::builder()
         .user_agent(concat!("Aloud/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(8))
@@ -103,8 +107,8 @@ async fn fetch(now: &NowPlaying) -> Result<Option<Lyrics>> {
     // because a "(Deluxe)" album name is the usual reason for one.
     for with_album in [true, false] {
         let mut query = vec![
-            ("track_name", now.title.as_str()),
-            ("artist_name", now.artist.as_str()),
+            ("track_name", title),
+            ("artist_name", artist),
             ("duration", seconds.as_str()),
         ];
         if with_album && !now.album.is_empty() {
@@ -129,9 +133,15 @@ async fn fetch(now: &NowPlaying) -> Result<Option<Lyrics>> {
         );
     }
 
+    // ponytail: a web video is matched on its length or not at all. Its intro
+    // and outro differ from the track's, so the search's loose fallback would
+    // hand back lyrics that run seconds off.
+    if now.player == Player::Browser {
+        return Ok(None);
+    }
     let records: Vec<Record> = client
         .get("https://lrclib.net/api/search")
-        .query(&[("track_name", &now.title), ("artist_name", &now.artist)])
+        .query(&[("track_name", title), ("artist_name", artist)])
         .send()
         .await
         .context("searching LRCLIB")?

@@ -4,7 +4,7 @@ import { createSpring, type Spring } from "@/lib/spring";
 import { Button } from "@/components/ui/button";
 import { Empty, Label } from "@/components/notch/list";
 import { cn } from "@/lib/utils";
-import { lineAt, positionAt, useNowPlaying } from "../media";
+import { lineAt, needsSong, positionAt, useNowPlaying } from "../media";
 
 type Load =
   | { key: string; status: "loading" }
@@ -32,7 +32,8 @@ export function MediaLyrics() {
 
   useEffect(() => {
     const track = latest.current;
-    if (!key || !track) return;
+    // A web video the page does not name a song for has nothing to look up.
+    if (!key || !track || (needsSong(track) && !track.song)) return;
     let live = true;
     setLoad({ key, status: "loading" });
     try {
@@ -58,7 +59,17 @@ export function MediaLyrics() {
   if (!now) {
     return (
       <Empty title="No lyrics without a song">
-        Play something in Spotify or Music and its lyrics scroll here in time.
+        Play a song in any music app and its lyrics scroll here in time.
+      </Empty>
+    );
+  }
+  if (needsSong(now) && !now.song) {
+    return (
+      <Empty title="No lyrics for this one">
+        Aloud looks lyrics up only when it knows the title and artist are a
+        song: a music app, or a web page that names them cleanly (YouTube
+        Music, an artist&apos;s own upload titled &ldquo;Artist - Song&rdquo;,
+        or an auto-generated Topic channel).
       </Empty>
     );
   }

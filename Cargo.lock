@@ -301,6 +301,7 @@ version = "0.1.0"
 dependencies = [
  "aloud-native",
  "aloud-notes",
+ "aloud-selection",
  "anyhow",
  "base64 0.22.1",
  "core-foundation",

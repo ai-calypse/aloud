@@ -1,6 +1,7 @@
 //! Wiring the Media section (`aloud-media`) to the notch.
 //!
-//! Orchestration only: one poller that reads the players and keeps the
+//! Orchestration only: one poller that reads the players (and browser tabs)
+//! and keeps the
 //! closed-notch island honest, and a command per thing the views can do. What
 //! a player reports, how lyrics are parsed and how devices are listed are the
 //! crate's.
@@ -15,7 +16,7 @@ use aloud_media::lyrics::Lyrics;
 use aloud_media::sound::{Direction, SoundState};
 use aloud_media::{NowPlaying, PlayState, Player, Reading, Transport};
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 use tokio::sync::Notify;
 
@@ -37,12 +38,27 @@ static POLL_NOW: Notify = Notify::const_new();
 
 /// Poll the moment a Media view opens or a transport button was pressed,
 /// instead of up to a period later.
-fn poll_now() {
+pub fn poll_now() {
     POLL_NOW.notify_one();
 }
 
 fn last() -> std::sync::MutexGuard<'static, Option<Reading>> {
     LAST.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Whether browser tabs are scanned: the Settings row, on by default. Read
+/// every poll so flipping it applies at once.
+fn browsers_on(app: &AppHandle) -> bool {
+    app.try_state::<crate::AppState>()
+        .and_then(|state| state.settings.lock().ok().map(|s| s.browser_media))
+        .unwrap_or(true)
+}
+
+/// Whether the any-app helper may run: the Settings row, on by default.
+fn any_app_on(app: &AppHandle) -> bool {
+    app.try_state::<crate::AppState>()
+        .and_then(|state| state.settings.lock().ok().map(|s| s.any_app_media))
+        .unwrap_or(true)
 }
 
 /// Background polling (no Media view open) starts once the user has opened
@@ -66,14 +82,22 @@ fn enable() {
 
 pub fn start(app: &AppHandle) {
     let app = app.clone();
+    // A change MediaRemote reports is shown at once, not at the next tick.
+    aloud_media::mediaremote::start(poll_now);
     tauri::async_runtime::spawn(async move {
         let mut shown: Option<NowPlaying> = None;
         loop {
             let watched = WATCHERS.load(Ordering::Relaxed) > 0;
+            let browsers = browsers_on(&app);
+            // The helper runs only for a user who has asked for Media (the same
+            // gate as the polling) and has not switched it off.
+            aloud_media::mediaremote::set_enabled(any_app_on(&app) && (watched || enabled()));
             let reading = if watched || enabled() {
-                tauri::async_runtime::spawn_blocking(aloud_media::now_playing::read)
-                    .await
-                    .unwrap_or_default()
+                tauri::async_runtime::spawn_blocking(move || {
+                    aloud_media::now_playing::read(browsers)
+                })
+                .await
+                .unwrap_or_default()
             } else {
                 Reading::default()
             };
@@ -136,19 +160,50 @@ fn sync_island(app: &AppHandle, now: Option<NowPlaying>, shown: &mut Option<NowP
         }
         return;
     };
-    if shown.as_ref().is_some_and(|s| s.key() == now.key()) {
+    let same_track = shown.as_ref().is_some_and(|s| s.key() == now.key());
+    // A MediaRemote cover arrives after the title: same track, new cover.
+    let same_cover = shown
+        .as_ref()
+        .is_some_and(|s| s.artwork_url == now.artwork_url);
+    if same_track && same_cover {
         return;
     }
-    crate::islands::push(app, island(&now, None));
+    if !same_track {
+        crate::islands::push(app, island(&now, None));
+    }
     *shown = Some(now.clone());
     // The cover can take a network round trip; the island is up without it
     // and takes it when it arrives.
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        if let Some(art) = aloud_media::artwork(&now).await {
+        // A page with no cover shows the browser's own icon: a web video's
+        // island is otherwise a blank tile. Any other app shows its own.
+        let art = match aloud_media::artwork(&now).await {
+            Some(art) => Some(art),
+            None if matches!(now.player, Player::Browser | Player::MediaRemote) => {
+                let name = now.source.app.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    aloud_media::now_playing::app_icon(&name)
+                })
+                .await
+                .ok()
+                .flatten()
+            }
+            None => None,
+        };
+        if let Some(art) = art {
             crate::islands::push(&app, island(&now, Some(art)));
         }
     });
+}
+
+/// What the island's button tells `actions.ts` to drive: the app's name for the
+/// players and browsers (the way it always has), `mediaRemote` for the rest.
+fn action_player(now: &NowPlaying) -> &str {
+    match now.player {
+        Player::MediaRemote => "mediaRemote",
+        _ => &now.source.app,
+    }
 }
 
 fn island(now: &NowPlaying, art: Option<String>) -> Island {
@@ -156,7 +211,9 @@ fn island(now: &NowPlaying, art: Option<String>) -> Island {
         id: ISLAND.into(),
         kind: IslandKind::Live,
         priority: IslandPriority::Low,
-        icon: Some(art.unwrap_or_else(|| "music".into())),
+        icon: art.or_else(|| {
+            matches!(now.player, Player::Spotify | Player::Music).then(|| "music".into())
+        }),
         // The row in Now › Overview reads artist over song; the pill, which
         // has one short value, shows the song.
         title: if now.artist.is_empty() {
@@ -165,7 +222,7 @@ fn island(now: &NowPlaying, art: Option<String>) -> Island {
             now.artist.clone()
         },
         detail: Some(now.title.clone()),
-        actions: vec![IslandAction::new("Pause", "media.toggle").arg("player", now.player.app())],
+        actions: vec![IslandAction::new("Pause", "media.toggle").arg("player", action_player(now))],
         expires: None,
     }
 }
@@ -174,10 +231,12 @@ fn island(now: &NowPlaying, art: Option<String>) -> Island {
 /// should not wait up to a second for its first frame.
 #[tauri::command]
 #[specta::specta]
-pub async fn media_now_playing() -> Reading {
-    let reading = tauri::async_runtime::spawn_blocking(aloud_media::now_playing::read)
-        .await
-        .unwrap_or_default();
+pub async fn media_now_playing(app: AppHandle) -> Reading {
+    let browsers = browsers_on(&app);
+    let reading =
+        tauri::async_runtime::spawn_blocking(move || aloud_media::now_playing::read(browsers))
+            .await
+            .unwrap_or_default();
     *last() = Some(reading.clone());
     reading
 }
@@ -223,6 +282,47 @@ pub async fn media_seek(player: Player, position_ms: u32) -> Result<(), String> 
     .map_err(|e| e.to_string())?;
     settle_then_poll();
     Ok(())
+}
+
+/// Playback speed of the browser tab on screen, in percent (100 is normal).
+#[tauri::command]
+#[specta::specta]
+pub async fn media_set_speed(player: Player, speed_pct: u16) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        aloud_media::now_playing::set_speed(player, speed_pct)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    settle_then_poll();
+    Ok(())
+}
+
+/// An app's icon as a `data:` URI, for the badge saying where a track plays.
+#[tauri::command]
+#[specta::specta]
+pub async fn media_source_icon(app: String) -> Option<String> {
+    tauri::async_runtime::spawn_blocking(move || aloud_media::now_playing::app_icon(&app))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// "I turned it on": forget that a browser could not be read and look now,
+/// instead of waiting out the few minutes between checks.
+#[tauri::command]
+#[specta::specta]
+pub fn media_recheck_browsers() {
+    aloud_media::browser::recheck();
+    poll_now();
+}
+
+/// Brings a browser forward so its menu bar is within reach of the fix the
+/// view describes.
+#[tauri::command]
+#[specta::specta]
+pub fn media_open_browser(app: String) {
+    aloud_media::browser::open(&app);
 }
 
 /// A player reports its old state for a moment after a command (the agent's

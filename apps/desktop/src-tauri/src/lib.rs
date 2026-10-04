@@ -189,6 +189,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             media::media_watch,
             media::media_control,
             media::media_seek,
+            media::media_set_speed,
+            media::media_source_icon,
+            media::media_recheck_browsers,
+            media::media_open_browser,
             media::media_artwork,
             media::media_lyrics,
             media::sound_state,
@@ -472,6 +476,10 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
                 tray::show_main(_app);
+            }
+            // The Now Playing helper is a child process; a normal quit must not leave it.
+            if let tauri::RunEvent::Exit = _event {
+                aloud_media::mediaremote::shutdown();
             }
         });
 }
