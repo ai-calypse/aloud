@@ -24,6 +24,7 @@ mod thumbnail;
 use serde_json::{json, Value};
 
 pub use catalogue::{editor_project, show};
+pub use contacts::prepare;
 pub use script::ScriptError;
 
 /// `args` with what the user was looking at when they spoke, for a native tool
@@ -422,7 +423,17 @@ pub fn confirmation(name: &str, args: &Value, result: &Value) -> Option<String> 
             _ => return None,
         });
     }
+    // `to_name` is who `prepare` resolved `to` to; the handle is the fallback.
+    let who = || arg("to_name").or(arg("to"));
     Some(match name {
+        // Only a real send: a dry run must not read as one.
+        "ALOUD_MESSAGES_SEND" if result["sent"] == true => {
+            format!("Sent “{}” to {}.", arg("text")?, who()?)
+        }
+        "ALOUD_MAIL_SEND" if result["sent"] == true => format!("Emailed {}.", who()?),
+        "ALOUD_FACETIME_CALL" if result["opened"] == true => {
+            format!("Opened a FaceTime call to {}.", who()?)
+        }
         "ALOUD_NOTES_CREATE" => format!("Created the note “{}”.", got("title").or(arg("title"))?),
         "ALOUD_NOTES_APPEND" if result.get("created").is_some() => {
             format!("Created the note “{}”.", got("title")?)
@@ -707,6 +718,24 @@ mod tests {
     }
 
     #[test]
+    fn messages_confirm_with_the_persons_name() {
+        let sent = json!({ "sent": true, "to": "+15550001111" });
+        let to_suhani = json!({ "to": "+15550001111", "to_name": "Suhani", "text": "hi" });
+        assert_eq!(
+            confirmation("ALOUD_MESSAGES_SEND", &to_suhani, &sent).as_deref(),
+            Some("Sent “hi” to Suhani.")
+        );
+        // A handle the model gave directly has no name to use.
+        let to_handle = json!({ "to": "+15550001111", "text": "hi" });
+        assert_eq!(
+            confirmation("ALOUD_MESSAGES_SEND", &to_handle, &sent).as_deref(),
+            Some("Sent “hi” to +15550001111.")
+        );
+        let dry = json!({ "sent": false, "dry_run": true });
+        assert_eq!(confirmation("ALOUD_MESSAGES_SEND", &to_suhani, &dry), None);
+    }
+
+    #[test]
     fn a_repeat_stops_at_the_first_failure_and_reports_progress() {
         let mut calls = 0;
         let outcome = repeat(5, || {
@@ -767,6 +796,8 @@ mod tests {
     fn sending_quitting_and_file_moves_still_ask_first() {
         for name in [
             "ALOUD_MESSAGES_SEND",
+            "ALOUD_MAIL_SEND",
+            "ALOUD_FACETIME_CALL",
             "ALOUD_DISCORD_MESSAGE",
             "ALOUD_QUIT_APP",
             "ALOUD_COLLECT_FILES",

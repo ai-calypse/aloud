@@ -26,6 +26,28 @@ fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, ScriptError> 
         .ok_or_else(|| ScriptError::Failed(format!("missing required argument {key:?}")))
 }
 
+/// `to` as a phone number or email. `prepare` resolves a name before the gate,
+/// so a name here was typed in at the gate or skipped the lookup, and guessing a
+/// recipient is worse than failing.
+fn handle(args: &Value) -> Result<&str, ScriptError> {
+    let to = required_str(args, "to")?.trim();
+    if crate::contacts::looks_like_handle(to) {
+        Ok(to)
+    } else {
+        Err(ScriptError::Failed(format!(
+            "“{to}” is not a phone number or email"
+        )))
+    }
+}
+
+/// A hidden argument, never in a schema: go as far as a real run would, short of
+/// sending. For the demo binary, so a send can be checked without sending one.
+fn dry_run(args: &Value) -> bool {
+    args.get("dry_run")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
 /// Whether the app now in front is the one at `bundle` (canonical). Used to wait
 /// out a launch, since `open` returns before the app is on screen.
 ///
@@ -1060,11 +1082,9 @@ pub const ACTIONS: &[Action] = &[
                 se.keystroke(ARG.text.replace(/\s*\n\s*/g, " "));
                 if (!ARG.dry_run) se.keyCode(36);
                 return title;"#,
-                &json!({ "to": to, "text": text, "dry_run": args.get("dry_run").and_then(Value::as_bool).unwrap_or(false) }),
+                &json!({ "to": to, "text": text, "dry_run": dry_run(args) }),
             )?;
-            Ok(
-                json!({ "sent": !args.get("dry_run").and_then(Value::as_bool).unwrap_or(false), "to": out }),
-            )
+            Ok(json!({ "sent": !dry_run(args), "to": out }))
         },
     },
     Action {
@@ -1198,9 +1218,10 @@ pub const ACTIONS: &[Action] = &[
     },
     Action {
         name: "ALOUD_MESSAGES_SEND",
-        description: "Send an iMessage or SMS to a phone number or email handle. \
-                      The `to` field must be a full handle, never a name — resolve \
-                      names to a handle first, or ask.",
+        description: "Send an iMessage or SMS. `to` is the person's name as the user said \
+                      it (\"Suhani\", \"mom\") or a phone number or email; a name is looked \
+                      up in Contacts, and if several people match you get their names back \
+                      to ask which one. Write the message yourself.",
         app: "Messages",
         read_only: false,
         repeatable: false,
@@ -1211,29 +1232,136 @@ pub const ACTIONS: &[Action] = &[
                 "properties": {
                     "to": {
                         "type": "string",
-                        "description": "The FULL recipient handle: a phone number \
-                                        (+15551234567) or email. Not a display name."
+                        "description": "Who: a name as spoken, or a phone number or email."
                     },
                     "text": { "type": "string", "description": "The message body." }
                 }
             })
         },
         run: |args| {
-            let to = required_str(args, "to")?;
+            let to = handle(args)?;
             let text = required_str(args, "text")?;
-            let to_esc = script::escape(to);
-            let text_esc = script::escape(text);
-            // `buddy` on the iMessage service. If the handle is an SMS-only
-            // number, Messages routes it — no need to pick the service here.
-            let source = format!(
-                r#"tell application "Messages"
-                    set svc to 1st service whose service type = iMessage
-                    send "{text_esc}" to buddy "{to_esc}" of svc
-                end tell"#
-            );
-            script::run("Messages", &source)?;
+            // iMessage first. Only a send that throws falls back to SMS: one that
+            // fails later, a red "Not Delivered", is past what a script can see.
+            // `service type` is read per account: on macOS 26 some accounts throw
+            // -10000 for it, which fails the bulk read of every account.
+            let out = script::run_jxa(
+                "Messages",
+                r#"const M = Application("Messages");
+                const all = M.accounts();
+                const types = all.map(a => { try { return a.enabled() ? a.serviceType() : ""; } catch (e) { return ""; } });
+                const accounts = ["iMessage", "SMS"].filter(t => types.includes(t))
+                    .map(type => ({ type, account: all[types.indexOf(type)] }));
+                if (accounts.length === 0) throw new Error("Messages has no iMessage or SMS account signed in; nothing was sent.");
+                if (ARG.dry_run) {
+                    let known = true;
+                    try { accounts[0].account.participants.byName(ARG.to).handle(); } catch (e) { known = false; }
+                    return JSON.stringify({ sent: false, dry_run: true, service: accounts[0].type, known });
+                }
+                const send = a => {
+                    M.send(ARG.text, { to: a.account.participants.byName(ARG.to) });
+                    return JSON.stringify({ sent: true, service: a.type });
+                };
+                try { return send(accounts[0]); } catch (e) {
+                    if (accounts.length < 2) throw e;
+                    return send(accounts[1]);
+                }"#,
+                &json!({ "to": to, "text": text, "dry_run": dry_run(args) }),
+            )?;
+            let mut result: Value = serde_json::from_str(&out)
+                .map_err(|e| ScriptError::Failed(format!("reading Messages' answer: {e}")))?;
             // Echo the handle back so a mis-send is visible in the transcript.
-            Ok(json!({ "sent": true, "to": to }))
+            result["to"] = json!(to);
+            Ok(result)
+        },
+    },
+    Action {
+        name: "ALOUD_MAIL_SEND",
+        description: "Send an email from the Mail app, in the background. `to` is the \
+                      person's name as the user said it or an email address; a name is looked \
+                      up in Contacts. Write the subject and body yourself.",
+        app: "Mail",
+        read_only: false,
+        repeatable: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["to", "body"],
+                "properties": {
+                    "to": {
+                        "type": "string",
+                        "description": "Who: a name as spoken, or an email address."
+                    },
+                    "subject": { "type": "string", "description": "A short subject line." },
+                    "body": { "type": "string", "description": "The email body." }
+                }
+            })
+        },
+        run: |args| {
+            let to = handle(args)?;
+            if !to.contains('@') {
+                return Err(ScriptError::Failed(format!("“{to}” is not an email address")));
+            }
+            let body = required_str(args, "body")?;
+            let out = script::run_jxa(
+                "Mail",
+                r#"const Mail = Application("Mail");
+                if (Mail.accounts().length === 0) throw new Error("Mail has no account set up; nothing was sent. Send it with a connected email service instead, if there is one.");
+                if (ARG.dry_run) return JSON.stringify({ sent: false, dry_run: true });
+                const msg = Mail.OutgoingMessage({ subject: ARG.subject, content: ARG.body, visible: false });
+                Mail.outgoingMessages.push(msg);
+                msg.toRecipients.push(Mail.Recipient({ address: ARG.to }));
+                if (msg.send() === false) throw new Error("Mail would not send it.");
+                return JSON.stringify({ sent: true });"#,
+                &json!({
+                    "to": to,
+                    "subject": args.get("subject").and_then(Value::as_str).unwrap_or_default(),
+                    "body": body,
+                    "dry_run": dry_run(args),
+                }),
+            )?;
+            let mut result: Value = serde_json::from_str(&out)
+                .map_err(|e| ScriptError::Failed(format!("reading Mail's answer: {e}")))?;
+            result["to"] = json!(to);
+            Ok(result)
+        },
+    },
+    Action {
+        name: "ALOUD_FACETIME_CALL",
+        description: "Start a FaceTime call: opens FaceTime's call prompt for `to`, the \
+                      person's name as the user said it or a phone number or email. Set \
+                      `audio` for an audio-only call.",
+        app: "FaceTime",
+        read_only: false,
+        repeatable: false,
+        params: || {
+            json!({
+                "type": "object",
+                "required": ["to"],
+                "properties": {
+                    "to": {
+                        "type": "string",
+                        "description": "Who: a name as spoken, or a phone number or email."
+                    },
+                    "audio": { "type": "boolean", "description": "Audio only; default video." }
+                }
+            })
+        },
+        run: |args| {
+            let to = handle(args)?;
+            let audio = args.get("audio").and_then(Value::as_bool).unwrap_or(false);
+            // A space or bracket would end the URL early, so a number keeps only + and digits.
+            let target: String = if to.contains('@') {
+                to.to_string()
+            } else {
+                to.chars().filter(|c| c.is_ascii_digit() || *c == '+').collect()
+            };
+            let scheme = if audio { "facetime-audio" } else { "facetime" };
+            if dry_run(args) {
+                return Ok(json!({ "opened": false, "dry_run": true, "to": to }));
+            }
+            open_with(None, Some(&format!("{scheme}://{target}")))?;
+            Ok(json!({ "opened": true, "to": to, "audio": audio }))
         },
     },
     Action {
@@ -1840,12 +1968,35 @@ mod tests {
             .find(|a| a.name == "ALOUD_FINDER_SEARCH")
             .unwrap();
         assert!(search.read_only, "FINDER_SEARCH only reads");
-        for name in ["ALOUD_MUSIC", "ALOUD_SPOTIFY", "ALOUD_NOTES_CREATE"] {
+        for name in [
+            "ALOUD_MUSIC",
+            "ALOUD_SPOTIFY",
+            "ALOUD_NOTES_CREATE",
+            "ALOUD_MESSAGES_SEND",
+            "ALOUD_MAIL_SEND",
+            "ALOUD_FACETIME_CALL",
+        ] {
             let action = ACTIONS.iter().find(|a| a.name == name).unwrap();
             assert!(
                 !action.read_only,
                 "{name} changes something — must be a write"
             );
+        }
+    }
+
+    /// A name typed in at the gate never had a Contacts lookup; Messages would
+    /// take "Suhani" as a handle and send it somewhere. Refused before osascript.
+    #[test]
+    fn a_name_that_skipped_the_lookup_is_never_sent_to() {
+        for name in [
+            "ALOUD_MESSAGES_SEND",
+            "ALOUD_MAIL_SEND",
+            "ALOUD_FACETIME_CALL",
+        ] {
+            let action = ACTIONS.iter().find(|a| a.name == name).unwrap();
+            let args = json!({ "to": "Suhani", "text": "hi", "body": "hi" });
+            let err = (action.run)(&args).unwrap_err().to_string();
+            assert!(err.contains("not a phone number or email"), "{name}: {err}");
         }
     }
 

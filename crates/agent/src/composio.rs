@@ -154,7 +154,10 @@ const TOOLKIT_WORDS: &[(&str, &[&str])] = &[
             "star",
         ],
     ),
-    ("slack", &["slack", "channel", "dm", "workspace", "thread"]),
+    (
+        "slack",
+        &["slack", "channel", "dm", "workspace", "thread", "team"],
+    ),
     ("notion", &["notion", "wiki"]),
     ("linear", &["linear", "ticket", "tickets"]),
     ("googledrive", &["drive", "file", "files", "folder"]),
