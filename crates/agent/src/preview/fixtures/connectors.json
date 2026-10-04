@@ -1,0 +1,1109 @@
+{
+ "GITHUB_CREATE_AN_ISSUE": {
+  "properties": {
+   "assignee": {
+    "type": "string"
+   },
+   "assignees": {
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "body": {
+    "type": "string"
+   },
+   "labels": {
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "milestone": {
+    "type": "string"
+   },
+   "owner": {
+    "type": "string"
+   },
+   "repo": {
+    "type": "string"
+   },
+   "title": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "owner",
+   "repo",
+   "title"
+  ],
+  "type": "object"
+ },
+ "GMAIL_BATCH_DELETE_MESSAGES": {
+  "properties": {
+   "messageIds": {
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "userId": {
+    "default": "me",
+    "type": "string"
+   }
+  },
+  "required": [
+   "messageIds"
+  ],
+  "type": "object"
+ },
+ "GMAIL_CREATE_EMAIL_DRAFT": {
+  "properties": {
+   "attachment": {},
+   "bcc": {
+    "default": [],
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "body": {
+    "type": "string"
+   },
+   "cc": {
+    "default": [],
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "extra_recipients": {
+    "default": [],
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "is_html": {
+    "default": false,
+    "type": "boolean"
+   },
+   "recipient_email": {
+    "type": "string"
+   },
+   "subject": {
+    "type": "string"
+   },
+   "thread_id": {
+    "type": "string"
+   },
+   "user_id": {
+    "default": "me",
+    "type": "string"
+   }
+  },
+  "type": "object"
+ },
+ "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID": {
+  "properties": {
+   "format": {
+    "default": "full",
+    "type": "string"
+   },
+   "message_id": {
+    "type": "string"
+   },
+   "user_id": {
+    "default": "me",
+    "type": "string"
+   }
+  },
+  "required": [
+   "message_id"
+  ],
+  "type": "object"
+ },
+ "GMAIL_MOVE_TO_TRASH": {
+  "properties": {
+   "message_id": {
+    "type": "string"
+   },
+   "user_id": {
+    "default": "me",
+    "type": "string"
+   }
+  },
+  "required": [
+   "message_id"
+  ],
+  "type": "object"
+ },
+ "GMAIL_REPLY_TO_THREAD": {
+  "properties": {
+   "attachment": {},
+   "bcc": {
+    "default": [],
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "cc": {
+    "default": [],
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "extra_recipients": {
+    "default": [],
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "is_html": {
+    "default": false,
+    "type": "boolean"
+   },
+   "message_body": {
+    "default": "",
+    "type": "string"
+   },
+   "recipient_email": {
+    "type": "string"
+   },
+   "thread_id": {
+    "type": "string"
+   },
+   "user_id": {
+    "default": "me",
+    "type": "string"
+   }
+  },
+  "required": [
+   "thread_id"
+  ],
+  "type": "object"
+ },
+ "GMAIL_SEND_EMAIL": {
+  "properties": {
+   "attachment": {},
+   "bcc": {
+    "default": [],
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "body": {
+    "type": "string"
+   },
+   "cc": {
+    "default": [],
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "extra_recipients": {
+    "default": [],
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "from_email": {
+    "type": "string"
+   },
+   "is_html": {
+    "default": false,
+    "type": "boolean"
+   },
+   "recipient_email": {
+    "type": "string"
+   },
+   "subject": {
+    "type": "string"
+   },
+   "user_id": {
+    "default": "me",
+    "type": "string"
+   }
+  },
+  "type": "object"
+ },
+ "GOOGLECALENDAR_CREATE_EVENT": {
+  "properties": {
+   "attendees": {
+    "items": {},
+    "type": "array"
+   },
+   "birthdayProperties": {
+    "type": "object"
+   },
+   "calendar_id": {
+    "default": "primary",
+    "type": "string"
+   },
+   "create_meeting_room": {
+    "default": true,
+    "type": "boolean"
+   },
+   "description": {
+    "type": "string"
+   },
+   "end_datetime": {
+    "type": "string"
+   },
+   "eventType": {
+    "default": "default",
+    "enum": [
+     "birthday",
+     "default",
+     "focusTime",
+     "outOfOffice",
+     "workingLocation"
+    ],
+    "type": "string"
+   },
+   "event_duration_hour": {
+    "default": 0,
+    "type": "integer"
+   },
+   "event_duration_minutes": {
+    "default": 30,
+    "type": "integer"
+   },
+   "exclude_organizer": {
+    "default": false,
+    "type": "boolean"
+   },
+   "extended_properties": {
+    "type": "object"
+   },
+   "focusTimeProperties": {
+    "type": "object"
+   },
+   "guestsCanInviteOthers": {
+    "type": "boolean"
+   },
+   "guestsCanModify": {
+    "type": "boolean"
+   },
+   "guestsCanSeeOtherGuests": {
+    "type": "boolean"
+   },
+   "location": {
+    "type": "string"
+   },
+   "outOfOfficeProperties": {
+    "type": "object"
+   },
+   "recurrence": {
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "send_updates": {
+    "enum": [
+     "all",
+     "externalOnly",
+     "none"
+    ],
+    "type": "string"
+   },
+   "start_datetime": {
+    "type": "string"
+   },
+   "summary": {
+    "type": "string"
+   },
+   "timezone": {
+    "type": "string"
+   },
+   "transparency": {
+    "default": "opaque",
+    "enum": [
+     "opaque",
+     "transparent"
+    ],
+    "type": "string"
+   },
+   "visibility": {
+    "default": "default",
+    "enum": [
+     "default",
+     "public",
+     "private",
+     "confidential"
+    ],
+    "type": "string"
+   },
+   "workingLocationProperties": {
+    "required": [
+     "type"
+    ],
+    "type": "object"
+   }
+  },
+  "required": [
+   "start_datetime"
+  ],
+  "type": "object"
+ },
+ "GOOGLECALENDAR_DELETE_EVENT": {
+  "properties": {
+   "calendar_id": {
+    "default": "primary",
+    "type": "string"
+   },
+   "event_id": {
+    "type": "string"
+   },
+   "send_notifications": {
+    "type": "boolean"
+   },
+   "send_updates": {
+    "enum": [
+     "all",
+     "externalOnly",
+     "none"
+    ],
+    "type": "string"
+   }
+  },
+  "required": [
+   "event_id"
+  ],
+  "type": "object"
+ },
+ "GOOGLECALENDAR_EVENTS_GET": {
+  "properties": {
+   "calendar_id": {
+    "default": "primary",
+    "type": "string"
+   },
+   "event_id": {
+    "type": "string"
+   },
+   "max_attendees": {
+    "type": "integer"
+   },
+   "time_zone": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "event_id"
+  ],
+  "type": "object"
+ },
+ "GOOGLECALENDAR_UPDATE_EVENT": {
+  "properties": {
+   "attendees": {
+    "items": {},
+    "type": "array"
+   },
+   "birthdayProperties": {
+    "type": "object"
+   },
+   "calendar_id": {
+    "default": "primary",
+    "type": "string"
+   },
+   "create_meeting_room": {
+    "default": true,
+    "type": "boolean"
+   },
+   "description": {
+    "type": "string"
+   },
+   "end_datetime": {
+    "type": "string"
+   },
+   "eventType": {
+    "default": "default",
+    "enum": [
+     "birthday",
+     "default",
+     "focusTime",
+     "outOfOffice",
+     "workingLocation"
+    ],
+    "type": "string"
+   },
+   "event_duration_hour": {
+    "default": 0,
+    "type": "integer"
+   },
+   "event_duration_minutes": {
+    "default": 30,
+    "type": "integer"
+   },
+   "event_id": {
+    "type": "string"
+   },
+   "extended_properties": {
+    "type": "object"
+   },
+   "focusTimeProperties": {
+    "type": "object"
+   },
+   "guestsCanInviteOthers": {
+    "type": "boolean"
+   },
+   "guestsCanModify": {
+    "type": "boolean"
+   },
+   "guestsCanSeeOtherGuests": {
+    "type": "boolean"
+   },
+   "location": {
+    "type": "string"
+   },
+   "outOfOfficeProperties": {
+    "type": "object"
+   },
+   "recurrence": {
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "send_updates": {
+    "enum": [
+     "all",
+     "externalOnly",
+     "none"
+    ],
+    "type": "string"
+   },
+   "start_datetime": {
+    "type": "string"
+   },
+   "summary": {
+    "type": "string"
+   },
+   "timezone": {
+    "type": "string"
+   },
+   "transparency": {
+    "default": "opaque",
+    "enum": [
+     "opaque",
+     "transparent"
+    ],
+    "type": "string"
+   },
+   "visibility": {
+    "default": "default",
+    "enum": [
+     "default",
+     "public",
+     "private",
+     "confidential"
+    ],
+    "type": "string"
+   },
+   "workingLocationProperties": {
+    "required": [
+     "type"
+    ],
+    "type": "object"
+   }
+  },
+  "required": [
+   "start_datetime",
+   "event_id"
+  ],
+  "type": "object"
+ },
+ "GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE": {
+  "properties": {
+   "domain": {
+    "type": "string"
+   },
+   "email_address": {
+    "type": "string"
+   },
+   "file_id": {
+    "type": "string"
+   },
+   "role": {
+    "enum": [
+     "owner",
+     "organizer",
+     "fileOrganizer",
+     "writer",
+     "commenter",
+     "reader"
+    ],
+    "type": "string"
+   },
+   "transfer_ownership": {
+    "type": "boolean"
+   },
+   "type": {
+    "enum": [
+     "user",
+     "group",
+     "domain",
+     "anyone"
+    ],
+    "type": "string"
+   }
+  },
+  "required": [
+   "file_id",
+   "role",
+   "type"
+  ],
+  "type": "object"
+ },
+ "GOOGLEDRIVE_CREATE_PERMISSION": {
+  "properties": {
+   "allow_file_discovery": {
+    "type": "boolean"
+   },
+   "domain": {
+    "type": "string"
+   },
+   "email_address": {
+    "type": "string"
+   },
+   "email_message": {
+    "type": "string"
+   },
+   "expiration_time": {
+    "type": "string"
+   },
+   "file_id": {
+    "type": "string"
+   },
+   "move_to_new_owners_root": {
+    "type": "boolean"
+   },
+   "role": {
+    "enum": [
+     "owner",
+     "organizer",
+     "fileOrganizer",
+     "writer",
+     "commenter",
+     "reader"
+    ],
+    "type": "string"
+   },
+   "send_notification_email": {
+    "type": "boolean"
+   },
+   "supports_all_drives": {
+    "type": "boolean"
+   },
+   "transfer_ownership": {
+    "type": "boolean"
+   },
+   "type": {
+    "enum": [
+     "user",
+     "group",
+     "domain",
+     "anyone"
+    ],
+    "type": "string"
+   },
+   "use_domain_admin_access": {
+    "type": "boolean"
+   }
+  },
+  "required": [
+   "file_id",
+   "type",
+   "role"
+  ],
+  "type": "object"
+ },
+ "GOOGLESHEETS_SPREADSHEETS_VALUES_APPEND": {
+  "properties": {
+   "includeValuesInResponse": {
+    "type": "boolean"
+   },
+   "insertDataOption": {
+    "enum": [
+     "OVERWRITE",
+     "INSERT_ROWS"
+    ],
+    "type": "string"
+   },
+   "majorDimension": {
+    "enum": [
+     "ROWS",
+     "COLUMNS"
+    ],
+    "type": "string"
+   },
+   "range": {
+    "type": "string"
+   },
+   "responseDateTimeRenderOption": {
+    "enum": [
+     "SERIAL_NUMBER",
+     "FORMATTED_STRING"
+    ],
+    "type": "string"
+   },
+   "responseValueRenderOption": {
+    "enum": [
+     "FORMATTED_VALUE",
+     "UNFORMATTED_VALUE",
+     "FORMULA"
+    ],
+    "type": "string"
+   },
+   "spreadsheetId": {
+    "type": "string"
+   },
+   "valueInputOption": {
+    "enum": [
+     "RAW",
+     "USER_ENTERED"
+    ],
+    "type": "string"
+   },
+   "values": {
+    "items": {
+     "type": "array"
+    },
+    "type": "array"
+   }
+  },
+  "required": [
+   "spreadsheetId",
+   "range",
+   "valueInputOption",
+   "values"
+  ],
+  "type": "object"
+ },
+ "GOOGLETASKS_INSERT_TASK": {
+  "properties": {
+   "completed": {
+    "type": "string"
+   },
+   "deleted": {
+    "type": "boolean"
+   },
+   "due": {
+    "type": "string"
+   },
+   "etag": {
+    "type": "string"
+   },
+   "hidden": {
+    "type": "boolean"
+   },
+   "id": {
+    "type": "string"
+   },
+   "notes": {
+    "type": "string"
+   },
+   "status": {
+    "default": "needsAction",
+    "enum": [
+     "needsAction",
+     "completed"
+    ],
+    "type": "string"
+   },
+   "task_parent": {
+    "type": "string"
+   },
+   "task_previous": {
+    "type": "string"
+   },
+   "tasklist_id": {
+    "type": "string"
+   },
+   "title": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "title",
+   "tasklist_id"
+  ],
+  "type": "object"
+ },
+ "LINEAR_CREATE_LINEAR_ISSUE": {
+  "properties": {
+   "assignee_id": {
+    "type": "string"
+   },
+   "cycle_id": {
+    "type": "string"
+   },
+   "description": {
+    "type": "string"
+   },
+   "due_date": {
+    "type": "string"
+   },
+   "estimate": {
+    "default": 0,
+    "type": "integer"
+   },
+   "label_ids": {
+    "default": [],
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "parent_id": {
+    "type": "string"
+   },
+   "priority": {
+    "default": 0,
+    "type": "integer"
+   },
+   "project_id": {
+    "type": "string"
+   },
+   "state_id": {
+    "type": "string"
+   },
+   "team_id": {
+    "type": "string"
+   },
+   "title": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "team_id",
+   "title"
+  ],
+  "type": "object"
+ },
+ "MAILCHIMP_SEND_CAMPAIGN": {
+  "properties": {
+   "campaign_id": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "campaign_id"
+  ],
+  "type": "object"
+ },
+ "NOTION_CREATE_NOTION_PAGE": {
+  "properties": {
+   "cover": {
+    "type": "string"
+   },
+   "icon": {
+    "type": "string"
+   },
+   "markdown": {
+    "type": "string"
+   },
+   "parent_id": {
+    "type": "string"
+   },
+   "title": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "parent_id",
+   "title"
+  ],
+  "type": "object"
+ },
+ "SLACK_CHAT_POST_MESSAGE": {
+  "properties": {
+   "attachments": {
+    "type": "string"
+   },
+   "blocks": {},
+   "channel": {
+    "type": "string"
+   },
+   "link_names": {
+    "type": "boolean"
+   },
+   "markdown_text": {
+    "type": "string"
+   },
+   "mrkdwn": {
+    "type": "boolean"
+   },
+   "parse": {
+    "type": "string"
+   },
+   "reply_broadcast": {
+    "type": "boolean"
+   },
+   "text": {
+    "type": "string"
+   },
+   "thread_ts": {
+    "type": "string"
+   },
+   "unfurl_links": {
+    "type": "boolean"
+   },
+   "unfurl_media": {
+    "type": "boolean"
+   }
+  },
+  "required": [
+   "channel"
+  ],
+  "type": "object"
+ },
+ "SLACK_RETRIEVE_CONVERSATION_INFORMATION": {
+  "properties": {
+   "channel": {
+    "type": "string"
+   },
+   "include_locale": {
+    "type": "boolean"
+   },
+   "include_num_members": {
+    "type": "boolean"
+   }
+  },
+  "type": "object"
+ },
+ "STRIPE_CREATE_CHARGE": {
+  "properties": {
+   "amount": {
+    "type": "integer"
+   },
+   "application_fee_amount": {
+    "type": "integer"
+   },
+   "capture": {
+    "type": "boolean"
+   },
+   "currency": {
+    "type": "string"
+   },
+   "customer": {
+    "type": "string"
+   },
+   "description": {
+    "type": "string"
+   },
+   "metadata": {
+    "type": "object"
+   },
+   "on_behalf_of": {
+    "type": "string"
+   },
+   "radar_options": {
+    "type": "object"
+   },
+   "receipt_email": {
+    "type": "string"
+   },
+   "shipping": {
+    "required": [
+     "name"
+    ],
+    "type": "object"
+   },
+   "source": {
+    "type": "string"
+   },
+   "statement_descriptor": {
+    "type": "string"
+   },
+   "statement_descriptor_suffix": {
+    "type": "string"
+   },
+   "transfer_data": {
+    "required": [
+     "destination"
+    ],
+    "type": "object"
+   },
+   "transfer_group": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "amount",
+   "currency"
+  ],
+  "type": "object"
+ },
+ "STRIPE_CREATE_PAYMENT_INTENT": {
+  "properties": {
+   "amount": {
+    "type": "integer"
+   },
+   "application_fee_amount": {
+    "type": "integer"
+   },
+   "automatic_payment_methods": {
+    "required": [
+     "enabled"
+    ],
+    "type": "object"
+   },
+   "confirm": {
+    "default": false,
+    "type": "boolean"
+   },
+   "currency": {
+    "type": "string"
+   },
+   "customer": {
+    "type": "string"
+   },
+   "description": {
+    "type": "string"
+   },
+   "metadata": {
+    "type": "object"
+   },
+   "off_session": {},
+   "payment_method": {
+    "type": "string"
+   },
+   "payment_method_options": {
+    "type": "object"
+   },
+   "payment_method_types": {
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "receipt_email": {
+    "type": "string"
+   },
+   "return_url": {
+    "type": "string"
+   },
+   "setup_future_usage": {
+    "type": "string"
+   },
+   "shipping": {
+    "required": [
+     "name",
+     "address"
+    ],
+    "type": "object"
+   },
+   "statement_descriptor": {
+    "type": "string"
+   },
+   "statement_descriptor_suffix": {
+    "type": "string"
+   }
+  },
+  "required": [
+   "amount",
+   "currency"
+  ],
+  "type": "object"
+ },
+ "STRIPE_CREATE_PAYMENT_LINK": {
+  "properties": {
+   "after_completion": {
+    "required": [
+     "type"
+    ],
+    "type": "object"
+   },
+   "allow_promotion_codes": {
+    "type": "boolean"
+   },
+   "application_fee_amount": {
+    "type": "integer"
+   },
+   "application_fee_percent": {
+    "type": "number"
+   },
+   "automatic_tax": {
+    "required": [
+     "enabled"
+    ],
+    "type": "object"
+   },
+   "billing_address_collection": {
+    "type": "string"
+   },
+   "currency": {
+    "type": "string"
+   },
+   "customer_creation": {
+    "type": "string"
+   },
+   "inactive_message": {
+    "type": "string"
+   },
+   "invoice_creation": {
+    "required": [
+     "enabled"
+    ],
+    "type": "object"
+   },
+   "line_items": {
+    "items": {
+     "type": "object"
+    },
+    "type": "array"
+   },
+   "metadata": {
+    "type": "object"
+   },
+   "on_behalf_of": {
+    "type": "string"
+   },
+   "payment_method_collection": {
+    "type": "string"
+   },
+   "payment_method_types": {
+    "default": [
+     "card"
+    ],
+    "items": {
+     "type": "string"
+    },
+    "type": "array"
+   },
+   "phone_number_collection": {
+    "type": "object"
+   },
+   "shipping_address_collection": {
+    "required": [
+     "allowed_countries"
+    ],
+    "type": "object"
+   },
+   "submit_type": {
+    "type": "string"
+   },
+   "subscription_data": {
+    "type": "object"
+   },
+   "tax_id_collection": {
+    "type": "object"
+   },
+   "transfer_data": {
+    "type": "object"
+   }
+  },
+  "required": [
+   "line_items"
+  ],
+  "type": "object"
+ }
+}

@@ -6,12 +6,18 @@
 //! itself. That also keeps the types specta-exportable: no `serde_json::Value`
 //! crosses the bridge.
 //!
-//! [`build`] is the schema layer every tool gets for free; hand and generated
-//! mappings refine it later without changing these types.
+//! [`render`] draws a call: its hand mapping (`hand.json`) when there is one,
+//! else [`build`], the schema layer every tool gets for free — with ids named
+//! from the run's earlier reads ([`Names`]). [`enrich`] then makes the reads a
+//! mapping asks for, each bounded in time.
 
 mod fallback;
+mod hand;
+mod resolve;
 
 pub use fallback::build;
+pub use hand::{check_hand, hand_tools, render, Context};
+pub use resolve::{enrich, Names};
 
 use serde::{Deserialize, Serialize};
 

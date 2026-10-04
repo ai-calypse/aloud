@@ -1,0 +1,489 @@
+{
+  "ALOUD_NOTES_CREATE": {
+    "kind": "note", "verb": "Create",
+    "slots": [
+      { "role": "heading", "path": "/title", "label": "Title" },
+      { "role": "text", "path": "/body", "label": "Note" }
+    ],
+    "editable": ["/title", "/body"]
+  },
+  "ALOUD_NOTES_APPEND": {
+    "kind": "note", "verb": "Add", "noun": "to note",
+    "slots": [
+      { "role": "heading", "path": "/title", "label": "Note" },
+      { "role": "text", "path": "/body", "label": "Adding" }
+    ],
+    "editable": ["/body"]
+  },
+  "ALOUD_REMINDERS_ADD": {
+    "kind": "task", "verb": "Add", "noun": "reminder",
+    "slots": [
+      { "role": "text", "path": "/text", "label": "Reminder" },
+      { "role": "when", "path": "/due", "label": "Due" },
+      { "role": "plain", "path": "/list", "label": "List" }
+    ],
+    "editable": ["/text"]
+  },
+  "ALOUD_MESSAGES_SEND": {
+    "kind": "message", "verb": "Send",
+    "slots": [
+      { "role": "person", "path": "/to", "label": "To" },
+      { "role": "text", "path": "/text", "label": "Message" }
+    ],
+    "editable": ["/to", "/text"],
+    "ask": "No recipient — cancel and ask again."
+  },
+  "ALOUD_DISCORD_MESSAGE": {
+    "kind": "message", "verb": "Send", "noun": "Discord message",
+    "slots": [
+      { "role": "destination", "path": "/to", "label": "To" },
+      { "role": "text", "path": "/text", "label": "Message" }
+    ],
+    "editable": ["/to", "/text"],
+    "ask": "No recipient — cancel and ask again."
+  },
+  "ALOUD_WRITE_FILE": {
+    "kind": "file", "verb": "Write", "noun": "file",
+    "slots": [
+      { "role": "path", "path": "/path", "label": "File" },
+      { "role": "text", "path": "/text", "label": "Contents" },
+      { "role": "flag", "path": "/append", "label": "Add to the end" },
+      { "role": "pill", "path": "/open_with", "label": "Then open in" }
+    ],
+    "editable": ["/text"]
+  },
+  "ALOUD_COLLECT_FILES": {
+    "kind": "file", "verb": "Collect", "noun": "files",
+    "slots": [
+      { "role": "list", "path": "/paths", "label": "Files" },
+      { "role": "path", "path": "/destination", "label": "Into" },
+      { "role": "flag", "path": "/move", "label": "Move, not copy" }
+    ],
+    "risks": [
+      { "path": "/move", "equals": true, "text": "Moves the originals out of where they are now." }
+    ]
+  },
+  "ALOUD_ORGANIZE_FOLDER": {
+    "kind": "file", "verb": "Tidy", "noun": "folder",
+    "slots": [
+      { "role": "pill", "path": "/folder", "label": "Folder" },
+      { "role": "list", "path": "/rules", "label": "Sorting into" }
+    ],
+    "recoverable": "Undo puts every file back where it was."
+  },
+  "ALOUD_UNDO_ORGANIZE": {
+    "kind": "file", "verb": "Undo", "noun": "tidy-up",
+    "slots": [{ "role": "pill", "path": "/folder", "label": "Folder" }]
+  },
+  "ALOUD_FINDER_REVEAL": {
+    "kind": "file", "verb": "Show", "noun": "in Finder",
+    "slots": [{ "role": "path", "path": "/path", "label": "File" }]
+  },
+  "ALOUD_OPEN_APP": {
+    "kind": "fallback", "verb": "Open", "noun": "", "to": "",
+    "slots": [
+      { "role": "destination", "path": "/names", "label": "Apps" },
+      { "role": "path", "path": "/open", "label": "Opening in it" }
+    ]
+  },
+  "ALOUD_QUIT_APP": {
+    "kind": "fallback", "verb": "Quit", "noun": "", "to": "",
+    "slots": [{ "role": "destination", "path": "/name", "label": "App" }]
+  },
+  "ALOUD_PRESS_KEYS": {
+    "kind": "fallback", "verb": "Press", "noun": "keys", "to": "in",
+    "slots": [
+      { "role": "plain", "path": "/keys", "label": "Keys" },
+      { "role": "destination", "path": "/app", "label": "In" },
+      { "role": "plain", "path": "/times", "label": "Times" }
+    ]
+  },
+  "ALOUD_MENU": {
+    "kind": "fallback", "verb": "Click", "noun": "menu item", "to": "in",
+    "slots": [
+      { "role": "plain", "path": "/item", "label": "Item" },
+      { "role": "list", "path": "/path", "label": "Menu" },
+      { "role": "destination", "path": "/app", "label": "In" },
+      { "role": "flag", "path": "/list", "label": "Only list the items" },
+      { "role": "plain", "path": "/times", "label": "Times" }
+    ]
+  },
+  "ALOUD_SPOTIFY": {
+    "kind": "fallback", "verb": "Control", "noun": "Spotify",
+    "slots": [
+      { "role": "pill", "path": "/action", "label": "Action" },
+      { "role": "plain", "path": "/query", "label": "Search" },
+      { "role": "url", "path": "/uri", "label": "Link" },
+      { "role": "plain", "path": "/times", "label": "Times" }
+    ]
+  },
+  "ALOUD_MUSIC": {
+    "kind": "fallback", "verb": "Control", "noun": "Music",
+    "slots": [
+      { "role": "pill", "path": "/action", "label": "Action" },
+      { "role": "plain", "path": "/query", "label": "Search" },
+      { "role": "plain", "path": "/times", "label": "Times" }
+    ]
+  },
+  "ALOUD_PHOTO_BOOTH_TAKE_PHOTO": {
+    "kind": "fallback", "verb": "Take", "noun": "photo",
+    "slots": [{ "role": "plain", "path": "/times", "label": "Photos" }]
+  },
+  "ALOUD_WINDOW_ARRANGE": {
+    "kind": "fallback", "verb": "Arrange", "noun": "window",
+    "slots": [
+      { "role": "plain", "path": "/app", "label": "App" },
+      { "role": "pill", "path": "/position", "label": "To" }
+    ]
+  },
+  "ALOUD_CLIPBOARD": {
+    "kind": "fallback", "verb": "Copy", "noun": "to clipboard",
+    "slots": [
+      { "role": "pill", "path": "/action", "label": "Action" },
+      { "role": "text", "path": "/text", "label": "Text" }
+    ],
+    "editable": ["/text"]
+  },
+  "ALOUD_BROWSER_TAB": {
+    "kind": "fallback", "verb": "Open", "noun": "tab",
+    "slots": [
+      { "role": "url", "path": "/url", "label": "Page" },
+      { "role": "pill", "path": "/action", "label": "Action" }
+    ]
+  },
+  "ALOUD_SYSTEM_VOLUME": {
+    "kind": "fallback", "verb": "Set", "noun": "volume",
+    "slots": [
+      { "role": "plain", "path": "/level", "label": "Level" },
+      { "role": "plain", "path": "/change", "label": "Change" }
+    ]
+  },
+  "ALOUD_SCREEN_CLICK": {
+    "kind": "fallback", "verb": "Click", "noun": "", "to": "in",
+    "slots": [
+      { "role": "destination", "path": "/app", "label": "App" },
+      { "role": "plain", "path": "/element", "label": "Element" }
+    ]
+  },
+  "ALOUD_SCREEN_TYPE": {
+    "kind": "fallback", "verb": "Type", "noun": "", "to": "in",
+    "slots": [
+      { "role": "destination", "path": "/app", "label": "App" },
+      { "role": "text", "path": "/text", "label": "Typing" },
+      { "role": "plain", "path": "/element", "label": "Element" },
+      { "role": "flag", "path": "/submit", "label": "Press Return after" }
+    ],
+    "editable": ["/text"],
+    "risks": [
+      { "path": "/submit", "equals": true, "text": "Presses Return straight after, which may send or submit it." }
+    ]
+  },
+
+  "SLACK_CHAT_POST_MESSAGE": {
+    "kind": "message", "verb": "Send",
+    "slots": [
+      { "role": "destination", "path": "/channel", "label": "Channel" },
+      { "role": "text", "path": "/markdown_text", "label": "Message" },
+      { "role": "text", "path": "/text", "label": "Plain text" },
+      { "role": "plain", "path": "/thread_ts", "label": "In thread" }
+    ],
+    "editable": ["/markdown_text", "/text"],
+    "lookups": [
+      {
+        "path": "/channel", "tool": "SLACK_RETRIEVE_CONVERSATION_INFORMATION",
+        "args": { "channel": "/channel" }, "show": ["/channel/name"]
+      }
+    ],
+    "risks": [
+      { "path": "/reply_broadcast", "equals": true, "text": "Also posts the reply to the whole channel." }
+    ],
+    "ask": "No channel — cancel and ask again."
+  },
+  "GMAIL_SEND_EMAIL": {
+    "kind": "email", "verb": "Send",
+    "slots": [
+      { "role": "person", "path": "/recipient_email", "label": "To" },
+      { "role": "person", "path": "/extra_recipients", "label": "Also to" },
+      { "role": "person", "path": "/cc", "label": "Cc" },
+      { "role": "person", "path": "/bcc", "label": "Bcc" },
+      { "role": "plain", "path": "/from_email", "label": "From" },
+      { "role": "heading", "path": "/subject", "label": "Subject" },
+      { "role": "text", "path": "/body", "label": "Body" },
+      { "role": "list", "path": "/attachment", "label": "Attached" }
+    ],
+    "editable": ["/subject", "/body"],
+    "risks": [
+      { "path": "/bcc", "text": "Bcc recipients are hidden from everyone else." }
+    ],
+    "ask": "No recipient — cancel and ask again."
+  },
+  "GMAIL_CREATE_EMAIL_DRAFT": {
+    "kind": "email", "verb": "Save", "noun": "draft",
+    "slots": [
+      { "role": "person", "path": "/recipient_email", "label": "To" },
+      { "role": "person", "path": "/extra_recipients", "label": "Also to" },
+      { "role": "person", "path": "/cc", "label": "Cc" },
+      { "role": "person", "path": "/bcc", "label": "Bcc" },
+      { "role": "heading", "path": "/subject", "label": "Subject" },
+      { "role": "text", "path": "/body", "label": "Body" },
+      { "role": "list", "path": "/attachment", "label": "Attached" },
+      { "role": "id", "path": "/thread_id", "label": "In thread" }
+    ],
+    "editable": ["/subject", "/body"]
+  },
+  "GMAIL_REPLY_TO_THREAD": {
+    "kind": "email", "verb": "Send", "noun": "reply",
+    "slots": [
+      { "role": "person", "path": "/recipient_email", "label": "To" },
+      { "role": "person", "path": "/extra_recipients", "label": "Also to" },
+      { "role": "person", "path": "/cc", "label": "Cc" },
+      { "role": "person", "path": "/bcc", "label": "Bcc" },
+      { "role": "text", "path": "/message_body", "label": "Reply" },
+      { "role": "list", "path": "/attachment", "label": "Attached" },
+      { "role": "id", "path": "/thread_id", "label": "Thread" }
+    ],
+    "editable": ["/message_body"]
+  },
+  "GMAIL_MOVE_TO_TRASH": {
+    "kind": "delete", "verb": "Trash", "noun": "email", "tier": "confirm",
+    "slots": [{ "role": "id", "path": "/message_id", "label": "Email" }],
+    "lookups": [
+      {
+        "path": "/message_id", "tool": "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+        "args": { "message_id": "/message_id" }, "with": { "format": "metadata" },
+        "show": ["/sender", "/subject"]
+      }
+    ],
+    "recoverable": "In Trash for 30 days."
+  },
+  "GMAIL_BATCH_DELETE_MESSAGES": {
+    "kind": "delete", "verb": "Delete", "noun": "email", "tier": "strict",
+    "slots": [{ "role": "list", "path": "/messageIds", "label": "Emails" }],
+    "sample": {
+      "path": "/messageIds", "tool": "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID", "arg": "message_id",
+      "with": { "format": "metadata" }, "show": ["/sender", "/subject"]
+    },
+    "risks": [
+      { "path": "/messageIds", "text": "These skip the Trash. Gmail cannot get them back." }
+    ],
+    "safer": { "label": "Move to Trash", "tool": "GMAIL_MOVE_TO_TRASH" }
+  },
+  "GOOGLECALENDAR_CREATE_EVENT": {
+    "kind": "event", "verb": "Create",
+    "slots": [
+      { "role": "heading", "path": "/summary", "label": "Title" },
+      { "role": "when", "path": "/start_datetime", "label": "Starts" },
+      { "role": "when", "path": "/end_datetime", "label": "Ends" },
+      { "role": "plain", "path": "/event_duration_hour", "label": "Hours" },
+      { "role": "plain", "path": "/event_duration_minutes", "label": "Minutes" },
+      { "role": "plain", "path": "/timezone", "label": "Time zone" },
+      { "role": "person", "path": "/attendees", "label": "Guests" },
+      { "role": "plain", "path": "/location", "label": "Where" },
+      { "role": "flag", "path": "/create_meeting_room", "label": "Google Meet link" },
+      { "role": "list", "path": "/recurrence", "label": "Repeats" },
+      { "role": "id", "path": "/calendar_id", "label": "Calendar" },
+      { "role": "pill", "path": "/visibility", "label": "Visibility" },
+      { "role": "text", "path": "/description", "label": "Notes" }
+    ],
+    "editable": ["/summary", "/description"],
+    "risks": [
+      { "path": "/attendees", "text": "Guests get an invite email." },
+      { "path": "/create_meeting_room", "equals": true, "text": "Adds a Google Meet link." },
+      { "path": "/visibility", "equals": "public", "text": "Anyone can see this event.", "tier": "strict" }
+    ]
+  },
+  "GOOGLECALENDAR_UPDATE_EVENT": {
+    "kind": "update", "verb": "Update", "noun": "event",
+    "slots": [
+      { "role": "id", "path": "/event_id", "label": "Event" },
+      { "role": "heading", "path": "/summary", "label": "Title" },
+      { "role": "when", "path": "/start_datetime", "label": "Starts" },
+      { "role": "when", "path": "/end_datetime", "label": "Ends" },
+      { "role": "person", "path": "/attendees", "label": "Guests" },
+      { "role": "plain", "path": "/location", "label": "Where" },
+      { "role": "flag", "path": "/create_meeting_room", "label": "Google Meet link" },
+      { "role": "text", "path": "/description", "label": "Notes" }
+    ],
+    "editable": ["/summary", "/description"],
+    "lookups": [
+      {
+        "path": "/event_id", "tool": "GOOGLECALENDAR_EVENTS_GET",
+        "args": { "event_id": "/event_id", "calendar_id": "/calendar_id" }, "show": ["/summary"]
+      }
+    ],
+    "current": {
+      "tool": "GOOGLECALENDAR_EVENTS_GET",
+      "args": { "event_id": "/event_id", "calendar_id": "/calendar_id" },
+      "before": {
+        "/summary": "/summary",
+        "/start_datetime": "/start/dateTime",
+        "/end_datetime": "/end/dateTime",
+        "/location": "/location",
+        "/description": "/description"
+      }
+    },
+    "risks": [
+      { "path": "/attendees", "equals": null, "text": "No guests are listed, so any on the event now are removed." },
+      { "path": "/attendees", "text": "Guests get an update email." }
+    ]
+  },
+  "GOOGLECALENDAR_DELETE_EVENT": {
+    "kind": "delete", "verb": "Delete", "noun": "event",
+    "slots": [
+      { "role": "id", "path": "/event_id", "label": "Event" },
+      { "role": "id", "path": "/calendar_id", "label": "Calendar" },
+      { "role": "pill", "path": "/send_updates", "label": "Tell guests" }
+    ],
+    "lookups": [
+      {
+        "path": "/event_id", "tool": "GOOGLECALENDAR_EVENTS_GET",
+        "args": { "event_id": "/event_id", "calendar_id": "/calendar_id" }, "show": ["/summary"]
+      }
+    ],
+    "recoverable": "In Calendar's Trash for 30 days."
+  },
+  "GOOGLETASKS_INSERT_TASK": {
+    "kind": "task", "verb": "Add",
+    "slots": [
+      { "role": "text", "path": "/title", "label": "Task" },
+      { "role": "when", "path": "/due", "label": "Due" },
+      { "role": "text", "path": "/notes", "label": "Notes" },
+      { "role": "id", "path": "/tasklist_id", "label": "List" }
+    ],
+    "editable": ["/title", "/notes"]
+  },
+  "NOTION_CREATE_NOTION_PAGE": {
+    "kind": "note", "verb": "Create", "noun": "page",
+    "slots": [
+      { "role": "heading", "path": "/title", "label": "Title" },
+      { "role": "id", "path": "/parent_id", "label": "Inside" },
+      { "role": "text", "path": "/markdown", "label": "Content" },
+      { "role": "plain", "path": "/icon", "label": "Icon" },
+      { "role": "url", "path": "/cover", "label": "Cover" }
+    ],
+    "editable": ["/title", "/markdown"]
+  },
+  "LINEAR_CREATE_LINEAR_ISSUE": {
+    "kind": "issue", "verb": "Create",
+    "slots": [
+      { "role": "heading", "path": "/title", "label": "Title" },
+      { "role": "id", "path": "/team_id", "label": "Team" },
+      { "role": "text", "path": "/description", "label": "Description" },
+      { "role": "id", "path": "/assignee_id", "label": "Assignee" },
+      { "role": "plain", "path": "/priority", "label": "Priority" },
+      { "role": "list", "path": "/label_ids", "label": "Labels" },
+      { "role": "when", "path": "/due_date", "label": "Due" },
+      { "role": "id", "path": "/project_id", "label": "Project" },
+      { "role": "id", "path": "/state_id", "label": "Status" }
+    ],
+    "editable": ["/title", "/description"],
+    "risks": [{ "path": "/assignee_id", "text": "The assignee gets notified." }]
+  },
+  "GITHUB_CREATE_AN_ISSUE": {
+    "kind": "issue", "verb": "Create",
+    "slots": [
+      { "role": "heading", "path": "/title", "label": "Title" },
+      { "role": "plain", "path": "/owner", "label": "Owner" },
+      { "role": "plain", "path": "/repo", "label": "Repository" },
+      { "role": "text", "path": "/body", "label": "Description" },
+      { "role": "list", "path": "/assignees", "label": "Assignees" },
+      { "role": "plain", "path": "/assignee", "label": "Assignee" },
+      { "role": "list", "path": "/labels", "label": "Labels" },
+      { "role": "plain", "path": "/milestone", "label": "Milestone" }
+    ],
+    "editable": ["/title", "/body"]
+  },
+  "GOOGLESHEETS_SPREADSHEETS_VALUES_APPEND": {
+    "kind": "row", "verb": "Add",
+    "slots": [
+      { "role": "id", "path": "/spreadsheetId", "label": "Sheet" },
+      { "role": "plain", "path": "/range", "label": "Range" },
+      { "role": "list", "path": "/values", "label": "Rows" },
+      { "role": "pill", "path": "/insertDataOption", "label": "Mode" }
+    ],
+    "risks": [
+      { "path": "/insertDataOption", "equals": "OVERWRITE", "text": "Writes over the cells under the table instead of adding rows." }
+    ]
+  },
+  "GOOGLEDRIVE_CREATE_PERMISSION": {
+    "kind": "share", "verb": "Share", "noun": "file",
+    "slots": [
+      { "role": "id", "path": "/file_id", "label": "File" },
+      { "role": "person", "path": "/email_address", "label": "With" },
+      { "role": "pill", "path": "/type", "label": "Who" },
+      { "role": "pill", "path": "/role", "label": "Access" },
+      { "role": "plain", "path": "/domain", "label": "Domain" },
+      { "role": "flag", "path": "/send_notification_email", "label": "Email them" },
+      { "role": "text", "path": "/email_message", "label": "Message" },
+      { "role": "flag", "path": "/transfer_ownership", "label": "Transfer ownership" },
+      { "role": "when", "path": "/expiration_time", "label": "Until" }
+    ],
+    "editable": ["/email_message"],
+    "risks": [
+      { "path": "/type", "equals": "anyone", "text": "Anyone with the link can open it.", "tier": "strict" },
+      { "path": "/role", "equals": "owner", "text": "Gives the file away: you stop being its owner.", "tier": "strict" },
+      { "path": "/transfer_ownership", "equals": true, "text": "Gives the file away: you stop being its owner.", "tier": "strict" }
+    ]
+  },
+  "GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE": {
+    "kind": "share", "verb": "Share", "noun": "file",
+    "slots": [
+      { "role": "id", "path": "/file_id", "label": "File" },
+      { "role": "person", "path": "/email_address", "label": "With" },
+      { "role": "pill", "path": "/type", "label": "Who" },
+      { "role": "pill", "path": "/role", "label": "Access" },
+      { "role": "plain", "path": "/domain", "label": "Domain" },
+      { "role": "flag", "path": "/transfer_ownership", "label": "Transfer ownership" }
+    ],
+    "risks": [
+      { "path": "/type", "equals": "anyone", "text": "Anyone with the link can open it.", "tier": "strict" },
+      { "path": "/role", "equals": "owner", "text": "Gives the file away: you stop being its owner.", "tier": "strict" },
+      { "path": "/transfer_ownership", "equals": true, "text": "Gives the file away: you stop being its owner.", "tier": "strict" }
+    ]
+  },
+  "STRIPE_CREATE_PAYMENT_LINK": {
+    "kind": "money", "verb": "Create", "noun": "payment link", "tier": "strict",
+    "slots": [
+      { "role": "list", "path": "/line_items", "label": "Selling" },
+      { "role": "pill", "path": "/currency", "label": "Currency" },
+      { "role": "flag", "path": "/allow_promotion_codes", "label": "Promotion codes" }
+    ],
+    "risks": [{ "path": "/line_items", "text": "Anyone with the link can pay it." }]
+  },
+  "STRIPE_CREATE_CHARGE": {
+    "kind": "money", "verb": "Charge", "noun": "card", "tier": "strict",
+    "slots": [
+      { "role": "money", "path": "/amount", "label": "Amount" },
+      { "role": "id", "path": "/customer", "label": "Customer" },
+      { "role": "id", "path": "/source", "label": "Card" },
+      { "role": "person", "path": "/receipt_email", "label": "Receipt to" },
+      { "role": "text", "path": "/description", "label": "Description" },
+      { "role": "flag", "path": "/capture", "label": "Take it now" }
+    ],
+    "risks": [
+      { "path": "/capture", "equals": false, "text": "Only holds the amount; nothing is taken until it is captured." },
+      { "path": "/amount", "text": "Charges the card. A refund is a separate action." }
+    ]
+  },
+  "STRIPE_CREATE_PAYMENT_INTENT": {
+    "kind": "money", "verb": "Create", "noun": "payment", "tier": "strict",
+    "slots": [
+      { "role": "money", "path": "/amount", "label": "Amount" },
+      { "role": "id", "path": "/customer", "label": "Customer" },
+      { "role": "id", "path": "/payment_method", "label": "Card" },
+      { "role": "flag", "path": "/confirm", "label": "Charge now" },
+      { "role": "person", "path": "/receipt_email", "label": "Receipt to" },
+      { "role": "text", "path": "/description", "label": "Description" }
+    ],
+    "risks": [
+      { "path": "/confirm", "equals": true, "text": "Charges the card now. A refund is a separate action." }
+    ]
+  },
+  "MAILCHIMP_SEND_CAMPAIGN": {
+    "kind": "money", "verb": "Send", "noun": "campaign", "tier": "strict",
+    "slots": [{ "role": "id", "path": "/campaign_id", "label": "Campaign" }],
+    "risks": [
+      { "path": "/campaign_id", "text": "Emails everyone on the list at once. It cannot be unsent." }
+    ]
+  }
+}

@@ -5,9 +5,9 @@ use super::{ActionPreview, CardKind, Field, Role, Tier};
 use serde_json::{Map, Value};
 
 /// Main fields on a card; the rest go under "more".
-const MAIN_FIELDS: usize = 8;
+pub(super) const MAIN_FIELDS: usize = 8;
 /// Entries of an array or object shown before "and N more".
-const SAMPLE: usize = 3;
+pub(super) const SAMPLE: usize = 3;
 
 /// The preview for a call to `name` with `args`, read against the tool's JSON
 /// `schema` when there is one. Empty and default arguments are hidden but
@@ -234,8 +234,22 @@ fn rank(role: Role) -> u8 {
 }
 
 fn field(key: &str, value: &Value, prop: Option<&Value>, currency: Option<&str>) -> Field {
+    let role = role(&words(key), value, prop, currency.is_some());
+    let path = format!("/{}", key.replace('~', "~0").replace('/', "~1"));
+    shape(role, path, key, value, prop, currency)
+}
+
+/// A field drawn as `role`, whoever picked the role: the schema rules above or
+/// a hand mapping. `key` is the argument's own name, for its label and id test.
+pub(super) fn shape(
+    role: Role,
+    path: String,
+    key: &str,
+    value: &Value,
+    prop: Option<&Value>,
+    currency: Option<&str>,
+) -> Field {
     let words = words(key);
-    let role = role(&words, value, prop, currency.is_some());
     let (mut text, mut items, count) = render(value);
     let mut unresolved = false;
     match role {
@@ -262,7 +276,7 @@ fn field(key: &str, value: &Value, prop: Option<&Value>, currency: Option<&str>)
     }
     Field {
         role,
-        path: format!("/{}", key.replace('~', "~0").replace('/', "~1")),
+        path,
         label: label(key, prop),
         value: text,
         items,
@@ -428,7 +442,7 @@ fn grouped(n: u64) -> String {
 }
 
 /// A date for people. Anything unparseable is shown as written.
-fn format_when(raw: &str) -> String {
+pub(super) fn format_when(raw: &str) -> String {
     use chrono::{DateTime, Local, NaiveDate, NaiveDateTime};
     const DAY: &str = "%a, %b %-d, %Y";
     const DAY_TIME: &str = "%a, %b %-d, %Y, %-I:%M %p";
@@ -476,7 +490,11 @@ fn render(value: &Value) -> (String, Vec<String>, u32) {
     }
 }
 
-fn sampled(all: impl Iterator<Item = String>, len: usize, sep: &str) -> (String, Vec<String>, u32) {
+pub(super) fn sampled(
+    all: impl Iterator<Item = String>,
+    len: usize,
+    sep: &str,
+) -> (String, Vec<String>, u32) {
     let items: Vec<String> = all.take(SAMPLE).collect();
     let mut text = items.join(sep);
     if len > SAMPLE {
@@ -485,7 +503,7 @@ fn sampled(all: impl Iterator<Item = String>, len: usize, sep: &str) -> (String,
     (text, items, count(len))
 }
 
-fn inline(value: &Value) -> String {
+pub(super) fn inline(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
         Value::Bool(true) => "Yes".into(),
@@ -496,7 +514,7 @@ fn inline(value: &Value) -> String {
     }
 }
 
-fn is_empty(value: &Value) -> bool {
+pub(super) fn is_empty(value: &Value) -> bool {
     match value {
         Value::Null => true,
         Value::String(s) => s.trim().is_empty(),
