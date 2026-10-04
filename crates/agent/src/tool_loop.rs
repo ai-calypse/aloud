@@ -159,8 +159,9 @@ sentence, transcribed, so it may contain small errors; act on the intent. Either
 do it with tools or just answer. \
 Choose tools in this order. \
 First, the ALOUD_ tools act on this Mac's own apps: Notes, Reminders, Music, \
-Spotify, Messages, files, windows, apps, Photo Booth, Discord. Each one opens its \
-own app, so never call ALOUD_OPEN_APP before it. When the command asks you to \
+Spotify, Messages, files, windows, apps, Photo Booth, Discord. They act in the \
+background without bringing the app forward; never call ALOUD_OPEN_APP before \
+them. When the command asks you to \
 make or add content — a list, a note, a reminder, a file, a message — write that \
 content yourself, in full, inside the tool's arguments: for \"make a shopping \
 list for a cake and put it in a note\", call ALOUD_NOTES_CREATE with the actual \

@@ -8,6 +8,8 @@
 //! ponytail: a generic runner is the upgrade path if this table ever gets long
 //! enough to be the bottleneck. It is a dozen rows; it is not.
 
+use std::path::{Path, PathBuf};
+
 use serde_json::{json, Value};
 
 use crate::organize;
@@ -24,24 +26,45 @@ fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, ScriptError> 
         .ok_or_else(|| ScriptError::Failed(format!("missing required argument {key:?}")))
 }
 
-/// Whether `name` is the app now in front. Used to wait out a launch, since
-/// `open` returns before the app is on screen.
+/// Whether the app now in front is the one at `bundle` (canonical). Used to wait
+/// out a launch, since `open` returns before the app is on screen.
 ///
 /// Asked of System Events rather than the AX API: the AX read of the focused
 /// application needs the calling process to be AX-trusted and fails outside the
 /// signed app, which would make this loop always time out in tests and examples.
-fn frontmost_is(name: &str) -> bool {
+/// By bundle path, not process name: VS Code's process is "Code", so a name
+/// never matched and every open waited out the full 10 s. Canonicalised, since
+/// /Applications/Safari.app is a symlink into a Cryptex that System Events
+/// reports by its real path.
+fn frontmost_is(bundle: &Path) -> bool {
     let Ok(out) = std::process::Command::new("osascript")
         .args([
             "-e",
-            "tell application \"System Events\" to name of first application process \
-             whose frontmost is true",
+            "tell application \"System Events\" to POSIX path of (file of first \
+             application process whose frontmost is true)",
         ])
         .output()
     else {
         return false;
     };
-    String::from_utf8_lossy(&out.stdout).trim() == name
+    std::fs::canonicalize(String::from_utf8_lossy(&out.stdout).trim())
+        .is_ok_and(|front| front == bundle)
+}
+
+/// The app a tool acts in: the one it was told, else the one the user was in
+/// when they spoke (`_front_app`, merged into the arguments by the caller). None
+/// leaves today's System Events frontmost read, which with Aloud's panel up is
+/// Aloud itself.
+///
+/// ponytail: an underscored key riding in the model's arguments; a `Context`
+/// parameter on `Action::run` is the upgrade.
+fn target_app(args: &Value) -> Option<&str> {
+    ["app", "_front_app"].into_iter().find_map(|key| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    })
 }
 
 /// The frontmost app's name, for tools that act on "this window" without being
@@ -63,30 +86,74 @@ fn frontmost_app_name() -> Result<String, ScriptError> {
 }
 
 /// Launches or activates one app by bundle path.
+fn open_one(name: &str) -> Result<(), ScriptError> {
+    open_with(Some(&bundle_path(name)?), None)
+}
+
+/// `open [-a bundle] [target]`.
 ///
 /// By path, never `open -b` or a URL scheme: Launch Services resolves a scheme
-/// like `discord://` to Discord *Canary* when both are installed. The first
-/// candidate that exists wins, so a user-installed app outranks a system one of
-/// the same name. `-a` activates a running instance rather than starting a
-/// second, which is what "switch to Safari" has to mean.
-fn open_one(name: &str) -> Result<(), ScriptError> {
-    let bundle = bundle_path(name)?;
-    let status = std::process::Command::new("/usr/bin/open")
-        .args(["-a", &bundle])
+/// like `discord://` to Discord *Canary* when both are installed. `-a`
+/// activates a running instance rather than starting a second, which is what
+/// "switch to Safari" has to mean.
+fn open_with(bundle: Option<&str>, target: Option<&str>) -> Result<(), ScriptError> {
+    let what = target.or(bundle).unwrap_or_default();
+    let mut open = std::process::Command::new("/usr/bin/open");
+    if let Some(bundle) = bundle {
+        open.args(["-a", bundle]);
+    }
+    let status = open
+        .args(target)
         .status()
-        .map_err(|e| ScriptError::Failed(format!("launching {name}: {e}")))?;
+        .map_err(|e| ScriptError::Failed(format!("opening {what}: {e}")))?;
     if status.success() {
         Ok(())
     } else {
-        Err(ScriptError::Failed(format!("could not open {name}")))
+        Err(ScriptError::Failed(format!("could not open {what}")))
     }
 }
 
-/// Where an installed app's bundle is, user-installed first.
+/// Starts an app without bringing it forward, if it is not already running.
+/// Only then: `open -g` on a running app sends it a reopen, which TextEdit
+/// answers with a new window. Running is asked by bundle id, because by path a
+/// symlinked bundle (Safari) reads as not running while it is.
+fn launch_hidden(bundle: &str) -> Result<(), ScriptError> {
+    let running = script::run_jxa(
+        "System Events",
+        "return Application(Application(ARG.bundle).id()).running();",
+        &json!({ "bundle": bundle }),
+    )?;
+    if running == "true" {
+        return Ok(());
+    }
+    let status = std::process::Command::new("/usr/bin/open")
+        .args(["-g", "-a", bundle])
+        .status()
+        .map_err(|e| ScriptError::Failed(format!("launching {bundle}: {e}")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(ScriptError::Failed(format!("could not launch {bundle}")))
+    }
+}
+
+/// Where an installed app's bundle is, user-installed first: the first candidate
+/// that exists wins, so a user-installed app outranks a system one of the same
+/// name. A name that is not an app's own goes through [`real_app_name`].
 fn bundle_path(name: &str) -> Result<String, ScriptError> {
+    bundle_in_app_folders(name)
+        .or_else(|| {
+            real_app_name(name, &aloud_selection::installed_apps()).and_then(bundle_in_app_folders)
+        })
+        .ok_or_else(|| ScriptError::Failed(format!("no application named {name} is installed")))
+}
+
+/// The folders `installed_apps` scans, plus CoreServices for Finder.
+fn bundle_in_app_folders(name: &str) -> Option<String> {
     let home = std::env::var("HOME").unwrap_or_default();
     [
         format!("/Applications/{name}.app"),
+        format!("/Applications/Utilities/{name}.app"),
         format!("/System/Applications/{name}.app"),
         format!("/System/Applications/Utilities/{name}.app"),
         format!("{home}/Applications/{name}.app"),
@@ -94,8 +161,51 @@ fn bundle_path(name: &str) -> Result<String, ScriptError> {
         format!("/System/Library/CoreServices/{name}.app"),
     ]
     .into_iter()
-    .find(|p| std::path::Path::new(p).exists())
-    .ok_or_else(|| ScriptError::Failed(format!("no application named {name} is installed")))
+    .find(|p| Path::new(p).exists())
+}
+
+/// The installed app a spoken name means when it is not the app's own name: an
+/// alias people say ("vs code" is Visual Studio Code), else the one installed
+/// app whose name holds it as whole words ("canary"). Two such apps is None —
+/// guessing between them opens the wrong one.
+///
+/// ponytail: a hand alias table and a word match; Spotlight's
+/// `kMDItemAlternateNames` per bundle is the upgrade if the table grows.
+fn real_app_name<'a>(
+    said: &str,
+    installed: &'a [aloud_selection::InstalledApp],
+) -> Option<&'a str> {
+    let said = said.trim().to_lowercase();
+    let wanted = match said.as_str() {
+        "vs code" | "vscode" | "code" => "visual studio code",
+        "chrome" => "google chrome",
+        "brave" => "brave browser",
+        other => other,
+    };
+    if let Some(exact) = installed
+        .iter()
+        .find(|a| a.name.eq_ignore_ascii_case(wanted))
+    {
+        return Some(&exact.name);
+    }
+    let words = |s: &str| -> Vec<String> {
+        s.to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let want = words(wanted);
+    if want.is_empty() {
+        return None;
+    }
+    let mut hits = installed
+        .iter()
+        .filter(|a| words(&a.name).windows(want.len()).any(|w| w == want));
+    match (hits.next(), hits.next()) {
+        (Some(one), None) => Some(&one.name),
+        _ => None,
+    }
 }
 
 /// Waits for `name` to actually reach the front.
@@ -105,9 +215,15 @@ fn bundle_path(name: &str) -> Result<String, ScriptError> {
 /// lands on the previous app. Polls rather than sleeping a flat second, so a
 /// warm app costs ~50ms.
 fn wait_until_frontmost(name: &str) {
+    let Some(bundle) = bundle_path(name)
+        .ok()
+        .and_then(|b| std::fs::canonicalize(b).ok())
+    else {
+        return;
+    };
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
-        if frontmost_is(name) {
+        if frontmost_is(&bundle) {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -271,6 +387,171 @@ fn free_name(path: &std::path::Path) -> std::path::PathBuf {
     path.to_path_buf()
 }
 
+/// The URL scheme `target` starts with, or None for a path or a bare name.
+fn url_scheme(target: &str) -> Option<&str> {
+    let (scheme, _) = target.split_once(':')?;
+    let mut chars = scheme.chars();
+    let valid = chars.next()?.is_ascii_alphabetic()
+        && chars.all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c));
+    valid.then_some(scheme)
+}
+
+/// A scheme other than a file or a web link — `slack:`, `tel:`, an app's own —
+/// which opens like the rest but is reported, so the permission tier can make
+/// it ask every time.
+fn flagged_scheme(target: &str) -> Option<&str> {
+    url_scheme(target).filter(|s| {
+        !["http", "https", "file"]
+            .iter()
+            .any(|ok| s.eq_ignore_ascii_case(ok))
+    })
+}
+
+/// The file or folder a bare name means, best first: one path, several when the
+/// best are tied (the model asks between them), or none.
+///
+/// `near` is the front window's document. While the user is in a repo, "open
+/// components" means that repo's components, so its root — walked up to the
+/// `.git`, never home or above — wins when it has that name, then an exact match
+/// inside it. Only then home, ranked by [`best_named`].
+pub(crate) fn resolve_named(name: &str, near: Option<&Path>) -> Vec<PathBuf> {
+    match home_dir() {
+        Ok(home) => resolve_named_in(name, near, &home, spotlight_named),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// [`resolve_named`] with home and the search passed in, so a test can run it
+/// over a scratch folder Spotlight has not indexed.
+fn resolve_named_in(
+    name: &str,
+    near: Option<&Path>,
+    home: &Path,
+    find: impl Fn(&Path, &str) -> Vec<PathBuf>,
+) -> Vec<PathBuf> {
+    let root = near.and_then(|near| {
+        near.ancestors()
+            .take_while(|dir| dir.starts_with(home) && *dir != home)
+            .find(|dir| dir.join(".git").exists())
+    });
+    if let Some(root) = root {
+        if root
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(name))
+        {
+            return vec![root.to_path_buf()];
+        }
+        let inside: Vec<PathBuf> = find(root, name)
+            .into_iter()
+            .filter(|p| name_tier(p, name) < 2)
+            .collect();
+        if !inside.is_empty() {
+            return best_named(inside, name);
+        }
+    }
+    best_named(find(home, name), name)
+}
+
+/// How well a path's name matches: 0 the name itself, 1 the name without its
+/// extension ("budget" is `budget.numbers`), 2 only a prefix. A folder called
+/// `components` must outrank `components.css`, or "open components" opens CSS.
+fn name_tier(path: &Path, name: &str) -> u8 {
+    let is = |part: Option<&std::ffi::OsStr>| {
+        part.is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(name))
+    };
+    if is(path.file_name()) {
+        0
+    } else if is(path.file_stem()) {
+        1
+    } else {
+        2
+    }
+}
+
+/// The hits tied for best: by [`name_tier`], then the day last modified, then
+/// the shallowest. By the day on purpose — a folder touched an hour after
+/// another is no reason to open it without asking.
+fn best_named(hits: Vec<PathBuf>, name: &str) -> Vec<PathBuf> {
+    let rank = |path: &PathBuf| {
+        let day = std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_secs() / 86_400);
+        (
+            name_tier(path, name),
+            std::cmp::Reverse(day),
+            path.components().count(),
+        )
+    };
+    let mut ranked: Vec<_> = hits.into_iter().map(|p| (rank(&p), p)).collect();
+    ranked.sort();
+    let Some(top) = ranked.first().map(|(r, _)| *r) else {
+        return Vec::new();
+    };
+    ranked
+        .into_iter()
+        .take_while(|(r, _)| *r == top)
+        .map(|(_, p)| p)
+        .take(5)
+        .collect()
+}
+
+/// Files and folders under `root` whose name is `name` or starts with it,
+/// without the build output and caches that match any common name.
+fn spotlight_named(root: &Path, name: &str) -> Vec<PathBuf> {
+    let Ok(out) = std::process::Command::new("mdfind")
+        .arg("-onlyin")
+        .arg(root)
+        .arg(format!(
+            "kMDItemFSName == '{}*'c",
+            search::escape_mdfind(name)
+        ))
+        .output()
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| !l.is_empty() && !search::is_noise(l))
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// The Notes scripts work in the background: activating Notes and showing the
+/// note pulled the user out of the app they were dictating into. The note's id
+/// rides back so a later "Show" can open exactly that note.
+const NOTES_CREATE_JS: &str = r#"const Notes = Application("Notes");
+    const note = Notes.make({ new: "note", withProperties: { body: ARG.body } });
+    return JSON.stringify({ created: true, title: note.name(), id: note.id() });"#;
+
+/// Appending rewrites the whole body, and attachments are not in the HTML a
+/// script reads, so a note with any is refused rather than silently stripped of
+/// them. See [`NOTES_CREATE_JS`] for why nothing here brings Notes forward.
+const NOTES_APPEND_JS: &str = r#"const Notes = Application("Notes");
+    let note = null;
+    if (ARG.title) {
+        const found = Notes.notes.whose({ name: { _contains: ARG.title } })();
+        note = found.length ? found[0] : null;
+    } else {
+        try { const picked = Notes.selection(); if (picked.length) note = picked[0]; } catch (e) {}
+        if (!note && Notes.notes.length) note = Notes.notes[0];
+    }
+    if (!note) {
+        note = Notes.make({ new: "note", withProperties: { body: ARG.fresh } });
+        return JSON.stringify({ created: true, title: note.name(), id: note.id() });
+    }
+    if (note.attachments.length > 0) {
+        throw new Error("“" + note.name() + "” has images or files in it, which rewriting it would delete; add this to a different note.");
+    }
+    // Notes joins a list to the one right before it: more bullets under a shopping list
+    // is right, bullets becoming steps 3 and 4 of a numbered list is not.
+    const old = note.body().trimEnd();
+    const clash = (old.endsWith("</ol>") && ARG.html.startsWith("<ul>"))
+        || (old.endsWith("</ul>") && ARG.html.startsWith("<ol>"));
+    note.body = old + (clash ? "<div><br></div>" : "") + ARG.html;
+    return JSON.stringify({ appended: true, title: note.name(), id: note.id() });"#;
+
 /// One native action. `params` is the JSON-schema object handed to the model;
 /// `run` is called with the model's (already gate-approved, for writes)
 /// arguments.
@@ -297,6 +578,7 @@ pub const ACTIONS: &[Action] = &[
                       CRITICAL: words naming a file TYPE are `kind`, NOT `query`. \
                       'pictures', 'photos', 'images' → kind=image. 'screenshots' \
                       → kind=screenshot. 'documents', 'PDFs' → kind=document. \
+                      'folder' → kind=folder. \
                       'files' → kind=any. Do NOT put these words in `query` — \
                       that searches for the literal filename and finds nothing.\n\
                       - `query`: ONLY a specific content term ('buddha', \
@@ -327,10 +609,10 @@ pub const ACTIONS: &[Action] = &[
                     },
                     "kind": {
                         "type": "string",
-                        "enum": ["screenshot", "image", "document", "any"],
+                        "enum": ["screenshot", "image", "document", "folder", "any"],
                         "description": "File type. pictures/photos/images→image, \
                                         screenshots→screenshot, docs/PDFs→\
-                                        document, files→any."
+                                        document, folders→folder, files→any."
                     },
                     "location": {
                         "type": "string",
@@ -507,7 +789,7 @@ pub const ACTIONS: &[Action] = &[
     },
     Action {
         name: "ALOUD_NOTES_CREATE",
-        description: "Create a new note in the Notes app and open it. Write the content yourself \
+        description: "Create a new note in the Notes app. Write the content yourself \
                       into `body` as markdown (lines, `- ` bullets, `1.` steps, `## ` headings): \
                       for \"make a shopping list for a cake and put it in a note\", body is the \
                       actual list. Plain text, no emoji. Omit `body` for an empty note.",
@@ -526,16 +808,12 @@ pub const ACTIONS: &[Action] = &[
         run: |args| {
             let title = required_str(args, "title")?;
             let body = args.get("body").and_then(Value::as_str).unwrap_or_default();
-            let name = script::run_jxa(
+            let out = script::run_jxa(
                 "Notes",
-                r#"const Notes = Application("Notes");
-                const note = Notes.make({ new: "note", withProperties: { body: ARG.body } });
-                Notes.activate();
-                Notes.show(note);
-                return note.name();"#,
+                NOTES_CREATE_JS,
                 &json!({ "body": notes::note_body(title, body) }),
             )?;
-            Ok(json!({ "created": true, "title": name }))
+            Ok(serde_json::from_str(&out).unwrap_or_else(|_| json!({ "created": true })))
         },
     },
     Action {
@@ -563,35 +841,9 @@ pub const ACTIONS: &[Action] = &[
                 .get("title")
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty());
-            // Appending rewrites the whole body, and attachments are not in the HTML a script
-            // reads, so a note with any is refused rather than silently stripped of them.
             let out = script::run_jxa(
                 "Notes",
-                r#"const Notes = Application("Notes");
-                let note = null;
-                if (ARG.title) {
-                    const found = Notes.notes.whose({ name: { _contains: ARG.title } })();
-                    note = found.length ? found[0] : null;
-                } else {
-                    try { const picked = Notes.selection(); if (picked.length) note = picked[0]; } catch (e) {}
-                    if (!note && Notes.notes.length) note = Notes.notes[0];
-                }
-                if (!note) {
-                    note = Notes.make({ new: "note", withProperties: { body: ARG.fresh } });
-                    Notes.activate(); Notes.show(note);
-                    return JSON.stringify({ created: true, title: note.name() });
-                }
-                if (note.attachments.length > 0) {
-                    throw new Error("“" + note.name() + "” has images or files in it, which rewriting it would delete; add this to a different note.");
-                }
-                // Notes joins a list to the one right before it: more bullets under a shopping list
-                // is right, bullets becoming steps 3 and 4 of a numbered list is not.
-                const old = note.body().trimEnd();
-                const clash = (old.endsWith("</ol>") && ARG.html.startsWith("<ul>"))
-                    || (old.endsWith("</ul>") && ARG.html.startsWith("<ol>"));
-                note.body = old + (clash ? "<div><br></div>" : "") + ARG.html;
-                Notes.activate(); Notes.show(note);
-                return JSON.stringify({ appended: true, title: note.name() });"#,
+                NOTES_APPEND_JS,
                 &json!({
                     "title": title,
                     "html": notes::to_html(body),
@@ -705,7 +957,9 @@ pub const ACTIONS: &[Action] = &[
         run: |args| {
             let spec = required_str(args, "keys")?;
             let chord = keys::parse(spec).map_err(ScriptError::Failed)?;
-            if let Some(app) = args.get("app").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            // Keys land in whatever is in front, which with Aloud's panel up is
+            // Aloud, so the app the user was in comes forward first.
+            if let Some(app) = target_app(args) {
                 open_one(app)?;
                 wait_until_frontmost(app);
             }
@@ -735,10 +989,13 @@ pub const ACTIONS: &[Action] = &[
             })
         },
         run: |args| {
-            let app = args.get("app").and_then(Value::as_str).filter(|s| !s.is_empty());
-            if let Some(app) = app {
-                open_one(app)?;
-                wait_until_frontmost(app);
+            let app = target_app(args);
+            // An AX menu press reaches a background app without bringing it
+            // forward (TextEdit's File > New opened a document while VLC stayed
+            // in front), so the app is only launched, hidden, when not running.
+            let bundle = app.map(bundle_path).transpose()?;
+            if let Some(bundle) = &bundle {
+                launch_hidden(bundle)?;
             }
             // Names are fetched a menu at a time (one Apple Event per menu, not
             // per item), and submenus only when the top level has no match: a
@@ -746,7 +1003,18 @@ pub const ACTIONS: &[Action] = &[
             let out = script::run_jxa(
                 "System Events",
                 r#"const se = Application("System Events");
-                const proc = ARG.app ? se.processes.byName(ARG.app) : se.processes.whose({ frontmost: true })[0];
+                let proc = null;
+                if (ARG.bundle) {
+                    // By bundle id, not name: VS Code's process is "Code". Polled, since a
+                    // hidden launch has no menu bar for a moment.
+                    const id = Application(ARG.bundle).id();
+                    for (let i = 0; i < 50 && !proc; i++) {
+                        const hits = se.processes.whose({ bundleIdentifier: id })();
+                        if (hits.length && hits[0].menuBars.length) proc = hits[0];
+                        else delay(0.1);
+                    }
+                    if (!proc) throw new Error(ARG.app + " did not start in time");
+                } else proc = se.processes.whose({ frontmost: true })[0];
                 const norm = (s) => String(s || "").toLowerCase().replace(/[….]+$/u, "").trim();
                 const tops = proc.menuBars[0].menuBarItems;
                 const topNames = tops.name().slice(1); // the Apple menu is the system's, not the app's
@@ -782,6 +1050,7 @@ pub const ACTIONS: &[Action] = &[
                 return JSON.stringify({ clicked: hit.path.join(" > "), app: proc.name() });"#,
                 &json!({
                     "app": app,
+                    "bundle": bundle,
                     "item": args.get("item").and_then(Value::as_str),
                     "path": args.get("path"),
                     "list": args.get("list").and_then(Value::as_bool).unwrap_or(false),
@@ -835,7 +1104,8 @@ pub const ACTIONS: &[Action] = &[
              \"System Settings\". Pass every app the user asked for in `names` and \
              they all open in this ONE call; never call this repeatedly to open \
              several. Use it to launch or focus an app; never drive Spotlight or \
-             the Dock on screen to do it.",
+             the Dock on screen to do it. To open a file, folder or link IN an app \
+             (\"open components in Cursor\"), pass it as `open`.",
         app: crate::ALWAYS,
         read_only: false,
         params: || {
@@ -848,6 +1118,12 @@ pub const ACTIONS: &[Action] = &[
                         "items": { "type": "string" },
                         "description": "Every app to open, as it appears in \
                                         Applications. One entry is fine.",
+                    },
+                    "open": {
+                        "type": "string",
+                        "description": "What to open in the last app: a path, \
+                                        ~/path or URL, or just the file or folder's \
+                                        name as said (\"components\") to look it up.",
                     }
                 }
             })
@@ -874,26 +1150,85 @@ pub const ACTIONS: &[Action] = &[
                 return Err(ScriptError::Failed("no app names given".into()));
             }
 
-            let mut opened = Vec::new();
+            let target = match args
+                .get("open")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                None => None,
+                Some(link) if url_scheme(link).is_some() => Some(link.to_string()),
+                Some(path) if path.contains('/') => {
+                    let path = path.trim_start_matches("~/");
+                    Some(if path.starts_with('/') {
+                        path.to_string()
+                    } else {
+                        home_dir()?.join(path).display().to_string()
+                    })
+                }
+                Some(name) => {
+                    let near = args
+                        .get("_front_document")
+                        .and_then(Value::as_str)
+                        .map(Path::new);
+                    match resolve_named(name, near).as_slice() {
+                        [] => {
+                            return Err(ScriptError::Failed(format!(
+                                "found no file or folder named {name:?}"
+                            )))
+                        }
+                        [one] => Some(one.display().to_string()),
+                        several => {
+                            let candidates: Vec<String> =
+                                several.iter().map(|p| p.display().to_string()).collect();
+                            return Ok(json!({
+                                "opened": false,
+                                "candidates": candidates,
+                                "note": "ask which, with these as options",
+                            }));
+                        }
+                    }
+                }
+            };
+
+            let mut apps = Vec::new();
             let mut missing = Vec::new();
             for name in &names {
-                match open_one(name) {
-                    Ok(()) => opened.push(name.clone()),
+                match bundle_path(name) {
+                    Ok(bundle) => apps.push((name.clone(), bundle)),
                     Err(_) => missing.push(name.clone()),
                 }
             }
-            if opened.is_empty() {
+            if apps.is_empty() {
                 return Err(ScriptError::Failed(format!(
                     "none of those apps are installed: {}",
                     missing.join(", ")
                 )));
+            }
+            // The target goes to the last app, the one left in front.
+            let last = apps.len() - 1;
+            let mut opened = Vec::new();
+            for (i, (name, bundle)) in apps.into_iter().enumerate() {
+                let with = target.as_deref().filter(|_| i == last);
+                match open_with(Some(&bundle), with) {
+                    Ok(()) => opened.push(name),
+                    Err(e) if with.is_some() => return Err(e),
+                    Err(_) => missing.push(name),
+                }
             }
             // The last one opened is the one left in front, so a follow-up
             // screen read targets something predictable.
             if let Some(last) = opened.last() {
                 wait_until_frontmost(last);
             }
-            Ok(json!({ "opened": opened, "not_installed": missing }))
+            let mut result = json!({ "opened": opened, "not_installed": missing });
+            if let Some(target) = &target {
+                result["target"] = json!(target);
+                if let Some(scheme) = flagged_scheme(target) {
+                    result["scheme"] = json!(scheme);
+                }
+            }
+            Ok(result)
         },
     },
     Action {
@@ -988,14 +1323,12 @@ pub const ACTIONS: &[Action] = &[
             if let Some(with) = args.get("open_with").and_then(Value::as_str) {
                 let file = wrote["wrote"].as_str().unwrap_or_default().to_string();
                 // By bundle path, not the `cursor` CLI: a Finder-launched app has a PATH without it.
-                let mut open = std::process::Command::new("/usr/bin/open");
-                match with {
-                    "cursor" => open.args(["-a", &bundle_path("Cursor")?]),
-                    "vscode" => open.args(["-a", &bundle_path("Visual Studio Code")?]),
-                    _ => &mut open,
+                let bundle = match with {
+                    "cursor" => Some(bundle_path("Cursor")?),
+                    "vscode" => Some(bundle_path("Visual Studio Code")?),
+                    _ => None,
                 };
-                let opened = open.arg(&file).status().is_ok_and(|s| s.success());
-                wrote["opened"] = json!(opened);
+                wrote["opened"] = json!(open_with(bundle.as_deref(), Some(&file)).is_ok());
             }
             Ok(wrote)
         },
@@ -1100,10 +1433,7 @@ pub const ACTIONS: &[Action] = &[
         },
         run: |args| {
             let position = required_str(args, "position")?;
-            let app = args
-                .get("app")
-                .and_then(Value::as_str)
-                .filter(|s| !s.trim().is_empty())
+            let app = target_app(args)
                 .map(str::to_string)
                 .map_or_else(frontmost_app_name, Ok)?;
 
@@ -1500,6 +1830,158 @@ mod tests {
             "must accept a list, or a 15-app request cannot be satisfied"
         );
         assert_eq!(params["required"][0], "names");
+    }
+
+    /// "Make a note" yanked the user out of the app they were dictating into,
+    /// because both scripts ended by activating Notes.
+    #[test]
+    fn notes_scripts_never_activate_notes() {
+        for script in [NOTES_CREATE_JS, NOTES_APPEND_JS] {
+            assert!(!script.contains("activate"), "{script}");
+            assert!(!script.contains(".show("), "{script}");
+            assert!(script.contains("id: note.id()"), "the id must come back");
+        }
+    }
+
+    /// VS Code's bundle is "Visual Studio Code", which nobody says; "chrome"
+    /// must not pick Canary just because it also has the word.
+    #[test]
+    fn vs_code_and_chrome_resolve_to_their_real_bundles() {
+        let installed: Vec<aloud_selection::InstalledApp> = [
+            "Visual Studio Code",
+            "Xcode",
+            "Google Chrome",
+            "Google Chrome Canary",
+            "Brave Browser",
+            "Android Studio",
+            "Microsoft Visual Studio",
+        ]
+        .into_iter()
+        .map(|name| aloud_selection::InstalledApp {
+            name: name.into(),
+            bundle_id: None,
+            icon: None,
+        })
+        .collect();
+        let real = |said| real_app_name(said, &installed);
+        for said in ["vs code", "VSCode", "code"] {
+            assert_eq!(real(said), Some("Visual Studio Code"), "{said}");
+        }
+        assert_eq!(real("chrome"), Some("Google Chrome"));
+        assert_eq!(real("brave"), Some("Brave Browser"));
+        assert_eq!(real("canary"), Some("Google Chrome Canary"));
+        // Two apps share the word: guessing would open the wrong one.
+        assert_eq!(real("studio"), None);
+        // Whole words only: "code" is not inside "Xcode" (the alias aside).
+        assert_eq!(real("xco"), None);
+        assert_eq!(real("  "), None);
+    }
+
+    /// MENU, PRESS_KEYS and WINDOW_ARRANGE with no `app` hit Aloud's own
+    /// panel, the thing in front while the user speaks.
+    #[test]
+    fn a_tool_without_an_app_targets_the_app_the_user_was_in() {
+        let front = json!({ "keys": "cmd+t", "_front_app": "Safari" });
+        assert_eq!(target_app(&front), Some("Safari"));
+        let named = json!({ "app": "TextEdit", "_front_app": "Safari" });
+        assert_eq!(target_app(&named), Some("TextEdit"), "a named app wins");
+        let blank = json!({ "app": " ", "_front_app": "Safari" });
+        assert_eq!(target_app(&blank), Some("Safari"));
+        assert_eq!(target_app(&json!({ "keys": "cmd+t" })), None);
+    }
+
+    /// Only these open without a mark; anything else (`slack:`, `tel:`) is
+    /// reported so the permission tier can make it ask every time.
+    #[test]
+    fn only_files_and_web_links_open_without_a_scheme_flag() {
+        for plain in [
+            "https://example.com",
+            "HTTP://example.com",
+            "file:///Users/me/notes.md",
+            "/Users/me/proj",
+            "~/proj/src",
+            "components",
+        ] {
+            assert_eq!(flagged_scheme(plain), None, "{plain}");
+        }
+        assert_eq!(flagged_scheme("slack://channel?id=1"), Some("slack"));
+        assert_eq!(flagged_scheme("mailto:a@b.c"), Some("mailto"));
+        assert_eq!(
+            flagged_scheme("x-apple.systempreferences:com.apple"),
+            Some("x-apple.systempreferences")
+        );
+        assert_eq!(url_scheme("components"), None, "a bare name is no link");
+    }
+
+    /// A scratch home with real folders: Spotlight never indexes these, so the
+    /// search is a plain walk, prefix-matching like the real one.
+    fn scratch_home(tag: &str) -> PathBuf {
+        let home = std::env::temp_dir().join(format!("aloud-named-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        home
+    }
+
+    fn walk(root: &Path, name: &str) -> Vec<PathBuf> {
+        let mut hits = Vec::new();
+        for entry in std::fs::read_dir(root).into_iter().flatten().flatten() {
+            let path = entry.path();
+            let file = entry.file_name().to_string_lossy().to_lowercase();
+            if file.starts_with(&name.to_lowercase()) {
+                hits.push(path.clone());
+            }
+            if path.is_dir() {
+                hits.extend(walk(&path, name));
+            }
+        }
+        hits
+    }
+
+    /// "Open components in Cursor" while in a repo must open that repo's
+    /// components, not a shallower one elsewhere in home.
+    #[test]
+    fn a_bare_name_prefers_the_project_on_screen() {
+        let home = scratch_home("project");
+        for dir in ["old/components", "app/.git", "app/src/components", ".git"] {
+            std::fs::create_dir_all(home.join(dir)).unwrap();
+        }
+        let doc = home.join("app/src/main.ts");
+        std::fs::write(&doc, "").unwrap();
+
+        let named = |name, near: Option<&Path>| resolve_named_in(name, near, &home, walk);
+        assert_eq!(
+            named("components", Some(&doc)),
+            vec![home.join("app/src/components")]
+        );
+        // Off the project, home's shallowest wins.
+        assert_eq!(named("components", None), vec![home.join("old/components")]);
+        // A repo named what was said is itself the answer.
+        assert_eq!(named("APP", Some(&doc)), vec![home.join("app")]);
+        // Home's own .git (a dotfiles repo) is no project, so home itself is
+        // never the answer.
+        let home_name = home.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(named(home_name.as_str(), Some(&home.join("old/components"))).is_empty());
+
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// Two folders equally likely to be "components" must come back as a
+    /// question, not a coin toss — and neither `components.css` nor a prefix
+    /// match ties the exact name.
+    #[test]
+    fn two_equally_good_matches_come_back_for_a_question() {
+        let home = scratch_home("tie");
+        for dir in ["a/components", "b/components", "c", "components-old"] {
+            std::fs::create_dir_all(home.join(dir)).unwrap();
+        }
+        std::fs::write(home.join("c/components.css"), "").unwrap();
+        let mut hits = resolve_named_in("components", None, &home, walk);
+        hits.sort();
+        assert_eq!(
+            hits,
+            vec![home.join("a/components"), home.join("b/components")]
+        );
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]

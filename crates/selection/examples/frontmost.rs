@@ -1,5 +1,5 @@
-//! Prints the currently focused app's name, and says which step failed if it
-//! cannot.
+//! Prints the currently focused app's name and its window's title and document,
+//! and says which step failed if it cannot.
 //!
 //!   cargo run -p aloud-selection --example frontmost
 //!
@@ -36,5 +36,15 @@ fn main() {
             app.bundle_id.as_deref().unwrap_or("<none>")
         ),
         None => println!("frontmost app: <none>"),
+    }
+
+    // AXDocument is what tells "open components" which project is on screen;
+    // Electron windows are the ones most likely to leave it out.
+    match aloud_selection::frontmost_window() {
+        Some((title, document)) => println!(
+            "window: {title:?}  document: {}",
+            document.as_deref().unwrap_or("<no AXDocument>")
+        ),
+        None => println!("window: <no focused window>"),
     }
 }
