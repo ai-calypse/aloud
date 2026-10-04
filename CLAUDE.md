@@ -19,6 +19,7 @@ crates/
   audio/               mic capture (cpal), resampling, pause segmenter
   engine/              runs the browser task engine (engine/, Node)
   hotkey/              global hotkeys: CGEventTap / WH_KEYBOARD_LL
+  islands/             the notch's live activities: ranking, dedupe, expiry
   llm/                 OpenAI-compatible chat, prompts, rate limits
   meeting/             meeting transcript assembly, note composition
   native/              Mac app actions (AppleScript/JXA) + the no-model fast path
@@ -181,6 +182,7 @@ src/styles/          the design system — every colour, size and curve
   motion.css         durations, easings, named animations, reduced-motion
   panel.css          ask/agent window chrome
   overlay.css        the recording overlay — glass pill, drop-down pill, wings
+  notch.css          the notch system's few non-utility rules (DESIGN.md)
 src/components/ui/   shared primitives. Nothing app-specific lives here
 src/features/<area>/ one folder per area of the app
 src/lib/             logic worth testing away from React
@@ -225,6 +227,28 @@ with the failure modes that render fine and still feel wrong.
 grouped card, the hairline row, the pane title and every button shape already
 exist. Each of them was extracted after being copy-pasted into two or three
 files and drifting apart.
+
+## Notch system
+
+Everything the notch shows is one system, documented in
+`apps/desktop/DESIGN.md` — read it before adding anything to the notch. The
+short version:
+
+- **Tokens:** the Mix palette, Geist and radii are `--notch-*` floating-surface
+  tokens in `tokens.css`, used through `notch-*` utilities. Fonts are bundled
+  (`@fontsource-variable`); the CSP allows no font host.
+- **Primitives:** `src/components/notch/` (tabs, segmented, rows, controls,
+  meters), built on `components/ui/` variants. Use them; do not restyle
+  overlay.css for a new view.
+- **Sections:** `features/notch/registry.ts` is the whole map, nine sections
+  in ⌘ order. A feature is a view plus `ready: true`; anything not ready is
+  hidden, never "coming soon". Append sections, never reorder them.
+- **Islands:** live state crosses from Rust as an `Island` pushed through
+  `crate::islands::push`; ranking, dedupe and expiry are `crates/islands`'
+  and tested there. The write toast is an alert island.
+- **Actions:** `features/notch/actions.ts` is the one registry ⌘K, island
+  buttons and (next) the voice agent share. Rust names an action; it never
+  sends code.
 
 ## Conventions
 
