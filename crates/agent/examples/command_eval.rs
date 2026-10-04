@@ -98,7 +98,13 @@ async fn main() -> anyhow::Result<()> {
             None => name != "cerebras",
         };
         if !key.trim().is_empty() && wanted {
-            brains.push((name, aloud_agent::brain(name, key)?));
+            let mut brain = aloud_agent::brain(name, key)?;
+            // Another model on the same provider, to compare before switching:
+            // NVIDIA_MODEL=z-ai/glm-5.3 command_eval -- nvidia
+            if let Ok(model) = std::env::var(format!("{}_MODEL", name.to_uppercase())) {
+                brain.model = Box::leak(model.into_boxed_str());
+            }
+            brains.push((name, brain));
         }
     }
     if brains.is_empty() {
