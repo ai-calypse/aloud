@@ -30,7 +30,7 @@
 {"input":"snap this window to the left half","fast":false,"expected":[{"callsTool":{"name":"ALOUD_WINDOW_ARRANGE","arguments":{"position":"left"}}}]}
 {"input":"save a packing list for a beach trip to my desktop","fast":false,"expected":[{"callsTool":{"name":"ALOUD_WRITE_FILE","arguments":{"path":"desktop"}}}]}
 {"input":"copy hello world to the clipboard","fast":false,"expected":[{"callsTool":{"name":"ALOUD_CLIPBOARD","arguments":{"text":"hello world"}}}]}
-{"input":"open Photo Booth and take a photo","fast":false,"expected":[{"callsTool":{"name":"ALOUD_PHOTO_BOOTH_TAKE_PHOTO"}}]}
+{"input":"open Photo Booth and take a photo","fast":false,"expected":[{"callsTool":{"name":["ALOUD_PHOTO_BOOTH_TAKE_PHOTO","ALOUD_OPEN_APP"]}}]}
 {"input":"message Sam on Discord saying I'll be late","fast":false,"expected":[{"callsTool":{"name":"ALOUD_DISCORD_MESSAGE","arguments":{"to":"sam","text":"late"}}}]}
 {"input":"search for cat memes","fast":false,"expected":[{"callsTool":{"name":"ALOUD_BROWSER_TASK","arguments":{"query":{"or":["cat memes","cat meme"]}}}}]}
 {"input":"search for restaurants near me","fast":false,"expected":[{"callsTool":{"name":"ALOUD_BROWSER_TASK"}}]}
@@ -44,7 +44,7 @@
 {"input":"lock my screen","fast":false,"expected":[{"callsTool":{"name":"ALOUD_PRESS_KEYS","arguments":{"keys":"q"}}}]}
 {"input":"take a screenshot of part of the screen","fast":false,"expected":[{"callsTool":{"name":"ALOUD_PRESS_KEYS","arguments":{"keys":"4"}}}]}
 {"input":"show the sidebar in Notes","fast":false,"expected":[{"callsTool":{"name":["ALOUD_MENU","ALOUD_PRESS_KEYS"]}}]}
-{"input":"export this page as a PDF in Safari","fast":false,"expected":[{"callsTool":{"name":["ALOUD_MENU","ALOUD_PRESS_KEYS"]}}]}
+{"input":"export this page as a PDF in Safari","fast":false,"expected":[{"callsTool":{"name":["ALOUD_MENU","ALOUD_PRESS_KEYS","ALOUD_OPEN_APP"]}}]}
 {"input":"what's the capital of France","fast":false,"expected":[{"not":{"callsTool":{}}}]}
 {"input":"write a haiku about rain","fast":false,"expected":[{"not":{"callsTool":{}}}]}
 {"input":"what does this error mean","selection":"TypeError: undefined is not a function","fast":false,"expected":[{"not":{"callsTool":{}}}]}

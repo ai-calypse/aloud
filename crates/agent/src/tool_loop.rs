@@ -514,11 +514,14 @@ where
         mock,
     } = callbacks;
     let Command {
+        said,
         prompt: command,
         tools,
         more,
-        ..
     } = command;
+    // A command with several steps can't end on its first round's writes:
+    // "take 5 photos" ended after one.
+    let several = names_several_actions(said);
     let (mut schemas, mut messages) = opening(command, tools, more);
     // Owned: a service loaded mid-run adds to it.
     let mut tools = tools.to_vec();
@@ -955,8 +958,10 @@ where
         only_native_writes = Some(only_native_writes.unwrap_or(true) && round_native_ok);
         // The model already said what it did, and what it did was ours and
         // worked: asking it again to say so, then grading that, was two more
-        // model calls (~0.8s) on every "create a note".
+        // model calls (~0.8s) on every "create a note". Not for a command that
+        // names several steps, where the first round is rarely all of them.
         if let Some(said) = finishes_early(turn.content.as_deref(), round_native_ok, &confirmations)
+            .filter(|_| !several)
         {
             return Ok(said);
         }
@@ -1113,6 +1118,43 @@ fn native_write(name: &str, args: &serde_json::Value, tools: &[ToolDef]) -> bool
         && !aloud_screen::is_screen_tool(name)
         && is_write(name, tools)
         && args["action"] != "now_playing"
+}
+
+/// Whether the user's words ask for more than one step: "and", "then",
+/// "twice", "3 photos", "4 times". A false hit only costs the round the early
+/// finish would have saved; a miss ends a run with work left undone.
+fn names_several_actions(said: &str) -> bool {
+    // Not a bare comma: transcripts are full of them ("Okay, create a note").
+    const LINKS: &[&str] = &[" and ", " then ", " also ", "after that"];
+    const COUNTS: &[&str] = &["times", "twice", "thrice"];
+    const NUMBERS: &[&str] = &[
+        "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+        "fifteen", "twenty",
+    ];
+    // Plurals that measure time, not repetitions: "in 5 minutes", "for 2 hours".
+    const UNITS: &[&str] = &[
+        "seconds", "secs", "minutes", "mins", "hours", "hrs", "days", "weeks", "months", "years",
+        "percent",
+    ];
+    let said = format!(" {} ", said.to_lowercase());
+    if LINKS.iter().any(|l| said.contains(l)) {
+        return true;
+    }
+    let words: Vec<String> = said
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .collect();
+    words.iter().any(|w| COUNTS.contains(&w.as_str()))
+        || words.windows(2).any(|pair| {
+            let is_count = pair[0].chars().all(|c| c.is_ascii_digit())
+                && pair[0].parse::<u32>().is_ok_and(|n| n > 1)
+                || NUMBERS.contains(&pair[0].as_str());
+            is_count
+                && pair[1].len() > 2
+                && pair[1].ends_with('s')
+                && !UNITS.contains(&pair[1].as_str())
+        })
 }
 
 /// The run's answer, if this round can be the last: every call was a native
@@ -1272,6 +1314,38 @@ mod tests {
         );
         approved = false;
         assert!(screen_gate(&mut approved), "a no asks again next time");
+    }
+
+    /// "take 5 photos" ended after one: the round's single write confirmed
+    /// itself and the run stopped. A command naming several steps goes back to
+    /// the model instead.
+    #[test]
+    fn a_command_naming_several_actions_does_not_finish_after_one_round() {
+        for said in [
+            "take 5 photos",
+            "open photo booth and take a photo",
+            "create a note then set volume to 20",
+            "press tab 4 times",
+            "skip three songs",
+            "ping me twice",
+        ] {
+            assert!(names_several_actions(said), "{said}");
+        }
+        for said in ["create a note called groceries", "take a photo", "pause"] {
+            assert!(!names_several_actions(said), "{said}");
+        }
+    }
+
+    #[test]
+    fn a_time_of_day_is_not_a_count() {
+        for said in [
+            "remind me to call Ana at 5",
+            "remind me in 10 minutes to stretch",
+            "set the volume to 30",
+            "remind me at 5pm",
+        ] {
+            assert!(!names_several_actions(said), "{said}");
+        }
     }
 
     /// A round with no text, or with a failed or foreign call, goes back to the
