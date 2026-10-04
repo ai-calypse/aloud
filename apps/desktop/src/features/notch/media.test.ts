@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { NowPlaying } from "@/lib/bindings";
-import { formatSpeed, formatTime, jsOffFix, joinNames, lineAt, lowest, nextSpeed, plainHost, positionAt, shortName } from "./media";
+import { formatSpeed, needsSong, formatTime, jsOffFix, joinNames, lineAt, lowest, nextSpeed, plainHost, positionAt, shortName } from "./media";
 
 const track = (over: Partial<NowPlaying> = {}): NowPlaying => ({
   player: "spotify",
-  source: { app: "Spotify", host: null, tab: null },
+  source: { app: "Spotify", bundleId: null, host: null, tab: null },
   state: "playing",
   title: "t",
   artist: "a",
@@ -110,5 +110,16 @@ describe("lowest", () => {
   it("is the battery that runs out first", () => {
     expect(lowest([{ percent: 100 }, { percent: 18 }, { percent: 63 }])).toBe(18);
     expect(lowest([])).toBeNull();
+  });
+});
+
+describe("needsSong", () => {
+  // Guards: lyrics for a browser title or a podcast episode being looked up as
+  // if it were a song; only Spotify and Music name their own tracks.
+  it("is true for everything but the two players that name their tracks", () => {
+    expect(needsSong(track({ player: "spotify" }))).toBe(false);
+    expect(needsSong(track({ player: "music" }))).toBe(false);
+    expect(needsSong(track({ player: "browser" }))).toBe(true);
+    expect(needsSong(track({ player: "mediaRemote" }))).toBe(true);
   });
 });

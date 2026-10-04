@@ -262,6 +262,27 @@ short version:
   one-second timeout per tab and skips silent tabs for ten minutes (JXA has no
   timeout). Only media tabs leave the scan, and only title, host and position.
   Settings › "Web video in the notch" turns it off.
+- **Any-app Now Playing:** Now Playing shows whatever any app plays (Podcasts,
+  VLC, a browser) with no setup, through macOS's *private* MediaRemote
+  framework, which Apple does not document and can close in any update. From
+  macOS 15.4 only Apple-signed processes may call it, so
+  `aloud_media::mediaremote` runs the vendored
+  [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter) (BSD-3,
+  `crates/media/mediaremote`): `/usr/bin/perl` loads a small dylib and streams
+  now-playing JSON as one long-lived child, restarted with backoff and killed
+  with the app; a button press is a second, short `perl` run. It is the primary
+  source; Spotify/Music AppleScript and the browser scan remain the fallbacks
+  when it is off, not built or silent, and what it reports as a browser is not
+  also scanned. Lyrics only for music apps (`is_music_app`). Settings › "Any
+  app in the notch" turns it off, and then no process runs. The helper is built
+  by `crates/media/mediaremote/build.sh` (stage-resources.sh calls it) into the
+  untracked `resources/mediaremote/`; in dev run it once, or the notch quietly
+  uses the fallbacks. **If a macOS update breaks it:** the log says
+  `mediaremote: helper stopped` or `nothing reported while another app plays`
+  (once per outage); the notch keeps working through the fallbacks. Check with
+  `cargo run -p aloud-media --example mediaremote -- watch`, compare against
+  upstream's issues and newest commit, re-vendor and rebuild, or ship with the
+  switch defaulted off.
 - **Clipboard history:** off until the user flips it, local only (SQLite and
   PNGs under `<data>/clipboard`), never logged or shown to a model. It polls
   `changeCount`, skips `org.nspasteboard.ConcealedType` and friends, and skips

@@ -63,6 +63,14 @@ export function formatSpeed(pct: number): string {
   return `${Number((pct / 100).toFixed(2))}×`;
 }
 
+/**
+ * Whether lyrics need the source to have named a clean song: a web video or an
+ * arbitrary app's title is not a track, a Spotify or Music one is.
+ */
+export function needsSong(now: NowPlaying): boolean {
+  return now.player === "browser" || now.player === "mediaRemote";
+}
+
 /** The host without a leading `www.`, for a line under the title. */
 export function plainHost(host: string | null): string {
   return (host ?? "").replace(/^www\./, "");
@@ -168,7 +176,11 @@ export function useSourceIcon(app: string | null): string | null {
 /** The cover of the track, once Rust has fetched it; null while it has not. */
 export function useArtwork(now: NowPlaying | null): string | null {
   const [art, setArt] = useState<{ key: string; uri: string | null } | null>(null);
-  const key = now ? `${now.player}|${now.title}|${now.artist}|${Math.floor(now.durationMs / 1000)}` : null;
+  // The cover URL is in the key because a MediaRemote cover arrives after the
+  // title and changes this opaque address when it does.
+  const key = now
+    ? `${now.player}|${now.title}|${now.artist}|${Math.floor(now.durationMs / 1000)}|${now.artworkUrl ?? ""}`
+    : null;
   const latest = useRef(now);
   latest.current = now;
 

@@ -41,6 +41,7 @@ export type NotchAction = {
 async function mediaPlayer(args: Record<string, string>): Promise<Player | null> {
   if (args.player === "Spotify") return "spotify";
   if (args.player === "Music") return "music";
+  if (args.player === "mediaRemote") return "mediaRemote";
   if (args.player) return "browser";
   return (await commands.mediaNowPlaying()).now?.player ?? null;
 }

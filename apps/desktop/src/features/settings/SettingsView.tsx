@@ -614,6 +614,20 @@ export function SettingsView({
 
             {IS_MAC && (
               <Row
+                label="Any app in the notch (uses a private macOS interface)"
+                hint="Now Playing shows whatever is playing in any app (Podcasts, VLC, browsers, and more) with no setup, and the notch's play, pause, skip and seek buttons drive it. It uses a private macOS interface that Apple does not document and a macOS update can break; if that happens Now Playing falls back to Spotify, Music and browsers. It reads only the title, artist, cover and the app's name. Off: nothing runs."
+                className="py-[11px]"
+              >
+                <Toggle
+                  checked={settings.anyAppMedia ?? true}
+                  label="Any app in the notch"
+                  onChange={(c) => update({ anyAppMedia: c })}
+                />
+              </Row>
+            )}
+
+            {IS_MAC && (
+              <Row
                 label="Web video in the notch"
                 hint="Now Playing also shows video and audio playing in Brave, Chrome, Edge and Safari, and the notch's play, pause, skip and speed buttons drive that tab. It reads only the tab's title, site and position. Each browser needs its Allow JavaScript from Apple Events switch on (View › Developer, or Safari's Develop menu); the Now Playing view says when one is off."
                 className="py-[11px]"

@@ -29,7 +29,12 @@ import {
   useSourceIcon,
 } from "../media";
 
-const PLAYER_NAME = { spotify: "Spotify", music: "Music", browser: "the browser" } as const;
+const PLAYER_NAME = {
+  spotify: "Spotify",
+  music: "Music",
+  browser: "the browser",
+  mediaRemote: "the app",
+} as const;
 
 /** What the transport buttons send. Errors surface as the next reading not changing. */
 function send(now: NowPlaying, transport: Transport) {
@@ -121,8 +126,8 @@ function BrowserIssues({ issues, compact }: { issues: BrowserIssue[]; compact?: 
 }
 
 /**
- * Media › Now Playing: what Spotify, Music or a browser tab is playing, with
- * the controls. The closed notch shows the same track as an island; this is it
+ * Media › Now Playing: what any app (or a browser tab, when the system cannot say) is
+ * playing, with the controls. The closed notch shows the same track as an island; this is it
  * one step deeper (scrub, previous and next, or for a web video skip and speed).
  */
 export function MediaPlaying() {
@@ -154,8 +159,8 @@ export function MediaPlaying() {
     if (browsers.length) return <BrowserIssues issues={browsers} />;
     return (
       <Empty title="Nothing playing">
-        Play something in Spotify, Music or a browser tab. It shows up here, and beside the camera
-        while the notch is closed.
+        Play something in any app. It shows up here, and beside the camera while the notch is
+        closed.
       </Empty>
     );
   }
@@ -269,7 +274,7 @@ export function MediaPlaying() {
             )}
             <Badge variant="notch" className="ml-auto gap-1.5">
               <AppIcon icon={icon} label="" size="sm" className="size-3.5 rounded-[4px]" />
-              {web ? shortName(now.source.app) : now.source.app}
+              {web || now.player === "mediaRemote" ? shortName(now.source.app) : now.source.app}
             </Badge>
           </div>
         </div>
