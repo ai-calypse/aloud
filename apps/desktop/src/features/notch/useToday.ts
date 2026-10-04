@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { commands, type Ticker, type Weather } from "@/lib/bindings";
+import {
+  commands,
+  type AgendaError,
+  type Event as CalendarEvent,
+  type Reminder,
+  type Ticker,
+  type Weather,
+} from "@/lib/bindings";
 import { usesFahrenheit } from "@/lib/today";
+
+type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
 
 /** A command's `Result`, as state: the value, or the sentence that says why not. */
 type Loaded<T> = { data: T | null; error: string | null; loading: boolean };
@@ -76,3 +85,49 @@ export function useStocks() {
     remove: (symbol: string) => change(commands.removeStock(symbol)),
   };
 }
+
+/** The Mac's clock, re-read every `every` ms while a view is open. */
+export function useNow(every = 30_000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), every);
+    return () => window.clearInterval(id);
+  }, [every]);
+  return now;
+}
+
+type Agenda<T> = { items: T[] | null; error: AgendaError | null };
+
+/**
+ * Calendar or Reminders as state. The first read can take seconds (it is a
+ * script talking to another app), so `items` stays null until it lands and a
+ * refresh keeps what was on screen.
+ */
+function useAgenda<T>(read: (refresh: boolean) => Promise<Result<T[], AgendaError>>) {
+  const [state, setState] = useState<Agenda<T>>({ items: null, error: null });
+  const load = useCallback(
+    (refresh: boolean) =>
+      read(refresh)
+        .then((r) =>
+          setState((s) =>
+            r.status === "ok"
+              ? { items: r.data, error: null }
+              : { items: s.items, error: r.error },
+          ),
+        )
+        .catch(() =>
+          setState((s) => ({ ...s, error: { kind: "failed", message: "This needs the Aloud app." } })),
+        ),
+    [read],
+  );
+  useEffect(() => {
+    void load(false);
+  }, [load]);
+  return { ...state, reload: () => load(true), setItems: (items: T[]) => setState({ items, error: null }) };
+}
+
+const readCalendar = (refresh: boolean) => commands.calendarEvents(refresh);
+const readReminders = () => commands.remindersDue();
+
+export const useCalendar = () => useAgenda<CalendarEvent>(readCalendar);
+export const useReminders = () => useAgenda<Reminder>(readReminders);

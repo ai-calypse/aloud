@@ -240,6 +240,23 @@ export const commands = {
 	stockQuotes: () => __TAURI_INVOKE<Ticker[]>("stock_quotes"),
 	addStock: (symbol: string) => typedError<Ticker[], string>(__TAURI_INVOKE("add_stock", { symbol })),
 	removeStock: (symbol: string) => typedError<Ticker[], string>(__TAURI_INVOKE("remove_stock", { symbol })),
+	/**
+	 *  Today's and tomorrow's events. `refresh` re-reads Calendar (about a
+	 *  second); otherwise a read from the last ten minutes is reused.
+	 * 
+	 *  This is also the only thing that may start Calendar.app: scripting an app
+	 *  that is not running launches it, which the background tick never does.
+	 */
+	calendarEvents: (refresh: boolean) => typedError<Event[], AgendaError>(__TAURI_INVOKE("calendar_events", { refresh })),
+	/**  Incomplete reminders due by the end of today, overdue ones first. */
+	remindersDue: () => typedError<Reminder[], AgendaError>(__TAURI_INVOKE("reminders_due")),
+	/**  Ticks a reminder off. The only thing in Today that writes to the account. */
+	completeReminder: (id: string) => typedError<null, AgendaError>(__TAURI_INVOKE("complete_reminder", { id })),
+	/**
+	 *  Opens an event's video-call link in the browser. Re-checks the host: the
+	 *  webview names the URL, and this must not open anything but a call.
+	 */
+	openMeetingLink: (url: string) => typedError<null, string>(__TAURI_INVOKE("open_meeting_link", { url })),
 	agentHookStatus: () => typedError<HookStatus, string>(__TAURI_INVOKE("agent_hook_status")),
 	/**
 	 *  Installs our hooks, copying the sidecar out of the bundle first.
@@ -386,6 +403,12 @@ export type ActionPreview = {
 	/**  Permission scope label, e.g. "Slack · send messages". */
 	scope: string | null,
 };
+
+/**
+ *  Why a read failed, in the one distinction the view acts on: a missing
+ *  Automation grant has a button (System Settings), anything else is words.
+ */
+export type AgendaError = { kind: "notPermitted"; app: string } | { kind: "failed"; message: string };
 
 /**
  *  Which CLI to open in the worktree. Serde/specta so this is the one type the
@@ -754,6 +777,20 @@ export type Entry = {
 	audioPath: string | null,
 };
 
+export type Event = {
+	/**  Unique per occurrence: a recurring event's uid is shared by all of them. */
+	id: string,
+	title: string,
+	/**  Unix ms. An all-day event runs local midnight to the next. */
+	start: number,
+	end: number,
+	allDay: boolean,
+	location: string | null,
+	/**  A video-call link, from the event's URL or its location. */
+	joinUrl: string | null,
+	calendar: string,
+};
+
 export type Field = {
 	role: Role,
 	/**  RFC 6901 pointer into the call's arguments. */
@@ -1076,7 +1113,11 @@ export type OverlayStyleChanged = {
 /**  A capability the app needs the OS to allow. */
 export type Permission = 
 /**  Global hotkeys, synthetic paste, and reading the focused selection. */
-"accessibility" | "microphone";
+"accessibility" | "microphone" | 
+/**  Control of Calendar.app (Automation): today's events in the notch. */
+"calendar" | 
+/**  Control of Reminders.app (Automation): today's reminders in the notch. */
+"reminders";
 
 /**  One app and action in the Settings pane, with what Aloud may do there. */
 export type PermissionRow = {
@@ -1140,6 +1181,15 @@ export type QuotaWindow = {
 	 *  without a refetch.
 	 */
 	resetsAt: string | null,
+};
+
+export type Reminder = {
+	id: string,
+	title: string,
+	due: number,
+	/**  Due on a day, not at a time. */
+	allDay: boolean,
+	list: string,
 };
 
 /**  What a field is, which decides how the card draws it. */

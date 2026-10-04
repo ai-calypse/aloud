@@ -5,6 +5,9 @@
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use aloud_agenda::{AgendaError, Event, Reminder};
+use tauri::AppHandle;
+
 use aloud_today::prefs::{Place, Prefs};
 use aloud_today::stocks::{self, Ticker};
 use aloud_today::weather::{self, Weather};
@@ -110,4 +113,140 @@ pub async fn remove_stock(symbol: String) -> Result<Vec<Ticker>, String> {
     prefs.stocks.retain(|s| s != &symbol);
     prefs.save().map_err(|e| e.to_string())?;
     Ok(stocks::quotes(&prefs.stocks).await)
+}
+
+// ---- Calendar and Reminders -------------------------------------------------
+
+/// Today and tomorrow: what the view shows, and what the next-event island
+/// looks through.
+const CALENDAR_DAYS: i64 = 2;
+/// How stale the events may get before the background tick re-reads them.
+const CALENDAR_TTL: Duration = Duration::from_secs(10 * 60);
+
+struct Agenda {
+    at: Instant,
+    /// The local midnight the window began at, so a cache from yesterday is
+    /// never mistaken for today's.
+    day: i64,
+    events: Vec<Event>,
+}
+
+static AGENDA: Mutex<Option<Agenda>> = Mutex::new(None);
+
+fn agenda() -> std::sync::MutexGuard<'static, Option<Agenda>> {
+    AGENDA.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn read_events() -> Result<Vec<Event>, AgendaError> {
+    let day = aloud_agenda::day_start(0);
+    let events = aloud_agenda::events(day, aloud_agenda::day_start(CALENDAR_DAYS))?;
+    *agenda() = Some(Agenda {
+        at: Instant::now(),
+        day,
+        events: events.clone(),
+    });
+    Ok(events)
+}
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn sync_island(app: &AppHandle) {
+    let island = agenda()
+        .as_ref()
+        .and_then(|a| aloud_agenda::island(&a.events, now_ms()));
+    match island {
+        Some(island) => crate::islands::push(app, island),
+        None => crate::islands::remove(app, aloud_agenda::NEXT_ISLAND_ID),
+    }
+}
+
+/// Today's and tomorrow's events. `refresh` re-reads Calendar (about a
+/// second); otherwise a read from the last ten minutes is reused.
+///
+/// This is also the only thing that may start Calendar.app: scripting an app
+/// that is not running launches it, which the background tick never does.
+#[tauri::command]
+#[specta::specta]
+pub async fn calendar_events(app: AppHandle, refresh: bool) -> Result<Vec<Event>, AgendaError> {
+    if !refresh {
+        let cached = agenda().as_ref().and_then(|a| {
+            (a.day == aloud_agenda::day_start(0) && a.at.elapsed() < CALENDAR_TTL)
+                .then(|| a.events.clone())
+        });
+        if let Some(events) = cached {
+            return Ok(events);
+        }
+    }
+    let events = tauri::async_runtime::spawn_blocking(read_events)
+        .await
+        .map_err(|e| AgendaError::Failed {
+            message: e.to_string(),
+        })??;
+    sync_island(&app);
+    Ok(events)
+}
+
+/// Incomplete reminders due by the end of today, overdue ones first.
+#[tauri::command]
+#[specta::specta]
+pub async fn reminders_due() -> Result<Vec<Reminder>, AgendaError> {
+    tauri::async_runtime::spawn_blocking(|| aloud_agenda::reminders(aloud_agenda::day_start(1)))
+        .await
+        .map_err(|e| AgendaError::Failed {
+            message: e.to_string(),
+        })?
+}
+
+/// Ticks a reminder off. The only thing in Today that writes to the account.
+#[tauri::command]
+#[specta::specta]
+pub async fn complete_reminder(id: String) -> Result<(), AgendaError> {
+    tauri::async_runtime::spawn_blocking(move || aloud_agenda::complete_reminder(&id))
+        .await
+        .map_err(|e| AgendaError::Failed {
+            message: e.to_string(),
+        })?
+}
+
+/// Opens an event's video-call link in the browser. Re-checks the host: the
+/// webview names the URL, and this must not open anything but a call.
+#[tauri::command]
+#[specta::specta]
+pub fn open_meeting_link(app: AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let url = aloud_agenda::join_url(Some(&url), None).ok_or("that is not a call link")?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// Keeps the next-event island true, once a minute. It re-reads Calendar only
+/// while Calendar.app is already open — the island is a courtesy, and it must
+/// not be the reason an app launches — and the view's own fetch covers the
+/// rest.
+pub fn init(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let due = agenda().as_ref().is_none_or(|a| {
+                a.day != aloud_agenda::day_start(0) || a.at.elapsed() >= CALENDAR_TTL
+            });
+            if due && aloud_agenda::app_running("Calendar") {
+                // A failure (no grant yet) leaves the cache empty and is
+                // retried in ten minutes, not every tick.
+                let read = tauri::async_runtime::spawn_blocking(read_events).await;
+                if !matches!(read, Ok(Ok(_))) {
+                    *agenda() = Some(Agenda {
+                        at: Instant::now(),
+                        day: aloud_agenda::day_start(0),
+                        events: Vec::new(),
+                    });
+                }
+            }
+            sync_island(&app);
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        }
+    });
 }

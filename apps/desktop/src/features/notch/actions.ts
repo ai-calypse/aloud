@@ -160,6 +160,59 @@ export const ACTIONS: NotchAction[] = [
     },
   },
   // notch-today-focus: Focus actions end
+  // notch-today-focus: Today actions begin
+  {
+    id: "today.calendar",
+    title: "Show today's calendar",
+    keywords: ["events", "meetings", "schedule", "agenda"],
+    section: "today",
+    subsection: "calendar",
+    run: (ctx) => {
+      ctx.open("today", "calendar");
+      return true;
+    },
+  },
+  {
+    id: "today.reminders",
+    title: "Show today's reminders",
+    keywords: ["todo", "tasks", "due"],
+    section: "today",
+    subsection: "reminders",
+    run: (ctx) => {
+      ctx.open("today", "reminders");
+      return true;
+    },
+  },
+  {
+    id: "today.weather",
+    title: "Show the weather",
+    keywords: ["forecast", "temperature", "rain"],
+    section: "today",
+    subsection: "weather",
+    run: (ctx) => {
+      ctx.open("today", "weather");
+      return true;
+    },
+  },
+  {
+    id: "today.stocks",
+    title: "Show my stocks",
+    keywords: ["ticker", "prices", "market"],
+    section: "today",
+    subsection: "stocks",
+    run: (ctx) => {
+      ctx.open("today", "stocks");
+      return true;
+    },
+  },
+  // The next-event island's Join button.
+  {
+    id: "calendar.join",
+    title: "Join the call",
+    args: ["url"],
+    run: async (_, { url }) => (await commands.openMeetingLink(url)).status === "ok",
+  },
+  // notch-today-focus: Today actions end
   {
     // What a finished row's Show does: bring back what a write made.
     id: "result.show",

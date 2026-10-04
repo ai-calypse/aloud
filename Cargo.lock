@@ -42,6 +42,7 @@ dependencies = [
 name = "aloud"
 version = "0.1.0"
 dependencies = [
+ "aloud-agenda",
  "aloud-agent",
  "aloud-agent-spawn",
  "aloud-audio",
@@ -85,6 +86,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "window-vibrancy 0.5.3",
+]
+
+[[package]]
+name = "aloud-agenda"
+version = "0.1.0"
+dependencies = [
+ "aloud-islands",
+ "aloud-native",
+ "chrono",
+ "serde",
+ "serde_json",
+ "specta",
+ "specta-typescript",
 ]
 
 [[package]]

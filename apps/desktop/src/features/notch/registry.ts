@@ -12,7 +12,7 @@ import {
 import { readySections, type Section } from "./sections";
 import { AgentsCoding, AgentsUsage, AgentsVoice } from "./views/Agents";
 import { FocusAwake, FocusNotes, FocusTimer } from "./views/Focus";
-import { TodayStocks, TodayWeather } from "./views/Today";
+import { TodayCalendar, TodayReminders, TodayStocks, TodayWeather } from "./views/Today";
 import { NowOverview } from "./views/Now";
 
 /**
@@ -117,8 +117,8 @@ export const SECTIONS: Section[] = [
     name: "Today",
     icon: CalendarIcon,
     subsections: [
-      { id: "calendar", name: "Calendar", features: ["Calendar"], ready: false },
-      { id: "reminders", name: "Reminders", features: ["Reminders"], ready: false },
+      { id: "calendar", name: "Calendar", features: ["Calendar"], ready: true, view: TodayCalendar },
+      { id: "reminders", name: "Reminders", features: ["Reminders"], ready: true, view: TodayReminders },
       { id: "weather", name: "Weather", features: ["Weather"], ready: true, view: TodayWeather },
       { id: "stocks", name: "Stocks", features: ["Stocks ticker"], ready: true, view: TodayStocks },
       { id: "inbox", name: "Inbox", features: ["Notification mirror"], ready: false },

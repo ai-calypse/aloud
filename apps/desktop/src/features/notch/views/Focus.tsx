@@ -68,9 +68,9 @@ export function FocusTimer() {
             stroke={7}
             // The ring drains as the time goes: what is left, not what is spent.
             value={total > 0 ? value / total : 0}
-            label={timer ? timerTitle(timer) : "Focus timer"}
+            label={idle ? "Focus timer" : timerTitle(timer)}
           >
-            <Lead sub={timer ? timerTitle(timer) : "Focus"} className="text-center">
+            <Lead sub={idle ? "Focus" : timerTitle(timer)} className="text-center">
               {clock(value, true)}
             </Lead>
           </Ring>
@@ -212,7 +212,7 @@ export function FocusAwake() {
       >
         {awake?.active ? "Awake" : "Off"}
       </Lead>
-      <Segmented label="Keep awake for" items={AWAKE_CHOICES} value={choice} onChange={(id) => void choose(id)} />
+      <Segmented label="Keep awake for" items={AWAKE_CHOICES} value={choice} onChange={(id) => void choose(id)} className="self-start" />
       {error && <p className="m-0 text-notch-meta text-notch-danger">{error}</p>}
     </div>
   );

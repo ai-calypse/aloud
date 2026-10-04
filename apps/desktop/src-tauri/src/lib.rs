@@ -163,6 +163,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             today::stock_quotes,
             today::add_stock,
             today::remove_stock,
+            today::calendar_events,
+            today::reminders_due,
+            today::complete_reminder,
+            today::open_meeting_link,
             // notch-today-focus: commands end
             sessions::agent_hook_status,
             sessions::install_agent_hooks,
@@ -302,6 +306,7 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
 
             // notch-today-focus: setup begin
             focus::init(app.handle());
+            today::init(app.handle());
             // notch-today-focus: setup end
 
             tray::init(app)?;
