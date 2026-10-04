@@ -2,6 +2,9 @@ mod agent;
 mod commands;
 mod islands;
 mod listen;
+// notch-mac: wiring begins
+mod mac;
+// notch-mac: wiring ends
 mod meeting;
 mod notch;
 mod overlay;
@@ -150,6 +153,15 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sessions::list_repo_branches,
             sessions::read_agent_transcript,
             quota::agent_quota,
+            // notch-mac: wiring begins
+            mac::mac_stats,
+            mac::mac_battery,
+            mac::mac_privacy,
+            mac::mac_front_window,
+            mac::mac_snap,
+            mac::mac_watchers,
+            mac::set_mac_watcher,
+            // notch-mac: wiring ends
             agent::confirm_agent,
             agent::arm_agent,
             agent::hold_agent,
@@ -273,6 +285,9 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             }
 
             sessions::start(app.handle());
+            // notch-mac: wiring begins
+            mac::start(app.handle());
+            // notch-mac: wiring ends
 
             tray::init(app)?;
 

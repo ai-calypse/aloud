@@ -266,6 +266,35 @@ export const commands = {
 	 */
 	agentQuota: () => typedError<Quota, string>(__TAURI_INVOKE("agent_quota")),
 	/**
+	 *  CPU, memory, disk, network and thermal pressure. Polled by Mac › Stats
+	 *  only while it is on screen.
+	 */
+	macStats: () => typedError<SystemStats, string>(__TAURI_INVOKE("mac_stats")),
+	/**  The battery, or None on a Mac without one. */
+	macBattery: () => __TAURI_INVOKE<{
+	percent: number,
+	state: ChargeState,
+	/**
+	 *  To empty while discharging, to full while charging; None while macOS
+	 *  is still estimating.
+	 */
+	minutes: number | null,
+	cycles: number | null,
+	/**  Capacity now over capacity when new, 0–100. */
+	health: number | null,
+} | null>("mac_battery"),
+	/**  Who holds the microphone and camera right now. */
+	macPrivacy: () => __TAURI_INVOKE<PrivacyUse>("mac_privacy"),
+	macFrontWindow: () => __TAURI_INVOKE<FrontWindowInfo>("mac_front_window"),
+	/**  Snaps the window the user was in. Returns the app's name. */
+	macSnap: (snap: Snap) => typedError<string, string>(__TAURI_INVOKE("mac_snap", { snap })),
+	macWatchers: () => __TAURI_INVOKE<Watchers>("mac_watchers"),
+	/**
+	 *  A watcher's on/off. Turning one off takes its island down at once rather
+	 *  than leaving it up until the next poll would have.
+	 */
+	setMacWatcher: (watcher: Watcher, on: boolean) => typedError<null, string>(__TAURI_INVOKE("set_mac_watcher", { watcher, on })),
+	/**
 	 *  The gate's buttons. `edits` carries the fields the user changed, keyed by
 	 *  the pointer each card field names; `revision` is the card's own, so a click
 	 *  meant for one gate can never answer the next.
@@ -583,6 +612,19 @@ export type AudioDevice = {
 /**  Live input level, 0.0–1.0, driving the pill's waveform. Only while recording. */
 export type AudioLevel = number | null;
 
+export type Battery = {
+	percent: number,
+	state: ChargeState,
+	/**
+	 *  To empty while discharging, to full while charging; None while macOS
+	 *  is still estimating.
+	 */
+	minutes: number | null,
+	cycles: number | null,
+	/**  Capacity now over capacity when new, 0–100. */
+	health: number | null,
+};
+
 /**
  *  What triggers a binding.
  * 
@@ -609,6 +651,12 @@ export type BuildInfo = {
 
 /**  Which card layout draws the preview. */
 export type CardKind = "message" | "email" | "event" | "task" | "note" | "issue" | "row" | "file" | "share" | "update" | "delete" | "money" | "fallback";
+
+export type ChargeState = "charging" | "discharging" | 
+/**  On the charger and at 100%. */
+"full" | 
+/**  On the charger but not charging: optimised charging holding at 80%. */
+"pluggedIn";
 
 export type Config = {
 	hold: Binding | null,
@@ -747,6 +795,13 @@ export type FoundFile = {
 	modified: string,
 	/**  A `data:image/png;base64,…` preview, or None when Quick Look has none. */
 	thumbnail: string | null,
+};
+
+export type FrontWindowInfo = {
+	/**  Accessibility granted: without it a snap cannot move anything. */
+	trusted: boolean,
+	/**  The app whose window a snap would move. */
+	app: string | null,
 };
 
 /**  The panel's answer to a gate. */
@@ -1024,6 +1079,16 @@ export type PlannedCall = {
 	app: string,
 };
 
+export type PrivacyUse = {
+	mic: boolean,
+	camera: boolean,
+	/**
+	 *  Apps holding the mic, sorted; empty when only the device-level answer
+	 *  was available.
+	 */
+	micApps: string[],
+};
+
 /**
  *  A question put to the user mid-run. `options` non-empty means the answer is
  *  one of them, so the panel offers buttons instead of a text field.
@@ -1263,6 +1328,8 @@ export type ShowTarget = {
 	target: string,
 };
 
+export type Snap = "left" | "right" | "top" | "bottom" | "topLeft" | "topRight" | "bottomLeft" | "bottomRight" | "maximize" | "center";
+
 /**  One closed span. */
 export type Span = {
 	/**  Groups the stages of one dictation; monotonic, so it orders by time. */
@@ -1298,6 +1365,25 @@ export type Stats = {
 export type StatsView = {
 	timeSavedSeconds: number | null,
 } & Stats;
+
+/**
+ *  One reading. Floats throughout: specta refuses 64-bit integers, and a
+ *  byte count shown as "11.2 GB" does not need exactness.
+ */
+export type SystemStats = {
+	/**  0–100, all cores. */
+	cpu: number | null,
+	memoryUsedGb: number | null,
+	memoryTotalGb: number | null,
+	diskUsedGb: number | null,
+	diskTotalGb: number | null,
+	/**  Bytes per second since the previous read, all non-loopback interfaces. */
+	netDown: number | null,
+	netUp: number | null,
+	thermal: Thermal,
+};
+
+export type Thermal = "nominal" | "fair" | "serious" | "critical";
 
 /**
  *  How hard the card makes it to say yes. Default-Always grants never reach a
@@ -1360,6 +1446,20 @@ export type ToolResult = {
 	tidied: string | null,
 	/**  The [`ToolCall::id`] this result finishes. */
 	id?: number | null,
+};
+
+/**  Which watcher a switch names. */
+export type Watcher = "privacy" | "battery";
+
+/**
+ *  The two background watchers, each with an on/off the user owns. Both
+ *  default on: they are quiet until there is something worth a glance.
+ */
+export type Watchers = {
+	/**  An island while any app is using the microphone or camera. */
+	privacy?: boolean,
+	/**  An island on a full charge, and while the battery is low. */
+	battery?: boolean,
 };
 
 /* Tauri Specta runtime */

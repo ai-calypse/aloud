@@ -28,6 +28,8 @@ aloud-native = { path = "../../../crates/native" }
 aloud-hotkey = { path = "../../../crates/hotkey" }
 aloud-islands = { path = "../../../crates/islands" }
 aloud-llm = { path = "../../../crates/llm" }
+# notch-mac
+aloud-mac = { path = "../../../crates/mac" }
 aloud-notes = { path = "../../../crates/notes" }
 aloud-quota = { path = "../../../crates/quota" }
 aloud-sessions = { path = "../../../crates/sessions" }
