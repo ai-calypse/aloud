@@ -8,6 +8,12 @@ const SIZE = {
   xl: "text-notch-w-numeral-xl",
 } as const;
 
+/** Widgets sit tighter than SF's default; Calm's Geist numerals tighter still. */
+const TRACKING = {
+  widget: "tracking-notch-w-numeral",
+  calm: "tracking-notch-n",
+} as const;
+
 /**
  * A big number in Apple's way: Light 300, tabular, tight. `text` is already
  * formatted (see `formatNumeral`), so the caller decides decimals and units.
@@ -22,15 +28,18 @@ export function Numeral({
   text,
   size = "l",
   roll = false,
+  tracking = "widget",
   className,
 }: {
   text: string;
   size?: keyof typeof SIZE;
   roll?: boolean;
+  tracking?: keyof typeof TRACKING;
   className?: string;
 }) {
   const base = cn(
-    "font-light leading-none tracking-notch-w-numeral tabular-nums text-widget-ink",
+    "font-light leading-none tabular-nums text-widget-ink",
+    TRACKING[tracking],
     SIZE[size],
     className,
   );

@@ -33,4 +33,21 @@ describe("cn", () => {
     expect(cn("text-widget-ink", "text-widget-ink-2")).toBe("text-widget-ink-2");
     expect(cn("stroke-widget-track", "stroke-widget-acc")).toBe("stroke-widget-acc");
   });
+
+  // Calm Home's tile tokens: a numeral size, its tracking, a state colour and a
+  // tile fill all start `text-`/`tracking-`/`bg-` and must survive one another.
+  it("keeps a Calm numeral size, tracking, accent and tile together", () => {
+    expect(cn("text-notch-n-hero", "text-notch-acc-ink", "tracking-notch-n")).toBe(
+      "text-notch-n-hero text-notch-acc-ink tracking-notch-n",
+    );
+    expect(cn("bg-notch-tile", "rounded-notch-tile", "border-notch-tile-edge")).toBe(
+      "bg-notch-tile rounded-notch-tile border-notch-tile-edge",
+    );
+    expect(cn("text-notch-tile-label", "text-notch-ink-3")).toBe("text-notch-tile-label text-notch-ink-3");
+  });
+
+  it("lets a Calm numeral size and tracking replace the widget ones", () => {
+    expect(cn("text-notch-w-numeral-l", "text-notch-n-hero")).toBe("text-notch-n-hero");
+    expect(cn("tracking-notch-w-numeral", "tracking-notch-n")).toBe("tracking-notch-n");
+  });
 });

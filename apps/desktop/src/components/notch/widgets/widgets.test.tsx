@@ -63,6 +63,49 @@ describe("Capsule", () => {
   });
 });
 
+// The Calm Home props are all optional, and the Widgets look must draw exactly
+// what it did: each default below is the class it always had, with no style.
+describe("Calm primitive props", () => {
+  it("fills a vertical capsule from the bottom, ending flat and filling its parent", () => {
+    const out = html(<Capsule value={0.25} label="Battery" vertical />);
+    expect(out).toContain("inset(75% 0 0 0)");
+    expect(out).toContain("h-full");
+    expect(out).not.toContain("h-1.5");
+    expect(out).not.toContain("999px");
+  });
+
+  it("leaves a horizontal capsule as it was", () => {
+    const out = html(<Capsule value={0.25} label="Battery" />);
+    expect(out).toContain("h-1.5");
+    expect(out).toContain("inset(0 75% 0 0 round 999px)");
+  });
+
+  it("sizes a segmented bar when told to, and keeps the 6px bar when not", () => {
+    const sized = html(<SegBar value={0.5} segments={10} label="Usage" height={7} gap={3} />);
+    expect(sized).toContain("height:7px");
+    expect(sized).toContain("gap:3px");
+    expect(sized).not.toContain("h-1.5");
+    const plain = html(<SegBar value={0.5} segments={10} label="Usage" />);
+    expect(plain).toContain("h-1.5");
+    expect(plain).toContain("gap-0.5");
+    expect(plain).not.toContain("style=");
+  });
+
+  it("tracks a Calm numeral tighter, and a widget one as before", () => {
+    expect(html(<Numeral text="82" tracking="calm" />)).toContain("tracking-notch-n");
+    const widget = html(<Numeral text="82" />);
+    expect(widget).toContain("tracking-notch-w-numeral");
+    expect(widget).not.toContain("tracking-notch-n ");
+  });
+
+  it("shades under a filled spark and ends it on a dot, and draws neither by default", () => {
+    const filled = html(<Spark values={[1, 3, 2, 4]} label="Highs" fill />);
+    expect(filled).toContain("<circle");
+    expect(filled).toContain("Z");
+    expect(html(<Spark values={[1, 3, 2, 4]} label="Highs" />)).not.toContain("<circle");
+  });
+});
+
 describe("SegBar", () => {
   it("lights the nearest whole number of segments", () => {
     const out = html(<SegBar value={0.5} segments={4} label="Level" />);

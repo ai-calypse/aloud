@@ -135,6 +135,19 @@
   --color-notch-warn: var(--notch-warn);
   --color-notch-danger: var(--notch-danger);
 
+  --color-notch-tile: var(--notch-tile);
+  --color-notch-tile-hi: var(--notch-tile-hi);
+  --color-notch-tile-edge: var(--notch-tile-edge);
+  --color-notch-field: var(--notch-field);
+  --color-notch-on: var(--notch-on);
+  --color-notch-caution: var(--notch-caution);
+  --color-notch-sun: var(--notch-sun);
+  --color-notch-cloud: var(--notch-cloud);
+  --color-notch-cloud-shade: var(--notch-cloud-shade);
+  /* A Calm tile's accent and its word-safe tint (tokens.css, `data-tile-state`). */
+  --color-notch-acc: var(--w-acc);
+  --color-notch-acc-ink: var(--tile-ink);
+
   --font-notch: var(--font-notch);
   --font-notch-mono: var(--font-notch-mono);
 
@@ -150,6 +163,17 @@
   --radius-notch-row: var(--radius-notch-row);
   --radius-notch-track: var(--radius-notch-track);
   --radius-notch-panel: var(--radius-notch-panel);
+  --radius-notch-tile: var(--radius-notch-tile);
+
+  --text-notch-n-hero: var(--text-notch-n-hero);
+  --text-notch-n-xl: var(--text-notch-n-xl);
+  --text-notch-n-lg: var(--text-notch-n-lg);
+  --text-notch-n-md: var(--text-notch-n-md);
+  --text-notch-n-sm: var(--text-notch-n-sm);
+  --text-notch-tile-label: var(--text-notch-tile-label);
+  --text-notch-tile-name: var(--text-notch-tile-name);
+  --text-notch-tile-title: var(--text-notch-tile-title);
+  --tracking-notch-n: var(--tracking-notch-n);
 
   /* The Widgets look (tokens.css, `--notch-w-*`). `widget-` utilities read the
      per-widget variables a role sets (`data-w-role`), with the neutral value

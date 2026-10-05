@@ -70,17 +70,28 @@ export function numeralParts(text: string): NumeralPart[] {
 }
 
 /**
- * The polyline of a sparkline in a `width` x `height` box, as an SVG path.
- * Scaled to the values' own range (a flat series draws mid-height rather than
+ * The points of a sparkline in a `width` x `height` box. Scaled to the values' own range (a flat series draws mid-height rather than
  * dividing by zero), with `pad` kept clear so the stroke is not clipped.
  */
-export function sparkPath(values: number[], width: number, height: number, pad = 1.5): string {
+export function sparkPoints(
+  values: number[],
+  width: number,
+  height: number,
+  pad = 1.5,
+): [number, number][] {
   const finite = values.filter(Number.isFinite);
-  if (finite.length < 2) return "";
+  if (finite.length < 2) return [];
   const min = Math.min(...finite);
   const span = Math.max(...finite) - min;
   const x = (i: number) => (i / (finite.length - 1)) * width;
   const y = (v: number) =>
     span === 0 ? height / 2 : height - pad - ((v - min) / span) * (height - 2 * pad);
-  return finite.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(" ");
+  return finite.map((v, i) => [x(i), y(v)]);
+}
+
+/** The same points as an SVG polyline path. */
+export function sparkPath(values: number[], width: number, height: number, pad = 1.5): string {
+  return sparkPoints(values, width, height, pad)
+    .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`)
+    .join(" ");
 }

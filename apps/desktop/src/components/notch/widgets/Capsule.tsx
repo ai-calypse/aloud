@@ -18,6 +18,7 @@ export function Capsule({
   valueText,
   onChange,
   thick = false,
+  vertical = false,
   onFill = false,
   accent,
   className,
@@ -33,6 +34,11 @@ export function Capsule({
   /** The chunky shape of a volume slider, against a thin progress line. */
   thick?: boolean;
   /**
+   * Fills from the bottom and takes its parent's height and width, so the
+   * tile decides the shape (Calm's battery). Read-only: it has no scrub.
+   */
+  vertical?: boolean;
+  /**
    * Drawn on a tile filled with the accent (Music): the accent over itself
    * would vanish, so the fill is the ink and the track a veil of it.
    */
@@ -47,7 +53,7 @@ export function Capsule({
   const shape = cn(
     "relative w-full overflow-hidden rounded-full",
     onFill ? "bg-widget-ink/25" : "bg-widget-track",
-    thick ? "h-7" : "h-1.5",
+    vertical ? "h-full" : thick ? "h-7" : "h-1.5",
     // The ring around the capsule, drawn from the hidden input's focus.
     "has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-solid has-[input:focus-visible]:outline-notch-focus",
     className,
@@ -56,11 +62,17 @@ export function Capsule({
     <div
       aria-hidden
       className={cn(
-        "h-full rounded-full",
+        "h-full",
+        !vertical && "rounded-full",
         onFill ? "bg-widget-ink" : "bg-widget-acc",
         !scrubbing && "transition-[clip-path] duration-[var(--spring-dur)] ease-[var(--spring)]",
       )}
-      style={{ clipPath: `inset(0 ${100 - v * 100}% 0 0 round 999px)` }}
+      style={{
+        // A bottom-up fill ends flat: the tile's own corners round it.
+        clipPath: vertical
+          ? `inset(${100 - v * 100}% 0 0 0)`
+          : `inset(0 ${100 - v * 100}% 0 0 round 999px)`,
+      }}
     />
   );
 
@@ -113,6 +125,8 @@ export function SegBar({
   label,
   valueText,
   accent,
+  height,
+  gap,
   className,
 }: {
   /** 0…1; the lit segments are the nearest whole number to it. */
@@ -121,6 +135,10 @@ export function SegBar({
   label: string;
   valueText?: string;
   accent?: WidgetRole;
+  /** Pixels; default is the 6px Widgets bar. Calm's tiles size theirs. */
+  height?: number;
+  /** Pixels between segments; default 2. */
+  gap?: number;
   className?: string;
 }) {
   const v = unit(value);
@@ -135,7 +153,8 @@ export function SegBar({
       aria-valuenow={Math.round(v * 100)}
       aria-valuetext={valueText}
       data-w-role={accent}
-      className={cn("flex h-1.5 w-full gap-0.5", className)}
+      className={cn("flex w-full", height === undefined && "h-1.5", gap === undefined && "gap-0.5", className)}
+      style={{ height, gap }}
     >
       {Array.from({ length: count }, (_, i) => (
         <span
