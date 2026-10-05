@@ -149,6 +149,46 @@
   color: var(--notch-ink-3);
 }
 
+/* The rest of the live activities: glyph discs overlapping like stacked
+   avatars. Each is ringed in the notch's black so the one under it reads as
+   tucked, not merged. The stack is positioned: useFlip measures against it.
+   Entering is a pop; a disc's neighbours slide to their slots on the live
+   spring (useFlip), so a disc arriving mid-slide does not stall them. */
+.island-pill__stack {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding-left: var(--disc-overlap);
+}
+
+.island-pill__disc {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  width: var(--disc);
+  height: var(--disc);
+  margin-left: calc(-1 * var(--disc-overlap));
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--notch-fill, #000);
+  animation: disc-in var(--spring-pop-dur) var(--spring-pop) both;
+}
+
+.island-pill__disc > [role="img"],
+.island-pill__disc > img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+.island-pill__disc > [role="img"] {
+  background: var(--w-track, var(--notch-well));
+  color: var(--w-ink, var(--notch-ink-2));
+}
+
+.island-pill__disc > img {
+  object-fit: cover;
+}
+
 /* --- The shell (features/notch/NotchShell.tsx) ---------------------------
  * Its rows rise in behind the shape the way the answer's parts always have
  * (the keyframes are overlay.css's), staggered top to bottom. */
@@ -249,6 +289,12 @@
   grid-auto-flow: dense;
   gap: 12px var(--notch-w-gap);
   justify-content: center;
+}
+
+/* A board of one large tile has two columns, so it centres instead of leaving
+   the other two empty. */
+.notch-board--solo {
+  grid-template-columns: repeat(2, var(--notch-w-small));
 }
 
 /* A bar over a board (a search pill) as wide as the board under it. */

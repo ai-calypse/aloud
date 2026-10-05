@@ -894,7 +894,21 @@ export type BtDevice = {
 	/**  `headphones`, `mouse`, `keyboard`, `trackpad` or `other`. */
 	kind: string,
 	connected: boolean,
+	/**  The raw parts, as the device reported them. */
 	batteries: DeviceBattery[],
+	/**
+	 *  The headline charge, never the case: the mean of left and right (the
+	 *  buds are worn as a pair), the one bud alone when only one reports, or
+	 *  the device's single battery. `None` when only a case reported.
+	 */
+	level: number | null,
+	/**  The charging case, shown small beside the headline. */
+	case: number | null,
+	/**
+	 *  "Left" or "Right" when `level` is that bud alone (the other is out of
+	 *  range or in the case), so the card can say so.
+	 */
+	singleBud: string | null,
 };
 
 /**

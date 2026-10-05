@@ -1,18 +1,10 @@
 import { useState } from "react";
 import { BluetoothIcon } from "lucide-react";
 import { commands, type BtDevice } from "@/lib/bindings";
-import { Capsule, formatNumeral, Numeral, Ring, WidgetBoard, WidgetFrame } from "@/components/notch/widgets";
+import { Capsule, WidgetBoard, WidgetFrame } from "@/components/notch/widgets";
 import { cn } from "@/lib/utils";
 import { usePolled } from "../../media";
-import {
-  deviceLevel,
-  leastLeft,
-  levelAccent,
-  levels,
-  RING_SLOTS,
-  rowSubtitle,
-  type Level,
-} from "./media-format";
+import { deviceLevel, levelAccent, rowSubtitle } from "./media-format";
 import { kindIcon, Notice, Pill } from "./parts";
 
 type Loaded = { devices: BtDevice[]; error: string | null } | null;
@@ -26,10 +18,10 @@ async function load(): Promise<Loaded> {
 }
 
 /**
- * Media › Devices as a widget board: Apple's Batteries family. The large
- * list is every paired device with its charge (and a Connect button for the
- * ones that are off), the medium tile is four rings, the small one the device
- * with the least left. Read on a slow clock.
+ * Media › Devices as a widget board: Apple's large Batteries list, a row per
+ * paired device with its charge (and a Connect button for the ones that are
+ * off). The medium ring tile and small "least left" tile it used to sit with
+ * drew the same devices again, so they are gone. Read on a slow clock.
  */
 export function WidgetMediaDevices() {
   const [loaded, refresh] = usePolled<Loaded>(load, POLL_MS, null);
@@ -91,18 +83,18 @@ export function DevicesBoard({
       </WidgetBoard>
     );
   }
-  const all = levels(loaded.devices);
-  const low = leastLeft(all);
   return (
-    <WidgetBoard label="Devices">
+    // One large tile: a two-column board, so it sits centred, not left of a hole.
+    <WidgetBoard label="Devices" className="notch-board--solo">
       <ListTile devices={loaded.devices} connecting={connecting} error={error} onConnect={onConnect} />
-      <RingsTile levels={all} />
-      <LeastTile low={low} />
     </WidgetBoard>
   );
 }
 
-/** Beside the name: the charge, and the battery drawn as a capsule in green until it runs low. */
+/**
+ * Beside the name: the headline charge (the buds' mean for AirPods), drawn as
+ * a capsule in green until it runs low. The case is small print under the name.
+ */
 function ListTile({
   devices,
   connecting,
@@ -173,80 +165,6 @@ function ListTile({
           })}
         </ul>
         {error && <p className="m-0 pb-3 text-notch-w-meta leading-snug text-widget-ink-2">{error}</p>}
-      </div>
-    </WidgetFrame>
-  );
-}
-
-/** The medium tile: a ring a device, its glyph inside, the charge and the name under it. */
-function RingsTile({ levels: all }: { levels: Level[] }) {
-  const shown = all.slice(0, RING_SLOTS);
-  return (
-    <WidgetFrame size="medium" label="Batteries" ground="vibrant">
-      {shown.length === 0 ? (
-        <Notice icon={<BluetoothIcon strokeWidth={1.6} />} title="No batteries to show">
-          <p className="m-0">Connected devices that report a charge appear here.</p>
-        </Notice>
-      ) : (
-        <ul className="m-0 grid h-full list-none grid-cols-4 items-center p-0 px-3.5">
-          {shown.map((l) => {
-            const Glyph = kindIcon(l.kind);
-            return (
-              <li key={l.name} className="flex min-w-0 flex-col items-center gap-1">
-                <Ring
-                  value={l.percent / 100}
-                  label={`${l.name} battery`}
-                  valueText={`${l.percent}%`}
-                  accent={levelAccent(l.percent)}
-                  size={60}
-                  stroke={7}
-                >
-                  <Glyph aria-hidden className="size-5 text-widget-ink" strokeWidth={1.8} />
-                </Ring>
-                <span className="text-notch-w-headline leading-tight font-light tabular-nums">{l.percent}%</span>
-                <span className="w-full truncate px-0.5 text-center text-notch-w-over leading-tight font-medium text-widget-ink-2">
-                  {l.name}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </WidgetFrame>
-  );
-}
-
-/** The small tile: the device that will need charging first, as Apple's shows its one ring. */
-function LeastTile({ low }: { low: Level | null }) {
-  if (!low) {
-    return (
-      <WidgetFrame size="small" label="Batteries" ground="vibrant">
-        <Notice icon={<BluetoothIcon strokeWidth={1.6} />} title="No battery reading" />
-      </WidgetFrame>
-    );
-  }
-  const Glyph = kindIcon(low.kind);
-  return (
-    <WidgetFrame size="small" label="Batteries" ground="vibrant" accent={levelAccent(low.percent)}>
-      <div className="flex h-full flex-col justify-between p-3.5">
-        <div className="flex items-start justify-between gap-2">
-          <Ring
-            value={low.percent / 100}
-            label={`${low.name} battery`}
-            valueText={`${low.percent}%`}
-            size={56}
-            stroke={9}
-          >
-            <Glyph aria-hidden className="size-5 text-widget-ink" strokeWidth={1.8} />
-          </Ring>
-          <span className="line-clamp-2 pt-1 text-right text-notch-w-meta leading-tight font-medium text-widget-ink-2">
-            {low.name} has the least left
-          </span>
-        </div>
-        <div className="flex items-baseline">
-          <Numeral text={formatNumeral(low.percent)} size="l" roll />
-          <span className="text-notch-w-numeral-s font-light text-widget-ink">%</span>
-        </div>
       </div>
     </WidgetFrame>
   );

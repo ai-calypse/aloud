@@ -9,8 +9,10 @@ import {
   islandTone,
   levelOf,
   opensOnHover,
-  pillSides,
-  PILL_MAX,
+  pillLayout,
+  pillSideWidths,
+  PILL_SIDE_MAX,
+  STACK_MAX,
   takeoverTier,
 } from "./islands";
 
@@ -61,23 +63,36 @@ describe("applyIsland", () => {
   });
 });
 
-describe("pillSides", () => {
+describe("pillLayout", () => {
   const ids = (list: Island[]) => list.map((i) => i.id);
+  const many = (n: number) => Array.from({ length: n }, (_, i) => island(`i${i}`, `${i}`));
 
-  it("spans one activity across both sides of the camera", () => {
-    const sides = pillSides([island("a")]);
-    expect([ids(sides.left), ids(sides.right), sides.more]).toEqual([["a"], [], 0]);
+  it("draws nothing for nothing, and one activity alone", () => {
+    expect(pillLayout([])).toEqual({ lead: null, stack: [], more: 0 });
+    const one = pillLayout(many(1));
+    expect([one.lead?.id, one.stack, one.more]).toEqual(["i0", [], 0]);
   });
 
-  it("alternates by rank, so the top two sit either side of the camera", () => {
-    const sides = pillSides(["a", "b", "c"].map((id) => island(id)));
-    expect([ids(sides.left), ids(sides.right)]).toEqual([["a", "c"], ["b"]]);
+  it("leads with the most important and stacks the next few behind it, in rank", () => {
+    const { lead, stack, more } = pillLayout(many(3));
+    expect([lead?.id, ids(stack), more]).toEqual(["i0", ["i1", "i2"], 0]);
   });
 
-  it("counts what does not fit instead of crowding the notch", () => {
-    const sides = pillSides(["a", "b", "c", "d", "e", "f"].map((id) => island(id)));
-    expect(ids(sides.left).length + ids(sides.right).length).toBe(PILL_MAX);
-    expect(sides.more).toBe(2);
+  it("caps the stack and counts the rest instead of crowding the notch", () => {
+    const { stack, more } = pillLayout(many(12));
+    expect(stack).toHaveLength(STACK_MAX);
+    expect(more).toBe(12 - 1 - STACK_MAX);
+  });
+
+  // Guards: the pill used to add an island a side per activity and grew with them.
+  it("is no wider for twelve activities than for five, and none outgrows the bound", () => {
+    const widest = (n: number) => {
+      const { left, right } = pillSideWidths(many(n));
+      return Math.max(left, right);
+    };
+    for (const n of [1, 2, 5, 12]) expect(widest(n)).toBeLessThanOrEqual(PILL_SIDE_MAX);
+    expect(widest(12)).toBe(widest(5));
+    expect(widest(5)).toBeLessThanOrEqual(PILL_SIDE_MAX);
   });
 });
 
