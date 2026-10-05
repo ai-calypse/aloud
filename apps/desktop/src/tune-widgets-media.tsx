@@ -26,22 +26,42 @@ const SOUND: SoundState = {
   micMuted: false,
 };
 
-const dev = (name: string, kind: string, percent: number[] | null, labels: string[] = []): BtDevice => ({
+const dev = (
+  name: string,
+  kind: string,
+  level: number | null,
+  rest: Partial<BtDevice> = {},
+): BtDevice => ({
   name,
   address: name.toLowerCase().replace(/\W/g, ":"),
   kind,
-  connected: percent !== null,
-  batteries: (percent ?? []).map((p, i) => ({ label: labels[i] ?? "", percent: p })),
+  connected: level !== null,
+  batteries: level === null ? [] : [{ label: "", percent: level }],
+  level,
+  case: null,
+  singleBud: null,
+  ...rest,
 });
-
+const pods = (name: string, left: number | null, right: number | null, caseLevel: number | null): BtDevice => {
+  const buds = [left, right].filter((p): p is number => p !== null);
+  return dev(name, "headphones", Math.ceil(buds.reduce((a, b) => a + b, 0) / buds.length), {
+    batteries: [
+      ...(left === null ? [] : [{ label: "Left", percent: left }]),
+      ...(right === null ? [] : [{ label: "Right", percent: right }]),
+      ...(caseLevel === null ? [] : [{ label: "Case", percent: caseLevel }]),
+    ],
+    case: caseLevel,
+    singleBud: left === null ? "Right" : right === null ? "Left" : null,
+  });
+};
 const DEVICES: BtDevice[] = [
-  dev("AirPods Pro", "headphones", [100, 98, 63], ["Left", "Right", "Case"]),
-  dev("Magic Mouse", "mouse", [80]),
-  dev("Magic Keyboard", "keyboard", [18]),
+  pods("AirPods Pro", 100, 98, 63),
+  dev("Magic Mouse", "mouse", 80),
+  dev("Magic Keyboard", "keyboard", 18),
   dev("Sony WH-1000XM5", "headphones", null),
-  dev("Magic Trackpad", "trackpad", []),
+  dev("Magic Trackpad", "trackpad", null, { connected: true }),
+  pods("Beats Fit Pro", 41, null, 90),
 ];
-
 function Block({ name, note, children }: { name: string; note: string; children: ReactNode }) {
   return (
     <section>

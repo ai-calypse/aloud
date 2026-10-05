@@ -44,11 +44,6 @@ export function lineAt(lines: { ms: number }[], positionMs: number): number {
   return lo - 1;
 }
 
-/** The lowest battery of a device, the one that decides when to charge it. */
-export function lowest(batteries: { percent: number }[]): number | null {
-  return batteries.length ? Math.min(...batteries.map((b) => b.percent)) : null;
-}
-
 /** The speeds the chip steps through, in percent, ending back at normal. */
 const SPEEDS = [100, 125, 150, 175, 200, 75];
 

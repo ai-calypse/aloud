@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NowPlaying } from "@/lib/bindings";
-import { formatSpeed, needsSong, formatTime, jsOffFix, joinNames, lineAt, lowest, nextSpeed, plainHost, positionAt, shortName } from "./media";
+import { formatSpeed, needsSong, formatTime, jsOffFix, joinNames, lineAt, nextSpeed, plainHost, positionAt, shortName } from "./media";
 
 const track = (over: Partial<NowPlaying> = {}): NowPlaying => ({
   player: "spotify",
@@ -103,13 +103,6 @@ describe("formatTime", () => {
     expect(formatTime(3_600_000)).toBe("1:00:00");
     expect(formatTime(-5)).toBe("0:00");
     expect(formatTime(Number.NaN)).toBe("0:00");
-  });
-});
-
-describe("lowest", () => {
-  it("is the battery that runs out first", () => {
-    expect(lowest([{ percent: 100 }, { percent: 18 }, { percent: 63 }])).toBe(18);
-    expect(lowest([])).toBeNull();
   });
 });
 

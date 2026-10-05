@@ -41,7 +41,45 @@ pub struct BtDevice {
     /// `headphones`, `mouse`, `keyboard`, `trackpad` or `other`.
     pub kind: String,
     pub connected: bool,
+    /// The raw parts, as the device reported them.
     pub batteries: Vec<DeviceBattery>,
+    /// The headline charge, never the case: the mean of left and right (the
+    /// buds are worn as a pair), the one bud alone when only one reports, or
+    /// the device's single battery. `None` when only a case reported.
+    pub level: Option<u8>,
+    /// The charging case, shown small beside the headline.
+    pub case: Option<u8>,
+    /// "Left" or "Right" when `level` is that bud alone (the other is out of
+    /// range or in the case), so the card can say so.
+    pub single_bud: Option<String>,
+}
+
+impl BtDevice {
+    /// Derives `level`, `case` and `single_bud` from `batteries`. Run it
+    /// wherever the parts change, so no consumer averages for itself.
+    fn settle(mut self) -> Self {
+        let of = |label: &str| {
+            self.batteries
+                .iter()
+                .find(|b| b.label == label)
+                .map(|b| u16::from(b.percent))
+        };
+        let (left, right) = (of("Left"), of("Right"));
+        self.case = of("Case").map(|p| p as u8);
+        self.single_bud = match (left, right) {
+            (Some(_), None) => Some("Left".into()),
+            (None, Some(_)) => Some("Right".into()),
+            _ => None,
+        };
+        // Rounded half up: two buds at 99 and 100 read 100, not 99.
+        self.level = match (left, right) {
+            (Some(l), Some(r)) => Some((l + r).div_ceil(2) as u8),
+            (Some(p), None) | (None, Some(p)) => Some(p as u8),
+            // `of("")` is the single-battery device (mouse, headset).
+            (None, None) => of("").map(|p| p as u8),
+        };
+        self
+    }
 }
 
 /// Every paired device, connected first, then by name. Blocking: the profiler
@@ -124,13 +162,22 @@ fn parse_profiler(json: &str) -> Vec<BtDevice> {
                     })
                 })
                 .collect();
-                out.push(BtDevice {
-                    name: name.clone(),
-                    address: normalize_address(d["device_address"].as_str().unwrap_or_default()),
-                    kind: kind_of(d["device_minorType"].as_str().unwrap_or_default(), name).into(),
-                    connected,
-                    batteries,
-                });
+                out.push(
+                    BtDevice {
+                        name: name.clone(),
+                        address: normalize_address(
+                            d["device_address"].as_str().unwrap_or_default(),
+                        ),
+                        kind: kind_of(d["device_minorType"].as_str().unwrap_or_default(), name)
+                            .into(),
+                        connected,
+                        batteries,
+                        level: None,
+                        case: None,
+                        single_bud: None,
+                    }
+                    .settle(),
+                );
             }
         }
     }
@@ -204,15 +251,22 @@ fn merge_hid(devices: &mut Vec<BtDevice>, hids: Vec<Hid>) {
                 d.connected = true;
                 if d.batteries.is_empty() {
                     d.batteries.push(battery);
+                    *d = d.clone().settle();
                 }
             }
-            None => devices.push(BtDevice {
-                kind: kind_of("", &hid.name).into(),
-                name: hid.name,
-                address: hid.address,
-                connected: true,
-                batteries: vec![battery],
-            }),
+            None => devices.push(
+                BtDevice {
+                    kind: kind_of("", &hid.name).into(),
+                    name: hid.name,
+                    address: hid.address,
+                    connected: true,
+                    batteries: vec![battery],
+                    level: None,
+                    case: None,
+                    single_bud: None,
+                }
+                .settle(),
+            ),
         }
     }
 }
@@ -269,9 +323,14 @@ const SETTLE: Duration = Duration::from_millis(1500);
 const LOW: u8 = 20;
 const REARM: u8 = 25;
 
-/// The part of a device with the least charge: left, right or case.
+/// The part of a device that decides when to charge it: the emptier bud, or
+/// the single battery. Never the case: it is charged by putting the buds in
+/// it, and a low case says nothing about what is in the ears.
 fn lowest(batteries: &[DeviceBattery]) -> Option<&DeviceBattery> {
-    batteries.iter().min_by_key(|b| b.percent)
+    batteries
+        .iter()
+        .filter(|b| b.label != "Case")
+        .min_by_key(|b| b.percent)
 }
 
 #[derive(Debug, Default)]
@@ -339,8 +398,9 @@ fn alert(id: String, icon: &str, title: String, tier: IslandTier) -> Island {
     }
 }
 
-/// The whisper for headphones coming on: their lowest battery, or the bare
-/// fact while no battery has been reported yet.
+/// The whisper for headphones coming on: the buds' level (the mean of left
+/// and right, as the Devices card headlines), or the bare fact while no
+/// battery has been reported yet.
 fn connected_island(address: &str, name: &str, percent: Option<u8>) -> Island {
     Island {
         short: Some(percent.map_or_else(|| "Connected".into(), |p| format!("{p}%"))),
@@ -418,7 +478,7 @@ pub fn react(event: BtEvent) -> Vec<Island> {
         out.push(connected_island(
             &event.address,
             me.map_or(event.name.as_str(), |d| d.name.as_str()),
-            me.and_then(|d| lowest(&d.batteries)).map(|b| b.percent),
+            me.and_then(|d| d.level),
         ));
     }
     out.extend(check_batteries(&devices));
@@ -650,6 +710,77 @@ mod tests {
         assert_eq!(devices[2].address, "0d:16:4a:d5:46:cf");
     }
 
+    /// A trimmed real `system_profiler SPBluetoothDataType -json`: other keys
+    /// around the batteries, one pair of buds with one bud out, a headset
+    /// with a single battery, a mouse the profiler also lists as not connected.
+    const REAL: &str = r#"{"SPBluetoothDataType":[{"controller_properties":{"controller_state":"attrib_on"},
+      "device_connected":[
+        {"Yaksh’s AirPods Pro":{"device_address":"AA:BB:CC:DD:EE:01","device_batteryLevelCase":"63%",
+          "device_batteryLevelLeft":"100%","device_batteryLevelRight":"98%","device_firmwareVersion":"7E93",
+          "device_minorType":"Headphones","device_productID":"0x2014","device_vendorID":"0x004C"}},
+        {"Beats Fit Pro":{"device_address":"AA:BB:CC:DD:EE:04","device_batteryLevelLeft":"41%",
+          "device_batteryLevelCase":"90%","device_minorType":"Headphones"}},
+        {"Sony WH-1000XM5":{"device_address":"AA:BB:CC:DD:EE:05","device_batteryLevelMain":"77%","device_minorType":"Headset"}}],
+      "device_not_connected":[
+        {"Magic Mouse":{"device_address":"AA:BB:CC:DD:EE:06","device_minorType":"Mouse"}}]}]}"#;
+
+    /// Guards: AirPods headlined 63%, the case, and the buds were never
+    /// averaged. One device is one entry however many parts it reports.
+    #[test]
+    fn buds_average_the_case_is_apart_and_one_device_is_one_entry() {
+        let devices = parse_profiler(REAL);
+        assert_eq!(
+            devices.len(),
+            4,
+            "one entry per device, not per battery part"
+        );
+        let pods = &devices[0];
+        assert_eq!(
+            (pods.level, pods.case, pods.single_bud.clone()),
+            (Some(99), Some(63), None)
+        );
+        // One bud out: that bud alone, said so, and the case still apart.
+        let beats = &devices[1];
+        assert_eq!(
+            (beats.level, beats.case, beats.single_bud.as_deref()),
+            (Some(41), Some(90), Some("Left"))
+        );
+        let headset = &devices[2];
+        assert_eq!(
+            (headset.level, headset.case, headset.single_bud.clone()),
+            (Some(77), None, None)
+        );
+        let off = &devices[3];
+        assert_eq!((off.connected, off.level, off.case), (false, None, None));
+    }
+
+    #[test]
+    fn the_mean_rounds_half_up_and_a_case_alone_has_no_headline() {
+        assert_eq!(pods(99, 100, 10).level, Some(100));
+        assert_eq!(pods(0, 1, 10).level, Some(1));
+        let case_only = BtDevice {
+            batteries: vec![DeviceBattery {
+                label: "Case".into(),
+                percent: 55,
+            }],
+            ..pods(0, 0, 0)
+        }
+        .settle();
+        assert_eq!((case_only.level, case_only.case), (None, Some(55)));
+    }
+
+    /// Guards: a nearly empty case raised "AirPods case battery is at 12%" while
+    /// the buds were full; the case is not what runs out in the ears.
+    #[test]
+    fn a_low_case_alone_is_not_low() {
+        let mut t = Tracker::default();
+        assert!(t.low_fires(&pods(90, 95, 12)).is_none());
+        assert!(
+            t.low_fires(&pods(90, 15, 12)).is_some(),
+            "an emptied bud is"
+        );
+    }
+
     #[test]
     fn nothing_paired_or_garbage_is_an_empty_list() {
         assert!(parse_profiler("{}").is_empty());
@@ -754,17 +885,23 @@ mod tests {
             kind: "headphones".into(),
             connected: true,
             batteries: vec![part("Left", left), part("Right", right), part("Case", case)],
+            level: None,
+            case: None,
+            single_bud: None,
         }
+        .settle()
     }
 
-    /// The whisper shows one number, and it is the one that runs out first.
+    /// Guards: the whisper (and the card) headlined 63%, the case, for
+    /// AirPods whose buds were at 100% and 98%.
     #[test]
-    fn the_lowest_part_speaks_for_the_device() {
+    fn the_buds_speak_for_the_device_never_the_case() {
         let d = pods(92, 88, 64);
-        assert_eq!(lowest(&d.batteries).map(|b| b.percent), Some(64));
+        assert_eq!(d.level, Some(90));
+        assert_eq!(lowest(&d.batteries).map(|b| b.percent), Some(88));
         assert_eq!(lowest(&[]), None);
-        let island = connected_island(&d.address, &d.name, Some(64));
-        assert_eq!(island.short.as_deref(), Some("64%"));
+        let island = connected_island(&d.address, &d.name, d.level);
+        assert_eq!(island.short.as_deref(), Some("90%"));
         assert_eq!(island.tier, Some(IslandTier::Whisper));
         assert_eq!(island.source, IslandSource::Connectivity);
         let bare = connected_island(&d.address, &d.name, None);
