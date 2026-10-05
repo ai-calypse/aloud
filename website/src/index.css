@@ -220,3 +220,9 @@ textarea:focus-visible {
   background: currentColor;
   animation: al-caret 1s steps(1) infinite;
 }
+
+/* Blog post body: plain tags in, house type out. */
+.post h2 { margin-top: 12px; font-family: var(--font-head); font-size: 1.5rem; font-weight: 500; letter-spacing: -0.02em; line-height: 1.2; }
+.post ul { display: grid; gap: 10px; padding-left: 1.25rem; list-style: square; }
+.post li::marker { color: var(--blue-500); }
+.post p, .post li { max-width: 62ch; }
