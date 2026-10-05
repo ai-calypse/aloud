@@ -5,6 +5,7 @@ import type {
   FocusStats,
   Note,
   PrivacyUse,
+  SyncState,
   SystemStats,
   TimerMode,
   TimerState,
@@ -20,6 +21,7 @@ import {
   StatsBoard,
   WindowsBoard,
 } from "./features/notch/views/widgets/Mac";
+import { syncStatus } from "./features/notch/views/widgets/focus-widgets";
 
 /**
  * Fixtures for the Mac and Focus widget views: each board with real-shaped
@@ -77,6 +79,8 @@ const NOTES: Note[] = [
   { path: "c", title: "", date: Date.now() / 1000 - 9 * 86_400, content: "# Notch ideas\nWidgets are an option, not the default" },
 ];
 
+const SYNC_MARKS: Record<string, SyncState> = { a: "synced", b: "edited", c: "new" };
+
 function Block({ name, note, children }: { name: string; note: string; children: ReactNode }) {
   return (
     <section>
@@ -115,9 +119,9 @@ function AwakeFixture({ active, minutes, error = null }: { active: boolean; minu
   return <AwakeBoard snap={snap} error={error} onChoose={noop} />;
 }
 
-function NotesFixture({ notes }: { notes: Note[] }) {
+function NotesFixture({ notes, marks = {}, status = null, syncing = false }: { notes: Note[]; marks?: Record<string, SyncState>; status?: ReturnType<typeof syncStatus> | null; syncing?: boolean }) {
   const [text, setText] = useState("");
-  return <NotesBoard text={text} notes={notes} openPath="a" now={Date.now()} onEdit={setText} onOpen={noop} onNew={() => setText("")} />;
+  return <NotesBoard text={text} notes={notes} openPath="a" now={Date.now()} marks={marks} status={status} syncing={syncing} onEdit={setText} onOpen={noop} onNew={() => setText("")} onSync={noop} onShowInNotes={noop} />;
 }
 
 const PRIVACY_ON: PrivacyUse = { mic: true, camera: true, micApps: ["Zoom"] };
@@ -179,8 +183,14 @@ export function MacFocusGallery() {
         <div className="h-4" />
         <AwakeFixture active={false} minutes={null} error="caffeinate could not start" />
       </Block>
-      <Block name="Focus · Notes" note="fixture: three notes and a note being written; then none yet">
-        <NotesFixture notes={NOTES} />
+      <Block name="Focus · Notes" note="fixture: one note in Apple Notes, one edited since, one never copied; then a copy finishing, one syncing, Automation denied, none yet">
+        <NotesFixture notes={NOTES} marks={SYNC_MARKS} />
+        <div className="h-4" />
+        <NotesFixture notes={NOTES} marks={{ a: "synced", b: "synced", c: "synced" }} status={syncStatus({ pushed: 2, error: null, permission: false })} />
+        <div className="h-4" />
+        <NotesFixture notes={NOTES} marks={SYNC_MARKS} syncing />
+        <div className="h-4" />
+        <NotesFixture notes={NOTES} marks={SYNC_MARKS} status={syncStatus({ pushed: 0, error: "Aloud needs permission to control Notes. Allow it under System Settings, Privacy & Security, Automation, then try again.", permission: true })} />
         <div className="h-4" />
         <NotesFixture notes={[]} />
       </Block>

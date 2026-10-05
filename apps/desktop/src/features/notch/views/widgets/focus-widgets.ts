@@ -1,4 +1,12 @@
-import type { AwakeState, FocusDay, TimerMode, TimerState } from "@/lib/bindings";
+import type {
+  AwakeState,
+  FocusDay,
+  Note,
+  SyncReport,
+  SyncState,
+  TimerMode,
+  TimerState,
+} from "@/lib/bindings";
 import type { WidgetRole } from "@/components/notch/widgets";
 import { clock, timerTitle, timerValueMs } from "@/lib/focus";
 import { formatMinutes } from "../mac-format";
@@ -136,4 +144,33 @@ export function noteWhen(unixSeconds: number, now: number): string {
   if (days === 0) return at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   if (days === 1) return "Yesterday";
   return at.toLocaleDateString(undefined, { month: "numeric", day: "numeric", year: "2-digit" });
+}
+
+/** What a row's button offers for a note, by how its copy in Apple Notes stands. */
+export const SYNC_LABEL: Record<SyncState, string> = {
+  new: "Save to Notes",
+  edited: "Update in Notes",
+  synced: "In Notes",
+};
+
+/** Notes with no copy yet or a stale one: what "Sync all" would send. */
+export function pendingSync(notes: Note[], marks: Record<string, SyncState>): number {
+  return notes.filter((n) => (marks[n.path] ?? "new") !== "synced").length;
+}
+
+/**
+ * The line under a sync: what happened, in the words of the one place the user
+ * can look for it. `permission` tells the board to offer the Automation switch,
+ * since retrying cannot fix that.
+ */
+export function syncStatus(r: SyncReport): { text: string; permission: boolean; ok: boolean } {
+  if (r.error) {
+    const done = r.pushed > 0 ? `${r.pushed} copied, then it stopped. ` : "";
+    return { text: `${done}${r.error}`, permission: r.permission, ok: false };
+  }
+  const text =
+    r.pushed === 0
+      ? "Everything is already in Notes."
+      : `${r.pushed === 1 ? "1 note" : `${r.pushed} notes`} copied to the Aloud folder in Notes.`;
+  return { text, permission: false, ok: true };
 }

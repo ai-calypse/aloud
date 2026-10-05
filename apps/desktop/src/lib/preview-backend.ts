@@ -239,6 +239,15 @@ const NOTES: Note[] = [
   { path: "/demo/notes/notch-ideas.md", title: "Notch ideas", date: SEC - 9 * 86_400, content: "# Notch ideas\nWidgets are an option, not the default" },
 ];
 
+// The one thing here that follows a click: a copy into Apple Notes, so the
+// "In Notes" and "Syncing" states can be seen. `?notesSync=denied` shows the
+// permission failure instead.
+const NOTE_MARKS: Record<string, "new" | "synced" | "edited"> = {
+  [NOTES[0].path]: "synced",
+  [NOTES[1].path]: "edited",
+  [NOTES[2].path]: "new",
+};
+
 // ── shelf ────────────────────────────────────────────────────────────────
 
 const FILE_NAMES: [string, boolean, "file" | "folder"][] = [
@@ -483,6 +492,15 @@ function handle(cmd: string, a: Record<string, unknown> = {}): unknown {
     case "focus_state": return focus();
     case "focus_stats": return FOCUS_STATS;
     case "quick_notes": return NOTES;
+    case "note_sync_marks": return Object.entries(NOTE_MARKS).map(([path, state]) => ({ path, state }));
+    case "sync_quick_notes": {
+      if (params.get("notesSync") === "denied") {
+        return { pushed: 0, permission: true, error: "Aloud needs permission to control Notes. Allow it under System Settings, Privacy & Security, Automation, then try again." };
+      }
+      const todo = Object.keys(NOTE_MARKS).filter((p) => (!a.path || p === a.path) && NOTE_MARKS[p] !== "synced");
+      for (const p of todo) NOTE_MARKS[p] = "synced";
+      return new Promise((done) => setTimeout(() => done({ pushed: todo.length, permission: false, error: null }), 400));
+    }
     case "recent_notes": return NOTES.slice(0, Number(a.limit) || 3);
     case "search_notes":
       return NOTES.filter((n) => has(n.content, a.query)).map((note) => ({ note, score: 1, snippet: note.content.split("\n")[0] }));

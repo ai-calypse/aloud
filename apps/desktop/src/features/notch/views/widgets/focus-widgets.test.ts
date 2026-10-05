@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { AwakeState, FocusDay, TimerState } from "@/lib/bindings";
+import type { AwakeState, FocusDay, Note, TimerState } from "@/lib/bindings";
 import {
   awakeChoice,
   noteSnippet,
   noteTitle,
   noteWhen,
+  pendingSync,
   primaryLabel,
+  syncStatus,
   timerCaption,
   timerFace,
   weekWidget,
@@ -141,5 +143,39 @@ describe("notes text", () => {
     expect(noteWhen(at(2026, 9, 4), now)).toMatch(/9:05/);
     expect(noteWhen(at(2026, 9, 3), now)).toBe("Yesterday");
     expect(noteWhen(at(2026, 8, 20), now)).not.toBe("Yesterday");
+  });
+});
+
+describe("pendingSync", () => {
+  const note = (path: string): Note => ({ path, title: path, date: 0, content: path });
+
+  it("counts notes with no copy and notes edited since, not current ones", () => {
+    const notes = [note("a"), note("b"), note("c"), note("d")];
+    expect(pendingSync(notes, { a: "synced", b: "edited", c: "new" })).toBe(3);
+  });
+
+  it("treats a note the ledger has not heard of as unsynced", () => {
+    expect(pendingSync([note("a")], {})).toBe(1);
+  });
+});
+
+describe("syncStatus", () => {
+  it("says a permission failure needs the Automation switch, not a retry", () => {
+    const s = syncStatus({ pushed: 0, error: "Aloud needs permission to control Notes", permission: true });
+    expect(s).toMatchObject({ ok: false, permission: true });
+  });
+
+  it("does not hide that some notes went through before it stopped", () => {
+    const s = syncStatus({ pushed: 2, error: "timed out", permission: false });
+    expect(s.text).toBe("2 copied, then it stopped. timed out");
+  });
+
+  it("says plainly when there was nothing to copy", () => {
+    expect(syncStatus({ pushed: 0, error: null, permission: false }).text).toBe(
+      "Everything is already in Notes.",
+    );
+    expect(syncStatus({ pushed: 1, error: null, permission: false }).text).toBe(
+      "1 note copied to the Aloud folder in Notes.",
+    );
   });
 });

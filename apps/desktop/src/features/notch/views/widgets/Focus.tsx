@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CoffeeIcon, FolderIcon, TimerIcon } from "lucide-react";
+import { ArrowUpRightIcon, CoffeeIcon, FolderIcon, TimerIcon } from "lucide-react";
 import { NOTCH_FOCUS } from "@/components/ui/button";
 import {
   Numeral,
@@ -13,6 +13,7 @@ import {
   type FocusSnapshot,
   type FocusStats,
   type Note,
+  type SyncState,
   type TimerMode,
   type TimerState,
 } from "@/lib/bindings";
@@ -27,7 +28,10 @@ import {
   noteSnippet,
   noteTitle,
   noteWhen,
+  SYNC_LABEL,
+  pendingSync,
   primaryLabel,
+  syncStatus,
   timerCaption,
   timerFace,
   weekWidget,
@@ -275,9 +279,10 @@ export function AwakeBoard({
 /* Focus › Notes ---------------------------------------------------------- */
 
 /**
- * Focus › Notes as a widget board: the Notes widget's yellow header over the
- * recent notes, and a second tile to write in. Autosave, opening an older
- * note and starting a new one come from one shared hook.
+ * Focus › Notes as a widget board: Aloud's own quick notes over a tile to
+ * write in. They are files in Aloud's notes folder, not the Notes app's, so the
+ * board says so and offers a one-way copy into a Notes folder called "Aloud".
+ * Autosave, opening, starting a new note and that copy come from one hook.
  */
 export function WidgetFocusNotes() {
   const q = useQuickNotes();
@@ -287,9 +292,14 @@ export function WidgetFocusNotes() {
       notes={q.notes}
       openPath={q.openPath}
       now={Date.now()}
+      marks={q.marks}
+      status={q.status}
+      syncing={q.syncing}
       onEdit={q.edit}
       onOpen={(n) => void q.open(n)}
       onNew={() => void q.fresh()}
+      onSync={(n) => void q.sync(n)}
+      onShowInNotes={(n) => void q.showInNotes(n)}
     />
   );
 }
@@ -298,51 +308,83 @@ export function WidgetFocusNotes() {
 const NOTES_HEAD =
   "flex h-11 shrink-0 items-center gap-2 bg-widget-acc px-4 text-notch-w-headline font-semibold text-widget-on";
 
+/** A small pill on a yellow header or a tile row. */
+const CHIP =
+  "h-6.5 shrink-0 rounded-full px-3 text-notch-w-meta font-semibold whitespace-nowrap transition-transform duration-[var(--dur-fast)] ease-[var(--ease-out)] active:scale-97 disabled:pointer-events-none disabled:opacity-40";
+
 export function NotesBoard({
   text,
   notes,
   openPath,
   now,
+  marks,
+  status,
+  syncing,
   onEdit,
   onOpen,
   onNew,
+  onSync,
+  onShowInNotes,
 }: {
   text: string;
   notes: Note[];
   openPath: string | null;
   now: number;
+  marks: Record<string, SyncState>;
+  status: ReturnType<typeof syncStatus> | null;
+  syncing: boolean;
   onEdit: (body: string) => void;
   onOpen: (note: Note) => void;
   onNew: () => void;
+  /** One note, or all that need it when called with none. */
+  onSync: (note?: Note) => void;
+  onShowInNotes: (note: Note) => void;
 }) {
+  const pending = pendingSync(notes, marks);
   return (
-    <WidgetBoard label="Notes">
-      <WidgetFrame size="large" label="Recent notes" accent="sun">
+    <WidgetBoard label="Aloud notes">
+      <WidgetFrame size="large" label="Aloud notes" accent="sun">
         <div className="flex h-full flex-col">
-          <div className={NOTES_HEAD}>
-            <FolderIcon aria-hidden className="size-5" fill="currentColor" strokeWidth={1.6} />
-            Notes
+          <div className={cn(NOTES_HEAD, "justify-between")}>
+            <span className="flex items-center gap-2">
+              <FolderIcon aria-hidden className="size-5" fill="currentColor" strokeWidth={1.6} />
+              Aloud notes
+            </span>
+            {notes.length > 0 && (
+              <button
+                type="button"
+                disabled={syncing || pending === 0}
+                onClick={() => onSync()}
+                className={cn(NOTCH_FOCUS, CHIP, "bg-widget-on/15")}
+              >
+                {syncing ? "Syncing…" : "Sync all"}
+              </button>
+            )}
           </div>
           {notes.length === 0 ? (
             <div className="min-h-0 flex-1">
               <Idle icon={<FolderIcon strokeWidth={1.6} />}>
-                No quick notes yet. Notes you type here are kept as markdown in your Aloud notes
-                folder, beside your meeting notes.
+                No notes yet. What you type here is kept by Aloud, beside your meeting notes. Save a
+                note to Notes to copy it into the Notes app.
               </Idle>
             </div>
           ) : (
             <ul aria-label="Quick notes" className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-0">
               {notes.slice(0, 5).map((note) => {
                 const selected = note.path === openPath;
+                const state = marks[note.path] ?? "new";
                 return (
-                  <li key={note.path} className="border-b border-widget-sep last:border-b-0">
+                  <li
+                    key={note.path}
+                    className="flex items-center border-b border-widget-sep last:border-b-0"
+                  >
                     <button
                       type="button"
                       aria-current={selected || undefined}
                       onClick={() => onOpen(note)}
                       className={cn(
                         NOTCH_FOCUS,
-                        "block w-full px-4 py-2.5 text-left focus-visible:-outline-offset-2 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
+                        "block min-w-0 flex-1 px-4 py-2.5 text-left focus-visible:-outline-offset-2 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
                         selected && "bg-widget-tile-2",
                       )}
                     >
@@ -354,10 +396,58 @@ export function NotesBoard({
                         {noteSnippet(note.content) && ` · ${noteSnippet(note.content)}`}
                       </span>
                     </button>
+                    {state === "synced" ? (
+                      <button
+                        type="button"
+                        aria-label={`Open “${noteTitle(note.content)}” in Notes`}
+                        onClick={() => onShowInNotes(note)}
+                        className={cn(
+                          NOTCH_FOCUS,
+                          CHIP,
+                          "mr-3 inline-flex items-center gap-1 text-widget-ink-2 hover:text-widget-ink",
+                        )}
+                      >
+                        {SYNC_LABEL.synced}
+                        <ArrowUpRightIcon aria-hidden className="size-3.5" strokeWidth={2} />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={syncing}
+                        aria-label={`${SYNC_LABEL[state]}: ${noteTitle(note.content)}`}
+                        onClick={() => onSync(note)}
+                        className={cn(NOTCH_FOCUS, CHIP, "mr-3 bg-widget-neutral-track text-widget-ink")}
+                      >
+                        {SYNC_LABEL[state]}
+                      </button>
+                    )}
                   </li>
                 );
               })}
             </ul>
+          )}
+          {notes.length > 0 && (
+            <p
+              role="status"
+              className={cn(
+                "m-0 flex shrink-0 items-center justify-between gap-2 border-t border-widget-sep px-4 py-2.5 text-notch-w-meta leading-snug",
+                status && !status.ok ? "text-widget-ink" : "text-widget-ink-2",
+              )}
+            >
+              <span>
+                {status?.text ??
+                  "Kept by Aloud, not in the Notes app. Save one to copy it into a Notes folder called Aloud."}
+              </span>
+              {status?.permission && (
+                <button
+                  type="button"
+                  onClick={() => void commands.openAutomationSettings()}
+                  className={cn(NOTCH_FOCUS, CHIP, "bg-widget-neutral-track text-widget-ink")}
+                >
+                  Open Settings
+                </button>
+              )}
+            </p>
           )}
         </div>
       </WidgetFrame>
