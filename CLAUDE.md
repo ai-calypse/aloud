@@ -384,6 +384,14 @@ short version:
   or worktree builds; a release build still fails until `stage-resources.sh`
   has run. Never copy the real `resources/` into a worktree — its `.env` holds
   real keys.
+- **The hotkey tap has never swallowed a dictation key.** `core-graphics`
+  0.24's tap trampoline maps a callback's `None` to "pass the original
+  event", so `Consume::Yes` and capture's swallow-all were always no-ops.
+  `crates/hotkey/src/macos.rs` now builds the tap on raw `CGEventTapCreate`
+  (also needed because `CGEventType` has no NX_SYSDEFINED, type 14), where
+  NULL really swallows — but only the volume keys use it. Honouring the
+  matcher's verdict changes every binding at once; do it per binding, on
+  hardware.
 
 ## Verifying
 
