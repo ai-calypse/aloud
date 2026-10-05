@@ -20,6 +20,29 @@ describe("registry widget views", () => {
     }
   });
 
+  // A widget view is the second look at a subsection, never the only one.
+  it("keeps a calm view behind every widget view", () => {
+    for (const section of SECTIONS) {
+      for (const sub of section.subsections) {
+        if (sub.widgetView) expect(sub.view, `${section.id}/${sub.id}`).toBeDefined();
+      }
+    }
+  });
+
+  it("draws Mac and Focus as widgets, every subsection of them", () => {
+    for (const [section, ids] of [
+      ["mac", ["stats", "power", "privacy", "windows"]],
+      ["focus", ["timer", "awake", "notes"]],
+    ] as const) {
+      const subs = READY.find((s) => s.id === section)?.subsections ?? [];
+      for (const id of ids) {
+        const sub = subs.find((s) => s.id === id);
+        expect(sub?.widgetView, `${section}/${id}`).toBeDefined();
+        expect(sub?.widgetView).not.toBe(sub?.view);
+      }
+    }
+  });
+
   it("never lists a widget view on a subsection that is not ready", () => {
     for (const section of SECTIONS) {
       for (const sub of section.subsections) {

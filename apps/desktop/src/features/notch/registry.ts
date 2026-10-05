@@ -25,6 +25,13 @@ import { FocusAwake, FocusNotes, FocusTimer } from "./views/Focus";
 import { TodayCalendar, TodayReminders, TodayStocks, TodayWeather } from "./views/Today";
 import { NowOverview } from "./views/Now";
 import { WidgetHome } from "./views/WidgetHome";
+import { WidgetFocusAwake, WidgetFocusNotes, WidgetFocusTimer } from "./views/widgets/Focus";
+import {
+  WidgetMacPower,
+  WidgetMacPrivacy,
+  WidgetMacStats,
+  WidgetMacWindows,
+} from "./views/widgets/Mac";
 import { ShelfDownloads, ShelfDrives, ShelfFiles, ShelfShots } from "./views/Shelf";
 
 /**
@@ -112,9 +119,30 @@ export const SECTIONS: Section[] = [
     name: "Focus",
     icon: TimerIcon,
     subsections: [
-      { id: "timer", name: "Timer", features: ["Pomodoro", "Stopwatch"], ready: true, view: FocusTimer },
-      { id: "awake", name: "Keep Awake", features: ["Keep awake", "Focus mode"], ready: true, view: FocusAwake },
-      { id: "notes", name: "Notes", features: ["Quick notes"], ready: true, view: FocusNotes },
+      {
+        id: "timer",
+        name: "Timer",
+        features: ["Pomodoro", "Stopwatch"],
+        ready: true,
+        view: FocusTimer,
+        widgetView: WidgetFocusTimer,
+      },
+      {
+        id: "awake",
+        name: "Keep Awake",
+        features: ["Keep awake", "Focus mode"],
+        ready: true,
+        view: FocusAwake,
+        widgetView: WidgetFocusAwake,
+      },
+      {
+        id: "notes",
+        name: "Notes",
+        features: ["Quick notes"],
+        ready: true,
+        view: FocusNotes,
+        widgetView: WidgetFocusNotes,
+      },
       { id: "call", name: "Call prep", features: ["Teleprompter", "Camera mirror"], ready: false },
     ],
   },
@@ -186,10 +214,38 @@ export const SECTIONS: Section[] = [
     name: "Mac",
     icon: LaptopIcon,
     subsections: [
-      { id: "stats", name: "Stats", features: ["System stats"], ready: true, view: MacStats },
-      { id: "power", name: "Power", features: ["Battery", "Full charge"], ready: true, view: MacPower },
-      { id: "privacy", name: "Privacy", features: ["Privacy indicator"], ready: true, view: MacPrivacy },
-      { id: "windows", name: "Windows", features: ["Window snapping"], ready: true, view: MacWindows },
+      {
+        id: "stats",
+        name: "Stats",
+        features: ["System stats"],
+        ready: true,
+        view: MacStats,
+        widgetView: WidgetMacStats,
+      },
+      {
+        id: "power",
+        name: "Power",
+        features: ["Battery", "Full charge"],
+        ready: true,
+        view: MacPower,
+        widgetView: WidgetMacPower,
+      },
+      {
+        id: "privacy",
+        name: "Privacy",
+        features: ["Privacy indicator"],
+        ready: true,
+        view: MacPrivacy,
+        widgetView: WidgetMacPrivacy,
+      },
+      {
+        id: "windows",
+        name: "Windows",
+        features: ["Window snapping"],
+        ready: true,
+        view: MacWindows,
+        widgetView: WidgetMacWindows,
+      },
       { id: "display", name: "Display", features: ["Keyboard backlight", "External display"], ready: false },
       { id: "menubar", name: "Menu bar", features: ["Menu bar icon hiding", "Menu bar detach"], ready: false },
     ],
