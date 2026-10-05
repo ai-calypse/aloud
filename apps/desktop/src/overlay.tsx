@@ -919,6 +919,7 @@ function Overlay() {
         setDismissing(false);
       }
       if (command.islands !== undefined) setIslands(livePreviews(command.islands));
+      if (command.notchStyle) setNotchStyle(command.notchStyle);
       if (command.open) {
         setBrowsing(true);
         navigate(command.open.section, command.open.sub);

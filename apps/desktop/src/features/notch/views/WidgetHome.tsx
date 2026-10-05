@@ -19,7 +19,16 @@ import {
   WidgetBoard,
   WidgetFrame,
 } from "@/components/notch/widgets";
-import { commands, type NowPlaying } from "@/lib/bindings";
+import {
+  commands,
+  type AgentPermission,
+  type AgentSession,
+  type Battery,
+  type FocusSnapshot,
+  type Island,
+  type NowPlaying,
+  type Weather,
+} from "@/lib/bindings";
 import { degrees } from "@/lib/today";
 import { cn } from "@/lib/utils";
 import { useNotch } from "../context";
@@ -81,7 +90,31 @@ function MusicWidget({ onOpen }: { onOpen: () => void }) {
   const { reading, patch } = useNowPlaying();
   const { now } = reading;
   const art = useArtwork(now);
+  return (
+    <MusicTile
+      now={now}
+      art={art}
+      onOpen={onOpen}
+      onToggle={() => {
+        if (!now) return;
+        patch((n) => ({ ...n, state: n.state === "playing" ? "paused" : "playing" }));
+        send(now);
+      }}
+    />
+  );
+}
 
+export function MusicTile({
+  now,
+  art,
+  onOpen,
+  onToggle,
+}: {
+  now: NowPlaying | null;
+  art: string | null;
+  onOpen?: () => void;
+  onToggle: () => void;
+}) {
   if (!now) {
     return (
       <WidgetFrame size="medium" label="Music" onActivate={onOpen}>
@@ -117,10 +150,7 @@ function MusicWidget({ onOpen }: { onOpen: () => void }) {
           {/* A white pill with dark words: Apple's translucent one is under 3:1. */}
           <button
             type="button"
-            onClick={() => {
-              patch((n) => ({ ...n, state: playing ? "paused" : "playing" }));
-              send(now);
-            }}
+            onClick={onToggle}
             className={cn(
               NOTCH_FOCUS,
               "mt-2 flex h-7.5 w-fit items-center gap-1.5 rounded-full bg-widget-ink px-3.5 text-notch-w-title font-semibold text-widget-on",
@@ -137,6 +167,18 @@ function MusicWidget({ onOpen }: { onOpen: () => void }) {
 
 function WeatherWidget({ onOpen }: { onOpen: () => void }) {
   const { data, loading } = useWeather();
+  return <WeatherTile data={data} loading={loading} onOpen={onOpen} />;
+}
+
+export function WeatherTile({
+  data,
+  loading,
+  onOpen,
+}: {
+  data: Weather | null;
+  loading: boolean;
+  onOpen?: () => void;
+}) {
   if (!data) {
     return (
       <WidgetFrame size="small" label="Weather" onActivate={onOpen}>
@@ -156,8 +198,10 @@ function WeatherWidget({ onOpen }: { onOpen: () => void }) {
           <Numeral text={degrees(data.temperature)} size="l" />
         </div>
         <div className="text-notch-w-title leading-snug font-medium">
-          <Sky aria-hidden className="mb-1 size-4.5 text-widget-ink" strokeWidth={1.8} />
-          <div className="truncate">{data.summary}</div>
+          <div className="flex items-center gap-1.5">
+            <Sky aria-hidden className="size-4.5 shrink-0 text-widget-ink" strokeWidth={1.8} />
+            <span className="truncate">{data.summary}</span>
+          </div>
           {today && (
             <div className="text-widget-ink/85">
               H:{degrees(today.high)} L:{degrees(today.low)}
@@ -171,6 +215,18 @@ function WeatherWidget({ onOpen }: { onOpen: () => void }) {
 
 function AgentsWidget({ onOpen }: { onOpen: () => void }) {
   const { sessions, permissions } = useNotch();
+  return <AgentsTile sessions={sessions} permissions={permissions} onOpen={onOpen} />;
+}
+
+export function AgentsTile({
+  sessions,
+  permissions,
+  onOpen,
+}: {
+  sessions: AgentSession[];
+  permissions: AgentPermission[];
+  onOpen?: () => void;
+}) {
   const a = agentsWidget(sessions, permissions);
   if (a.count === null) {
     return (
@@ -194,7 +250,18 @@ function AgentsWidget({ onOpen }: { onOpen: () => void }) {
 
 function CalendarWidget({ onOpen }: { onOpen: () => void }) {
   const { islands } = useNotch();
-  const now = useNow();
+  return <CalendarTile islands={islands} now={useNow()} onOpen={onOpen} />;
+}
+
+export function CalendarTile({
+  islands,
+  now,
+  onOpen,
+}: {
+  islands: Island[];
+  now: number;
+  onOpen?: () => void;
+}) {
   const c = calendarWidget(islands, now);
   return (
     <WidgetFrame size="medium" label="Calendar" onActivate={onOpen}>
@@ -227,6 +294,18 @@ function CalendarWidget({ onOpen }: { onOpen: () => void }) {
 
 function TimerWidget({ onOpen }: { onOpen: () => void }) {
   const { snap, now } = useFocus();
+  return <TimerTile snap={snap} now={now} onOpen={onOpen} />;
+}
+
+export function TimerTile({
+  snap,
+  now,
+  onOpen,
+}: {
+  snap: FocusSnapshot | null;
+  now: number;
+  onOpen?: () => void;
+}) {
   const t = timerWidget(snap, now);
   if (t.idle) {
     return (
@@ -256,8 +335,18 @@ function TimerWidget({ onOpen }: { onOpen: () => void }) {
 }
 
 function BatteryWidget({ onOpen }: { onOpen: () => void }) {
-  // `null` is a Mac with no battery; `undefined` is not read yet.
   const battery = usePoll(() => commands.macBattery(), BATTERY_POLL_MS);
+  return <BatteryTile battery={battery} onOpen={onOpen} />;
+}
+
+export function BatteryTile({
+  battery,
+  onOpen,
+}: {
+  /** `null` is a Mac with no battery; `undefined` is not read yet. */
+  battery: Battery | null | undefined;
+  onOpen?: () => void;
+}) {
   if (!battery) {
     return (
       <WidgetFrame size="small" label="Battery" ground="vibrant" onActivate={onOpen}>

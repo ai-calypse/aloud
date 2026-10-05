@@ -17,6 +17,7 @@ import { Segmented, SubTabs } from "./components/notch/segmented";
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "./index.css";
+import { WidgetGallery } from "./tune-widgets";
 import "./styles/notch.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
@@ -203,7 +204,9 @@ function Tuner() {
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
   const [stage, setStage] = useState<Stage>("dropPill");
   // The framed overlay, or the notch primitives laid out by state.
-  const [view, setView] = useState<"overlay" | "primitives">("overlay");
+  const [view, setView] = useState<"overlay" | "primitives">(
+    new URLSearchParams(location.search).get("view") === "primitives" ? "primitives" : "overlay",
+  );
   const [copied, setCopied] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
 
@@ -324,6 +327,20 @@ function Tuner() {
           <div className="grid grid-cols-2 gap-1.5">
             <Action onClick={() => send({ rest: true, islands: 2, open: { section: "now" } })}>
               Shell · Now
+            </Action>
+            <Action
+              onClick={() =>
+                send({ rest: true, islands: 2, notchStyle: "widgets", open: { section: "now" } })
+              }
+            >
+              Shell · Now · Widgets
+            </Action>
+            <Action
+              onClick={() =>
+                send({ rest: true, islands: 2, notchStyle: "calm", open: { section: "now" } })
+              }
+            >
+              Shell · Now · Calm
             </Action>
             <Action onClick={() => send({ rest: true, open: { section: "agents", sub: "voice" } })}>
               Shell · Voice
@@ -647,6 +664,10 @@ function NotchGallery() {
               <Lead sub="2 of 4">18:42</Lead>
             </Ring>
           </div>
+        </Specimen>
+
+        <Specimen name="Widgets look" note="the Settings › Overlay option: Apple-style tiles; primitives, the Home board, empty and urgent states">
+          <WidgetGallery />
         </Specimen>
 
         <Specimen name="Empty" note="a view with nothing to show teaches what fills it">
