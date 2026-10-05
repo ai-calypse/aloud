@@ -1,8 +1,10 @@
+import { useRef, type CSSProperties } from "react";
 import type { AgentPermission, AgentSession, Island } from "@/lib/bindings";
 import { AppIcon } from "@/components/notch/app-icon";
 import { LevelBar } from "@/components/notch/level-bar";
 import { AgentCats } from "@/features/overlay/NotchAgents";
-import { capsuleText, islandRole, islandTone, levelOf, pillSides } from "./islands";
+import { capsuleText, islandRole, islandTone, levelOf, PILL, pillLayout } from "./islands";
+import { useFlip } from "./useFlip";
 
 /**
  * An island's lead, wherever it is drawn: the coding agents' cat stack for
@@ -29,11 +31,13 @@ export function IslandIcon({
 }
 
 /**
- * The closed notch with live activities: ranked, either side of the camera,
- * never under it — the middle column is exactly the cutout, which has no
- * pixels to draw on. The notch's own spring widens it to fit (useNotchPanel
- * measures this), so a second activity arriving is the pill growing, not a
- * swap.
+ * The closed notch with live activities, either side of the camera, never
+ * under it — the middle column is exactly the cutout, which has no pixels to
+ * draw on. The most important activity is drawn in full; the rest are glyph
+ * discs stacked over one another beside the camera, with a count past three
+ * (`pillLayout`), so the notch is never wider for having more going on. The
+ * notch's own spring widens it to fit (useNotchPanel measures this) when the
+ * first of them arrives.
  *
  * A whisper (`whisper`) borrows it for a moment instead: the same widened
  * notch, one glyph left of the camera and a word, a number or a level bar right,
@@ -57,11 +61,11 @@ export function IslandPill({
   /** Takeovers waiting their turn: "+N" beside whatever is showing. */
   waiting?: number;
 }) {
-  const { left, right, more } = pillSides(live);
+  const { lead, stack, more } = pillLayout(live);
   const single = live.length === 1 ? live[0] : null;
-  const icon = (island: Island) => (
-    <IslandIcon island={island} sessions={sessions} permissions={permissions} />
-  );
+  const stackRef = useRef<HTMLDivElement>(null);
+  // The discs slide into their new places when one joins, leaves or re-ranks.
+  useFlip(stackRef, stack.map((i) => i.id).join("|"));
 
   if (whisper) return <Whisper island={whisper} waiting={waiting} leaving={leaving} />;
   const rest = more + waiting;
@@ -72,15 +76,21 @@ export function IslandPill({
       data-leaving={leaving || undefined}
       role="status"
       aria-label={live.map((i) => [i.title, i.detail].filter(Boolean).join(": ")).join(", ")}
+      style={
+        {
+          "--disc": `${PILL.disc}px`,
+          "--disc-overlap": `${PILL.overlap}px`,
+        } as CSSProperties
+      }
     >
       <div className="island-pill__side island-pill__side--left">
-        {left.map((island) => (
-          <span className="island-pill__item" key={island.id} data-w-role={islandRole(island)}>
-            {icon(island)}
+        {lead && (
+          <span className="island-pill__item" data-w-role={islandRole(lead)}>
+            <IslandIcon island={lead} sessions={sessions} permissions={permissions} />
             {/* One activity spans both sides: its value goes right. */}
-            {!single && <Detail island={island} />}
+            {!single && <Detail island={lead} />}
           </span>
-        ))}
+        )}
       </div>
       <span className="island-pill__camera" aria-hidden />
       <div
@@ -91,12 +101,22 @@ export function IslandPill({
         {single ? (
           <Detail island={single} />
         ) : (
-          right.map((island) => (
-            <span className="island-pill__item" key={island.id} data-w-role={islandRole(island)}>
-              {icon(island)}
-              <Detail island={island} />
-            </span>
-          ))
+          // The first disc is nearest the camera and on top; the rest tuck
+          // under it, so the stack reads outward from the lead.
+          <div className="island-pill__stack" ref={stackRef}>
+            {stack.map((island, i) => (
+              <span
+                className="island-pill__disc"
+                key={island.id}
+                data-tile={island.id}
+                data-w-role={islandRole(island)}
+                style={{ zIndex: stack.length - i }}
+                title={island.title}
+              >
+                <AppIcon icon={island.icon} label={island.title} size="sm" />
+              </span>
+            ))}
+          </div>
         )}
         {rest > 0 && <span className="island-pill__more">+{rest}</span>}
       </div>

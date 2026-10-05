@@ -24,30 +24,58 @@ export function applyIsland(islands: Island[], { change, order }: IslandChanged)
 }
 
 /**
- * How many activities the closed notch draws beside the camera before the
- * rest become a count: two a side, the most a glance takes in.
+ * The closed notch's measures, in px. CSS reads them off the pill (IslandPill
+ * sets them as custom properties), so the helper below and the drawing cannot
+ * disagree about how wide a stack is.
  */
-export const PILL_MAX = 4;
+export const PILL = {
+  icon: 18,
+  gap: 6,
+  /** `.island-pill__detail`'s 12ch cap, at the pill's 12px digits. */
+  detail: 84,
+  disc: 22,
+  /** How much of a disc the next one covers, as an avatar stack does. */
+  overlap: 7,
+  /** The "+N" after the stack. */
+  more: 24,
+} as const;
+
+/** Discs in the stack before the rest become a count. */
+export const STACK_MAX = 3;
 
 /**
- * The closed notch's two sides. One activity spans both — its icon left of
- * the camera, its value right — as the Dynamic Island draws one; more
- * alternate by rank, so the first two are always nearest the eye's start,
- * and past `PILL_MAX` the remainder is a count on the right.
+ * What the closed notch draws for its live activities, whatever their number:
+ * the most important in full (`lead`), the next few as overlapping glyph discs
+ * (`stack`, nearest the camera first), and the remainder as a count. It never
+ * grows with the number of activities, which is what keeps the notch the size
+ * of a notch.
  */
-export function pillSides(live: Island[]): {
-  left: Island[];
-  right: Island[];
-  more: number;
-} {
-  if (live.length <= 1) return { left: live, right: [], more: 0 };
-  const shown = live.slice(0, PILL_MAX);
+export function pillLayout(live: Island[]): { lead: Island | null; stack: Island[]; more: number } {
+  const [lead = null, ...rest] = live;
+  return { lead, stack: rest.slice(0, STACK_MAX), more: Math.max(0, rest.length - STACK_MAX) };
+}
+
+/**
+ * Each side's width in px. One activity spans the camera (icon left, value
+ * right); more put the lead's icon and value left and the stack right.
+ * Pill-wide, the notch is twice the wider side plus the camera.
+ */
+export function pillSideWidths(live: Island[]): { left: number; right: number } {
+  const { lead, stack, more } = pillLayout(live);
+  if (!lead) return { left: 0, right: 0 };
+  if (stack.length === 0) return { left: PILL.icon, right: PILL.detail };
+  const discs = PILL.disc + (stack.length - 1) * (PILL.disc - PILL.overlap);
   return {
-    left: shown.filter((_, i) => i % 2 === 0),
-    right: shown.filter((_, i) => i % 2 === 1),
-    more: live.length - shown.length,
+    left: PILL.icon + PILL.gap + PILL.detail,
+    right: discs + (more > 0 ? PILL.gap + PILL.more : 0),
   };
 }
+
+/** The widest a side ever gets: the lead in full, or a full stack and its count. */
+export const PILL_SIDE_MAX = Math.max(
+  PILL.icon + PILL.gap + PILL.detail,
+  PILL.disc + (STACK_MAX - 1) * (PILL.disc - PILL.overlap) + PILL.gap + PILL.more,
+);
 
 /** The accent each owner's island speaks in, by the prefix of its id (`media:browser:…`). */
 const ISLAND_ROLES: Record<string, WidgetRole> = {

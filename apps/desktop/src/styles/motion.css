@@ -151,6 +151,20 @@
  * element's computed `1fr`, which reads as "no animation" on the way in and as
  * a hard cut on the way out.
  */
+/* A glyph disc joining the closed notch's stack: the individual `scale`
+   property, so it never fights the transform useFlip drives. Both ends are
+   stated in the same units. */
+@keyframes disc-in {
+  from {
+    opacity: 0;
+    scale: 0.4;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
 @keyframes row-in {
   from {
     grid-template-rows: 0fr;
