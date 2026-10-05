@@ -27,6 +27,7 @@ import { NowOverview } from "./views/Now";
 import { WidgetHome } from "./views/WidgetHome";
 import { ShelfDownloads, ShelfDrives, ShelfFiles, ShelfShots } from "./views/Shelf";
 import { WidgetShelfFiles } from "./views/widgets/ShelfFiles";
+import { WidgetShelfShots } from "./views/widgets/ShelfShots";
 
 /**
  * Every section of the notch panel and every subsection in it, in tab order —
@@ -138,6 +139,7 @@ export const SECTIONS: Section[] = [
         features: ["Screenshot shelf", "Screen capture"],
         ready: true,
         view: ShelfShots,
+        widgetView: WidgetShelfShots,
       },
       { id: "downloads", name: "Downloads", features: ["Download alerts"], ready: true, view: ShelfDownloads },
       { id: "drives", name: "Drives", features: ["Drive eject"], ready: true, view: ShelfDrives },
