@@ -1,0 +1,12 @@
+{
+ "VolumeName": "Macintosh HD",
+ "MountPoint": "/",
+ "Internal": true,
+ "Ejectable": false,
+ "Removable": false,
+ "RemovableMedia": false,
+ "BusProtocol": "Apple Fabric",
+ "TotalSize": 494384795648,
+ "FreeSpace": 0,
+ "DeviceNode": "/dev/disk3s1s1"
+}

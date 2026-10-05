@@ -19,6 +19,14 @@ const COPY: Record<Permission, { label: string; hint: string }> = {
     label: "Microphone",
     hint: "Recording. Denied, every dictation transcribes silence.",
   },
+  calendar: {
+    label: "Calendar",
+    hint: "Today's events in the notch. Read only; Aloud never adds or changes an event.",
+  },
+  reminders: {
+    label: "Reminders",
+    hint: "Today's reminders in the notch. Ticking one off is the only change Aloud makes.",
+  },
 };
 
 /**
@@ -55,7 +63,7 @@ export function PermissionsCard() {
   if (statuses.length === 0) return null;
 
   return (
-    <Group title="Permissions">
+    <Group title="System access">
       {statuses.map(({ permission, granted }) => (
         <Row
           key={permission}

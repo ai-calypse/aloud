@@ -20,6 +20,10 @@ pub enum Permission {
     /// Global hotkeys, synthetic paste, and reading the focused selection.
     Accessibility,
     Microphone,
+    /// Control of Calendar.app (Automation): today's events in the notch.
+    Calendar,
+    /// Control of Reminders.app (Automation): today's reminders in the notch.
+    Reminders,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -36,13 +40,18 @@ pub fn all() -> Vec<PermissionStatus> {
     return Vec::new();
 
     #[cfg(target_os = "macos")]
-    [Permission::Accessibility, Permission::Microphone]
-        .into_iter()
-        .map(|permission| PermissionStatus {
-            permission,
-            granted: is_granted(permission),
-        })
-        .collect()
+    [
+        Permission::Accessibility,
+        Permission::Microphone,
+        Permission::Calendar,
+        Permission::Reminders,
+    ]
+    .into_iter()
+    .map(|permission| PermissionStatus {
+        permission,
+        granted: is_granted(permission),
+    })
+    .collect()
 }
 
 /// Whether `permission` is granted right now, without prompting. Public so a
@@ -73,6 +82,12 @@ pub fn open_settings(permission: Permission) -> anyhow::Result<()> {
         let anchor = match permission {
             Permission::Accessibility => "Privacy_Accessibility",
             Permission::Microphone => "Privacy_Microphone",
+            // Automation grants are per target app, in one pane. Asking first
+            // is what makes the prompt appear at all.
+            Permission::Calendar | Permission::Reminders => {
+                automation::request(permission);
+                return Ok(());
+            }
         };
         // `spawn`, not `status`: this is a non-async Tauri command on the main
         // thread, and waiting for LaunchServices freezes the window.
@@ -90,6 +105,7 @@ fn granted(permission: Permission) -> bool {
     match permission {
         Permission::Accessibility => aloud_hotkey::is_permitted(),
         Permission::Microphone => macos::microphone_authorized(),
+        Permission::Calendar | Permission::Reminders => automation::granted(permission),
     }
 }
 
@@ -132,5 +148,139 @@ mod macos {
                 std::mem::transmute(objc_msgSend as *const ());
             send(class, selector, AVMediaTypeAudio) == AUTHORIZED
         }
+    }
+}
+
+/// Automation (Apple Events) permission for Calendar.app and Reminders.app.
+///
+/// macOS can only say whether an app may be controlled while that app is
+/// running (`procNotFound` otherwise), and asking must not launch it every time
+/// Settings gains focus. So the last answer seen is remembered for the
+/// process, and a row with no answer yet reads "not granted" until its
+/// button — which does launch the app, hidden — gets one.
+#[cfg(target_os = "macos")]
+mod automation {
+    use super::Permission;
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    const NO_ERR: i32 = 0;
+    const PROC_NOT_FOUND: i32 = -600;
+    const NOT_PERMITTED: i32 = -1743;
+
+    // 0 unknown, 1 granted, 2 refused: one slot per permission.
+    static SEEN: [AtomicU8; 2] = [AtomicU8::new(0), AtomicU8::new(0)];
+
+    /// `AEDesc`: a descriptor type and a handle, 16 bytes on 64-bit.
+    #[repr(C)]
+    struct AeDesc {
+        descriptor_type: u32,
+        data_handle: *mut c_void,
+    }
+
+    #[link(name = "CoreServices", kind = "framework")]
+    unsafe extern "C" {
+        fn AECreateDesc(
+            type_code: u32,
+            data: *const c_void,
+            size: isize,
+            result: *mut AeDesc,
+        ) -> i16;
+        fn AEDisposeDesc(desc: *mut AeDesc) -> i16;
+        fn AEDeterminePermissionToAutomateTarget(
+            target: *const AeDesc,
+            class: u32,
+            id: u32,
+            ask_user_if_needed: u8,
+        ) -> i32;
+    }
+
+    fn four(code: &[u8; 4]) -> u32 {
+        u32::from_be_bytes(*code)
+    }
+
+    fn target(permission: Permission) -> (&'static str, &'static str, usize) {
+        match permission {
+            Permission::Reminders => ("com.apple.reminders", "Reminders", 1),
+            _ => ("com.apple.iCal", "Calendar", 0),
+        }
+    }
+
+    /// The OS's answer for `bundle`, optionally raising the consent prompt.
+    fn determine(bundle: &str, ask: bool) -> i32 {
+        let mut desc = AeDesc {
+            descriptor_type: 0,
+            data_handle: std::ptr::null_mut(),
+        };
+        // SAFETY: `bundle` outlives the call, `desc` is written by AECreateDesc
+        // before it is read, and it is disposed exactly once, on the success path.
+        unsafe {
+            let made = AECreateDesc(
+                four(b"bund"),
+                bundle.as_ptr().cast(),
+                bundle.len() as isize,
+                &mut desc,
+            );
+            if made != 0 {
+                return i32::from(made);
+            }
+            let status = AEDeterminePermissionToAutomateTarget(
+                &desc,
+                four(b"****"),
+                four(b"****"),
+                u8::from(ask),
+            );
+            AEDisposeDesc(&mut desc);
+            status
+        }
+    }
+
+    fn remember(slot: usize, status: i32) {
+        match status {
+            NO_ERR => SEEN[slot].store(1, Ordering::Relaxed),
+            PROC_NOT_FOUND => {}
+            _ => SEEN[slot].store(2, Ordering::Relaxed),
+        }
+    }
+
+    pub fn granted(permission: Permission) -> bool {
+        let (bundle, _, slot) = target(permission);
+        remember(slot, determine(bundle, false));
+        SEEN[slot].load(Ordering::Relaxed) == 1
+    }
+
+    /// Starts the app if it is not open (hidden, never frontmost), asks, and
+    /// when the answer is a refusal sends the user to the Automation pane,
+    /// where a refusal can be undone. Off the caller's thread: the prompt blocks
+    /// until it is answered.
+    pub fn request(permission: Permission) {
+        std::thread::spawn(move || {
+            let (bundle, name, slot) = target(permission);
+            let running = |n: &str| {
+                std::process::Command::new("pgrep")
+                    .args(["-x", n])
+                    .stdout(std::process::Stdio::null())
+                    .status()
+                    .is_ok_and(|s| s.success())
+            };
+            if !running(name) {
+                let _ = std::process::Command::new("open")
+                    .args(["-g", "-j", "-a", name])
+                    .status();
+                for _ in 0..30 {
+                    if running(name) {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+            let status = determine(bundle, true);
+            remember(slot, status);
+            if status == NOT_PERMITTED {
+                let _ = std::process::Command::new("open")
+                    .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
+                    .spawn();
+            }
+        });
     }
 }

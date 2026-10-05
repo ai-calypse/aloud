@@ -4,6 +4,14 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * The notch's keyboard focus: the system accent as an outline, outside the
+ * control, replacing shadcn's ring (which is the floating surface's teal and
+ * reads as a selection, not focus).
+ */
+export const NOTCH_FOCUS =
+  "focus-visible:border-transparent focus-visible:ring-0 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-notch-focus"
+
 const buttonVariants = cva(
   // Named transition properties, not shadcn's `transition-all`, which eases a
   // button's own layout on any width or content change. The press scale is on
@@ -34,6 +42,14 @@ const buttonVariants = cva(
         "plain-danger": "text-danger hover:text-danger/80 active:scale-95",
         /** Filled but quiet: the Connect button in a Connectors row. */
         field: "bg-field hover:bg-brand hover:text-brand-fg",
+
+        /* --- The notch panel (always on the black floating surface) ------- */
+        /** The one action a view is for, inverted: white on the black. */
+        notch: `${NOTCH_FOCUS} bg-notch-primary text-notch-primary-ink font-semibold hover:bg-notch-primary/85 active:bg-notch-primary/75`,
+        /** Everything else a view offers: text until pointed at. */
+        "notch-quiet": `${NOTCH_FOCUS} text-notch-ink-2 hover:bg-notch-well hover:text-notch-ink active:bg-notch-raised`,
+        /** Its destructive twin: the word is red, the fill only on intent. */
+        "notch-danger": `${NOTCH_FOCUS} text-notch-danger hover:bg-notch-danger/15 active:bg-notch-danger/25`,
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",
@@ -48,6 +64,9 @@ const buttonVariants = cva(
         row: "rounded-lg px-[15px] py-[7px] text-ui font-medium",
         /** Text-only actions carry no box, so they get no padding either. */
         text: "text-ui font-medium",
+        /** The notch's one control height: rows, footers and islands share it. */
+        notch: "h-[26px] gap-1.5 rounded-notch-control px-2.5 font-notch text-notch-body has-[>svg]:px-2 [&_svg:not([class*='size-'])]:size-3.5",
+        "notch-icon": "size-[26px] rounded-notch-control [&_svg:not([class*='size-'])]:size-3.5",
       },
     },
     defaultVariants: {

@@ -123,28 +123,26 @@ const Combobox = React.forwardRef<
 });
 
 /**
- * What a blank tab holds: the composer for starting a coding agent. Pick a repo,
+ * Agents › Coding's "New coding agent": the composer for starting one. Pick a repo,
  * pick one of its branches, say what to do, and Rust opens a Terminal tab that
  * checks that branch out in the repo and runs the agent on the task there (no
  * worktree — it edits the repo directly). The running session then shows up
- * under the Agents tab through the same discovery every other session uses.
+ * in the list beside it through the same discovery every other session uses.
  *
  * The three choices are independent: the task is the agent's instruction
  * verbatim, and the branch is picked, not derived from it. Branches are fetched
  * when the repo settles, so the dropdown reflects the chosen repo.
  *
- * A `Panel` like `Answer`/`AgentRun` so it inherits the strip's `+`, close, and
- * the always-dark chrome; the panel's own spring settles around the fields, so
+ * A `Panel` like `AgentRun`, so it inherits the close and the always-dark
+ * chrome; the panel's own spring settles around the fields, so
  * revealing the branch row simply grows the notch — no animation of its own.
  */
 export function CodingAgentComposer({
   bodyRef,
   onClose,
-  onAddTab,
 }: {
   bodyRef: React.RefObject<HTMLDivElement | null>;
   onClose: () => void;
-  onAddTab?: () => void;
 }) {
   const [repo, setRepo] = useState(() => localStorage.getItem(LAST_REPO_KEY) ?? "");
   const [branch, setBranch] = useState("");
@@ -228,11 +226,11 @@ export function CodingAgentComposer({
   };
 
   return (
-    <Panel title="New coding agent" bodyRef={bodyRef} onClose={onClose} onAddTab={onAddTab}>
+    <Panel title="New coding agent" bodyRef={bodyRef} onClose={onClose}>
       {started ? (
         <p className="ask__done">
           Started on <span className="ask__branch">{started}</span>. It will
-          appear under Agents in a moment.{" "}
+          appear in the list in a moment.{" "}
           <button className="composer__link" onClick={startAnother}>
             Start another
           </button>

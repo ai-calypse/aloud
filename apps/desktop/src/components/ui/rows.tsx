@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { NOTCH_FOCUS } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
@@ -166,19 +167,26 @@ export function PaneTitle({
   );
 }
 
-/** iOS-style switch: a button with `role="switch"` is the whole component. */
+/**
+ * iOS-style switch: a button with `role="switch"` is the whole component.
+ * `tone="notch"` is the notch panel's shadcn-shaped one: smaller, white when
+ * on with a black knob, and the system focus outline (NOTCH_FOCUS).
+ */
 export function Toggle({
   checked,
   onChange,
   label,
   disabled = false,
+  tone = "system",
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
   /** Dimmed and unclickable — used when a master switch governs this one. */
   disabled?: boolean;
+  tone?: "system" | "notch";
 }) {
+  const notch = tone === "notch";
   return (
     <button
       type="button"
@@ -192,6 +200,11 @@ export function Toggle({
         "focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
         disabled && "opacity-40",
         checked ? "bg-toggle-on" : "bg-toggle-off",
+        notch && [
+          "h-5 w-[34px] hover:brightness-125 active:brightness-150 disabled:hover:brightness-100 focus-visible:ring-offset-0",
+          NOTCH_FOCUS,
+          checked ? "bg-notch-primary" : "bg-notch-raised",
+        ],
       )}
     >
       <span
@@ -201,6 +214,10 @@ export function Toggle({
           // stop and back is what separates an iOS switch from a slider.
           "transition-transform duration-[var(--spring-pop-dur)] ease-[var(--spring-pop)]",
           checked ? "translate-x-4" : "translate-x-0",
+          notch && [
+            "size-4 shadow-none",
+            checked ? "translate-x-3.5 bg-notch-primary-ink" : "bg-notch-ink",
+          ],
         )}
       />
     </button>

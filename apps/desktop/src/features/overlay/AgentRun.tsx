@@ -1,31 +1,32 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, type CSSProperties } from "react";
 import {
+  ArrowUpRightIcon,
   CheckIcon,
   CircleDashedIcon,
   LoaderCircleIcon,
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
-import { commands, type FinderResults, type ShowTarget } from "@/lib/bindings";
+import {
+  commands,
+  type FinderResults,
+  type GateDecision,
+  type ShowTarget,
+} from "@/lib/bindings";
 import { Button } from "@/components/ui/button";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import { FallbackCard } from "@/components/preview/kit";
+import { PreviewCard } from "@/components/preview/cards";
+import { CardEditsContext, FileGlyph } from "@/components/preview/kit";
 import {
   groupSteps,
   pendingStep,
+  stepStatus,
   type Run,
   type Step,
 } from "@/lib/agent-steps";
-import {
-  askFor,
-  bodyFor,
-  editsFor,
-  gateFor,
-  labelFor,
-  text,
-  type ToolArgs,
-} from "@/lib/tool-views";
+import { gateFor, labelFor, rowLabel, text } from "@/lib/tool-views";
+import { fromPalette } from "@/features/notch/search";
 import { Panel } from "./Panel";
 
 /**
@@ -35,11 +36,15 @@ import { Panel } from "./Panel";
 export function AgentRun({
   run,
   bodyRef,
-  onAddTab,
+  onExpand,
+  onDecide,
 }: {
   run: Run;
   bodyRef: React.RefObject<HTMLDivElement | null>;
-  onAddTab?: () => void;
+  /** Given on the compact panel, which has no sections to browse to. */
+  onExpand?: () => void;
+  /** The open gate was answered: `confirmed` false is a decline. */
+  onDecide?: (confirmed: boolean) => void;
 }) {
   const pending = pendingStep(run);
 
@@ -50,13 +55,14 @@ export function AgentRun({
       // Nothing to copy until the run has said something.
       copyText={run.finished || undefined}
       onClose={() => void commands.closeAgent()}
-      onAddTab={onAddTab}
+      onExpand={onExpand}
       footer={
         <span className="agent__trail">
           {run.steps.length > 0
-            ? labelFor(
+            ? rowLabel(
                 run.steps[run.steps.length - 1].name,
                 run.steps[run.steps.length - 1].args,
+                run.steps[run.steps.length - 1].preview?.title,
               )
             : ""}
         </span>
@@ -87,16 +93,23 @@ export function AgentRun({
             <li key={`${step.name}-${i}`}>
               <span className="agent__step">
                 <StepIcon step={step} pending={step === pending} />
-                <span className="agent__name">{labelFor(step.name, step.args)}</span>
+                <span className="agent__name">
+                  {rowLabel(step.name, step.args, step.preview?.title)}
+                </span>
                 {count > 1 && <span className="agent__count">×{count}</span>}
                 <span className="agent__state">
                   {stepStatus(step, step === pending)}
                 </span>
                 {step.result?.show && <ShowButton show={step.result.show} />}
+                {step.result?.tidied && <UndoButton folder={step.result.tidied} />}
               </span>
-              {/* Only what this tool is worth showing, and never for the step
-                  awaiting a decision — the gate below shows that one, and
-                  rendering both put the same draft on screen twice. */}
+              {/* Why a saved grant refused it — kept on the row, where the
+                  status line it used to be was wiped by this very result. */}
+              {step.result?.note && <p className="agent__reason">{step.result.note}</p>}
+              {/* What a write did, as a compact echo of the card it was
+                  approved from — and never for the step awaiting a decision:
+                  the gate below shows that one, and rendering both put the
+                  same draft on screen twice. */}
               {step !== pending &&
                 (step.name === "ALOUD_FINDER_SEARCH" ? (
                   // The search wall renders its own thumbnails once the results
@@ -105,9 +118,19 @@ export function AgentRun({
                   <FinderGrid
                     query={text(step.args, "query")}
                     kind={text(step.args, "kind")}
+                    found={step.found}
                   />
                 ) : (
-                  <span className="agent__body">{bodyFor(step.name, step.args)}</span>
+                  step.preview && (
+                    <div className="agent__body">
+                      <PreviewCard
+                        preview={step.preview}
+                        app={step.app}
+                        icon={step.icon}
+                        compact
+                      />
+                    </div>
+                  )
                 ))}
             </li>
             ),
@@ -127,9 +150,15 @@ export function AgentRun({
         </ul>
       )}
 
-      {/* Keyed on the step, so a second gate in one run starts from its own
-          arguments instead of inheriting the first one's draft. */}
-      {pending && <ConfirmGate key={`${pending.name}-${run.steps.length}`} step={pending} />}
+      {/* Keyed on the card's revision, so a second gate — or the same card
+          redrawn by "make it …" — starts from its own draft and countdown. */}
+      {pending && (
+        <ConfirmGate
+          key={`${pending.name}-${pending.preview?.revision ?? run.steps.length}`}
+          step={pending}
+          onDecide={onDecide}
+        />
+      )}
 
       {/* Keyed on the question so a second one clears the first one's answer. */}
       {run.question && !pending && (
@@ -158,19 +187,30 @@ export function AgentRun({
  * run rather than retrying into the same wall.
  */
 /**
- * The Finder search result wall — Option 1, a 4-up thumbnail grid under a
- * "find my …" step. The model runs the search tool itself and speaks the count;
- * this fetches the same query again for thumbnails, so the panel shows the files
- * without the tool payload being piped back through the loop.
+ * A Finder search's results under its "find my …" step: images as a 4-up
+ * thumbnail wall, anything else as Finder's own list view. The model runs the
+ * search tool itself and speaks the count; this fetches the same query again
+ * for thumbnails and sizes, so the panel shows the files without the tool
+ * payload being piped back through the loop.
  *
- * Fetches once per (query, kind). A click reveals the file in Finder. Renders
- * nothing until results land — the panel's own height animation covers the gap,
- * and an empty grid flashing before the fill would fight it.
+ * Fetches once per (query, kind), unless the results came with the step. A
+ * click reveals the file in Finder; a press drags it out. Renders nothing
+ * until results land — the panel's own height animation covers the gap, and
+ * an empty list flashing before the fill would fight it.
  */
-function FinderGrid({ query, kind }: { query: string; kind: string }) {
-  const [results, setResults] = useState<FinderResults | null>(null);
+export function FinderGrid({
+  query,
+  kind,
+  found,
+}: {
+  query: string;
+  kind: string;
+  found?: FinderResults;
+}) {
+  const [results, setResults] = useState<FinderResults | null>(found ?? null);
 
   useEffect(() => {
+    if (found) return;
     let live = true;
     void commands.finderSearch(query, kind || "any").then((res) => {
       // The command returns Result; ignore the error arm — a failed search
@@ -180,17 +220,14 @@ function FinderGrid({ query, kind }: { query: string; kind: string }) {
     return () => {
       live = false;
     };
-  }, [query, kind]);
+  }, [query, kind, found]);
 
   if (!results || results.files.length === 0) return null;
+  if (kind !== "image" && kind !== "screenshot") return <FinderList results={results} />;
 
-  const noun = kind === "image" ? "image" : "file";
   return (
     <div className="finder">
-      <p className="finder-grid__count">
-        {results.count} {noun}
-        {results.count === 1 ? "" : "s"}
-      </p>
+      <p className="finder-grid__count">{results.heading}</p>
       <div className="finder-grid" role="list">
         {results.files.map((file, i) => (
           <button
@@ -199,13 +236,7 @@ function FinderGrid({ query, kind }: { query: string; kind: string }) {
             role="listitem"
             title={file.name}
             style={{ ["--i" as string]: i }}
-            // Arm the native drag on mousedown: a real system file drag can only
-            // start from the live mouse event, which a JS click cannot supply,
-            // so Rust stashes the path and the native monitor drags it. See
-            // crates/drag. Cleared on mouseup so a plain click stays a click.
-            onMouseDown={() => void commands.armFileDrag(file.path)}
-            onMouseUp={() => void commands.disarmFileDrag()}
-            onClick={() => void commands.finderReveal(file.path)}
+            {...dragAndReveal(file.path)}
           >
             {file.thumbnail ? (
               // draggable=false so the img's own image-bytes drag never
@@ -221,7 +252,81 @@ function FinderGrid({ query, kind }: { query: string; kind: string }) {
   );
 }
 
-function AskGate({ asked }: { asked: { question: string; options: string[] } }) {
+/**
+ * A found file's press, release and click. The native drag is armed on
+ * mousedown: a real system file drag can only start from the live mouse event,
+ * which a JS click cannot supply, so Rust stashes the path and the native
+ * monitor drags it (crates/drag). Cleared on mouseup so a plain click stays a
+ * click, which reveals the file in Finder.
+ */
+function dragAndReveal(path: string) {
+  return {
+    onMouseDown: () => void commands.armFileDrag(path),
+    onMouseUp: () => void commands.disarmFileDrag(),
+    onClick: () => void commands.finderReveal(path),
+  };
+}
+
+/**
+ * Documents as Finder's list view: what was searched and how many matched,
+ * then Name, Size and Date Modified. ↗ opens the folder in Finder with the
+ * first file selected; × closes the panel, as Finder's window close would.
+ */
+function FinderList({ results }: { results: FinderResults }) {
+  const first = results.files[0].path;
+  return (
+    <div className="finder-list">
+      <div className="finder-list__bar">
+        <FileGlyph name="" folder />
+        <span className="finder-list__title">{results.heading}</span>
+        <button
+          className="finder-list__button"
+          aria-label="Show in Finder"
+          title="Show in Finder"
+          onClick={() => void commands.finderReveal(first)}
+        >
+          <ArrowUpRightIcon size={13} />
+        </button>
+        <button
+          className="finder-list__button finder-list__button--close"
+          aria-label="Close"
+          onClick={() => void commands.closeAgent()}
+        >
+          <XIcon size={11} />
+        </button>
+      </div>
+      <div className="finder-list__row finder-list__row--head" aria-hidden>
+        <span />
+        <span>Name</span>
+        <span>Size</span>
+        <span>Date Modified</span>
+      </div>
+      <div role="list">
+        {results.files.map((file, i) => (
+          <button
+            key={file.path}
+            className="finder-list__row"
+            role="listitem"
+            title={file.name}
+            style={{ ["--i" as string]: i }}
+            {...dragAndReveal(file.path)}
+          >
+            {file.thumbnail ? (
+              <img className="finder-list__thumb" src={file.thumbnail} alt="" draggable={false} />
+            ) : (
+              <FileGlyph name={file.name} />
+            )}
+            <span className="finder-list__name">{file.label}</span>
+            <span className="finder-list__meta">{file.size}</span>
+            <span className="finder-list__meta">{file.modified}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function AskGate({ asked }: { asked: { question: string; options: string[] } }) {
   const [typed, setTyped] = useState("");
   const answer = (text: string | null) => void commands.answerAgent(text);
 
@@ -285,101 +390,176 @@ function AskGate({ asked }: { asked: { question: string; options: string[] } }) 
 }
 
 /**
- * The gate a write passes before it runs.
+ * The gate a write passes before it runs: the card Rust drew from its real
+ * arguments (`PreviewCard`), so no write is ever approved from a title alone.
+ * Fields Rust marked editable are edited in place, and an exact-words message
+ * counts itself down — sent at the deadline unless the user reaches for it.
  *
- * Most tools show what they are about to do and take a yes. A few declare
- * editable fields (`edits` in tool-views) and show inputs instead — the agent
- * reaches the contact gate precisely because it could not find an address, so
- * refusing is the only other answer it could give.
- *
- * A tool with no hand-drawn view shows the card Rust built from its schema, so
- * no write is ever approved from a title alone.
+ * Every answer carries the card's revision, so one meant for this card can
+ * never answer the next.
  */
-function ConfirmGate({ step }: { step: Step }) {
-  const fields = editsFor(step.name);
-  const [draft, setDraft] = useState<ToolArgs>(step.args);
-  // A form is a demand, and the agent reaches this one on its own initiative.
-  // Ask first; the fields only appear for someone who said yes.
-  const [filling, setFilling] = useState(false);
-  const asking = fields.length > 0 && !filling;
-  const body = bodyFor(step.name, draft);
-  const card = fields.length === 0 && body == null ? step.preview : null;
+export function ConfirmGate({
+  step,
+  onDecide,
+}: {
+  step: Step;
+  onDecide?: (confirmed: boolean) => void;
+}) {
+  const preview = step.preview;
+  const revision = preview?.revision ?? 0;
+  const autoMs = preview?.autoMs ?? null;
+  // Strict cards take a click: no Enter, focus on Don't allow, no Always.
+  const strict = preview?.tier === "strict";
+  // Only what the user changed, by pointer. Rust writes it into the real
+  // arguments; anything untouched keeps the value the model chose.
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [held, setHeld] = useState(false);
+  const counting = autoMs !== null && !held;
+  // An editable field the model left empty is the one to fill, so it takes
+  // focus rather than the allow button.
+  const missing = [...(preview?.fields ?? []), ...(preview?.more ?? [])].some(
+    (f) => f.editable && f.value === "",
+  );
 
-  // Only what the user could have changed. Rust folds it back into the real
-  // nested arguments; anything untouched keeps the value the model chose.
-  const confirm = (approved: boolean) =>
-    void commands.confirmAgent(
-      approved,
-      approved && fields.length > 0 ? asStrings(draft) : null,
-    );
+  // Armed from here, once the card is on screen, so the bar the user watches
+  // and the deadline in Rust start together.
+  useEffect(() => {
+    if (autoMs !== null) void commands.armAgent(revision);
+  }, [autoMs, revision]);
+
+  const hold = () => {
+    if (!counting) return;
+    setHeld(true);
+    void commands.holdAgent(revision);
+  };
+
+  const decide = (decision: GateDecision) => {
+    const approved = decision !== "decline";
+    const edits = approved && Object.keys(draft).length > 0 ? draft : null;
+    void commands.confirmAgent(decision, edits, revision);
+    onDecide?.(approved);
+  };
+
+  // ApprovalCard's keys: Enter allows once, Escape declines. Capture phase so
+  // the panel's own Escape does not also fire — and so it must step aside for
+  // ⌘K, whose Enter and Escape are the palette's, not this write's.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (fromPalette(e)) return;
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        decide("decline");
+        return;
+      }
+      if (e.key !== "Enter" || strict) return;
+      // A focused button answers for itself; a message keeps Enter for new
+      // lines, and ⌘↩ sends it.
+      if (e.target instanceof HTMLButtonElement) return;
+      if (e.target instanceof HTMLTextAreaElement && !e.metaKey) return;
+      e.preventDefault();
+      decide("allowOnce");
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
+
+  // The card is the app's own window, so its title bar says what this is; a
+  // line above it only where a yes covers more than the card shows (screen
+  // control's one yes for the run), or where there is no card at all.
+  const title =
+    gateFor(step.name, step.args) ||
+    (!preview && `${labelFor(step.name, step.args)} — this writes to ${step.app}.`);
+
+  // Allow once is the app's own blue pill at the window's foot; declining and
+  // Always allow sit quieter beside it, Always the quietest — it is the
+  // highest commitment, so never the easy default.
+  const actions = (
+    <>
+      <button
+        className="gate__quiet"
+        autoFocus={strict}
+        onClick={() => decide("decline")}
+      >
+        {/* On a card that counts down, declining is taking it back before it
+            goes. Still "Undo" once held: reaching for it is what holds it,
+            and a label changing under the pointer is a misclick. */}
+        {autoMs !== null ? "Undo" : "Don't allow"} <span className="btn__k">esc</span>
+      </button>
+      {step.canAlways && !strict && (
+        <button className="gate__quiet" onClick={() => decide("allowAlways")}>
+          Always allow
+        </button>
+      )}
+      <button
+        // The exact-words countdown drains across the pill it ends by pressing.
+        className={autoMs !== null ? "app-pill motion-countdown" : "app-pill"}
+        data-danger={strict || undefined}
+        data-held={held || undefined}
+        style={autoMs !== null ? ({ "--auto-ms": `${autoMs}ms` } as CSSProperties) : undefined}
+        autoFocus={!strict && !missing}
+        onClick={() => decide("allowOnce")}
+      >
+        {preview?.verb || "Allow"}
+        {!strict && <span className="btn__k">⏎</span>}
+      </button>
+    </>
+  );
 
   return (
-    <div className="agent__confirm" role="group">
-      <p className="agent__confirm-title">
-        {asking && askFor(step.name, draft)
-          ? askFor(step.name, draft)
-          : gateFor(step.name, draft) ||
-            card?.title ||
-            `${labelFor(step.name, draft)} — this writes to ${step.app}.`}
-      </p>
-      {/* Approving a write without seeing what it will do is not a gate, so the
-          body shows here even though the step list is otherwise quiet. */}
-      {asking ? null : fields.length > 0 ? (
-        <div className="agent__fields">
-          {fields.map((field) => (
-            <label className="agent__field" key={field.key}>
-              <span className="agent__field-label">{field.label}</span>
-              <input
-                className="ask__input"
-                value={field.get(draft)}
-                placeholder={field.placeholder}
-                // The first empty field is the one the agent could not fill.
-                autoFocus={!field.get(draft)}
-                onChange={(e) =>
-                  setDraft((current) => field.set(current, e.target.value))
-                }
-              />
-            </label>
-          ))}
-        </div>
-      ) : card ? (
-        <FallbackCard preview={card} />
-      ) : (
-        <div className="agent__body">{body}</div>
+    <div
+      className="agent__confirm"
+      role="group"
+      data-danger={strict || undefined}
+      // Reaching for the card stops the countdown: whoever moves toward it
+      // means to read it, or to stop it.
+      onPointerMove={hold}
+    >
+      {title && (
+        <p
+          className={strict ? "agent__confirm-title agent__confirm-title--danger" : "agent__confirm-title"}
+        >
+          {title}
+        </p>
       )}
-      <div className="agent__actions">
-        <button className="agent__action" onClick={() => confirm(false)}>
-          {asking ? "No thanks" : "Cancel"}
-        </button>
-        {asking ? (
-          <button
-            className="agent__action agent__action--go"
-            autoFocus
-            onClick={() => setFilling(true)}
-          >
-            Save contact
-          </button>
-        ) : (
-          <button
-            className="agent__action agent__action--go"
-            autoFocus={fields.length === 0}
-            onClick={() => confirm(true)}
-          >
-            {card?.verb || "Confirm"}
-          </button>
-        )}
-      </div>
+      {preview ? (
+        <CardEditsContext.Provider
+          value={{
+            draft,
+            edit: (path, value) => {
+              hold();
+              setDraft((current) => ({ ...current, [path]: value }));
+            },
+            hold,
+          }}
+        >
+          <PreviewCard preview={preview} app={step.app} icon={step.icon} actions={actions} />
+        </CardEditsContext.Provider>
+      ) : (
+        <div className="preview__actions">{actions}</div>
+      )}
+      {/* What an Always allow would cover, under the window it would skip. */}
+      {preview?.scope && <p className="agent__scope">{preview.scope}</p>}
     </div>
   );
 }
 
-/** The flat string map the confirm command takes; see `display_args` in agent.rs. */
-function asStrings(args: ToolArgs): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(args).map(([key, value]) => [
-      key,
-      typeof value === "string" ? value : JSON.stringify(value),
-    ]),
+/**
+ * Puts a tidied folder back as it was. The only write with a reverse already
+ * built, so the only row with an Undo.
+ */
+export function UndoButton({ folder }: { folder: string }) {
+  const [undone, setUndone] = useState(false);
+  return (
+    <Button
+      variant="plain"
+      size="text"
+      disabled={undone}
+      onClick={() =>
+        void commands.undoTidy(folder).then((res) => setUndone(res.status === "ok"))
+      }
+    >
+      {undone ? "Undone" : "Undo"}
+    </Button>
   );
 }
 
@@ -388,7 +568,7 @@ function asStrings(args: ToolArgs): Record<string, string> {
  * folder. The tools that made it stayed in the background, so this is the way
  * to go and look.
  */
-function ShowButton({ show }: { show: ShowTarget }) {
+export function ShowButton({ show }: { show: ShowTarget }) {
   return (
     <Button
       variant="plain"
@@ -401,6 +581,9 @@ function ShowButton({ show }: { show: ShowTarget }) {
 }
 
 function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
+  // Before the result: a declined write's result is a failure, but the user
+  // said no — a neutral mark, not the red one.
+  if (step.confirmed === false) return <XIcon className="agent__icon" size={14} />;
   if (step.result) {
     return step.result.success ? (
       <CheckIcon className="agent__icon" size={14} />
@@ -408,7 +591,6 @@ function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
       <XIcon className="agent__icon agent__icon--bad" size={14} />
     );
   }
-  if (step.confirmed === false) return <XIcon className="agent__icon" size={14} />;
   if (pending)
     return <TriangleAlertIcon className="agent__icon agent__icon--warn" size={14} />;
   return <LoaderCircleIcon className="agent__icon animate-spin" size={14} />;
@@ -419,12 +601,5 @@ function StepIcon({ step, pending }: { step: Step; pending: boolean }) {
  * identically, which is exactly when collapsing them hides nothing.
  */
 function rowKey(step: Step, pending: boolean): string {
-  return `${labelFor(step.name, step.args)}|${stepStatus(step, pending)}`;
-}
-
-function stepStatus(step: Step, pending: boolean): string {
-  if (step.result) return step.result.success ? "done" : "failed";
-  if (step.confirmed === false) return "cancelled";
-  if (pending) return "needs approval";
-  return "running…";
+  return `${rowLabel(step.name, step.args, step.preview?.title)}|${stepStatus(step, pending)}`;
 }

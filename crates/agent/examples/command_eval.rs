@@ -13,9 +13,13 @@
 //!
 //! `runs` plays each case in `evals/runs.jsonl` through the whole tool loop
 //! with every tool answered from the case's `mocks` (default
-//! `{"successful":true}`), questions from `answers` and writes auto-approved,
-//! then scores every call the run made: all `expected` entries must be met and
-//! no `forbid` entry may be. `{"callsTool":{"name":…,"count":N}}` passes when
+//! `{"successful":true}`; a key ending in `_` answers every tool it prefixes)
+//! and questions from `answers`. Gates are answered as a user would: yes,
+//! unless the card is strict or warns that outside content asked for it —
+//! those are declined and listed as "asked". Every call the run made is then
+//! scored: all `expected` entries must be met, and no `forbid` entry may match
+//! a call that actually executed (a declined attempt is the gate working).
+//! `{"callsTool":{"name":…,"count":N}}` passes when
 //! the matching calls' `times` (1 each when absent) add up to exactly N, so
 //! five calls and one call with `times: 5` both count. The first turn alone
 //! cannot see a run that stops after its first step; this can.
@@ -84,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
     let mut brains: Vec<(&str, Brain)> = Vec::new();
     for (name, key) in [
         ("groq", &settings.groq_api_key),
+        ("nvidia", &settings.nvidia_api_key),
         ("gemini", &settings.gemini_api_key),
         // Only when asked for by name: off the default list while it returns 402.
         ("cerebras", &settings.cerebras_api_key),
@@ -93,11 +98,17 @@ async fn main() -> anyhow::Result<()> {
             None => name != "cerebras",
         };
         if !key.trim().is_empty() && wanted {
-            brains.push((name, aloud_agent::brain(name, key)?));
+            let mut brain = aloud_agent::brain(name, key)?;
+            // Another model on the same provider, to compare before switching:
+            // NVIDIA_MODEL=z-ai/glm-5.3 command_eval -- nvidia
+            if let Ok(model) = std::env::var(format!("{}_MODEL", name.to_uppercase())) {
+                brain.model = Box::leak(model.into_boxed_str());
+            }
+            brains.push((name, brain));
         }
     }
     if brains.is_empty() {
-        anyhow::bail!("no brain to evaluate: set GROQ_API_KEY or GEMINI_API_KEY");
+        anyhow::bail!("no brain to evaluate: set GROQ_API_KEY, GEMINI_API_KEY or NVIDIA_API_KEY");
     }
 
     let cases: Vec<Case> = include_str!("../evals/commands.jsonl")
@@ -289,6 +300,11 @@ async fn judge(
             aloud_engine::BROWSER_TASK.to_string(),
             json!({ "goal": case.input }),
         )),
+        // Not a tool at all, but the cases name it so the section is asserted.
+        Some(Fast::Notch { section, sub, .. }) => Some((
+            "NOTCH_OPEN".to_string(),
+            json!({ "section": section, "sub": sub.unwrap_or("") }),
+        )),
         None => {
             trace.route = "brain";
             let aloud_agent::CommandTools { tools, more } =
@@ -399,9 +415,20 @@ struct RunCase {
     /// Replies to the run's questions, in order; past the end they go unanswered.
     #[serde(default)]
     answers: Vec<String>,
+    #[serde(default)]
     expected: Vec<Value>,
+    /// Scored against executed calls only.
     #[serde(default)]
     forbid: Vec<Value>,
+}
+
+/// Everything one whole run did: each call it attempted, those that executed
+/// and succeeded, and the gates the simulated user declined.
+#[derive(Default)]
+struct Played {
+    calls: Vec<(String, Value)>,
+    executed: Vec<(String, Value)>,
+    asked: Vec<String>,
 }
 
 async fn whole_runs(
@@ -423,7 +450,7 @@ async fn whole_runs(
         let mut report = Vec::new();
         for case in &cases {
             let started = Instant::now();
-            let (verdict, calls) = play(case, brain, installed, composio, &offline).await;
+            let (verdict, played) = play(case, brain, installed, composio, &offline).await;
             let took = started.elapsed();
             let (mark, outcome, why) = match &verdict {
                 Verdict::Pass => {
@@ -440,9 +467,14 @@ async fn whole_runs(
                 }
             };
             let note = why.as_ref().map(|w| format!("  ({w})")).unwrap_or_default();
-            let made: Vec<&str> = calls.iter().map(|(n, _)| n.as_str()).collect();
+            let made: Vec<&str> = played.calls.iter().map(|(n, _)| n.as_str()).collect();
+            let asked = if played.asked.is_empty() {
+                String::new()
+            } else {
+                format!("  [asked: {}]", played.asked.join(", "))
+            };
             println!(
-                "{mark} {:>5.2}s {}{note}\n        {}",
+                "{mark} {:>5.2}s {}{note}\n        {}{asked}",
                 took.as_secs_f32(),
                 case.input,
                 made.join(" → ")
@@ -457,7 +489,8 @@ async fn whole_runs(
                     "why": why,
                     "route": "run",
                     "ms": took.as_millis() as u64,
-                    "calls": calls.iter().map(|(name, args)| json!({ "name": name, "args": args })).collect::<Vec<_>>(),
+                    "calls": played.calls.iter().map(|(name, args)| json!({ "name": name, "args": args })).collect::<Vec<_>>(),
+                    "asked": played.asked,
                 }],
             }));
         }
@@ -472,14 +505,14 @@ async fn whole_runs(
 }
 
 /// Plays one case through the real loop with every tool mocked, and returns
-/// the verdict with every call the run made, in order.
+/// the verdict with what the run did, in order.
 async fn play(
     case: &RunCase,
     brain: &Brain,
     installed: &[aloud_selection::InstalledApp],
     composio: Option<&ComposioClient>,
     offline: &ComposioClient,
-) -> (Verdict, Vec<(String, Value)>) {
+) -> (Verdict, Played) {
     let aloud_agent::CommandTools { tools, more } =
         aloud_agent::command_tools(&case.input, installed, composio).await;
     for want in case
@@ -493,7 +526,7 @@ async fn play(
         if !tools.iter().any(|t| name_matches(want, &t.name)) && !loadable {
             return (
                 Verdict::Skip(format!("{want} not offered here")),
-                Vec::new(),
+                Played::default(),
             );
         }
     }
@@ -507,10 +540,17 @@ async fn play(
     let mock = |name: &str, _args: &Value| {
         case.mocks
             .get(name)
+            .or_else(|| {
+                case.mocks
+                    .iter()
+                    .find(|(key, _)| key.ends_with('_') && name.starts_with(key.as_str()))
+                    .map(|(_, result)| result)
+            })
             .map_or_else(|| r#"{"successful":true}"#.to_string(), Value::to_string)
     };
     let answers = std::sync::Mutex::new(case.answers.iter().cloned());
-    let mut calls: Vec<(String, Value)> = Vec::new();
+    let asked = std::sync::Mutex::new(Vec::new());
+    let mut played = Played::default();
     let result = aloud_agent::run_tool_loop(
         std::slice::from_ref(brain),
         composio.unwrap_or(offline),
@@ -522,15 +562,40 @@ async fn play(
             front: case.front.as_deref(),
             document: None,
             project: None,
+            selection: case.selection.is_some(),
         },
         aloud_agent::Callbacks {
-            on_event: |event| {
-                if let aloud_agent::LoopEvent::ToolCallStart { name, args } = event {
-                    calls.push((name, args));
+            on_event: |event| match event {
+                // Steps count every start from 0, so a step is its index here.
+                aloud_agent::LoopEvent::ToolCallStart { name, args, .. } => {
+                    played.calls.push((name, args));
                 }
+                aloud_agent::LoopEvent::ToolCallResult {
+                    step,
+                    success: true,
+                    ..
+                } => {
+                    if let Some(call) = played.calls.get(step as usize) {
+                        played.executed.push(call.clone());
+                    }
+                }
+                _ => {}
             },
-            confirm: |call: aloud_agent::ProposedCall| async move {
-                aloud_agent::Verdict::Run(call.args)
+            // The user, simulated with no saved grants: yes to an ordinary
+            // card, no to one that is strict or warns the request came from
+            // outside content.
+            confirm: |call: aloud_agent::ProposedCall| {
+                let verdict = match &call.gate {
+                    Some(gate) if gate.named_rule || gate.strict => {
+                        asked
+                            .lock()
+                            .unwrap()
+                            .push(format!("{} ({})", call.name, gate.key));
+                        aloud_agent::Verdict::Decline
+                    }
+                    _ => aloud_agent::Verdict::Run(call.args),
+                };
+                async move { verdict }
             },
             ask: |_question: String| {
                 let next = answers.lock().ok().and_then(|mut a| a.next());
@@ -541,19 +606,21 @@ async fn play(
         },
     )
     .await;
+    played.asked = asked.into_inner().unwrap();
     if let Err(e) = result {
-        return (Verdict::Fail(format!("error: {e:#}")), calls);
+        return (Verdict::Fail(format!("error: {e:#}")), played);
     }
-    (score(case, &calls), calls)
+    (score(case, &played.calls, &played.executed), played)
 }
 
-/// Every `expected` entry met and no `forbid` entry met. A failure says how
-/// far the run got: "finished after 1 of 2" is a run that stopped early.
-fn score(case: &RunCase, calls: &[(String, Value)]) -> Verdict {
+/// Every `expected` entry met among the calls made, and no `forbid` entry met
+/// among those executed. A failure says how far the run got: "finished after
+/// 1 of 2" is a run that stopped early.
+fn score(case: &RunCase, calls: &[(String, Value)], executed: &[(String, Value)]) -> Verdict {
     for entry in &case.forbid {
         if let Some(want) = entry.get("callsTool") {
-            if let Some((name, args)) = calls.iter().find(|(n, a)| call_matches(want, n, a)) {
-                return Verdict::Fail(format!("forbidden call {name} {args}"));
+            if let Some((name, args)) = executed.iter().find(|(n, a)| call_matches(want, n, a)) {
+                return Verdict::Fail(format!("forbidden call executed: {name} {args}"));
             }
         }
     }

@@ -7,10 +7,23 @@
   NSMicrophoneUsageDescription is not optional: macOS terminates a process that
   touches the microphone without one, so its absence is a crash on first
   dictation rather than a missing prompt.
+
+  NSBluetoothAlwaysUsageDescription is the same kind of key for Bluetooth: the
+  connect notifications and device list (IOBluetooth) are covered by the
+  Bluetooth privacy permission on macOS 11 and later.
+
+  NSRemindersFullAccessUsageDescription is what EventKit's full-access request
+  (macOS 14+) needs to read reminders in process. Without the key the request
+  is a kill, so the agenda crate checks for it before asking and otherwise
+  reads through scripting.
 -->
 <plist version="1.0">
   <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Aloud records your voice so it can transcribe what you say and paste the text into the app you are using.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Aloud notices when your headphones connect or disconnect, and when a device's battery is running low, so it can tell you in the notch.</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>Aloud shows the reminders that are due or overdue in the notch, and notices when one comes due.</string>
   </dict>
 </plist>

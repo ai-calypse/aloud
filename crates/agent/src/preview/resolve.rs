@@ -28,12 +28,12 @@ const ID_KEYS: &[&str] = &["id", "messageId"];
 
 /// Every id the run's reads returned: what each was called, and which read
 /// found it.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Names {
     seen: HashMap<String, Seen>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Seen {
     /// Every distinct name a read gave this id; more than one means no name.
     names: Vec<String>,

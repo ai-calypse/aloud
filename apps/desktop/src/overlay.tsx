@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -13,11 +14,14 @@ import {
   type AgentPermission,
   type AgentSession,
   type ApprovalReply,
+  type Island,
+  type IslandAction,
   type OverlayStyle,
   type Phase,
 } from "./lib/bindings";
 import {
   withCall,
+  withDecision,
   withResult,
   withoutPlanned,
   type Run,
@@ -27,33 +31,43 @@ import { truncate } from "./lib/format";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import { CatSettingsProvider } from "./lib/cat-settings";
 import { listen } from "@tauri-apps/api/event";
-import { AgentList, AgentDetail } from "./features/overlay/AgentList";
+import { NotchToast, toastForm } from "./features/overlay/NotchToast";
+import { useDwell } from "./features/overlay/useDwell";
+import { ListeningCat, CatPeek } from "./features/overlay/NotchAgents";
 import { AgentRun } from "./features/overlay/AgentRun";
-import { CodingAgentComposer } from "./features/overlay/CodingAgentComposer";
-import {
-  ListeningCat,
-  CatPeek,
-  AmbientSign,
-  NotchAgents,
-} from "./features/overlay/NotchAgents";
-import {
-  type Tab,
-  FIRST_TABS,
-  AGENTS_TAB,
-  MAX_TABS,
-  TabStrip,
-} from "./features/overlay/TabStrip";
+import { NotchShell } from "./features/notch/NotchShell";
+import { HOVER_INTENT_MS, homeNav, shellState } from "./features/notch/hover";
+import { useHoverIntent } from "./features/notch/useHoverIntent";
+import { useVoiceRuns } from "./features/notch/voice-runs";
+import { IslandPill } from "./features/notch/IslandPill";
+import { runAction } from "./features/notch/actions";
+import { NotchProvider } from "./features/notch/context";
+import { applyIsland, dwellMs, opensOnHover, takeoverTier } from "./features/notch/islands";
+import { loadNav, saveNav, type Nav, type SectionId } from "./features/notch/sections";
 import {
   PARTIAL_PREVIEW,
   PARTIAL_MS,
   AGENT_PREVIEW,
-  FALLBACK_PREVIEW,
+  VOICE_RUN_PREVIEWS,
+  CARD_PREVIEWS,
+  CONTACT_PREVIEW,
+  FINDER_PREVIEWS,
+  livePreviews,
+  TAKEOVER_PREVIEWS,
+  TOAST_PREVIEWS,
+  withIcon,
 } from "./features/overlay/previews";
 import { useNotchPanel } from "./features/overlay/useNotchPanel";
+// The notch panel's faces, bundled: the CSP allows no font host.
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 // Streamdown styles the agent's answer with Tailwind utilities — see the
 // `@source` note in index.css.
 import "./index.css";
 import "./styles/overlay.css";
+import "./styles/notch.css";
+import "./styles/events.css";
+import "./styles/nudges.css";
 
 const LABEL: Record<Phase, string> = {
   idle: "",
@@ -109,6 +123,29 @@ function Overlay() {
   // Latched once a run has produced words; see `effectiveStyle`.
   const [droppedDown, setDroppedDown] = useState(false);
   const [agent, setAgent] = useState<Run | null>(null);
+  // The island queue's copy, ranked by Rust (see `applyIsland`).
+  const [islands, setIslands] = useState<Island[]>([]);
+  // The alert island on screen — the confirmation chip a run of writes ends
+  // on, and any later alert. Not a panel: it holds no focus and takes no
+  // keys, and it stays mounted through its own exit — it is cleared only once
+  // the collapse has played (the dismissing timer). Keyed, so an alert
+  // replacing another restarts its clock.
+  const [toast, setToast] = useState<{ value: Island; key: number } | null>(null);
+  const toastKey = useRef(0);
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  // A whisper alongside: a glyph and one thing beside the camera at rest, the
+  // top row of a peek, an echo under a card. Not a panel and not a toast: it
+  // claims no window (Rust leaves the resting one alone) and its own clock
+  // takes it away. Keyed so a fresh whisper restarts its clock; the same id
+  // updating in place keeps its key, which is how a volume bar moves instead
+  // of remounting.
+  const [whisper, setWhisper] = useState<{ value: Island; key: number } | null>(null);
+  const whisperKey = useRef(0);
+  const whisperRef = useRef(whisper);
+  whisperRef.current = whisper;
+  // How many takeovers wait for their turn (Rust's line): "+N".
+  const [waiting, setWaiting] = useState(0);
   // The notch opened by clicking it rather than by speaking. Its own state
   // because it belongs to no dictation and must survive `run` changing.
   const [browsing, setBrowsing] = useState(false);
@@ -154,6 +191,10 @@ function Overlay() {
   // card pending is fine: the hook waits (24h), the card stays queued under
   // the Agents tab's dot, and reopening the notch finds it again.
   const panelOpen = agent !== null || browsing;
+  // A run alone is the compact panel (just the run, grown from the notch); the
+  // full sections shell is only for someone who asked for it — a click, a hover
+  // that was then clicked into, a voice command naming a section, an approval.
+  const compact = agent !== null && !browsing;
   // A ref, not the state it mirrors: the phase listener subscribes once, and
   // depending on `panelOpen` would rebuild it on every streamed token.
   const openRef = useRef(panelOpen);
@@ -171,27 +212,46 @@ function Overlay() {
   // Pointer over the notch, from Rust's cursor poll — a click-through window
   // cannot see the mouse, so there is no `mouseenter` to use here.
   const [hovering, setHovering] = useState(false);
-  const [tabs, setTabs] = useState<Tab[]>(FIRST_TABS);
-  const [activeTab, setActiveTab] = useState(0);
-  const nextTabId = useRef(1);
-  // A new dictation is a new session, so its extra tabs go with it. Keyed on
-  // `run` rather than the phase because both the real and the preview paths
-  // bump it, which makes this the single place the reset has to live.
-  useEffect(() => {
-    setTabs(FIRST_TABS);
-    setActiveTab(0);
-  }, [run]);
 
-  // With no run to show, the agents tab is the only content the panel has —
-  // opening by click, by a permission arriving, or by the run closing out
-  // from under the strip all land there rather than on an empty tab 0.
-  useEffect(() => {
-    if (panelOpen && !agent) setActiveTab(AGENTS_TAB);
-  }, [panelOpen, agent]);
+  // Where the panel is, and where the user last chose to be. A run or an
+  // approval takes the panel to itself without moving the remembered place,
+  // so the next click on the notch opens where the user was, not wherever a
+  // command happened to land.
+  const [nav, setNav] = useState<Nav>(loadNav);
+  const navRef = useRef(nav);
+  navRef.current = nav;
+  const chosen = useRef(nav);
+  const navigate = useCallback((section: SectionId, sub?: string) => {
+    const current = navRef.current;
+    const next = { section, subs: sub ? { ...current.subs, [section]: sub } : current.subs };
+    chosen.current = next;
+    saveNav(next);
+    setNav(next);
+  }, []);
+  const takeFocus = useCallback((section: SectionId, sub?: string) => {
+    setNav((current) => ({
+      section,
+      subs: sub ? { ...current.subs, [section]: sub } : current.subs,
+    }));
+  }, []);
+  // ⌘K, open in the panel's body. Here rather than in the shell so a closed
+  // panel cannot reopen onto a half-typed search.
+  const [palette, setPalette] = useState(false);
+  // A run takes the shell, if it is open, to its Voice view (otherwise the run
+  // is the compact panel and the section is only where "open in Agents" lands);
+  // keyed on the utterance, so it fires once per run and the user can still
+  // navigate away while it works. A layout effect so the panel never paints a
+  // frame of the wrong section — pure state, no `invoke`, so it cannot stall
+  // the paint it precedes.
+  const runKey = agent?.heard;
+  useLayoutEffect(() => {
+    if (runKey !== undefined) takeFocus("agents", "voice");
+  }, [runKey, takeFocus]);
 
-  // Dev/QA: `?agents=2` fakes a session list and `?hover` holds the peek row
-  // open, so the resting notch's two states are reachable in a browser. The
-  // real ones only arrive from Rust, and the hover only from a cursor poll.
+  // Dev/QA: `?agents=2` fakes a session list and `?hover` holds the pointer on
+  // the notch (Home opens after the hover delay), so the resting notch's states
+  // are reachable in a browser. The real ones only arrive from Rust, and the
+  // hover only from a cursor poll. `?runs` fills Agents › Voice's history.
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const count = Number(params.get("agents"));
@@ -226,6 +286,18 @@ function Overlay() {
         })),
       );
     }
+    // `?notch=200x32` stands in for the cutout Rust measures and sends with
+    // every style event, so a browser preview draws the hardware's shape.
+    const [notchW, notchH] = (params.get("notch") ?? "").split("x").map(Number);
+    if (notchW > 0 && notchH > 0) {
+      root.current?.style.setProperty("--notch-w", `${notchW}px`);
+      root.current?.style.setProperty("--notch-h", `${notchH}px`);
+    }
+    // The agents' island is Rust's, so the preview stands it in for `?agents`
+    // (the cats beside the camera); `?islands=3` adds the fixtures' others.
+    const live = Number(params.get("islands"));
+    if (live > 0) setIslands(livePreviews(live));
+    else if (count > 0) setIslands(livePreviews(1));
     if (params.has("hover")) setHovering(true);
     // `?perm` and `?perm=2` stage the card and a queue behind it.
     const perms = params.has("perm") ? Math.max(1, Number(params.get("perm")) || 1) : 0;
@@ -329,6 +401,23 @@ function Overlay() {
   useEffect(refreshCatSettings, [refreshCatSettings]);
 
   // Agents, hover and permission requests, all independent of any dictation.
+  // An alert island arriving: a whisper takes its side slot and touches nothing
+  // else; anything bigger is the toast, and replaces whatever panel was up (Rust
+  // only sends one where no panel is being read — `overlay::show_toast`). Also
+  // what the tuner's fixtures go through, so the preview is the real routing.
+  const takeOver = useCallback((value: Island) => {
+    if (takeoverTier(value) === "whisper" && !value.shrunk) {
+      const same = whisperRef.current?.value.id === value.id;
+      setWhisper((now) => ({ value, key: same && now ? now.key : ++whisperKey.current }));
+      return;
+    }
+    setToast({ value, key: ++toastKey.current });
+    setAgent(null);
+    setBrowsing(false);
+    setSelected(null);
+    setDismissing(false);
+  }, []);
+
   useEffect(() => {
     const sessionsOff = events.agentSessions.listen((e) => setSessions(e.payload));
     const hoverOff = events.notchHover.listen((e) => setHovering(e.payload.over));
@@ -350,13 +439,56 @@ function Overlay() {
     const resolvedOff = events.agentPermissionResolved.listen((e) =>
       setPermissions((queue) => queue.filter((p) => p.id !== e.payload.id)),
     );
+    // The island queue. An alert arriving is what the agent's "toast" event
+    // used to be: the run's own panel collapses into the chip (the notch
+    // panel's spring retargets from the panel's size to the chip's) and a
+    // quiet run's grows out of the cutout. Rust only pushes one where no
+    // other panel is being read (`overlay::show_toast`).
+    const islandOff = events.island.listen(({ payload }) => {
+      setIslands((list) => applyIsland(list, payload));
+      const { change } = payload;
+      if (change.op !== "remove" && change.value.kind === "alert") {
+        takeOver(change.value);
+      }
+      // Taken down from Rust's side (its backstop): leave the way the
+      // clock would.
+      if (change.op === "remove" && toastRef.current?.value.id === change.value) {
+        setDismissing(true);
+      }
+      if (change.op === "remove" && whisperRef.current?.value.id === change.value) {
+        setWhisper(null);
+      }
+    });
+    const waitingOff = events.islandsWaiting.listen(({ payload }) => setWaiting(payload.count));
+    // "Show my agents": the shell, at that section. Rust has already taken the
+    // window and the keyboard (`open_notch`). A jump the user asked for by
+    // voice, not a place they chose, so the next click still opens where they
+    // last were.
+    const notchOpenOff = events.notchOpen.listen(({ payload }) => {
+      setAgent(null);
+      setToast(null);
+      setSelected(null);
+      setDismissing(false);
+      setBrowsing(true);
+      takeFocus(payload.section as SectionId, payload.sub ?? undefined);
+    });
+    // The event carries changes only; islands pushed before this window
+    // listened arrive with the snapshot.
+    try {
+      void commands.islands().then(setIslands);
+    } catch {
+      /* browser preview: no Tauri, no islands */
+    }
     return () => {
       void sessionsOff.then((off) => off());
       void hoverOff.then((off) => off());
       void permOff.then((off) => off());
       void resolvedOff.then((off) => off());
+      void islandOff.then((off) => off());
+      void waitingOff.then((off) => off());
+      void notchOpenOff.then((off) => off());
     };
-  }, []);
+  }, [takeOver, takeFocus]);
 
   // Answer, then drop it locally — the resolved event will also drop it, and
   // whichever lands first wins. Removing it here keeps the next card from
@@ -366,36 +498,6 @@ function Overlay() {
     setPermissions((queue) => queue.filter((p) => p.id !== id));
   }, []);
 
-  // The cap is enforced here rather than in each button, so no caller can get
-  // past it — the buttons only hide themselves so the strip stops offering.
-  // The cap is enforced here rather than in each button, so no caller can get
-  // past it — the buttons only hide themselves so the strip stops offering.
-  const addTab = useCallback(() => {
-    if (tabs.length >= MAX_TABS) return;
-    const id = nextTabId.current++;
-    setTabs((current) => [...current, { id, blank: true }]);
-    setActiveTab(id);
-  }, [tabs.length]);
-
-  // Marked, not removed: unmounting here would cut the exit off mid-frame. The
-  // removal is `dropTab`, downstream of the animation finishing.
-  const closeTab = useCallback(
-    (id: number) => {
-      setTabs((current) =>
-        current.map((tab) => (tab.id === id ? { ...tab, closing: true } : tab)),
-      );
-      // Closing the active tab lands on the run when there is one, else on
-      // the agents — tab 0 without a run is an empty panel.
-      const home = agent ? 0 : AGENTS_TAB;
-      setActiveTab((active) => (active === id ? home : active));
-    },
-    [agent],
-  );
-
-  const dropTab = useCallback(
-    (id: number) => setTabs((current) => current.filter((tab) => tab.id !== id)),
-    [],
-  );
   // Dev/QA: `?dismiss=800` plays the exit 800ms in — otherwise only reachable
   // from a Rust event, and it is the one path here that races.
   const dismissAfter = Number(new URLSearchParams(location.search).get("dismiss"));
@@ -419,6 +521,7 @@ function Overlay() {
     catImages &&
     catImagesDictation &&
     !panelOpen &&
+    toast === null &&
     (phase === "recording" || phase === "transcribing");
 
   /**
@@ -427,41 +530,121 @@ function Overlay() {
    * latches for the rest of the run rather than tracking the words — the
    * transcript is gone by `transcribing`, and springing back up to a menu-bar
    * tab there would undo the drop just watched.
+   *
+   * At rest it is always the drop pill, whatever the last dictation drew: the
+   * resting notch is the cutout (Rust's `show_notch` says so too), and the
+   * live islands and the hover peek live in it. Before islands the agents'
+   * strip drew outside it, so a notch left in `wings` after a dictation lost
+   * only the hover; now it would lose the agents too.
    */
+  // Nothing is being said and no panel is up: the notch is just sitting there.
+  const resting = !panelOpen && phase === "idle" && !dismissing && toast === null;
   const effectiveStyle: OverlayStyle =
-    style === "wings" && (droppedDown || panelOpen) ? "dropPill" : style;
-
-  /**
-   * Nothing is being said and no panel is up: the notch is just sitting there.
-   * This is the state that did not exist before — the window used to be hidden
-   * entirely between dictations.
-   */
-  const resting = !panelOpen && phase === "idle" && !dismissing;
-  const busyCount = sessions.filter((s) => s.busy).length;
-  // The ambient sign: what the resting notch shows *without* a hover — a small
-  // strip of stage cats left of the camera while agents are busy, or an
-  // attention pulse when one wants permission and the notch did not auto-open
-  // (that setting off; when on, the panel is up and we are not resting).
-  // Hovering it expands the stack into a labelled horizontal row and offers a
-  // "view all agents" button; it owns the resting click-box while up.
-  const ambient = resting && (busyCount > 0 || permissions.length > 0);
-  // Drill into one agent (opens the panel on its detail) or open the whole
-  // list — the two things the expanded ambient row can do. Both route through
-  // the same open-the-notch state a click does today.
-  const openAgent = useCallback((id: string) => {
-    setBrowsing(true);
-    setSelected(id);
+    style === "wings" && (droppedDown || panelOpen || toast !== null || resting)
+      ? "dropPill"
+      : style;
+  // What the resting notch shows: the live islands, beside the camera — the
+  // coding agents' cats while they work or ask (Rust's `agents` island), and
+  // whatever features push later. Resting under the pointer opens Home.
+  const live = islands.filter((island) => island.kind === "live");
+  // A whisper takes the resting notch for its moment; over a toast it is part
+  // of the toast instead (a peek's top row, an echo under a card), and while a
+  // dictation or a panel has the window it waits, its clock stopped.
+  const whisperNow = resting && toast === null && whisper !== null;
+  // Pointing at a whisper that has a button opens it into a peek. That is the
+  // hover the user is answering, so it outranks Home's: Home opens once the
+  // whisper has gone and the pointer is still there.
+  const whisperOpen = whisperNow && hovering && whisper !== null && opensOnHover(whisper.value);
+  // Resting under a pointer that has stayed: Home opens in place (`shellState`).
+  // Only what is clicked or typed into stays when the pointer leaves.
+  const dwelled = useHoverIntent(resting && hovering, HOVER_INTENT_MS);
+  const shell = shellState({ browsing, resting, hovering, dwelled, whisperOpen });
+  const peeking = shell === "peek";
+  // Held a beat after the pointer leaves, so Home collapses into the cutout on
+  // the panel's spring rather than snapping (the same as the live pill's exit).
+  const peekShown = useLinger(peeking, 600);
+  const peekLeaving = peekShown && !peeking && resting;
+  const shellShown = shell !== "closed" || peekLeaving;
+  // What was said before now, for Agents › Voice. Read when the shell opens and
+  // when the run on screen ends (Rust writes its row just before it says so).
+  const { entries: runs, setEntries: setRuns, remove: removeRun } = useVoiceRuns(
+    `${shellShown}|${agent?.heard}|${agent?.finished !== undefined || agent?.error !== undefined}`,
+  );
+  useEffect(() => {
+    if (new URLSearchParams(location.search).has("runs")) setRuns(VOICE_RUN_PREVIEWS);
+  }, [setRuns]);
+  // Closed, the next open is a click — which lands where the user last chose.
+  // A hover-opened Home counts as open until its exit has played, or the
+  // panel would swap sections while it shrinks.
+  useEffect(() => {
+    if (!panelOpen && !peekShown) {
+      setNav(chosen.current);
+      setPalette(false);
+    }
+  }, [panelOpen, peekShown]);
+  // Home, whichever section was chosen: a hover is a glance at what is live.
+  useLayoutEffect(() => {
+    if (peeking) setNav(homeNav(chosen.current));
+  }, [peeking]);
+  // Clicking into a hover-opened Home, or typing in it, makes it a panel like
+  // one opened by a click. (Typing only reaches here once the window is key.)
+  useEffect(() => {
+    if (!peeking) return;
+    const commit = () => setBrowsing(true);
+    window.addEventListener("keydown", commit);
+    return () => window.removeEventListener("keydown", commit);
+  }, [peeking]);
+  // Takeovers waiting their turn show as "+N" even on a bare notch.
+  const liveNow = resting && (live.length > 0 || whisperNow || waiting > 0);
+  // Held up a beat after the last one goes, so the pill collapses into the
+  // cutout on the panel's spring (`pillLeaving` below) rather than snapping.
+  const pillShown = useLinger(liveNow, 600);
+  const pillLeaving = pillShown && !liveNow;
+  // What the pill draws while it leaves: the last activities or whisper,
+  // fading out as the shape collapses under them, rather than an empty pill
+  // doing so.
+  const lastLive = useRef(live);
+  if (live.length > 0) lastLive.current = live;
+  const lastWhisper = useRef<Island | null>(null);
+  if (whisperNow && whisper) lastWhisper.current = whisper.value;
+  else if (live.length > 0) lastWhisper.current = null;
+  const pillWhisper = whisperNow && whisper ? whisper.value : liveNow ? null : lastWhisper.current;
+  // The whisper's own clock: stopped while it cannot be seen and while the
+  // pointer is on one that opens, like a toast's. Rust's backstop covers a
+  // webview that never gets to show it.
+  const endWhisper = useCallback(() => {
+    const id = whisperRef.current?.value.id;
+    setWhisper(null);
+    try {
+      if (id) void commands.dismissIsland(id);
+    } catch {
+      /* browser preview: no queue to tell */
+    }
   }, []);
-  const openAgents = useCallback(() => {
+  useDwell(
+    whisper ? dwellMs(whisper.value) : null,
+    !(whisperNow || (whisper !== null && toast !== null)) || whisperOpen,
+    endWhisper,
+    whisper?.key,
+  );
+  // What a toast is drawn as: a side capsule, a peek row, or the card.
+  const toastDrawn = toast ? toastForm(toast.value, hovering) : null;
+  // The open gate was answered: the run's own row says so before Rust's event.
+  const decideRun = useCallback(
+    (confirmed: boolean) =>
+      setAgent((r) => r && { ...r, steps: withDecision(r.steps, confirmed) }),
+    [],
+  );
+  // The compact run panel's one way into the sections: the same run, in Agents › Voice.
+  const openVoice = useCallback(() => {
     setBrowsing(true);
-    setSelected(null);
-  }, []);
-
-  // The drill is plain navigation state. A permission arriving *sets* it
-  // (one-shot, in the event listener) — deriving it from the queue every
-  // render meant "back" un-drilled and the fallback instantly re-drilled,
-  // which read as the button not working.
-  const selectedSession = sessions.find((s) => s.id === selected) ?? null;
+    takeFocus("agents", "voice");
+  }, [takeFocus]);
+  // A drill — a permission arriving, a dealt card clicked, a row picked —
+  // is a coding agent, so the panel goes to where they live.
+  useLayoutEffect(() => {
+    if (selected) takeFocus("agents", "coding");
+  }, [selected, takeFocus]);
 
   // Reconcile the cat-variation counters once for the whole list before any
   // avatar reads a seed: bumps a session's counter on stage change and prunes
@@ -501,19 +684,19 @@ function Overlay() {
   // judging by the body's measured width instead was wrong twice (a
   // `display: none` pill measures 0 with content, an empty body measures its
   // padding without any), so the decision is state, never pixels.
-  const populated = panelOpen || phase !== "idle" || (resting && hovering);
-  // The strip owns the click-box only while it is the thing on screen — i.e. at
-  // rest, NOT once a hover has grown the notch. Passing bare `ambient` here left
-  // the strip's small resting box reported after the panel grew, so the cursor
-  // (now over a dealt card well below the old cutout) tested as OUTSIDE and the
-  // window went click-through: the card never got `mouseenter`, so the hover
-  // pop/plate did not fire until a click→back forced the grown box to report.
+  const populated =
+    panelOpen ||
+    toast !== null ||
+    phase !== "idle" ||
+    (resting && (shellShown || pillShown));
+  // The pill reports its own measured box, so hovering it is hovering the
+  // notch — the one writer of the click-box, where the old canvas strip and
+  // the panel used to take turns at it.
   const panel = useNotchPanel(
     effectiveStyle,
     run,
     populated,
-    ambient && !hovering,
-    dismissing,
+    dismissing || (pillLeaving && !hovering) || peekLeaving,
     reportBox,
   );
 
@@ -529,6 +712,16 @@ function Overlay() {
       /* browser preview — nothing is tracking the pointer either */
     }
   }, [panelOpen]);
+  // Home opened under the pointer holds the takeover gate (a banner waits)
+  // without taking keyboard focus: that is `set_notch_peek`, not a panel.
+  // After the effect above, so a click-in reaches Rust as "panel open" first.
+  useEffect(() => {
+    try {
+      void commands.setNotchPeek(peeking);
+    } catch {
+      /* browser preview: no gate to tell */
+    }
+  }, [peeking]);
   // The root, not the bar row: --level inherits, so the wings style can draw
   // two waves off one write.
   const root = useRef<HTMLDivElement>(null);
@@ -573,9 +766,11 @@ function Overlay() {
       if (e.payload === "recording") {
         setError(null);
         // A dictation started over the top of an answer takes the panel back —
-        // including from the agents surface, or the pill and the panel fight
-        // over the same strip.
+        // including from the agents surface and a toast, or the pill and the
+        // panel fight over the same strip.
         setAgent(null);
+        setToast(null);
+        setWhisper(null);
         setBrowsing(false);
         setSelected(null);
         setPartial("");
@@ -654,6 +849,21 @@ function Overlay() {
     const onPreview = (event: Event) => {
       const command = (event as CustomEvent<PreviewCommand>).detail;
       if (command.style) setStyle(command.style);
+      // First, so anything else in the same command draws on a resting notch.
+      if (command.rest) {
+        clearInterval(typing);
+        setAgent(null);
+        setBrowsing(false);
+        setSelected(null);
+        setToast(null);
+        setWhisper(null);
+        setWaiting(0);
+        setHovering(false);
+        setPartial("");
+        setDroppedDown(false);
+        setDismissing(false);
+        setPhase("idle");
+      }
       // Phase first: `recording` resets everything below, including the timer
       // both streams share, so a stream started before it would be cancelled.
       if (command.phase) {
@@ -674,7 +884,7 @@ function Overlay() {
           ...AGENT_PREVIEW,
           steps: [AGENT_PREVIEW.steps[0]],
           finished:
-            "Sent the release notes to Priya. The reply to Sam is drafted and waiting in Gmail.",
+            "Said hi in #launch. The email to David is ready whenever you are.",
         });
       }
       if (command.agent === "pending") {
@@ -704,21 +914,21 @@ function Overlay() {
               app: "Google Contacts",
               args: { query: "Genghis Khan" },
               requiresConfirmation: false,
-              result: { success: true, message: "no results", show: null },
+              result: { success: true, message: "no results", show: null, note: null, tidied: null },
             },
             {
               name: "GMAIL_FETCH_EMAILS",
               app: "Gmail",
               args: { query: "Genghis Khan" },
               requiresConfirmation: false,
-              result: { success: true, message: "no results", show: null },
+              result: { success: true, message: "no results", show: null, note: null, tidied: null },
             },
             {
               name: "GMAIL_FETCH_EMAILS",
               app: "Gmail",
               args: { query: "from:Genghis" },
               requiresConfirmation: false,
-              result: { success: true, message: "no results", show: null },
+              result: { success: true, message: "no results", show: null, note: null, tidied: null },
             },
             {
               name: "GOOGLECONTACTS_CREATE_CONTACT",
@@ -733,6 +943,7 @@ function Overlay() {
                 personFields: "names,emailAddresses",
               },
               requiresConfirmation: true,
+              preview: CONTACT_PREVIEW,
             },
           ],
         });
@@ -748,14 +959,14 @@ function Overlay() {
               app: "Google Contacts",
               args: { query: "Charlie Yang" },
               requiresConfirmation: false,
-              result: { success: true, message: "no results", show: null },
+              result: { success: true, message: "no results", show: null, note: null, tidied: null },
             },
             {
               name: "GMAIL_FETCH_EMAILS",
               app: "Gmail",
               args: { query: "Charlie Yang" },
               requiresConfirmation: false,
-              result: { success: true, message: "no results", show: null },
+              result: { success: true, message: "no results", show: null, note: null, tidied: null },
             },
           ],
           question: {
@@ -775,7 +986,7 @@ function Overlay() {
               app: "Google Contacts",
               args: { query: "Sam" },
               requiresConfirmation: false,
-              result: { success: true, message: "3 results", show: null },
+              result: { success: true, message: "3 results", show: null, note: null, tidied: null },
             },
           ],
           question: {
@@ -788,7 +999,34 @@ function Overlay() {
           },
         });
       }
-      if (command.agent === "fallback") setAgent(FALLBACK_PREVIEW);
+      if (command.card) setAgent(withIcon(CARD_PREVIEWS[command.card], command.icon));
+      if (command.finder) setAgent(FINDER_PREVIEWS[command.finder]);
+      if (command.toast) {
+        const value = TOAST_PREVIEWS[command.toast];
+        setToast({
+          value: command.icon ? { ...value, icon: command.icon } : value,
+          key: ++toastKey.current,
+        });
+        setAgent(null);
+        setDismissing(false);
+      }
+      if (command.takeover) {
+        // `stay`: the fixture keeps its place for a screenshot, not its dwell.
+        const fixture: Island = { ...TAKEOVER_PREVIEWS[command.takeover] };
+        if (command.level !== undefined) fixture.level = command.level;
+        if (command.stay) fixture.dwellMs = fixture.tier === "card" ? null : 3_600_000;
+        takeOver(fixture);
+        setDismissing(false);
+      }
+      if (command.hover !== undefined) setHovering(command.hover);
+      if (command.runs !== undefined) setRuns(command.runs ? VOICE_RUN_PREVIEWS : []);
+      if (command.waiting !== undefined) setWaiting(command.waiting);
+      if (command.islands !== undefined) setIslands(livePreviews(command.islands));
+      if (command.open) {
+        setBrowsing(true);
+        navigate(command.open.section, command.open.sub);
+      }
+      if (command.palette !== undefined) setPalette(command.palette);
       if (command.agent === "close") setAgent(null);
       if (command.partial === "clear") {
         clearInterval(typing);
@@ -804,7 +1042,7 @@ function Overlay() {
       window.removeEventListener(PREVIEW_EVENT, onPreview);
       clearInterval(typing);
     };
-  }, []);
+  }, [takeOver]);
 
   // An agent run. Its own listener: a separate event stream, a shared surface.
   useEffect(() => {
@@ -813,6 +1051,7 @@ function Overlay() {
         case "runStarted":
           // A new run resets the panel; it is reused, not recreated.
           setAgent({ heard: payload.value, steps: [] });
+          setToast(null);
           break;
         case "planned":
           setAgent((r) => r && { ...r, planned: payload.value });
@@ -828,6 +1067,11 @@ function Overlay() {
                 question: undefined,
               },
           );
+          break;
+        case "decided":
+          // The countdown or a spoken reply answered the gate; its own buttons
+          // already said so through `onDecide`.
+          setAgent((r) => r && { ...r, steps: withDecision(r.steps, payload.value) });
           break;
         case "toolResult":
           setAgent((r) => r && { ...r, steps: withResult(r.steps, payload.value), status: undefined });
@@ -876,28 +1120,43 @@ function Overlay() {
     if (el && agent && !agent.finished) el.scrollTop = el.scrollHeight;
   }, [agent]);
 
+  // Closes the panel: Escape, and the shell's ×.
+  const closePanel = useCallback(() => {
+    // A browse sets `PANEL_OPEN` in Rust (via `setPanelInteractive`), so
+    // closing it has to clear that too — `closeBrowse` does, and clearing
+    // only the webview `browsing` would leave the Rust flag stuck.
+    // `invoke` throws synchronously in the browser preview; the webview side
+    // of the close must still happen there.
+    if (!agent) {
+      try {
+        void commands.closeBrowse();
+      } catch {
+        /* browser preview: no Tauri */
+      }
+      setBrowsing(false);
+      setSelected(null);
+      return;
+    }
+    // `closeAgent` also abandons a pending confirmation, so Escape reads as
+    // "no" rather than leaving a write waiting on a channel nobody answers.
+    try {
+      void commands.closeAgent();
+    } catch {
+      // The preview has no Rust to send the dismiss back, so it closes here.
+      setAgent(null);
+    }
+  }, [agent]);
+
   // Escape dismisses the panel. Guarded on `panelOpen` so a stray keystroke
   // cannot ask Rust to hide a pill mid-dictation.
   useEffect(() => {
     if (!panelOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      // A browse sets `PANEL_OPEN` in Rust (via `setPanelInteractive`), so
-      // closing it has to clear that too — `closeBrowse` does, and clearing
-      // only the webview `browsing` would leave the Rust flag stuck.
-      if (!agent) {
-        void commands.closeBrowse();
-        setBrowsing(false);
-        setSelected(null);
-        return;
-      }
-      // `closeAgent` also abandons a pending confirmation, so Escape reads as
-      // "no" rather than leaving a write waiting on a channel nobody answers.
-      void commands.closeAgent();
+      if (e.key === "Escape") closePanel();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [panelOpen, agent]);
+  }, [panelOpen, closePanel]);
 
   // A dismissal is an animation, not a state of being: once the collapse has
   // settled, the panel is back to resting so the notch (and the agents under
@@ -909,14 +1168,61 @@ function Overlay() {
   // cut a no-speech run off dead), so the last real phase is still latched —
   // and a resting notch that re-opens onto a stale "Transcribing…" pill is
   // that latch showing. Collapse settled = the run is over = idle.
+  //
+  // A toast is torn down here too, after its collapse has played and not
+  // before — then Rust is told, which hands the window back (to the listening
+  // wings, or to rest). Told the other way round, a listening bar would swap
+  // its style back under the toast mid-exit and cut it dead.
   useEffect(() => {
     if (!dismissing) return;
     const timer = setTimeout(() => {
       setDismissing(false);
       setPhase("idle");
+      if (toastRef.current) {
+        setToast(null);
+        // The browse close is exactly the toast's: end the panel, nothing
+        // more. `closeAgent` would also decline a gate a newer run has open.
+        try {
+          void commands.closeBrowse();
+        } catch {
+          /* browser preview: no Tauri */
+        }
+      }
     }, 600);
     return () => clearTimeout(timer);
   }, [dismissing]);
+
+  // The toast leaving, by its clock, its × or its action: the panel collapses
+  // into the notch on its close spring while the chip fades, then the timer
+  // above takes it away. The queue hears it now, so the alert is not left
+  // for its backstop.
+  const leaveToast = useCallback(() => {
+    setDismissing(true);
+    const id = toastRef.current?.value.id;
+    try {
+      if (id) void commands.dismissIsland(id);
+    } catch {
+      /* browser preview: no queue to tell */
+    }
+  }, []);
+
+  // An island's button, through the one action registry ⌘K also runs. An
+  // action that opens the panel is the user choosing a place, so it is
+  // remembered like a tab click.
+  const actOnIsland = useCallback(
+    (action: IslandAction) =>
+      runAction(
+        action.action,
+        {
+          open: (section, sub) => {
+            setBrowsing(true);
+            navigate(section, sub);
+          },
+        },
+        action.args,
+      ),
+    [navigate],
+  );
 
   // Follow the words down as they arrive: past the height cap in overlay.css
   // this is the only thing keeping the newest ones on screen.
@@ -947,7 +1253,7 @@ function Overlay() {
     <div
       className="overlay-root"
       ref={root}
-      data-exiting={dismissing || undefined}
+      data-exiting={dismissing || peekLeaving || undefined}
       // Belt-and-suspenders close. The primary popover dismiss is now
       // focus-loss in Rust (`dismiss_on_focus_loss`) — a click outside the
       // panel rect reaches the app behind *and* resigns the overlay's key
@@ -993,13 +1299,26 @@ function Overlay() {
       // measured cutout height. Never `--idle` while an answer is up, whatever
       // the phase says — `--idle` is `display: none`.
       <div
-        className={`drop-pill drop-pill--${panelOpen ? "answering" : resting ? "resting" : phase}`}
+        className={`drop-pill drop-pill--${
+          panelOpen
+            ? "answering"
+            : toast
+              ? "toast"
+              : resting
+                ? pillShown && !hovering
+                  ? "live"
+                  : "resting"
+                : phase
+        }`}
         data-hover={resting && hovering ? "" : undefined}
+        data-form={toastDrawn ?? undefined}
         ref={panel.surface}
         // Only ever reaches the DOM while the pointer is over the panel — Rust
-        // hands the window clicks exactly then (`track_cursor`).
+        // hands the window clicks exactly then (`track_cursor`). A click on the
+        // resting notch opens the sections panel whatever is running, and a
+        // click inside Home's hover-open keeps it: this is the commit.
         onClick={() => {
-          if (resting && sessions.length > 0) setBrowsing(true);
+          if (resting) setBrowsing(true);
         }}
       >
         {/* The panel's whole silhouette. A path and not a border-radius,
@@ -1015,104 +1334,99 @@ function Overlay() {
         <span className="drop-pill__notch" aria-hidden />
         <div
           className={`drop-pill__body${
-            panelOpen
-              ? " drop-pill__body--ask"
-              : resting && hovering
-                ? " drop-pill__body--agents"
-                : transcript
-                  ? " drop-pill__body--transcript"
-                  : ""
+            shellShown
+              ? " drop-pill__body--shell"
+              : compact
+                ? " drop-pill__body--ask"
+                : toast
+                  ? toastDrawn === "card"
+                    ? " drop-pill__body--toast"
+                    : toastDrawn === "peek"
+                      ? " drop-pill__body--peek"
+                      : " drop-pill__body--live"
+                  : whisperOpen
+                    ? " drop-pill__body--peek"
+                    : resting && pillShown
+                      ? " drop-pill__body--live"
+                      : transcript
+                        ? " drop-pill__body--transcript"
+                        : ""
           }${dictating ? " drop-pill__body--cat" : ""}`}
           ref={panel.content}
         >
-          {resting ? (
-            // At rest the panel is exactly the cutout and this body is empty;
-            // the cats show on the strip left of the notch (`AmbientSign`).
-            // Hovering grows the notch down (the spring in `useNotchPanel`) and
-            // deals the same agents out into it as a row of bigger cards
-            // (`NotchAgents`), while the strip fades. This is the "agents
-            // animate inside the notch on hover" the notch is for.
-            hovering && (
-              <NotchAgents
-                sessions={sessions}
-                permissions={permissions}
-                onOpenAgent={openAgent}
-                onOpenAgents={openAgents}
-                onResolve={resolvePermission}
+          {shellShown ? (
+            // Everything under one notch: sections across the top, what was
+            // said in Agents › Voice and the coding agents in Agents ›
+            // Coding. Open for someone who asked for it, or in place under a
+            // resting pointer (Home, see `shellState`).
+            <NotchProvider
+                value={{
+                  agent,
+                  setAgent,
+                  sessions,
+                  permissions,
+                  islands,
+                  runs,
+                  removeRun,
+                  act: actOnIsland,
+                  selected,
+                  select: setSelected,
+                  resolvePermission,
+                  showPeek,
+                  bodyRef: answerRef,
+                  navigate,
+                  close: closePanel,
+                  palette,
+                  setPalette,
+                }}
+              >
+                <NotchShell nav={nav} />
+              </NotchProvider>
+          ) : compact && agent ? (
+            // A command shows itself, in place: the run and nothing else, the
+            // way it did before the sections.
+            <AgentRun
+              key={agent.heard}
+              run={agent}
+              bodyRef={answerRef}
+              onExpand={openVoice}
+              onDecide={decideRun}
+            />
+          ) : resting ? (
+            // At rest the panel is exactly the cutout and this body is empty —
+            // unless islands are live, when it widens beside the camera to
+            // show them (`IslandPill`).
+            whisperOpen && whisper ? (
+              <NotchToast
+                key={whisper.key}
+                island={whisper.value}
+                hovering
+                onLeave={endWhisper}
+                onAction={actOnIsland}
+                waiting={waiting}
               />
+            ) : (
+              pillShown && (
+                <IslandPill
+                  live={liveNow ? live : lastLive.current}
+                  sessions={sessions}
+                  permissions={permissions}
+                  leaving={pillLeaving}
+                  whisper={pillWhisper}
+                  waiting={waiting}
+                />
+              )
             )
-          ) : panelOpen ? (
-            // Everything under one notch: the strip always shows, the agents
-            // are a tab on it, and a dictation's agent panel is another —
-            // so escaping one never takes the other away.
-            <>
-              <TabStrip
-                tabs={tabs}
-                active={activeTab}
-                runOpen={agent !== null}
-                asking={permissions.length > 0}
-                title={
-                  agent?.heard ??
-                  // Opened from the notch rather than by speaking, so there is
-                  // no utterance to name the tab after.
-                  "Aloud"
-                }
-                onSelect={setActiveTab}
-                onClose={closeTab}
-                onClosed={dropTab}
-                onAdd={addTab}
-              />
-              {activeTab === AGENTS_TAB ? (
-                // The agents surface: the list, or one agent's live detail,
-                // with any pending permission under the row that is asking.
-                selectedSession ? (
-                  <AgentDetail
-                    session={selectedSession}
-                    permission={
-                      permissions.find((p) => p.sessionId === selectedSession.id) ?? null
-                    }
-                    onResolve={resolvePermission}
-                    onBack={() => setSelected(null)}
-                    onPeek={showPeek}
-                  />
-                ) : (
-                  <AgentList
-                    sessions={sessions}
-                    permissions={permissions}
-                    onSelect={setSelected}
-                    onResolve={resolvePermission}
-                    onPeek={showPeek}
-                    onClose={() => {
-                      setBrowsing(false);
-                      setSelected(null);
-                      // With a run open the X leaves the panel up on that run;
-                      // only a browse-only panel actually closes — and that is
-                      // the case that has to clear Rust's `PANEL_OPEN`.
-                      if (agent) setActiveTab(0);
-                      else void commands.closeBrowse();
-                    }}
-                  />
-                )
-              ) : /* Keyed so switching back to a tab replays its entrance rather
-                  than having the content appear already settled. */
-              tabs.find((tab) => tab.id === activeTab)?.blank ? (
-                // A new tab is where you start a coding agent. Keyed on the tab
-                // so switching back replays its entrance, like the run tabs.
-                <CodingAgentComposer
-                  key={activeTab}
-                  bodyRef={answerRef}
-                  onClose={() => closeTab(activeTab)}
-                  onAddTab={tabs.length < MAX_TABS ? addTab : undefined}
-                />
-              ) : agent ? (
-                <AgentRun
-                  key={agent.heard}
-                  run={agent}
-                  bodyRef={answerRef}
-                  onAddTab={tabs.length < MAX_TABS ? addTab : undefined}
-                />
-              ) : null}
-            </>
+          ) : toast ? (
+            <NotchToast
+              key={toast.key}
+              island={toast.value}
+              hovering={hovering}
+              onLeave={leaveToast}
+              onAction={actOnIsland}
+              side={whisper?.value}
+              waiting={waiting}
+            />
           ) : (
             <>
               {/* The meme is listening while the app is. See ListeningCat. */}
@@ -1140,23 +1454,26 @@ function Overlay() {
         scroll clip. Grows out of the hovered avatar's box (its origin), which
         is why it is positioned from the anchor rect rather than centred. */}
     {peek && <CatPeek stage={peek.stage} seed={peek.seed} rect={peek.rect} />}
-    {/* The ambient sign lives on the canvas beside the cutout, not in the pill —
-        agent-notch's trick: a full transparent top-bar canvas lets a mascot be
-        drawn left of the notch without growing any box. Click-through
-        (`pointer-events: none`), so it never touches the hit-test region. */}
-    {ambient && (
-      <AmbientSign
-        sessions={sessions}
-        permissions={permissions}
-        // Hovering grew the notch and the dealt row took over: fade the strip
-        // out (it is the same agents, now shown bigger inside the notch).
-        handedOff={hovering}
-        onBox={reportBox}
-      />
-    )}
     </div>
     </CatSettingsProvider>
   );
+}
+
+/**
+ * True while `on`, and for `ms` after it goes false — the surface outliving
+ * its own exit. A returning `on` inside the window cancels the exit.
+ */
+function useLinger(on: boolean, ms: number): boolean {
+  const [held, setHeld] = useState(on);
+  useEffect(() => {
+    if (on) {
+      setHeld(true);
+      return;
+    }
+    const timer = setTimeout(() => setHeld(false), ms);
+    return () => clearTimeout(timer);
+  }, [on, ms]);
+  return on || held;
 }
 
 /**
@@ -1188,8 +1505,14 @@ function Indicator({ phase }: { phase: Phase }) {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <Overlay />
-  </React.StrictMode>,
-);
+const mount = () =>
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <Overlay />
+    </React.StrictMode>,
+  );
+
+// A plain browser (the tuner, screenshots) has no Rust: stand one in before
+// anything calls `invoke`. A dynamic import, so the real app never loads it.
+if ("__TAURI_INTERNALS__" in window) mount();
+else void import("./lib/preview-backend").then((m) => (m.installPreviewBackend(), mount()));

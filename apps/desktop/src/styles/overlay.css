@@ -214,7 +214,21 @@
   }
 }
 
-/* Answer mode: fixed width, so only the height changes as the answer streams
+/* The sections panel (features/notch/NotchShell). The shell sets its own
+   fixed width, so only the height changes as an answer streams rather than
+   the panel's shoulders crawling outward per token. */
+.drop-pill__body--shell {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
+  width: max-content;
+  height: auto;
+  padding: 0;
+}
+
+/* A command's run, in place: the compact panel the notch grows when you ask
+   for something. Fixed width, so only the height changes as the answer streams
    rather than the panel's shoulders crawling outward per token. */
 .drop-pill__body--ask {
   flex-direction: column;
@@ -224,227 +238,10 @@
   width: 480px;
   height: auto;
   padding: 0;
+  font-family: var(--font-notch);
 }
 
-/* Resting-hover: the dealt row + peek the notch grows into. Top-aligned so the
-   row sits below the cutout, and a FIXED width matching the clicked-in detail
-   panel — so the hover peek (which renders that same detail) is always the
-   notch-panel size, never as wide as its longest line of text (a long cwd path
-   under `max-content` blew the notch out to most of the screen). The dealt row
-   is narrower and centres within it. */
-.drop-pill__body--agents {
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0;
-  width: 460px;
-  height: auto;
-  padding: 0;
-}
-
-/* --- The tab strip ------------------------------------------------------
- *
- * The gap does not collapse with the wrapper below, so a new tab shoves its
- * neighbours sideways by this much on its first frame. Kept small enough that
- * the jump is imperceptible against the 80pt the panel travels underneath —
- * three pixels buys every chip a visible edge, which is worth more.
- */
-.tabs {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 7px 8px 0;
-  /* The same entrance `.ask > *` gets, leading the stagger — the strip is the
-     panel's first row and was the only one popping in flat.
-     It also fixes the `+`: the row is composited for the animation and stays
-     that way (`both` retains the transform), so every child paints into that
-     one layer. Without it `.tabs` was un-composited while each `.tab` inside
-     promoted itself, and in WKWebView the `+` — the only child that never
-     animates — went unpainted until an unrelated repaint forced it. The footer
-     `+`, identical markup inside the already-composited `.ask__footer`, never
-     had the problem. */
-  animation:
-    ask-rise var(--spring-pop-dur) var(--spring-pop) both,
-    ask-fade var(--dur-fast) var(--ease-out) both;
-}
-
-/* The collapsing wrapper — the same 0fr→1fr technique as `.motion-row` in
-   motion.css, turned ninety degrees. A grid track interpolates; `width: auto`
-   does not, and measuring each chip to animate a real width buys nothing here.
-   The child needs `overflow: hidden` or it spills out of the 0fr track. */
-/* Shrinks rather than pushing the `+` off the end: past four tabs the strip is
-   over its 480pt budget, and a browser would rather ellipsis a label than lose
-   the control that made it. `min-width: 0` is what lets a flex item shrink
-   below its content at all. */
-.tab {
-  display: grid;
-  grid-template-columns: 1fr;
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-.tab > * {
-  overflow: hidden;
-}
-
-.tab[data-motion="in"] {
-  animation: tab-in var(--spring-dur) var(--spring) both;
-}
-
-/* Slower than the entrance, per the app's open/close asymmetry, and eased
-   rather than sprung: a tab on its way out must not overshoot back into the
-   strip and make the neighbours it is handing space to hesitate. */
-.tab[data-motion="out"] {
-  animation: tab-out var(--spring-dur-slow) var(--ease-in) both;
-}
-
-/* Both ends stated on both keyframes: an implicit end resolves to the
-   element's computed `1fr`, which reads as no animation in and a cut out. */
-@keyframes tab-in {
-  from {
-    grid-template-columns: 0fr;
-    opacity: 0;
-    filter: blur(3px);
-  }
-  to {
-    grid-template-columns: 1fr;
-    opacity: 1;
-    filter: blur(0);
-  }
-}
-
-@keyframes tab-out {
-  from {
-    grid-template-columns: 1fr;
-    opacity: 1;
-    filter: blur(0);
-  }
-  to {
-    grid-template-columns: 0fr;
-    opacity: 0;
-    filter: blur(3px);
-  }
-}
-
-.tab__chip {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 150px;
-  padding: 4px 5px 4px 10px;
-  border-radius: 8px;
-  /* Filled even when inactive. With only the active one filled, four tabs read
-     as four loose words with air between them rather than as a strip. */
-  background: rgb(255 255 255 / 0.045);
-  color: rgb(255 255 255 / 0.45);
-  /* No sliding indicator behind the chips: a new tab is active before it has
-     finished growing, so the indicator would sit over the `+` for the whole
-     entrance. The active state is the chip's own fill. */
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
-}
-
-.tab__chip:hover {
-  background: rgb(255 255 255 / 0.09);
-  color: rgb(255 255 255 / 0.7);
-}
-
-/* An agent is waiting on an answer: the chip carries the flag so the ask is
-   visible even while another tab has the panel. */
-.tab__chip[data-asking]::after {
-  content: "";
-  width: 6px;
-  height: 6px;
-  margin-right: 8px;
-  border-radius: 50%;
-  background: var(--sys-orange, #ff9f0a);
-}
-
-.tab__chip[data-active] {
-  background: rgb(255 255 255 / 0.16);
-  color: rgb(255 255 255 / 0.92);
-}
-
-.tab__select {
-  flex: 1;
-  /* Without this the flex item refuses to shrink and the ellipsis never
-     engages — the label pushes the chip past its max-width instead. */
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tab__close {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: none;
-  color: inherit;
-  /* Revealed on the tab being pointed at or read, so a strip at rest is
-     labels and not a row of crosses. */
-  opacity: 0;
-  transition:
-    opacity var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-
-.tab__chip:hover .tab__close,
-.tab__chip[data-active] .tab__close {
-  opacity: 1;
-}
-
-.tab__close:hover {
-  background: rgb(255 255 255 / 0.18);
-}
-
-.tab__add {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  margin-left: 4px;
-  padding: 0;
-  /* Outlined as well as filled. It is the only control in the strip with no
-     label, so it has to read as a button from its shape alone — a glyph at
-     the strip's own ink level was clickable and unfindable. */
-  border: 1px solid rgb(255 255 255 / 0.14);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 0.08);
-  color: rgb(255 255 255 / 0.75);
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
-    transform var(--dur-instant) var(--ease-out);
-}
-
-.tab__add:hover {
-  background: rgb(255 255 255 / 0.18);
-  color: rgb(255 255 255 / 0.95);
-}
-
-.tab__add:active {
-  transform: scale(0.88);
-}
-
-/* A new tab holds the coding-agent composer, inside a `.ask` panel — so its
+/* Agents › Coding's coding-agent composer, inside a `.ask` panel — so its
    entrance, dark chrome and exit all come from `.ask`, and only the fields
    below need their own layout. */
 .composer {
@@ -777,6 +574,11 @@
   list-style: none;
 }
 
+/* A finished write's echo is a small window; the answer under it needs air. */
+.agent__steps:not(:last-child) {
+  margin-bottom: 8px;
+}
+
 .agent__step {
   display: flex;
   align-items: center;
@@ -876,6 +678,20 @@
   font-weight: 600;
 }
 
+/* "Slack · send and share": what a saved grant would cover, under the card. */
+.agent__scope {
+  margin: 0;
+  font-size: 11px;
+  color: rgb(255 255 255 / 0.45);
+}
+
+/* Why this asks when a grant would have let it run. */
+.agent__reason {
+  margin: 0;
+  font-size: 12px;
+  color: var(--warning);
+}
+
 .agent__actions {
   display: flex;
   justify-content: flex-end;
@@ -910,15 +726,168 @@
   background: color-mix(in srgb, var(--sys-blue) 85%, white);
 }
 
-/* The card a write shows at its gate (components/preview/kit.tsx).
+/* A strict write — money, a public post, a permanent delete — says so in red:
+   the card's edge and its pill. */
+.agent__confirm-title--danger {
+  color: var(--danger);
+}
+
+/* The card a write shows at its gate (components/preview/cards.tsx), drawn as
+ * a small window of the app it writes to: the app's icon and its window title
+ * in a bar, the content laid out the app's way, and the app's own blue Send at
+ * the foot. A window rather than bare rows because the point is recognition —
+ * "this is a Gmail compose" lands before a single label is read.
  *
- * Rows on hairlines, the same idiom as the gate around it, rather than a
- * bordered box: a box inside the black panel reads as another surface dropped
- * in. Every value arrives as finished text; nothing here truncates one, because
+ * Every value arrives as finished text; nothing here truncates one, because
  * the clipped part of an address or a message is the part that gets sent. */
 .preview {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-solid);
+}
+
+.preview[data-strict] {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.preview__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--sep);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.preview__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview__sigil {
+  margin-right: 1px;
+  color: var(--text2);
+}
+
+.preview__content {
+  display: flex;
+  flex-direction: column;
+  padding: 0 12px 4px;
+}
+
+/* The app's own icon, or a neutral window glyph where none is known yet. */
+.app-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  object-fit: contain;
+}
+
+.app-icon--glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--field);
+  color: var(--text2);
+}
+
+/* Allow once, as the app draws its primary button; the decline and Always
+   allow are text beside it, quieter by design. */
+.preview__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px 10px 6px;
+}
+
+.gate__quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-row);
+  background: none;
+  color: var(--text2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.gate__quiet:hover,
+.gate__quiet:focus-visible {
+  background: var(--field);
+  color: var(--fg);
+  outline: none;
+}
+
+.app-pill {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 5px 14px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--app-action);
+  color: var(--app-action-fg);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.app-pill:hover {
+  background: color-mix(in srgb, var(--app-action) 85%, white);
+}
+
+.app-pill:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--app-action) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.app-pill:disabled {
+  opacity: 0.55;
+}
+
+.app-pill .btn__k {
+  color: color-mix(in srgb, var(--app-action-fg) 60%, transparent);
+}
+
+.app-pill[data-danger] {
+  background: var(--danger);
+}
+
+.app-pill[data-danger]:hover {
+  background: color-mix(in srgb, var(--danger) 85%, white);
+}
+
+/* The exact-words countdown, draining across the pill it ends by pressing.
+   The clock itself is `.motion-countdown` in motion.css — paused once held,
+   stepped under reduced motion — so this only paints the lighter fill it
+   shrinks, from the right, toward the label's start. */
+.app-pill.motion-countdown::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--app-action-fg) 22%, transparent);
+  transform-origin: left;
+  pointer-events: none;
 }
 
 .preview__row {
@@ -930,8 +899,9 @@
   border-bottom: 1px solid var(--sep);
 }
 
-.preview__row:first-child {
-  padding-top: 0;
+/* A compose window's To and Cc: a short label, then the chips. */
+.preview__compose .preview__row {
+  grid-template-columns: max-content minmax(0, 1fr);
 }
 
 .preview__label {
@@ -954,11 +924,12 @@
   gap: 4px 6px;
 }
 
+/* A recipient as Mail and Gmail draw one: a pill. */
 .preview__chip {
   display: inline-block;
   max-width: 100%;
-  padding: 1px 7px;
-  border-radius: var(--radius-chip);
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
   background: var(--field);
 }
 
@@ -971,6 +942,150 @@
 .preview__when,
 .preview__heading {
   font-weight: 600;
+}
+
+/* A record's name as the line its app opens on. Doubled up to outrank the
+   lead's own size further down. */
+.preview__lead.preview__heading--big {
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+/* A chat message you send: a bubble at the right, its tail corner tucked. */
+.preview__chat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--sep);
+}
+
+.preview__bubble {
+  max-width: 86%;
+  padding: 6px 11px;
+  border-radius: 16px 16px 4px 16px;
+  background: var(--bubble);
+  color: var(--bubble-fg);
+  font-size: 13px;
+}
+
+/* The bubble's text is the field itself on the open card. A text box sized by
+   its own words wraps at every letter, and the bubble is sized by the box, so
+   one you can write in takes the bubble's full width instead. */
+.preview__bubble:has(.preview__input) {
+  width: 86%;
+}
+
+.preview__bubble .preview__input {
+  margin: -2px -5px;
+  color: inherit;
+}
+
+.preview__bubble .preview__input:hover,
+.preview__bubble .preview__input:focus {
+  background: color-mix(in srgb, var(--bubble-fg) 14%, transparent);
+  border-color: transparent;
+}
+
+/* A reminder: its empty circle, what to do, and when, under it. */
+.preview__task {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.preview__check {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 1.5px solid var(--text3);
+  border-radius: var(--radius-pill);
+}
+
+.preview__task-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.preview__due {
+  font-size: 12px;
+  color: var(--text2);
+}
+
+/* An issue's fields as chips, label then value, under its description. */
+.preview__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--sep);
+  font-size: 12px;
+}
+
+.preview__tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--field);
+  color: var(--fg);
+}
+
+.preview__tag .preview__chip {
+  padding: 0;
+  background: none;
+}
+
+/* Files as Finder lists them: a type glyph, then the path. */
+.preview__finder {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.preview__finder-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.file-glyph {
+  flex: none;
+  color: var(--text2);
+}
+
+.file-glyph--folder {
+  color: var(--folder);
+}
+
+/* The finished step's echo: the window's bar and the one line that names it. */
+.preview__key {
+  margin: 0;
+  padding: 6px 12px 8px;
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--text2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview--compact .preview__bar {
+  padding: 5px 10px;
+  border-bottom: 0;
+  font-size: 12px;
+}
+
+.preview--compact .preview__key {
+  padding-top: 0;
 }
 
 .preview__money {
@@ -1036,6 +1151,211 @@
   rotate: 90deg;
 }
 
+/* The full-width blocks a layout leads with (components/preview/cards.tsx):
+   the same hairline idiom as a row, without its label column. */
+.preview__lead,
+.preview__text,
+.preview__sample {
+  margin: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--sep);
+  font-size: 13px;
+  color: var(--fg);
+}
+
+/* The window's foot has the actions; a hairline above them is one too many. */
+.preview__content > :last-child,
+.preview__content > .preview__compose:last-child .preview__row:last-child {
+  border-bottom: 0;
+}
+
+.preview__text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* Inside a row, the value column already gives it its place. */
+.preview__value .preview__text {
+  padding: 0;
+  border: 0;
+}
+
+.preview__when--big {
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+
+.preview__lead .preview__money {
+  font-size: 22px;
+}
+
+.preview__origin {
+  padding: 0 6px;
+  border-radius: var(--radius-chip);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.preview__origin--yours {
+  color: var(--origin-yours);
+  background: color-mix(in srgb, var(--origin-yours) 12%, transparent);
+}
+
+.preview__origin--aloud {
+  color: var(--origin-aloud);
+  background: color-mix(in srgb, var(--origin-aloud) 14%, transparent);
+}
+
+.preview__old {
+  color: var(--text2);
+  text-decoration: line-through;
+}
+
+.preview__arrow {
+  margin: 0 6px;
+  color: var(--text2);
+}
+
+.preview__new {
+  color: var(--success);
+}
+
+.preview__sample {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+}
+
+/* A sample, not the list being approved — the count beside it is — so one
+   long subject may clip rather than push the rest off the card. */
+.preview__item {
+  display: grid;
+  grid-template-columns: minmax(0, 110px) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.preview__item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Under an event's time: its zone and length, one quiet line. */
+.preview__under {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text2);
+}
+
+/* Rows bound for a sheet, in the sheet's own grid. Every cell shown is one
+   being written, so every cell carries the "new" tint. */
+.preview__sheet table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.preview__sheet th,
+.preview__sheet td {
+  padding: 3px 6px;
+  border: 1px solid var(--sep);
+  text-align: left;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.preview__sheet th {
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.preview__sheet td {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.preview__sheet .preview__faint {
+  display: block;
+  padding-top: 4px;
+}
+
+.preview__risk {
+  margin: 0;
+  padding-top: 7px;
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.preview__risk--danger {
+  color: var(--danger);
+}
+
+/* A field the open card lets you correct before saying yes. It reads as the
+   value it replaces — same type, same place — and only shows it is a field on
+   hover and focus, so a card with editable text is still a card, not a form.
+   Unlayered, so it wins over the shadcn input's utilities. */
+.preview__input {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  margin: -3px 0 -3px -6px;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-row);
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  /* Not the `font` shorthand: a message keeps `.preview__body`'s leading. */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  resize: none;
+  outline: none;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+input.preview__input {
+  line-height: inherit;
+}
+
+.preview__input:hover {
+  background: var(--field);
+}
+
+.preview__input:focus,
+.preview__input:focus-visible {
+  border-color: var(--sep);
+  background: var(--field);
+  box-shadow: none;
+}
+
+.preview__input::placeholder {
+  color: var(--text2);
+}
+
+/* Text you can write into, as the app's own window would take it: an I-beam,
+   and the app's blue caret once it is in. */
+textarea.preview__input {
+  cursor: text;
+  caret-color: var(--app-action);
+}
+
+/* A recipient being corrected stays the pill it was. */
+.preview__input--chip {
+  width: auto;
+  min-width: 18ch;
+  margin: 0;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--field);
+}
+
 /* The Finder search result grid — Option 1, a dense 4-up thumbnail wall. Sits
    in a step body, so it inherits the panel's black ground; no card chrome, the
    same rule the confirm gate follows. The panel measures its own new height
@@ -1099,6 +1419,198 @@
   font-size: 11px;
   color: rgb(255 255 255 / 0.4);
   font-variant-numeric: tabular-nums;
+}
+
+/* Documents found, as Finder's list view: a window like the approval card's,
+   the search and its count in the bar, then Name, Size and Date Modified. */
+.finder-list {
+  margin: 6px 0 6px 22px;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-solid);
+  font-size: 12.5px;
+}
+
+.finder-list__bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--sep);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.finder-list__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finder-list__button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text2);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.finder-list__button:hover {
+  background: var(--field);
+  color: var(--fg);
+}
+
+.finder-list__button--close {
+  background: var(--field);
+}
+
+.finder-list__row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 54px 90px;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 4px 12px;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  /* Draggable out to other apps, like the grid's tiles. */
+  cursor: grab;
+  -webkit-user-drag: element;
+  /* The rows assemble top-down rather than the list landing as a block. */
+  animation: materialize var(--spring-dur) var(--spring) both;
+  animation-delay: calc(var(--i, 0) * 22ms);
+}
+
+/* Finder's alternating rows, faint enough to guide the eye along a line. */
+.finder-list__row:nth-child(even) {
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+
+.finder-list__row:hover {
+  background: var(--hover);
+}
+
+.finder-list__row--head {
+  padding-top: 5px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--sep);
+  color: var(--text2);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: default;
+  animation: none;
+}
+
+.finder-list__row--head:hover {
+  background: none;
+}
+
+.finder-list__name,
+.finder-list__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finder-list__meta {
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+
+.finder-list__thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: cover;
+}
+
+/* --- The toast -----------------------------------------------------------
+ *
+ * The chip a run of writes ends on (NotchToast.tsx). It is the notch panel's
+ * own content, so it grows out of the cutout — or the run's panel shrinks into
+ * it — on the panel's live spring, and goes back into the notch on its close.
+ * `max-content` so the panel hugs it; the cutout floor in useNotchPanel keeps
+ * it from ever settling narrower than the hole it hangs from.
+ */
+.drop-pill__body--toast {
+  gap: 0;
+  height: auto;
+  padding: 0;
+}
+
+/* Rises in a beat behind the shape, like the answer does. */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 440px;
+  padding: 6px 12px 12px 8px;
+  animation:
+    ask-rise var(--spring-pop-dur) var(--spring-pop) both,
+    ask-fade var(--dur-fast) var(--ease-out) both;
+}
+
+.toast .app-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.toast__close {
+  display: inline-flex;
+  flex: none;
+  align-self: flex-start;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--field);
+  color: var(--text2);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.toast__close:hover {
+  background: var(--sep);
+  color: var(--fg);
+}
+
+.toast__text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Gone before the panel closes over it, as the answer is: a chip sliced off by
+   the collapse would read as the window being killed. */
+.overlay-root[data-exiting] .toast {
+  animation: ask-out var(--dur-fast) var(--ease-in) both;
 }
 
 /* The last tool that ran — a "where is it up to" that survives the step list
@@ -1317,25 +1829,9 @@
   cursor: default;
 }
 
-/* Hovered, the panel has grown by one row and the row fades up into it. The
-   fade is opacity only — the movement is the panel getting taller underneath,
-   so animating position here would be two things moving at once. */
+/* Under the pointer the notch is about to open Home. */
 .drop-pill--resting[data-hover] {
   cursor: pointer;
-}
-
-/* The "No agents running" line shown when the notch is hovered with an empty
-   list. The only surviving `.notch-peek`: the old one-line hover row it styled
-   is now the dealt cards (`.notch-card`). */
-.notch-peek--empty {
-  margin: 0;
-  padding: 2px 14px 8px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--pill-ink);
-  opacity: 0.55;
-  white-space: nowrap;
-  animation: peek-in var(--dur-fast) var(--ease-out) both;
 }
 
 @keyframes peek-in {
@@ -1526,13 +2022,15 @@
 }
 
 /* Danger's allow: red, so the eye catches before the finger commits. */
-.perm[data-danger] .btn--allow {
+.perm[data-danger] .btn--allow,
+.agent__confirm[data-danger] .btn--allow {
   background: rgb(255 69 58 / 0.16);
   border-color: rgb(255 69 58 / 0.4);
   color: rgb(255 180 174);
 }
 
-.perm[data-danger] .btn--allow:hover {
+.perm[data-danger] .btn--allow:hover,
+.agent__confirm[data-danger] .btn--allow:hover {
   background: rgb(255 69 58 / 0.24);
 }
 
@@ -1709,13 +2207,6 @@
 
 /* Each row is a small block: head line, prompt line, optional subagents. The
    dithered separator agent-notch draws between them is a bottom hairline. */
-.agents-empty {
-  margin: 0;
-  padding: 8px 4px;
-  font-size: 13px;
-  opacity: 0.5;
-}
-
 .agent-row {
   display: flex;
   flex-direction: column;
@@ -1761,378 +2252,10 @@
   opacity: 0.8;
 }
 
-/* --- Agent detail -------------------------------------------------------- */
-
-.agent-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 440px;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace;
-}
-
-.agent-detail__back {
-  align-self: flex-start;
-  margin-bottom: 2px;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 12px;
-  color: var(--sys-blue, #0a84ff);
-  cursor: pointer;
-}
-
-/* Plan-quota dashboard — rolling usage limits above the agent list. */
-.quota {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 2px 2px 12px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid rgb(255 255 255 / 0.06);
-}
-
-.quota__row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.quota__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.quota__label {
-  font-size: 11px;
-  font-weight: 600;
-  opacity: 0.8;
-}
-
-.quota__figures {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  font-size: 10.5px;
-  font-variant-numeric: tabular-nums;
-}
-
-.quota__pct {
-  font-weight: 600;
-}
-
-.quota__pct[data-level="low"] {
-  color: var(--sys-green, #32d74b);
-}
-.quota__pct[data-level="mid"] {
-  color: var(--sys-orange, #ff9f0a);
-}
-.quota__pct[data-level="high"] {
-  color: var(--sys-red, #ff453a);
-}
-
-.quota__reset {
-  opacity: 0.45;
-}
-
-.quota__track {
-  height: 4px;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.08);
-  overflow: hidden;
-}
-
-.quota__fill {
-  height: 100%;
-  border-radius: 999px;
-  transition: width var(--dur-3, 0.3s) var(--ease-out, ease-out);
-}
-
-.quota__fill[data-level="low"] {
-  background: var(--sys-green, #32d74b);
-}
-.quota__fill[data-level="mid"] {
-  background: var(--sys-orange, #ff9f0a);
-}
-.quota__fill[data-level="high"] {
-  background: var(--sys-red, #ff453a);
-}
-
-.quota__extra {
-  font-size: 10.5px;
-  font-weight: 500;
-  color: var(--sys-red, #ff453a);
-  opacity: 0.85;
-}
-
-.quota__note {
-  margin: 0;
-  font-size: 11px;
-  opacity: 0.4;
-}
-
-/* Opt-in trigger — reading the token prompts for keychain access, so usage is
-   only fetched on an explicit click. */
-.quota__toggle {
-  align-self: flex-start;
-  background: none;
-  border: 0;
-  padding: 0;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--sys-blue, #0a84ff);
-  cursor: pointer;
-}
-
-.quota__toggle:hover {
-  text-decoration: underline;
-}
-
-.agent-detail__meta {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-/* Model tag over the live state — the identity block beside the avatar. */
-.agent-detail__id {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-.agent-detail__tag {
-  font-size: 12px;
-  opacity: 0.75;
-}
-
-/* State beside the photo — a coloured dot + word, no longer its own row. */
-.agent-detail__state {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: rgb(255 255 255 / 0.5);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-detail__state-dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: rgb(255 255 255 / 0.3);
-}
-
-/* Busy = blue, breathing; done/idle = still. Mirrors the row dot vocabulary. */
-.agent-detail__state[data-state="busy"] {
-  color: color-mix(in srgb, var(--sys-blue) 85%, #fff);
-}
-
-.agent-detail__state[data-state="busy"] .agent-detail__state-dot {
-  background: var(--sys-blue, #0a84ff);
-  animation: breathe 1.6s var(--ease-in-out, ease-in-out) infinite;
-}
-
-.agent-detail__state[data-state="done"] .agent-detail__state-dot {
-  background: var(--sys-green, #32d74b);
-}
-
-.agent-detail__tag[data-state="busy"] {
-  color: var(--sys-blue, #0a84ff);
-}
-
-.agent-detail__tag[data-state="done"] {
-  color: var(--sys-green, #32d74b);
-}
-
-/* Folder name (left) and usage (right) below the header. The labelled usage
-   line is long, so it wraps to its own line under the folder rather than
-   colliding on a narrow panel. */
-.agent-detail__subline {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-}
-
-.agent-detail__cwd {
-  margin: 0;
-  min-width: 0;
-  flex: 1;
-  font-size: 11px;
-  opacity: 0.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Usage: dimmed token breakdown, brighter cost. Never shrinks — the folder
-   name gives way first. */
-.agent-detail__usage {
-  flex: none;
-  margin-left: auto;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  color: rgb(255 255 255 / 0.4);
-}
-
-.agent-detail__prompt {
-  margin: 0;
-  font-size: 12px;
-  opacity: 0.6;
-}
-
-.agent-detail__subs {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding-top: 6px;
-  border-top: 1px solid rgb(255 255 255 / 0.06);
-}
-
-.agent-detail__label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  opacity: 0.4;
-}
-
-/* Cost is the headline number of the usage line — near-opaque, so it lifts
-   above the dimmed token breakdown beside it. */
-.agent-detail__cost {
-  font-weight: 600;
-  color: rgb(255 255 255 / 0.85);
-}
-
-.agent-detail__transcript-empty {
-  margin: 0;
-  font-size: 11px;
-  opacity: 0.4;
-}
-
-/* ── The stream ──
-   One interleaved feed: prompts, assistant messages, tool calls, in order,
-   newest at the bottom. No card chrome around it — it reads as a thread, and a
-   short left rail ties the turns together. */
-/* ── Activity ──
-   Deliberately spare: Claude's latest message, then a few tool ticks. Not the
-   whole thread.
-
-   Fixed height with internal scroll — the notch springs to the panel's outer
-   size on every content change, so a live message that grows and shrinks made
-   it re-animate constantly. A stable box absorbs those changes: the text
-   updates and scrolls INSIDE, the panel's height (and the notch) stays put. */
-.activity {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  margin-top: 6px;
-  padding-top: 10px;
-  border-top: 1px solid rgb(255 255 255 / 0.06);
-  height: 180px;
-  overflow-y: auto;
-}
-
-/* The latest message — markdown, full height inside the scrolling box. */
-.msg {
-  min-width: 0;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: rgb(255 255 255 / 0.88);
-}
-
-/* Tool ticks — a dense checklist of what it just did. Runs of the same verb
-   fold into one line with a count, so it stays a summary. */
-.ticks {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.tick {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 10.5px;
-  color: rgb(255 255 255 / 0.5);
-}
-
-.tick__mark {
-  flex: none;
-  color: var(--sys-green, #32d74b);
-}
-
-.tick[data-error] {
-  color: var(--danger);
-}
-
-.tick[data-error] .tick__mark {
-  color: var(--danger);
-}
-
-.tick__text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tick__count {
-  flex: none;
-  opacity: 0.6;
-}
-
-.subagent-row__tool {
-  font-size: 10px;
-  opacity: 0.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .agent-row__head {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-/* A ring when done, a filled pulsing dot mid-turn — a shape change, not only a
-   colour one, so it survives being read at a glance. */
-.agent-row__state {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 1.5px var(--pill-ink);
-  opacity: 0.4;
-}
-
-.agent-row__state[data-state="busy"] {
-  background: var(--sys-green, #32d74b);
-  box-shadow: none;
-  opacity: 1;
-  animation: breathe 1.6s var(--ease-in-out) infinite;
-}
-
-.agent-row__state[data-state="done"] {
-  /* Done reads green but still, not pulsing — the checkmark's colour without
-     its motion. */
-  box-shadow: inset 0 0 0 1.5px var(--sys-green, #32d74b);
-  opacity: 0.9;
 }
 
 /* Cat as a chat-style avatar, with the status dot overlapping its corner —
@@ -2216,55 +2339,19 @@
     opacity var(--dur-instant) var(--ease-out);
 }
 
-/* --- Resting strip + notch agent rows ----------------------------------- */
+/* --- The agents' cat stack + notch agent rows ---------------------------- */
 
-/* The resting strip: a tight stack of stage cats on the canvas just left of
-   the camera, shown at rest. Anchored by its RIGHT edge a hair left of the
-   cutout (centred, `--notch-w` wide, so half of it plus a gap is the offset).
-   It does NOT expand in place — hovering hands off to the notch, which grows
-   down and deals the same agents out as a bigger row (`.notch-card`, dealt
-   from the strip's side via `--from`). `pointer-events: none`: it is a sign,
-   not a target; the notch takes the clicks. It still reports its rect as the
-   resting click-box (so the hover that grows the notch fires over the strip),
-   but that is Rust's poll, not DOM events. */
+/* The coding agents' face in the closed notch: the `agents` island's lead,
+   left of the camera inside the live pill (`.island-pill`). No entrance of
+   its own: it arrives with the pill. */
 .ambient {
-  position: absolute;
-  top: 0;
-  right: calc(50% + var(--notch-w, 200px) / 2 + 6px);
-  height: var(--notch-h, 32px);
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  pointer-events: none;
-  /* Slides in from the notch when an agent first becomes busy. */
-  animation: ambient-in var(--dur-base) var(--ease-out) both;
-  transition: opacity var(--dur-fast) var(--ease-out);
-}
-
-/* Handed off: the notch has grown and its dealt row shows the same agents, so
-   the strip fades out. Fade (not `display:none`) so the exit actually plays.
-   `animation: none` so the entrance keyframe's `both` fill mode stops pinning
-   opacity at 1 (a running/filled animation outranks the declared value; the
-   transition would never take). */
-.ambient[data-handed-off] {
-  animation: none;
-  opacity: 0;
-}
-
-@keyframes ambient-in {
-  from {
-    opacity: 0;
-    transform: translateX(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
 }
 
 .ambient__cats {
   display: flex;
   align-items: center;
-  padding: 0 6px;
   border-radius: 12px;
 }
 
@@ -2339,328 +2426,9 @@
   }
 }
 
-/* The agents dealt into the notch, shown while the resting notch is hovered.
-   The cats deal out from the resting stack into a straight row of bigger
-   circles (layout B), staggered like a dealer going round the table, then a
-   quiet "view all agents" underneath. Grows downward with the drop-pill. */
-.notch-agents {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 4px 10px 8px;
-}
-
-/* The deal table: the layer the cards are dealt across. Sized inline (absolute
-   cards contribute nothing, so the panel would collapse without it). Its centre
-   (`left: 50%`) is the notch centre, so a card's `--tx` places it symmetrically
-   about the cutout. */
-.notch-deal {
-  position: relative;
-  margin-top: 2px;
-  /* Fits a 56px disc + gap + one label line, snug. The width is set inline (it
-     depends on the card count and the absolute cards do not measure); the
-     height is constant, so it lives here. Was 84px — that left a dead band
-     under the label, tallest on a single-agent hover. */
-  height: 74px;
-}
-
-/* One dealt card: a button into that agent's detail, centred on the deal layer
-   then slid to its `--tx` slot. Before the deal (`:not([data-dealt])`) it sits
-   collapsed on the resting stack (`--from`, left of the cutout), tiny and
-   faded; the `data-dealt` flip transitions it out to its slot — 520ms travel,
-   with the per-card `transition-delay` (set inline) giving the round-the-table
-   stagger. `--tx` also carries into the resting state so it deals from the
-   stack, not from centre. */
-.notch-card {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  /* ponytail: width must equal `DEAL_CARD_W` in NotchAgents.tsx (it sizes the
-     deal layer, which the panel measures); keep the two in sync. */
-  width: 86px;
-  margin-left: -43px; /* centre the card on its --tx (half of width) */
-  /* Where a card deals FROM: the resting stack, a hair left of the cutout —
-     identical for every card, so it lives here, not inline per card. */
-  --from: calc(-1 * (var(--notch-w, 200px) / 2 + 20px));
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--pill-ink);
-  cursor: pointer;
-  opacity: 0;
-  transform: translate(var(--from), 4px) scale(0.34);
-  transition:
-    transform 520ms cubic-bezier(0.2, 0.72, 0.24, 1),
-    opacity 320ms var(--ease-out);
-}
-
-.notch-agents[data-dealt] .notch-card {
-  opacity: 1;
-  transform: translateX(var(--tx, 0));
-}
-
-/* The disc holds the cat and its corner badge, and is the thing that pops. The
-   pop is driven by `--pop` (0→1) written each frame by the live spring in
-   `NotchCard` — NOT a CSS transition, or a glide between cats would restart its
-   curve from zero and stall. `--pop` is the spring's position (it overshoots
-   past 1 and settles, so the scale rides the rebound). The card's own transform
-   stays owned by the deal; the pop rides here, so the two never fight.
-   `transform-origin` at the bottom so it grows *up* out of the row, not its own
-   centre. Badge is a child so it scales with the disc and stays in the corner. */
-.notch-card__disc {
-  position: relative;
-  display: block;
-  width: 56px;
-  height: 56px;
-  transform-origin: 50% 100%;
-  transform:
-    translateY(calc(var(--pop, 0) * -5px))
-    scale(calc(1 + var(--pop, 0) * 0.16));
-  /* The spring writes --pop every frame; own layer so the pop composites and
-     never repaints the row behind it. */
-  will-change: transform;
-}
-
-/* The profile image, ringed in this agent's stable identity hue (`--ring`) so
-   two agents in the same stage are still told apart at a glance. The ring
-   brightens with the pop (the glow), so a popped cat also reads as picked. */
-.notch-card__cat {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  object-fit: cover;
-  box-shadow:
-    0 6px 16px rgb(0 0 0 / 0.5),
-    0 0 0 2px var(--ring, rgb(255 255 255 / 0.3));
-  filter: drop-shadow(
-    0 0 calc(var(--pop, 0) * 8px) color-mix(in srgb, var(--ring, #fff) 60%, transparent)
-  );
-}
-
-/* The stage badge: a small dot in the disc's corner saying what the agent is
-   doing right now, coloured like the agent-list rows. A ring of the notch fill
-   punches it off the cat so it reads at 12px. */
-.notch-card__badge {
-  position: absolute;
-  right: 1px;
-  bottom: 1px;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--notch-fill, #000);
-  background: var(--sys-grey, #8e8e93);
-}
-.notch-card__badge[data-state="busy"] {
-  background: var(--sys-green, #32d74b);
-  animation: breathe 1.6s var(--ease-in-out) infinite;
-}
-.notch-card__badge[data-state="live"] {
-  background: var(--sys-green, #32d74b);
-}
-.notch-card__badge[data-state="asking"] {
-  background: var(--sys-orange, #ff9f0a);
-  animation: breathe 1.2s var(--ease-in-out) infinite;
-}
-
-.notch-card__label {
-  font-size: 11px;
-  font-weight: 500;
-  opacity: 0.9;
-  white-space: nowrap;
-  max-width: 86px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* "View all agents": opens the full list. Sits under the dealt row, quieter
-   than the cards so it reads as the way out rather than another agent. */
-.notch-agents__all {
-  margin-top: 6px;
-  padding: 7px 16px;
-  border: 0;
-  border-radius: 10px;
-  background: rgb(255 255 255 / 0.12);
-  color: var(--pill-ink);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out);
-}
-
-.notch-agents__all:hover {
-  background: rgb(255 255 255 / 0.2);
-}
-
-/* The detail plate (option A): unfolds under the dealt row for the hovered
-   card. Collapsed to nothing at rest — max-height + opacity + margin so it
-   *grows* out of the row rather than popping in, the same downward direction
-   the notch itself grows, timed to the card's pop so the two read as one. */
-.notch-plate {
-  width: 100%;
-  max-height: 0;
-  margin-top: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition:
-    max-height var(--spring-dur) var(--spring),
-    opacity var(--dur-fast) var(--ease-out),
-    margin-top var(--spring-dur) var(--spring);
-}
-
-.notch-plate[data-open] {
-  /* The quick-peek head: title, stage, meta, and the "Now" line, plus the
-     hairline + padding. A ceiling for the fold; the real height is content. */
-  max-height: 104px;
-  margin-top: 6px;
-  opacity: 1;
-}
-
-/* Dwelled long enough to show the full detail view — a much taller ceiling; the
-   `.agent-detail` inside supplies the real height (it can scroll if huge). */
-.notch-plate[data-open][data-expanded] {
-  max-height: 520px;
-}
-
-/* The full-detail tier: the real AgentDetail, sized to the plate (never wider,
-   so a long cwd wraps instead of stretching the notch), scrolling if it is
-   taller than the ceiling. Left-aligned like the pinned view. */
-/* Both classes, so this outranks the base `.notch-plate__inner`'s
-   `text-align: center` regardless of source order — the full detail is
-   left-aligned like the clicked-in page, not centred like the quick head. */
-.notch-plate__inner.notch-plate__inner--full {
-  text-align: left;
-  max-height: 500px;
-  overflow-y: auto;
-}
-.notch-plate__inner--full .agent-detail {
-  min-width: 0;
-  width: 100%;
-}
-
-/* The contents are keyed on the session, so gliding to another card remounts
-   this and it crossfades in rather than the text swapping under you. */
-.notch-plate__inner {
-  border-top: 1px solid var(--sep, rgb(255 255 255 / 0.1));
-  padding-top: 8px;
-  text-align: center;
-  animation: notch-plate-in var(--dur-fast) var(--ease-out) both;
-}
-
-@keyframes notch-plate-in {
-  from {
-    opacity: 0;
-    transform: translateY(2px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.notch-plate__title {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--pill-ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* What it is doing right now, led by the same status dot as the card badge —
-   the live status, brighter than the "what it is" meta below it. */
-.notch-plate__stage {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  margin-top: 3px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--pill-ink);
-  white-space: nowrap;
-}
-
-.notch-plate__pip {
-  width: 7px;
-  height: 7px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--sys-grey, #8e8e93);
-}
-.notch-plate__pip[data-state="busy"] {
-  background: var(--sys-green, #32d74b);
-  animation: breathe 1.6s var(--ease-in-out) infinite;
-}
-.notch-plate__pip[data-state="live"] {
-  background: var(--sys-green, #32d74b);
-}
-.notch-plate__pip[data-state="asking"] {
-  background: var(--sys-orange, #ff9f0a);
-  animation: breathe 1.2s var(--ease-in-out) infinite;
-}
-
-.notch-plate__meta {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--pill-ink);
-  opacity: 0.6;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The live "Now" line — always shown, the quick "what is it doing" answer. A
-   monospace tool string on a faint chip, matching the pinned detail's Now. */
-.notch-plate__now {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  justify-content: center;
-  margin-top: 6px;
-  font-size: 11px;
-  min-width: 0;
-}
-.notch-plate__now-label {
-  flex: none;
-  font-weight: 600;
-  opacity: 0.5;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 10px;
-}
-.notch-plate__now-tool {
-  min-width: 0;
-  padding: 1px 7px;
-  border-radius: 6px;
-  background: rgb(255 255 255 / 0.08);
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  color: var(--pill-ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.notch-plate__now-tool[data-idle] {
-  background: none;
-  opacity: 0.5;
-}
-
-/* Movement can make some users unwell — collapse the deal to a snap. The cards
-   still appear (opacity), they just do not travel; the 1ms durations in
-   motion.css shrink the shimmer/attn loops. */
+/* Movement can make some users unwell; the 1ms durations in motion.css shrink
+   the shimmer/attn loops. */
 @media (prefers-reduced-motion: reduce) {
-  .notch-card,
-  .notch-plate {
-    transition-duration: 1ms;
-  }
-  .notch-plate__inner {
-    animation: none;
-  }
   .ambient,
   .ambient[data-busy] .ambient__cats::after,
   .ambient[data-asking] .ambient__cat-img[data-asking] {
@@ -2739,36 +2507,6 @@
   cursor: pointer;
 }
 
-.subagents {
-  margin: 2px 0 0 15px;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.subagent-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.subagent-row__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 0.85;
-}
-
-.subagent-row__model {
-  margin-left: auto;
-  flex: none;
-  font-size: 10px;
-  opacity: 0.4;
-}
-
 /* --- Exits ---------------------------------------------------------------
  *
  * Rust holds the window open for EXIT_MS after a run ends (overlay.rs), so
@@ -2779,7 +2517,7 @@
 /* The answer must be gone before the panel collapses over it — the collapse
    clips its contents, and a paragraph sliced off line by line reads as the
    window being killed. Faster than the collapse for that reason. */
-.overlay-root[data-exiting] :is(.ask > *, .tabs) {
+.overlay-root[data-exiting] :is(.ask > *, .notch-shell > *) {
   animation: ask-out var(--dur-fast) var(--ease-in) both;
   animation-delay: 0ms;
 }

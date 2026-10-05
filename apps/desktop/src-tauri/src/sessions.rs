@@ -365,16 +365,93 @@ fn rows(store: &SessionStore) -> Vec<AgentSession> {
 /// Emits only on real change — see [`Agents::last`].
 fn emit(app: &AppHandle, rows: Vec<AgentSession>) {
     let state = app.state::<Arc<Agents>>();
-    let Ok(mut last) = state.last.lock() else {
-        return;
+    {
+        // Held across the emit, so two sources racing cannot send an older
+        // list after a newer one.
+        let Ok(mut last) = state.last.lock() else {
+            return;
+        };
+        if *last == rows {
+            return;
+        }
+        *last = rows.clone();
+        if let Err(e) = AgentSessions(rows).emit(app) {
+            tracing::warn!(%e, "could not send agent sessions");
+        }
+    }
+    sync_island(app);
+}
+
+/// The coding agents' island id: one for all of them, as the notch shows them.
+const AGENTS_ISLAND: &str = "agents";
+
+/// Keeps the agents' island in step with the sessions and the approvals
+/// waiting on them. Cheap to call often: the queue drops a push that changes
+/// nothing.
+fn sync_island(app: &AppHandle) {
+    let state = app.state::<Arc<Agents>>();
+    let asking = state.pending.lock().map(|p| p.len()).unwrap_or(0);
+    let island = state
+        .last
+        .lock()
+        .ok()
+        .and_then(|rows| agents_island(&rows, asking));
+    match island {
+        Some(island) => crate::islands::push(app, island),
+        None => crate::islands::remove(app, AGENTS_ISLAND),
+    }
+}
+
+/// The coding agents as one live island — what the resting notch shows
+/// beside the camera: one waiting on the user outranks everything, else how
+/// many are working. None when nothing is busy or asking, which takes it down.
+fn agents_island(rows: &[AgentSession], asking: usize) -> Option<aloud_islands::Island> {
+    use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority};
+    let busy = rows.iter().filter(|s| s.busy).count();
+    if busy == 0 && asking == 0 {
+        return None;
+    }
+    let lead = rows.iter().find(|s| s.busy).or(rows.first());
+    let title = match lead {
+        Some(s) => {
+            let agent = match s.agent.as_str() {
+                "claude" => "Claude Code",
+                "codex" => "Codex",
+                other => other,
+            };
+            let project = s
+                .cwd
+                .as_deref()
+                .and_then(|c| c.rsplit('/').find(|p| !p.is_empty()));
+            project.map_or_else(|| agent.to_string(), |p| format!("{agent} · {p}"))
+        }
+        None => "Coding agents".to_string(),
     };
-    if *last == rows {
-        return;
-    }
-    *last = rows.clone();
-    if let Err(e) = AgentSessions(rows).emit(app) {
-        tracing::warn!(%e, "could not send agent sessions");
-    }
+    let detail = match (asking, busy) {
+        (1, _) => "Needs you".to_string(),
+        (n, _) if n > 1 => format!("{n} need you"),
+        (_, 1) => "Working".to_string(),
+        (_, n) => format!("{n} running"),
+    };
+    Some(Island {
+        id: AGENTS_ISLAND.to_string(),
+        kind: IslandKind::Live,
+        priority: if asking > 0 {
+            IslandPriority::Urgent
+        } else {
+            IslandPriority::Normal
+        },
+        icon: Some("agents".to_string()),
+        title,
+        detail: Some(detail),
+        actions: vec![IslandAction::new(
+            if asking > 0 { "Review" } else { "Open" },
+            "agents.open",
+        )],
+        expires: None,
+        dismissible: false,
+        ..Island::default()
+    })
 }
 
 /// Parks the socket thread until the user answers, then hands back their reply.
@@ -420,6 +497,8 @@ fn await_decision(
             },
         );
     }
+    // The resting notch says an agent is waiting before anyone opens it.
+    sync_island(app);
 
     // Whether this request raises the notch, per settings. The hook parks
     // either way — the toggle is about the surface, never the protocol.
@@ -530,6 +609,7 @@ fn await_decision(
     if resolved {
         let _ = (AgentPermissionResolved { id }).emit(app);
     }
+    sync_island(app);
     reply
 }
 
@@ -975,7 +1055,46 @@ fn write_settings(path: &std::path::Path, value: &serde_json::Value) -> anyhow::
 
 #[cfg(test)]
 mod tests {
-    use super::is_dangerous;
+    use super::{agents_island, is_dangerous, AgentSession};
+    use aloud_islands::IslandPriority as Priority;
+
+    fn session(busy: bool) -> AgentSession {
+        AgentSession {
+            id: "s".into(),
+            agent: "claude".into(),
+            title: "fix the gif".into(),
+            prompt: None,
+            cwd: Some("/Users/y/dev/aloud-tauri".into()),
+            tool: None,
+            model: None,
+            branch: None,
+            last_activity: None,
+            subagents: Vec::new(),
+            busy,
+            transient: None,
+        }
+    }
+
+    /// The island the resting notch draws: up while an agent works or asks,
+    /// urgent while one asks, and gone when they are all idle.
+    #[test]
+    fn the_agents_island_follows_work_and_asks() {
+        assert!(
+            agents_island(&[session(false)], 0).is_none(),
+            "idle agents draw nothing"
+        );
+
+        let working = agents_island(&[session(true), session(true)], 0).unwrap();
+        assert_eq!(working.priority, Priority::Normal);
+        assert_eq!(working.detail.as_deref(), Some("2 running"));
+        assert_eq!(working.title, "Claude Code · aloud-tauri");
+
+        // Asking outranks working, even for an agent the poll calls idle.
+        let asking = agents_island(&[session(false)], 1).unwrap();
+        assert_eq!(asking.priority, Priority::Urgent);
+        assert_eq!(asking.detail.as_deref(), Some("Needs you"));
+        assert_eq!(asking.actions[0].action, "agents.open");
+    }
 
     #[test]
     fn flags_destructive_commands() {

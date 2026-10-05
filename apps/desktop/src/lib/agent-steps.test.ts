@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   groupSteps,
   pendingStep,
+  stepStatus,
   withCall,
+  withDecision,
   withResult,
   type Step,
 } from "./agent-steps";
@@ -14,8 +16,9 @@ const call = (name: string, requiresConfirmation: boolean): ToolCall => ({
   args: { subject: name, body: "hello", user_id: "me" },
   requiresConfirmation,
   preview: null,
+  canAlways: false,
 });
-const ok: ToolResult = { success: true, message: "done", show: null };
+const ok: ToolResult = { success: true, message: "done", show: null, note: null, tidied: null };
 
 /** Rust emits the call, then — for a write — the same call again with the gate. */
 function startAndGate(steps: Step[], name: string): Step[] {
@@ -52,7 +55,7 @@ describe("agent panel step folding", () => {
     let steps = startAndGate([], "A");
     steps = withResult(steps, ok);
     steps = withCall(steps, call("B", false));
-    steps = withResult(steps, { success: false, message: "boom", show: null });
+    steps = withResult(steps, { success: false, message: "boom", show: null, note: null, tidied: null });
 
     expect(steps[0].result).toEqual(ok);
     expect(steps[1].result?.success).toBe(false);
@@ -62,7 +65,7 @@ describe("agent panel step folding", () => {
   it("keeps what a finished step can show", () => {
     const show = { app: "Notes", target: "x-coredata://note/p1" };
     let steps = withCall([], call("ALOUD_NOTES_CREATE", false));
-    steps = withResult(steps, { success: true, message: "done", show });
+    steps = withResult(steps, { ...ok, show });
     steps = withCall(steps, call("GMAIL_SEND_EMAIL", false));
     steps = withResult(steps, ok);
 
@@ -108,10 +111,97 @@ describe("agent panel step folding", () => {
     }
   });
 
+  /**
+   * The start event guesses the app from the tool's name ("macOS" for every
+   * Mac action); the gate names it as its permission does, with its icon. The
+   * card wears the gate's, whichever of the pair lands second.
+   */
+  it("the gate's app and icon survive the start event folding in", () => {
+    const preview = {} as ActionPreview;
+    const gate = {
+      ...call("ALOUD_NOTES_CREATE", true),
+      app: "Notes",
+      icon: "data:image/png;base64,AA",
+      preview,
+    };
+    const start = { ...call("ALOUD_NOTES_CREATE", false), app: "macOS" };
+
+    for (const steps of [
+      withCall(withCall([], start), gate),
+      withCall(withCall([], gate), start),
+    ]) {
+      expect(steps[0].app).toBe("Notes");
+      expect(steps[0].icon).toBe("data:image/png;base64,AA");
+    }
+  });
+
   it("treats a declined step as settled so it cannot re-open the gate", () => {
     let steps = startAndGate([], "GMAIL_SEND_EMAIL");
     steps = steps.map((s) => ({ ...s, confirmed: false }));
     expect(pendingStep({ heard: "", steps })).toBeUndefined();
+  });
+
+  /** Rust reports a declined write as a failed result; the user said no. */
+  it("reads a declined gate as cancelled, not failed", () => {
+    let steps = startAndGate([], "SLACK_SEND_MESSAGE");
+    steps = withDecision(steps, false);
+    steps = withResult(steps, { success: false, message: "failed", show: null, note: null, tidied: null });
+    expect(stepStatus(steps[0], false)).toBe("cancelled");
+    expect(pendingStep({ heard: "", steps })).toBeUndefined();
+
+    // A real failure after a yes still reads as one.
+    let approved = withDecision(startAndGate([], "SLACK_SEND_MESSAGE"), true);
+    approved = withResult(approved, { success: false, message: "failed", show: null, note: null, tidied: null });
+    expect(stepStatus(approved[0], false)).toBe("failed");
+  });
+
+  /**
+   * A round's calls run together: every call starts (and a write's gate opens)
+   * before the first result comes back. Attaching to the last waiting step put
+   * the first call's result on the last call's row.
+   */
+  it("a_result_lands_on_its_own_step_when_events_interleave", () => {
+    const withId = (name: string, id: number, gate = false): ToolCall => ({
+      ...call(name, gate),
+      id,
+    });
+    const result = (id: number, success: boolean): ToolResult => ({
+      success,
+      message: "",
+      show: null,
+      note: null,
+      tidied: null,
+      id,
+    });
+    let steps: Step[] = [];
+    steps = withCall(steps, withId("SLACK_CHAT_POST_MESSAGE", 0));
+    steps = withCall(steps, withId("SLACK_CHAT_POST_MESSAGE", 0, true));
+    steps = withCall(steps, withId("ALOUD_BROWSER_TASK", 1));
+    // Same tool twice in one round: still two rows.
+    steps = withCall(steps, withId("ALOUD_NOTES_CREATE", 2));
+    steps = withCall(steps, withId("ALOUD_NOTES_CREATE", 3));
+    steps = withResult(steps, result(2, true));
+    steps = withResult(steps, result(0, false));
+    steps = withResult(steps, result(3, true));
+    steps = withResult(steps, result(1, true));
+
+    expect(steps.map((s) => [s.name, s.result?.success])).toEqual([
+      ["SLACK_CHAT_POST_MESSAGE", false],
+      ["ALOUD_BROWSER_TASK", true],
+      ["ALOUD_NOTES_CREATE", true],
+      ["ALOUD_NOTES_CREATE", true],
+    ]);
+    expect(steps[0].requiresConfirmation).toBe(true);
+    // A quiet run that surfaced mid-round never saw step 5's row.
+    expect(withResult(steps, result(5, true))).toEqual(steps);
+  });
+
+  it("carries the gate's Always-allow offer onto the step", () => {
+    const steps = withCall(withCall([], call("SLACK_SEND_MESSAGE", false)), {
+      ...call("SLACK_SEND_MESSAGE", true),
+      canAlways: true,
+    });
+    expect(steps[0].canAlways).toBe(true);
   });
 });
 
@@ -126,7 +216,7 @@ describe("groupSteps", () => {
     app: "Gmail",
     args: {},
     requiresConfirmation: false,
-    result: result === undefined ? undefined : { success: result, message: "", show: null },
+    result: result === undefined ? undefined : { success: result, message: "", show: null, note: null, tidied: null },
   });
   // Stands in for the panel's row text: label plus rendered status.
   const key = (s: Step) => `${s.name}:${s.result ? s.result.success : "running"}`;

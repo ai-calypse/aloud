@@ -14,6 +14,10 @@
   --dur-base: 240ms;
   --dur-slow: 400ms;
   --dur-slower: 560ms;
+  /* A ring draining in real time: one tick of the clock it shows. Fixed, not
+     a spring, because nothing redirects it mid-flight and a linear drain reads
+     as time passing rather than as a value settling. */
+  --dur-drain: 1000ms;
 
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-glide: cubic-bezier(0.32, 0.72, 0, 1);
@@ -82,6 +86,7 @@
     --dur-base: 1ms;
     --dur-slow: 1ms;
     --dur-slower: 1ms;
+    --dur-drain: 1ms;
 
     /* The sweep below only reaches animation/transition-duration; a JS-driven
        spring (lib/spring.ts) reads these vars and must be told directly. */
@@ -146,6 +151,20 @@
  * element's computed `1fr`, which reads as "no animation" on the way in and as
  * a hard cut on the way out.
  */
+/* A glyph disc joining the closed notch's stack: the individual `scale`
+   property, so it never fights the transform useFlip drives. Both ends are
+   stated in the same units. */
+@keyframes disc-in {
+  from {
+    opacity: 0;
+    scale: 0.4;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
 @keyframes row-in {
   from {
     grid-template-rows: 0fr;
@@ -204,4 +223,97 @@
 
 .motion-shimmer {
   animation: shimmer 2s linear infinite;
+}
+
+/* The exact-words countdown on an agent gate: a bar that empties over
+ * `--auto-ms`, the duration Rust chose. A duration and not a spring, and
+ * `linear`, because it is a clock — any easing would tell the time wrong.
+ * Paused, not removed, once the user reaches for the card: Rust stops the
+ * deadline at the same moment. */
+@keyframes countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.motion-countdown::after {
+  animation: countdown var(--auto-ms) linear both;
+}
+
+.motion-countdown[data-held]::after {
+  animation-play-state: paused;
+}
+
+/* Reduced motion collapses every animation to 1ms, which would show this
+   clock already run out while Rust still waits the full time. It steps once a
+   second instead: the time left stays true, with no travel. */
+@media (prefers-reduced-motion: reduce) {
+  .motion-countdown::after {
+    animation-duration: var(--auto-ms) !important;
+    animation-timing-function: steps(3, end);
+  }
+}
+
+/* --- Weather backdrop -------------------------------------------------------
+   Ambient loops behind a weather card (Weather.tsx). They are not physical, so
+   they are linear or eased durations rather than springs, and they run only
+   while the card is on screen. transform only: the compositor owns every frame.
+   Rain and snow fall by exactly one pattern tile so the loop has no seam. */
+.wx {
+  mask-image: linear-gradient(to bottom, #000 38%, transparent 62%);
+}
+.wx-fall {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--wx-tile) * -1);
+  height: calc(100% + var(--wx-tile));
+  animation: wx-fall var(--wx-secs) linear infinite;
+  will-change: transform;
+}
+.wx-fall--rain { --wx-tile: 44px; --wx-secs: 1.1s; }
+.wx-fall--storm { --wx-tile: 44px; --wx-secs: 0.7s; }
+.wx-fall--snow { --wx-tile: 64px; --wx-secs: 9s; }
+@keyframes wx-fall {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, var(--wx-tile), 0); }
+}
+
+.wx-puff,
+.wx-band {
+  position: absolute;
+  will-change: transform;
+  animation: wx-drift var(--wx-secs) ease-in-out infinite alternate;
+}
+.wx-puff {
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--notch-w-ink) 24%, transparent), transparent);
+}
+.wx-puff--a { --wx-secs: 16s; left: -10%; top: -8%; width: 70%; height: 38%; }
+.wx-puff--b { --wx-secs: 22s; right: -20%; top: 10%; width: 80%; height: 34%; animation-direction: alternate-reverse; }
+.wx-band {
+  left: -20%;
+  width: 140%;
+  height: 14%;
+  background: linear-gradient(to right, transparent, color-mix(in srgb, var(--notch-w-ink) 22%, transparent) 30% 70%, transparent);
+}
+.wx-band--a { --wx-secs: 13s; top: 6%; }
+.wx-band--b { --wx-secs: 17s; top: 20%; animation-direction: alternate-reverse; }
+.wx-band--c { --wx-secs: 21s; top: 34%; }
+@keyframes wx-drift {
+  from { transform: translate3d(-6%, 0, 0); }
+  to { transform: translate3d(6%, 0, 0); }
+}
+
+/* Not the global 1ms collapse: an infinite loop at 1ms is a strobe. A still
+   picture of the same weather is the reduced-motion version. */
+@media (prefers-reduced-motion: reduce) {
+  .wx-fall,
+  .wx-puff,
+  .wx-band {
+    animation: none;
+  }
 }

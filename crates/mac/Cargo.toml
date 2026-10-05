@@ -1,0 +1,32 @@
+[package]
+name = "aloud-mac"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The notch's Mac section: system stats, battery, mic/camera use and window snapping, from public macOS APIs"
+
+[dependencies]
+aloud-islands = { path = "../islands" }
+aloud-notes = { path = "../notes" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+tracing.workspace = true
+# Only the counters the stats read needs: no process list, no components (the
+# temperature sensors are SMC keys, which Apple does not document).
+sysinfo = { version = "0.37", default-features = false, features = ["system", "disk", "network"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+block2 = "0.5"
+# Shared with src-tauri: relax-sign-encoding keeps NSScreen.screens from
+# aborting a debug build (see CLAUDE.md), and a crate's own example has no
+# src-tauri to unify the feature for it.
+objc2 = { version = "0.5", features = ["relax-sign-encoding"] }
+objc2-app-kit = { version = "0.2", features = ["NSScreen", "NSRunningApplication", "NSWindow", "NSResponder"] }
+objc2-foundation = { version = "0.2", features = ["NSArray", "NSEnumerator", "NSGeometry", "NSNotification", "NSOperation", "NSProcessInfo", "NSString", "NSThread", "block2"] }
+
+[dev-dependencies]
+tempfile = "3"

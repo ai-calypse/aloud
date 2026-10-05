@@ -6,6 +6,7 @@ import {
   type BuildInfo,
   type DefaultPrompt,
   type OverlayDisplay,
+  type NotchEvents,
   type Settings,
 } from "../../lib/bindings";
 import { or } from "../../lib/result";
@@ -18,6 +19,8 @@ import { RunLogView } from "./RunLogView";
 import { MeetingsView } from "./MeetingsView";
 import { DebugView } from "./DebugView";
 import { PermissionsCard } from "./PermissionsCard";
+import { PermissionsPane } from "./PermissionsPane";
+import { NudgeSettings } from "./NudgeSettings";
 import { AUTO_DETECT, LANGUAGES, SAME_AS_SPOKEN } from "./languages";
 import {
   Group,
@@ -63,6 +66,7 @@ export type SettingsSection =
   | "rules"
   | "prompts"
   | "connectors"
+  | "permissions"
   | "runlog"
   | "meetings"
   /** Behind `developer_tools`; the sidebar hides the row when it is off. */
@@ -70,6 +74,67 @@ export type SettingsSection =
 
 /** Settings forms bound to the Rust `Settings` struct, as macOS System
  * Settings grouped lists. Which pane shows comes from the `section` prop. */
+/** The notch's takeovers (`notchEvents`): what the defaults are, then the rows. */
+const EVENT_DEFAULTS: Required<NotchEvents> = {
+  quiet: false,
+  focusAware: true,
+  huds: true,
+  power: true,
+  connectivity: true,
+  banners: true,
+  replaceSystemHuds: false,
+  appNotifications: false,
+  appNotificationAllow: [
+    "com.apple.MobileSMS",
+    "com.apple.mail",
+    "com.apple.FaceTime",
+    "com.tinyspeck.slackmacgap",
+    "com.apple.iCal",
+  ],
+};
+
+const EVENT_ROWS: {
+  key: Exclude<keyof NotchEvents, "appNotifications" | "appNotificationAllow">;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    key: "quiet",
+    label: "Quiet notch",
+    hint: "Everything one size smaller: a card becomes a peek and a peek a whisper. Only a call, an approval or a battery about to die stays a card. Pointing at one still opens the next size up.",
+  },
+  {
+    key: "focusAware",
+    label: "Respect Focus",
+    hint: "While a macOS Focus is on, ordinary system events (a screenshot, a drive, a finished download) are held back. Anything urgent, your own key presses and Aloud's own messages still show. Reading the Focus needs Full Disk Access; without it Aloud assumes none is on.",
+  },
+  {
+    key: "huds",
+    label: "Key-press whispers",
+    hint: "Volume, brightness, mic mute and Caps Lock as a small whisper beside the camera.",
+  },
+  {
+    key: "power",
+    label: "Power events",
+    hint: "Battery low, battery critical and fully charged.",
+  },
+  {
+    key: "connectivity",
+    label: "Connections",
+    hint: "A drive connected or safe to remove, and the displays, networks and devices that follow.",
+  },
+  {
+    key: "banners",
+    label: "App banners",
+    hint: "Things that happened elsewhere: a screenshot saved, a download finished.",
+  },
+  {
+    key: "replaceSystemHuds",
+    label: "Replace the macOS volume and brightness HUDs",
+    hint: "The volume and brightness keys move the level in the notch instead of macOS's square on screen. Needs key-press whispers on; Option alone still opens Sound or Displays settings, Option+Shift moves a finer step. An output with no volume (HDMI) or an external main display keeps macOS's behaviour.",
+  },
+];
+
 export function SettingsView({
   section,
   onSettings,
@@ -144,6 +209,7 @@ export function SettingsView({
       ? overlayDisplay.named
       : null;
   const sounds = settings.playSounds ?? true;
+  const events = { ...EVENT_DEFAULTS, ...settings.notchEvents };
   const catImages = settings.catImages ?? true;
   const catImagesDictation = settings.catImagesDictation ?? true;
   const catImagesAgents = settings.catImagesAgents ?? true;
@@ -610,6 +676,49 @@ export function SettingsView({
               />
             </Row>
 
+            {IS_MAC &&
+              EVENT_ROWS.map(({ key, label, hint }) => (
+                <Row key={key} label={label} hint={hint} className="py-[11px]">
+                  <Toggle
+                    checked={events[key]}
+                    label={label}
+                    onChange={(c) => update({ notchEvents: { ...events, [key]: c } })}
+                  />
+                </Row>
+              ))}
+
+            {IS_MAC && (
+              <NudgeSettings value={events} onChange={(notchEvents) => update({ notchEvents })} />
+            )}
+
+            {IS_MAC && (
+              <Row
+                label="Any app in the notch (uses a private macOS interface)"
+                hint="Now Playing shows whatever is playing in any app (Podcasts, VLC, browsers, and more) with no setup, and the notch's play, pause, skip and seek buttons drive it. It uses a private macOS interface that Apple does not document and a macOS update can break; if that happens Now Playing falls back to Spotify, Music and browsers. It reads only the title, artist, cover and the app's name. Off: nothing runs."
+                className="py-[11px]"
+              >
+                <Toggle
+                  checked={settings.anyAppMedia ?? true}
+                  label="Any app in the notch"
+                  onChange={(c) => update({ anyAppMedia: c })}
+                />
+              </Row>
+            )}
+
+            {IS_MAC && (
+              <Row
+                label="Web video in the notch"
+                hint="Now Playing also shows video and audio playing in Brave, Chrome, Edge and Safari, and the notch's play, pause, skip and speed buttons drive that tab. It reads only the tab's title, site and position. Each browser needs its Allow JavaScript from Apple Events switch on (View › Developer, or Safari's Develop menu); the Now Playing view says when one is off."
+                className="py-[11px]"
+              >
+                <Toggle
+                  checked={settings.browserMedia ?? true}
+                  label="Web video in the notch"
+                  onChange={(c) => update({ browserMedia: c })}
+                />
+              </Row>
+            )}
+
             {IS_MAC && (
               <Row
                 label="Style"
@@ -987,8 +1096,9 @@ export function SettingsView({
         />
       )}
 
-      {/* These three own their data and their titles: they read history and
-          timings, not `settings`. */}
+      {/* These own their data and their titles: they read history, timings
+          and grants, not `settings`. */}
+      {section === "permissions" && <PermissionsPane />}
       {section === "runlog" && <RunLogView />}
       {section === "meetings" && <MeetingsView />}
       {section === "debug" && <DebugView />}

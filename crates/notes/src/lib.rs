@@ -5,6 +5,8 @@
 //! ponytail: linear scan of all note files per query — plenty for years of
 //! meetings; SQLite FTS is the upgrade path if it ever feels slow.
 
+pub mod sync;
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Serialize;
@@ -236,6 +238,45 @@ pub fn write_note(dir: &Path, title: &str, content: &str, at: DateTime<Utc>) -> 
     Ok(path)
 }
 
+/// What a note typed into the notch is called on disk. It is also how the
+/// notch finds them again: meeting notes and voice notes live in the same
+/// folder and are not the notch's to edit.
+pub const QUICK_TITLE: &str = "Quick note";
+
+/// The notch's quick notes, newest first.
+pub fn quick_notes(dir: &Path) -> Vec<Note> {
+    let mut notes = all_notes(dir);
+    notes.retain(|n| is_quick(&n.path));
+    notes
+}
+
+fn is_quick(path: &Path) -> bool {
+    path.file_stem()
+        .is_some_and(|s| s.to_string_lossy().contains(QUICK_TITLE))
+}
+
+/// Saves a quick note: a new file when `path` is None, else that note
+/// overwritten. Called on every pause in typing, so it must be safe to call
+/// with whatever the webview sends — `path` has to be a quick note sitting
+/// directly in `dir`, or nothing is written.
+pub fn save_quick(
+    dir: &Path,
+    path: Option<&Path>,
+    text: &str,
+    at: DateTime<Utc>,
+) -> Result<PathBuf> {
+    let Some(path) = path else {
+        return write_note(dir, QUICK_TITLE, text, at);
+    };
+    anyhow::ensure!(
+        path.parent() == Some(dir) && is_quick(path),
+        "{} is not a quick note",
+        path.display()
+    );
+    fs::write(path, text).with_context(|| format!("writing note {}", path.display()))?;
+    Ok(path.to_path_buf())
+}
+
 /// Strips path separators and characters Windows rejects in file names.
 fn sanitize(title: &str) -> String {
     title
@@ -363,5 +404,30 @@ mod tests {
         let path = write_note(dir.path(), "1/2 sync: recap", "body", at).unwrap();
         let name = path.file_name().unwrap().to_string_lossy();
         assert!(!name.contains('/') && !name.contains(':'), "got: {name}");
+    }
+
+    /// The webview names the file to overwrite; it must not be able to name
+    /// anything but a quick note in the notes folder (a meeting note, or a
+    /// path that climbs out of it).
+    #[test]
+    fn save_quick_only_overwrites_quick_notes_in_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = DateTime::from_timestamp(0, 0).unwrap();
+        let meeting = write_note(dir.path(), "Standup", "keep me", at).unwrap();
+        assert!(save_quick(dir.path(), Some(&meeting), "x", at).is_err());
+        assert_eq!(fs::read_to_string(&meeting).unwrap(), "keep me");
+
+        let outside = dir.path().join("../escape Quick note.md");
+        assert!(save_quick(dir.path(), Some(&outside), "x", at).is_err());
+
+        let first = save_quick(dir.path(), None, "one", at).unwrap();
+        let again = save_quick(dir.path(), Some(&first), "one two", at).unwrap();
+        assert_eq!(first, again);
+        assert_eq!(fs::read_to_string(&first).unwrap(), "one two");
+        assert_eq!(
+            quick_notes(dir.path()).len(),
+            1,
+            "the meeting note is not listed"
+        );
     }
 }

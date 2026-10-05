@@ -16,6 +16,13 @@ use tracing::Instrument;
 
 pub const DEFAULT_BASE_URL: &str = "https://api.groq.com/openai/v1";
 const TIMEOUT: Duration = Duration::from_secs(30);
+/// A tool turn's ceiling. Normal turns take 0.5–3s (NVIDIA's median 1.7s), but
+/// NVIDIA's free endpoint sometimes hangs and sends nothing: 3 of 59 first
+/// turns sat out the full 30s, and the command failed with them. At 12s a hung
+/// brain costs seconds before the next one takes over.
+/// ponytail: one fixed knob, measured 2026-10-04; per-provider ceilings if a
+/// slow-but-working model starts tripping it.
+const TOOL_TIMEOUT: Duration = Duration::from_secs(12);
 /// Output cap on a tool turn. Cerebras charges the *requested* maximum against
 /// its tokens-per-minute budget, and gpt-oss's 40k default 429'd the second call
 /// of a command; a tool call is ~150–400 tokens and a spoken answer well under
@@ -114,6 +121,10 @@ pub enum LlmError {
     Failed { status: u16, body: String },
     #[error("model returned empty output")]
     EmptyOutput,
+    /// No answer at all: the request timed out or the connection was refused.
+    /// Not a status the server chose, so another provider is the fix.
+    #[error("model {model} did not answer: {reason}")]
+    Unreachable { model: String, reason: String },
 }
 
 pub struct LlmClient {
@@ -121,6 +132,7 @@ pub struct LlmClient {
     base_url: String,
     api_key: String,
     cooldowns: Arc<CooldownTracker>,
+    tool_timeout: Duration,
 }
 
 /// One connection pool for the process: a client is built per request, and a
@@ -167,6 +179,9 @@ struct ChatRequest<'a> {
     reasoning_effort: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     include_reasoning: Option<bool>,
+    /// NVIDIA's switch for a model's thinking; see [`thinking_off`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
 }
@@ -191,6 +206,15 @@ fn reasoning_for(model: &str) -> (Option<&'static str>, Option<bool>) {
         m if m.starts_with("gemini-3") => (Some("minimal"), None),
         _ => (None, None),
     }
+}
+
+/// Nemotron thinks unless its chat template is told not to — NVIDIA takes no
+/// `reasoning_effort`. Off, "take 5 photos" picked the right tool in 1.0s
+/// against 2.6s with it on, same call. Measured 2026-10-04.
+fn thinking_off(model: &str) -> Option<serde_json::Value> {
+    model
+        .starts_with("nvidia/nemotron")
+        .then(|| serde_json::json!({ "enable_thinking": false }))
 }
 
 #[derive(Deserialize)]
@@ -245,7 +269,21 @@ impl LlmClient {
             cooldowns: COOLDOWNS
                 .get_or_init(|| Arc::new(CooldownTracker::new()))
                 .clone(),
+            tool_timeout: TOOL_TIMEOUT,
         })
+    }
+
+    /// A different ceiling for tool turns than [`TOOL_TIMEOUT`].
+    pub fn with_tool_timeout(mut self, timeout: Duration) -> Self {
+        self.tool_timeout = timeout;
+        self
+    }
+
+    /// How long `model` at this endpoint stays rate-limited, as any client in
+    /// the process last heard; None when it is usable. Asked before a call so
+    /// a known limit is never rediscovered with a request.
+    pub fn cooldown_remaining(&self, model: &str) -> Option<Duration> {
+        self.cooldowns.remaining(&self.cooldown_key(model))
     }
 
     /// The endpoint is part of the key: the tracker is process-wide, so a bare
@@ -302,6 +340,7 @@ impl LlmClient {
                 tool_choice: None,
                 reasoning_effort,
                 include_reasoning,
+                chat_template_kwargs: thinking_off(model),
                 max_tokens: None,
             })
             .send()
@@ -384,9 +423,7 @@ impl LlmClient {
         let response = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
-            // Per request: the client is shared with the transcribe crate,
-            // which wants a different timeout.
-            .timeout(TIMEOUT)
+            .timeout(self.tool_timeout)
             .bearer_auth(&self.api_key)
             .json(&ChatRequest {
                 model,
@@ -396,15 +433,19 @@ impl LlmClient {
                 tool_choice: tools.map(|_| "auto"),
                 reasoning_effort,
                 include_reasoning,
+                chat_template_kwargs: thinking_off(model),
                 max_tokens: Some(TOOL_MAX_TOKENS),
             })
             .send()
             .await
-            .context("tool chat request failed")?;
+            .map_err(|e| transport(model, e, "tool chat request failed"))?;
 
         let response = self.check(model, response).await?;
 
-        let parsed: ChatResponse = response.json().await.context("decoding tool response")?;
+        let parsed: ChatResponse = response
+            .json()
+            .await
+            .map_err(|e| transport(model, e, "decoding tool response"))?;
         record_usage(&parsed.usage);
         let message = parsed
             .choices
@@ -419,6 +460,21 @@ impl LlmClient {
                 .map(|c| prompts::strip_think_tags(&c).trim().to_string()),
             tool_calls: message.tool_calls.unwrap_or_default(),
         })
+    }
+}
+
+/// A timeout or a refused connection as [`LlmError::Unreachable`], which the
+/// tool loop fails over on; anything else keeps reqwest's error under
+/// `context`. The body read counts too: a hang can start after the headers.
+fn transport(model: &str, error: reqwest::Error, context: &'static str) -> anyhow::Error {
+    if error.is_timeout() || error.is_connect() {
+        LlmError::Unreachable {
+            model: model.to_string(),
+            reason: error.to_string(),
+        }
+        .into()
+    } else {
+        anyhow::Error::new(error).context(context)
     }
 }
 
@@ -484,6 +540,37 @@ mod tests {
         );
     }
 
+    /// NVIDIA's free endpoint sometimes accepts and then says nothing. That,
+    /// and a refused connection, must read as unreachable — the error the tool
+    /// loop fails over on — not as an anonymous transport error that ends the
+    /// command.
+    #[tokio::test]
+    async fn a_hung_or_refused_endpoint_is_unreachable() {
+        let hung = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let hung_url = format!("http://{}", hung.local_addr().unwrap());
+        let refused = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let refused_url = format!("http://{}", refused.local_addr().unwrap());
+        drop(refused);
+
+        for url in [hung_url, refused_url] {
+            let client = LlmClient::new("k", Some(&url))
+                .unwrap()
+                .with_tool_timeout(Duration::from_millis(200));
+            let error = client
+                .chat_with_tools("m", &[Message::user("hi")], None, None)
+                .await
+                .expect_err("nothing answered");
+            assert!(
+                matches!(
+                    error.downcast_ref::<LlmError>(),
+                    Some(LlmError::Unreachable { .. })
+                ),
+                "{url}: {error:#}"
+            );
+        }
+        drop(hung);
+    }
+
     #[tokio::test]
     async fn a_success_passes_through_untouched() {
         let client = LlmClient::new("k", None).unwrap();
@@ -538,5 +625,14 @@ mod tests {
         assert_eq!(reasoning_for("gemini-3.5-flash"), (Some("minimal"), None));
         assert_eq!(reasoning_for("llama-3.3-70b-versatile"), (None, None));
         assert_eq!(reasoning_for("whatever-the-user-typed"), (None, None));
+    }
+
+    #[test]
+    fn only_nemotron_is_told_not_to_think() {
+        assert_eq!(
+            thinking_off("nvidia/nemotron-3.5-lightning-30b-a3b"),
+            Some(serde_json::json!({ "enable_thinking": false }))
+        );
+        assert_eq!(thinking_off("openai/gpt-oss-120b"), None);
     }
 }

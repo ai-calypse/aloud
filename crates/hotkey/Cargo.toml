@@ -12,11 +12,18 @@ specta.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+# The keys example moves the real volume the way the app does, and puts it back.
+aloud-media = { path = "../media" }
+# ... and the brightness keys' display, likewise.
+aloud-mac = { path = "../mac" }
 tracing-subscriber = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 core-graphics = "0.24"
+foreign-types = "0.5"
+# Same pin and feature as aloud-mac: NSEvent is the only reader of a media key.
+objc2 = { version = "0.5", features = ["relax-sign-encoding"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = [

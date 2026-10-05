@@ -25,7 +25,9 @@ use serde_json::{json, Value};
 
 pub use catalogue::{editor_project, show};
 pub use contacts::prepare;
-pub use script::ScriptError;
+pub use notes::sync_note;
+pub use script::{run, run_args, run_jxa, ScriptError};
+pub use search::{file_row, heading as search_heading};
 
 /// `args` with what the user was looking at when they spoke, for a native tool
 /// to fall back on: `_front_app` (MENU, PRESS_KEYS, WINDOW_ARRANGE with no
@@ -84,6 +86,22 @@ pub fn show_target(name: &str, args: &Value, result: &Value) -> Option<(String, 
         }
         _ => None,
     }
+}
+
+/// The folder a tidy-up sorted, for the Undo on its finished row: the one write
+/// here with a reverse already built (`ALOUD_UNDO_ORGANIZE`). None for anything
+/// else, and for a tidy-up that moved nothing and so left no receipt.
+// ponytail: one reverse, one field. A general "undo call" on the result is the
+// upgrade when a second write gets a reverse.
+pub fn tidied(name: &str, args: &Value, result: &Value) -> Option<String> {
+    let moved = result.get("organized").and_then(Value::as_u64).unwrap_or(0);
+    (name == "ALOUD_ORGANIZE_FOLDER" && moved > 0).then(|| {
+        args.get("folder")
+            .and_then(Value::as_str)
+            .filter(|f| !f.trim().is_empty())
+            .unwrap_or("Downloads")
+            .to_string()
+    })
 }
 
 /// A file preview for the notch grid — a base64 `data:` URI, or None when Quick
@@ -233,6 +251,36 @@ pub fn permission(name: &str, args: &Value, front: Option<&str>) -> Option<Permi
 /// even where its tool would otherwise skip the card.
 pub fn low_risk(name: &str, args: &Value) -> bool {
     permission(name, args, None).is_some_and(|p| p.default_always && !p.strict)
+}
+
+/// Whether a native call brings an app forward, acts on whatever is in front,
+/// or sets the clipboard — so two at once would fight over the screen, and the
+/// loop runs them one at a time. Everything else here scripts its app in the
+/// background and runs alongside them.
+///
+/// A match beside `action_label` and `strict` rather than a flag on each
+/// catalogue entry: three of these depend on the arguments.
+pub fn takes_front(name: &str, args: &Value) -> bool {
+    let action = args.get("action").and_then(Value::as_str);
+    match name {
+        "ALOUD_PHOTO_BOOTH_TAKE_PHOTO"
+        | "ALOUD_DISCORD_MESSAGE"
+        | "ALOUD_PRESS_KEYS"
+        | "ALOUD_OPEN_APP"
+        | "ALOUD_WINDOW_ARRANGE"
+        | "ALOUD_FINDER_REVEAL"
+        // Opens a facetime:// URL, which brings FaceTime forward.
+        | "ALOUD_FACETIME_CALL"
+        // A shortcut can do anything, including bring an app forward.
+        | RUN_SHORTCUT => true,
+        // With no app it clicks in the frontmost one, which a sibling may have
+        // just changed.
+        "ALOUD_MENU" => catalogue::target_app(args).is_none(),
+        "ALOUD_CLIPBOARD" => action == Some("write"),
+        "ALOUD_BROWSER_TAB" => action == Some("open"),
+        "ALOUD_WRITE_FILE" => args.get("open_with").is_some_and(|w| !w.is_null()),
+        _ => false,
+    }
 }
 
 fn action_label(name: &str) -> &'static str {
@@ -661,6 +709,29 @@ mod tests {
         );
     }
 
+    /// Undo replays the tidy-up's receipt, and a tidy-up that moved nothing
+    /// wrote none: offering Undo there would only fail.
+    #[test]
+    fn only_a_tidy_up_that_moved_files_offers_undo() {
+        let moved = json!({ "organized": 12, "folder": "/Users/me/Desktop" });
+        assert_eq!(
+            tidied(
+                "ALOUD_ORGANIZE_FOLDER",
+                &json!({ "folder": "Desktop" }),
+                &moved
+            ),
+            Some("Desktop".into())
+        );
+        assert_eq!(
+            tidied("ALOUD_ORGANIZE_FOLDER", &json!({ "rules": {} }), &moved),
+            Some("Downloads".into()),
+            "the tool's own default folder"
+        );
+        let nothing = json!({ "organized": 0, "note": "nothing to sort" });
+        assert_eq!(tidied("ALOUD_ORGANIZE_FOLDER", &json!({}), &nothing), None);
+        assert_eq!(tidied("ALOUD_COLLECT_FILES", &json!({}), &moved), None);
+    }
+
     #[test]
     fn show_brings_back_the_note_the_file_and_what_was_opened() {
         let show = |name, args, result| show_target(name, &args, &result);
@@ -877,6 +948,44 @@ mod tests {
         );
         assert!(permission("ALOUD_FINDER_SEARCH", &json!({}), None).is_none());
         assert!(permission("GMAIL_SEND_EMAIL", &json!({}), None).is_none());
+    }
+
+    /// Only what moves the front app or the clipboard queues behind the other
+    /// screen tools; a note, a reminder or a song never waits for them.
+    #[test]
+    fn only_tools_that_take_the_front_queue_for_the_screen() {
+        for (name, args) in [
+            ("ALOUD_OPEN_APP", json!({ "names": ["Safari"] })),
+            ("ALOUD_PHOTO_BOOTH_TAKE_PHOTO", json!({})),
+            ("ALOUD_CLIPBOARD", json!({ "action": "write", "text": "x" })),
+            (
+                "ALOUD_BROWSER_TAB",
+                json!({ "action": "open", "url": "a.com" }),
+            ),
+            (
+                "ALOUD_WRITE_FILE",
+                json!({ "path": "a", "open_with": "cursor" }),
+            ),
+            ("ALOUD_MENU", json!({ "item": "New" })),
+        ] {
+            assert!(takes_front(name, &args), "{name} {args}");
+        }
+        for (name, args) in [
+            ("ALOUD_NOTES_CREATE", json!({ "title": "x" })),
+            ("ALOUD_REMINDERS_ADD", json!({ "text": "x" })),
+            ("ALOUD_MUSIC", json!({ "action": "play" })),
+            ("ALOUD_CLIPBOARD", json!({ "action": "read" })),
+            ("ALOUD_BROWSER_TAB", json!({ "action": "current" })),
+            ("ALOUD_WRITE_FILE", json!({ "path": "a", "text": "x" })),
+            // A named app's menu is pressed in the background.
+            (
+                "ALOUD_MENU",
+                json!({ "item": "New", "_front_app": "TextEdit" }),
+            ),
+            ("GMAIL_SEND_EMAIL", json!({})),
+        ] {
+            assert!(!takes_front(name, &args), "{name} {args}");
+        }
     }
 
     /// Creating a new file is undone by deleting it; overwriting one is not

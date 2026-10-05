@@ -25,6 +25,15 @@ pub enum Fast {
         args: Value,
         done: String,
     },
+    /// A place in the notch panel, asked for by name: nothing to run, the
+    /// panel opens there. `section` and `sub` are the webview registry's ids
+    /// (`features/notch/registry.ts`); `sub` is `None` for "wherever that
+    /// section was last left".
+    Notch {
+        section: &'static str,
+        sub: Option<&'static str>,
+        done: String,
+    },
 }
 
 /// Routes `text`, or `None` for the brain. An installed app's name outranks a
@@ -40,6 +49,11 @@ pub fn route(text: &str, installed: &[aloud_selection::InstalledApp]) -> Option<
     };
     Some(match classify(text, &names)? {
         Intent::Web(query) => Fast::Web { query },
+        Intent::Notch(place) => Fast::Notch {
+            section: place.section,
+            sub: place.sub,
+            done: format!("Opened {}.", place.name),
+        },
         Intent::Open(apps) => {
             let apps: Vec<String> = apps.iter().map(|a| proper(a)).collect();
             Fast::Tool {
@@ -112,6 +126,8 @@ enum Intent {
     /// Installed apps, lowercase.
     Open(Vec<String>),
     Quit(String),
+    /// A section of the notch panel, by name.
+    Notch(&'static NotchPlace),
     /// play, pause, next or previous.
     Media(&'static str),
     Volume(Volume),
@@ -122,6 +138,90 @@ enum Volume {
     Level(i64),
     Change(i64),
 }
+
+/// Something the notch panel can open to, and what it may be called.
+#[derive(Debug, PartialEq)]
+struct NotchPlace {
+    section: &'static str,
+    sub: Option<&'static str>,
+    /// What the confirmation names.
+    name: &'static str,
+    /// Whole names, after "the", "my" and a trailing "panel" are dropped. Whole
+    /// on purpose: "show the weather in Paris" and "open the shelf folder" are
+    /// requests, and only a bare section name is a way into the panel.
+    called: &'static [&'static str],
+}
+
+/// ponytail: ids mirror `features/notch/registry.ts` by hand, and the webview
+/// falls back to the first ready subsection for one it does not know, so a
+/// rename there degrades to the section's front page, not to nothing.
+const NOTCH: &[NotchPlace] = &[
+    NotchPlace {
+        section: "agents",
+        sub: Some("coding"),
+        name: "Agents",
+        called: &["agents", "coding agents"],
+    },
+    NotchPlace {
+        section: "agents",
+        sub: Some("voice"),
+        name: "voice history",
+        called: &["voice history", "past commands", "voice runs"],
+    },
+    NotchPlace {
+        section: "shelf",
+        sub: None,
+        name: "the shelf",
+        called: &["shelf", "file shelf"],
+    },
+    NotchPlace {
+        section: "clipboard",
+        sub: Some("history"),
+        name: "Clipboard",
+        called: &["clipboard", "clipboard history"],
+    },
+    NotchPlace {
+        section: "today",
+        sub: None,
+        name: "Today",
+        called: &["today"],
+    },
+    NotchPlace {
+        section: "focus",
+        sub: Some("timer"),
+        name: "the timer",
+        called: &["timer", "focus timer"],
+    },
+    NotchPlace {
+        section: "media",
+        sub: Some("playing"),
+        name: "Media",
+        called: &["media", "now playing"],
+    },
+    NotchPlace {
+        section: "media",
+        sub: Some("lyrics"),
+        name: "lyrics",
+        called: &["lyrics"],
+    },
+    NotchPlace {
+        section: "now",
+        sub: Some("overview"),
+        name: "Home",
+        called: &["home", "notch"],
+    },
+];
+
+/// Verbs that put something on screen.
+const SHOW: &[&str] = &[
+    "show me ",
+    "show ",
+    "open up ",
+    "open ",
+    "pull up ",
+    "bring up ",
+    "go to ",
+];
 
 /// Sites the engine recognises by name. ponytail: mirrors `SITES` in
 /// `engine/lib/site.ts` by hand — the engine still picks the URL, this only
@@ -315,6 +415,10 @@ fn classify(text: &str, apps: &[String]) -> Option<Intent> {
         }
     }
 
+    if let Some(place) = notch_place(&said) {
+        return Some(Intent::Notch(place));
+    }
+
     if let Some(query) = after_verb(&said, WEB_SEARCH).filter(|q| !q.trim().is_empty()) {
         return Some(Intent::Web(Some(query.trim().to_string())));
     }
@@ -336,6 +440,19 @@ fn classify(text: &str, apps: &[String]) -> Option<Intent> {
         }
     }
     None
+}
+
+/// The notch section `said` asks to be shown, when it names nothing else.
+/// Checked after installed apps, so "open Notes" stays an app.
+fn notch_place(said: &str) -> Option<&'static NotchPlace> {
+    let object = after_verb(said, SHOW)?;
+    let object = object.strip_prefix("the ").unwrap_or(object);
+    let object = object.strip_prefix("my ").unwrap_or(object);
+    let object = [" panel", " tab", " section"]
+        .iter()
+        .find_map(|word| object.strip_suffix(word))
+        .unwrap_or(object);
+    NOTCH.iter().find(|place| place.called.contains(&object))
 }
 
 /// The installed app `phrase` names exactly ("the notes app" → notes), if any.
@@ -546,6 +663,61 @@ mod tests {
             classify("search lofi on youtube", &apps),
             Some(Intent::Web(None))
         );
+    }
+
+    fn notch(text: &str) -> Option<(&'static str, Option<&'static str>)> {
+        match route(text) {
+            Some(Intent::Notch(p)) => Some((p.section, p.sub)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_bare_section_name_opens_the_notch_there() {
+        for (text, want) in [
+            ("show my agents", ("agents", Some("coding"))),
+            ("Show the agents panel.", ("agents", Some("coding"))),
+            ("open the shelf", ("shelf", None)),
+            ("show clipboard", ("clipboard", Some("history"))),
+            (
+                "Please show my clipboard history",
+                ("clipboard", Some("history")),
+            ),
+            ("open today", ("today", None)),
+            ("show my timer", ("focus", Some("timer"))),
+            ("show media", ("media", Some("playing"))),
+            ("pull up now playing", ("media", Some("playing"))),
+            ("show lyrics", ("media", Some("lyrics"))),
+            ("show my voice history", ("agents", Some("voice"))),
+            ("go to the notch", ("now", Some("overview"))),
+        ] {
+            assert_eq!(notch(text), Some(want), "{text}");
+        }
+    }
+
+    /// Each of these is a request or an app, and opening a panel would drop it
+    /// on the floor: a weather question, a folder, an installed app, half a task.
+    #[test]
+    fn near_misses_stay_with_the_apps_the_browser_and_the_brain() {
+        for text in [
+            "show me the weather in Paris",
+            "open Safari",
+            "open the shelf folder in finder",
+            "show my agents and quit slack",
+            "show today's calendar events",
+            "show media files",
+            "open my clipboard in a note",
+            "show my timer settings",
+            "show me what the agents did today",
+            "show",
+            "show the",
+            "what's on my clipboard",
+        ] {
+            assert_eq!(notch(text), None, "{text}");
+        }
+        // An installed app of the same name outranks the panel.
+        let apps = ["today".to_string()];
+        assert_eq!(classify("open today", &apps), open(&["today"]));
     }
 
     #[test]

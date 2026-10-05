@@ -150,6 +150,12 @@ async fn take_turns(
             }
             continue;
         }
+        // A reply to the card on screen answers it now: queued, it would wait
+        // behind the very run the card is holding up.
+        if crate::agent::answer_by_voice(&shared.app, text) {
+            finish(&shared);
+            continue;
+        }
         tracing::info!(request = %text, "always-listening request");
         let _ = requests.send((shared.generation.load(Ordering::SeqCst), text.to_string()));
     }
@@ -163,8 +169,15 @@ async fn run_requests(shared: Arc<Shared>, mut queue: mpsc::UnboundedReceiver<(u
             continue;
         }
         let cancelled = || shared.generation.load(Ordering::SeqCst) != generation;
-        if let Err(e) =
-            crate::agent::run(&shared.app, request, &shared.settings, true, cancelled).await
+        if let Err(e) = crate::agent::run(
+            &shared.app,
+            request,
+            aloud_store::timings::next_utterance_id(),
+            &shared.settings,
+            true,
+            cancelled,
+        )
+        .await
         {
             tracing::error!(%e, "always-listening request failed");
         }

@@ -17,14 +17,20 @@ apps/desktop/          Tauri app
 crates/
   agent/               the command brain: tool loop, Composio, evals
   audio/               mic capture (cpal), resampling, pause segmenter
+  clipboard/           notch clipboard: history watcher, snippets, picked colours
   engine/              runs the browser task engine (engine/, Node)
   hotkey/              global hotkeys: CGEventTap / WH_KEYBOARD_LL
+  islands/             the notch's live activities: ranking, dedupe, expiry
+  launcher/            notch launch: pinned/recent apps, Apple Shortcuts, file search
   llm/                 OpenAI-compatible chat, prompts, rate limits
+  mac/                 the notch's Mac section: stats, battery, mic/camera use, window snapping
   meeting/             meeting transcript assembly, note composition
   native/              Mac app actions (AppleScript/JXA) + the no-model fast path
   notes/               markdown notes + search, app data paths
+  notify/              other apps' notifications: a read-only watcher over Notification Center's DB
   paste/               clipboard snapshot/restore, synthetic paste
   screen/              screen control through Cua Driver: read, click, type
+  screens/             displays in AppKit points, notch geometry, overlay placement
   selection/           reading the focused app and its selected text
   store/               settings, history, stats, migrations, timings
   transcribe/          local whisper.cpp + cloud whisper + Deepgram streaming
@@ -99,21 +105,63 @@ all run one agent) and **Meeting**. A command goes:
 
 1. **Fast path, no model** — `aloud_native::fast`: open/quit installed apps,
    play/pause/next, volume, and obvious web commands ("go to youtube", "search
-   lofi on youtube") straight to the browser engine.
-2. **The brain** — one tool-calling model, Cerebras `qwen-3.8-27b` then Gemini
-   Flash-Lite on failover (`aloud_agent::brains`). Tools, in the order the prompt
-   gives them: `ALOUD_*` Mac intent tools (the model writes content into their
-   arguments), the connected services the command is about (Composio; others
-   load on demand via `ALOUD_MORE_TOOLS`), `ALOUD_BROWSER_TASK`, screen control
-   for a Mac app nothing else covers, else an answer.
+   lofi on youtube") straight to the browser engine. A bare section name
+   ("show my agents", "open the shelf", "show clipboard", "open today", "show
+   my timer", "show media") opens the notch shell there (`Fast::Notch`, the
+   `notch-open` event); a run otherwise shows only itself, in a compact panel,
+   and never opens the sections.
+2. **The brain** — one tool-calling model at a time, best first
+   (`aloud_agent::brains`): Groq `openai/gpt-oss-120b`, then Gemini
+   Flash-Lite, then NVIDIA's `nemotron-3.5-lightning` (fast, but it wanders
+   over a long run). The ~9,000-token prompt is past Groq's free 8,000 a
+   minute, so on a free key Gemini does most of the work. A 429, a 5xx, a dead key or an unreachable endpoint moves the
+   command to the next brain mid-run; a tool turn times out at 12s, and a brain
+   still cooling down is skipped without a request. Tools, in the order the
+   prompt gives them: `ALOUD_*` Mac intent tools (the model writes content into
+   their arguments), the connected services the command is about (Composio;
+   others load on demand via `ALOUD_MORE_TOOLS`), `ALOUD_BROWSER_TASK`, screen
+   control for a Mac app nothing else covers, else an answer.
 3. A run of Mac writes that all worked ends on the tool's own confirmation —
-   no second model call.
+   no second model call. A command naming several actions ("take 5 photos",
+   "… then …") never ends early; repeatable tools take `times`.
+
+Mac intent tools act in the background without bringing their app forward.
+The app, document and project the user was in are merged into a native tool's
+arguments after the gate, so neither the model nor the card sees them.
+
+**The gate.** Every write goes through `permissions::gate`, which keys it by app
+and action (`slack:send-and-share`), then `agent::permit` reads `grants.json`:
+
+- **Always** runs with no card; **Never** refuses, and the row says "Blocked in
+  Settings"; **Ask** shows the approval card. Settings → Permissions edits them.
+- **Strict** — paying, permanent deletes, public posting, sharing passwords or
+  codes — always asks, never offers Always allow, and ignores Enter.
+- **The named-app rule** is the silent defence against injected instructions.
+  Once outside content is in the run (the selection, or any read, browser or
+  screen result), a write to an app the user never named asks even when it is
+  always allowed. The front app counts as named.
+- **The card** comes from `preview::render`: a `hand.json` mapping, else a
+  generated one (`action-previews.json`), else the schema. `enrich` then names
+  ids with reads cut off at 1.5s. The user's exact words to a resolved contact
+  or channel count down 3s with Undo instead of waiting for a click.
+- **Answers** are revisioned, and whichever comes first wins: a click, a spoken
+  reply ("send it", "cancel", "make it …"), the countdown, or the gate being
+  cleared. A spoken reply is tried before speech claims a new run, so a card can
+  be answered by voice without cancelling its run. Each decision and write is
+  logged to `audit.jsonl` (tool, app, decision, never content).
+
+A round's calls are admitted one at a time (gates and questions in order, one
+prompt on screen), then run together, three at most, and are reported in call
+order. Anything that brings an app forward or types into the front one holds
+the process-wide UI lock (`tool_loop::UI`); a native tool that does must be
+listed in `aloud_native::takes_front`, or it races its siblings for the screen.
 
 Script user text into apps with `script::run_jxa` (one JSON argument, never
 interpolated). Routing changes are checked against the eval, not by feel:
 
 ```sh
-cargo run -p aloud-agent --example command_eval            # every brain with a key
+cargo run -p aloud-agent --example command_eval            # first turn, every brain with a key
+cargo run -p aloud-agent --example command_eval -- runs nvidia  # whole runs, tools mocked
 cargo run -p aloud-native --example demo -- fast "<said>"  # what the fast path does
 pnpm evals                                                 # the dashboard, 127.0.0.1:8091
 ```
@@ -123,7 +171,8 @@ the dashboard lines a branch's run up against the brain's previous one. It
 reads real use from the same folder (`timings.sqlite`, `history.sqlite`,
 `engine/log.jsonl`) and shows it apart from the eval, never blended. A
 command's words are deliberately not in the timings DB, so a real command
-shows its route, tools and rounds but not what was said.
+shows its route, tools and rounds but not what was said. They are in
+`history.sqlite` instead (below), which the dashboard reads for dictations only.
 
 Screen control is the last tier, on trycua's Cua Driver (`crates/screen`, which
 shells out to `cua-driver call`): read an app's accessibility tree as numbered
@@ -134,6 +183,38 @@ carries one label (a bare `call` is a session of its own and every click comes
 back stale), and an ended label is dead for good, so each run gets a fresh one.
 A driver action takes ~1.5–2s — its own post-action window watch, no knob.
 
+## Notch takeovers
+
+An alert island is a *takeover*: it borrows the notch, sized by what it costs to
+miss — **Whisper** (notch height, 1.2–2 s, no buttons), **Peek** (one extra row,
+4 s, opens on hover), **Card** (sticky, buttons; a call, an approval, battery
+under 10%, a failed critical action). Anything that wants attention calls
+`islands::takeover(app, island)` and never `show_toast` + `push` itself; live
+islands (media, timer, agents) stay plain `islands::push`.
+
+`crates/islands/src/gate.rs` is the design's rules as one pure `decide()`
+(urgent interrupts, high interrupts a whisper not a peek, low only when idle,
+typing shrinks, panel open holds, Quiet drops a tier, Focus holds system news);
+`stage.rs` holds the one on screen and the line behind it. Both are tested
+without a window — `cargo run -p aloud-islands --example takeovers` prints a
+realistic sequence. A producer sets `tier`, `priority`, `source` (which Settings
+switch silences it), `short` (the whisper's word), `level` and `dwell_ms`; the
+gate fills in the rest. `docs/design/notch-events.html` (branch
+`design/notch-events`) is the reference.
+
+**Nudges** are takeovers made of other apps' words: Messages, Mail, Slack, a
+FaceTime call and any allowed app (`aloud-notify`, opt-in, Full Disk Access,
+`notchEvents.appNotifications` + `appNotificationAllow`), plus a calendar event
+ten minutes away and a reminder come due (`aloud_agenda::soon_island` /
+`due_island`, off the Today tick, no database). All go through `takeover` as
+`IslandSource::Banners` with ids `nudge:<bundle>:<row>`, `cal:soon:<id>`,
+`rem:due:<id>`; `features/overlay/Nudge.tsx` draws them in their app's accent.
+Notification text is shown and forgotten: never logged (the type's `Debug`
+prints the app and row only), stored, or sent to a model. The buttons are Open
+and Join only, because Aloud cannot answer a call or reply for you. `cargo run
+-p aloud-notify --example nudges -- 60` prints the watcher's state and each new
+notification's app and title (needs Full Disk Access for the terminal).
+
 ## Frontend architecture
 
 ```
@@ -143,6 +224,7 @@ src/styles/          the design system — every colour, size and curve
   motion.css         durations, easings, named animations, reduced-motion
   panel.css          ask/agent window chrome
   overlay.css        the recording overlay — glass pill, drop-down pill, wings
+  notch.css          the notch system's few non-utility rules (DESIGN.md)
 src/components/ui/   shared primitives. Nothing app-specific lives here
 src/features/<area>/ one folder per area of the app
 src/lib/             logic worth testing away from React
@@ -188,6 +270,89 @@ grouped card, the hairline row, the pane title and every button shape already
 exist. Each of them was extracted after being copy-pasted into two or three
 files and drifting apart.
 
+## Notch system
+
+Everything the notch shows is one system, documented in
+`apps/desktop/DESIGN.md` — read it before adding anything to the notch. The
+short version:
+
+- **Tokens:** the Mix palette, Geist and radii are `--notch-*` floating-surface
+  tokens in `tokens.css`, used through `notch-*` utilities. Fonts are bundled
+  (`@fontsource-variable`); the CSP allows no font host.
+- **Primitives:** `src/components/notch/` (tabs, segmented, rows, controls,
+  meters), built on `components/ui/` variants. Use them; do not restyle
+  overlay.css for a new view.
+- **Sections:** `features/notch/registry.ts` is the whole map, nine sections
+  in ⌘ order. A feature is a view plus `ready: true`; anything not ready is
+  hidden, never "coming soon". Append sections, never reorder them.
+- **One look:** a Calm shell (Geist, text tabs, hairline rows) whose
+  sections are each drawn as a Calm list or as a widget board (Apple-style
+  tiles in SF, inside a `.notch-board`), as the registry says: a subsection has
+  one `view`. There is no look setting. Takeovers and resting islands carry
+  their owner's accent (`islandRole`, `data-w-role`). Widget tokens are
+  `--notch-w-*`, primitives are in `components/notch/widgets/`; see DESIGN.md ›
+  Widget boards before adding one.
+- **Islands:** live state crosses from Rust as an `Island` pushed through
+  `crate::islands::push`; ranking, dedupe and expiry are `crates/islands`'
+  and tested there. The write toast is an alert island.
+- **Battery:** `aloud_mac::power::Watch` drops one alert chip when the Mac
+  starts discharging at or below 20% (again only after it recovered or was
+  plugged in), pins an `Urgent` island only at or below 10%, and drops the
+  full-charge chip on the transition to 100%. The pinned island is
+  `dismissible` — a × in Now › Overview — and the watcher remembers the
+  dismissal (`dismiss_island` → `mac::island_dismissed`) until the battery
+  recovers, since it re-pushes every ~30s.
+- **Actions:** `features/notch/actions.ts` is the one registry ⌘K, island
+  buttons and (next) the voice agent share. Rust names an action; it never
+  sends code.
+- **Web video:** Now Playing also reads `<video>`/`<audio>` in Brave, Chrome,
+  Edge and Safari (`aloud_media::browser`), by running one small script in each
+  tab through the browser's own scripting. It needs "Allow JavaScript from
+  Apple Events" on in each browser, which Aloud can only point at; while it is
+  off the view says which menu holds it (`Reading.browsers`), rechecked every
+  few minutes, not every poll. A tab the browser has discarded or not loaded
+  never answers `execute javascript`, so the scan is AppleScript with a
+  one-second timeout per tab and skips silent tabs for ten minutes (JXA has no
+  timeout). Only media tabs leave the scan, and only title, host and position.
+  Settings › "Web video in the notch" turns it off.
+- **Any-app Now Playing:** Now Playing shows whatever any app plays (Podcasts,
+  VLC, a browser) with no setup, through macOS's *private* MediaRemote
+  framework, which Apple does not document and can close in any update. From
+  macOS 15.4 only Apple-signed processes may call it, so
+  `aloud_media::mediaremote` runs the vendored
+  [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter) (BSD-3,
+  `crates/media/mediaremote`): `/usr/bin/perl` loads a small dylib and streams
+  now-playing JSON as one long-lived child, restarted with backoff and killed
+  with the app; a button press is a second, short `perl` run. It is the primary
+  source; Spotify/Music AppleScript and the browser scan remain the fallbacks
+  when it is off, not built or silent, and what it reports as a browser is not
+  also scanned. Lyrics only for music apps (`is_music_app`). Settings › "Any
+  app in the notch" turns it off, and then no process runs. The helper is built
+  by `crates/media/mediaremote/build.sh` (stage-resources.sh calls it) into the
+  untracked `resources/mediaremote/`; in dev run it once, or the notch quietly
+  uses the fallbacks. **If a macOS update breaks it:** the log says
+  `mediaremote: helper stopped` or `nothing reported while another app plays`
+  (once per outage); the notch keeps working through the fallbacks. Check with
+  `cargo run -p aloud-media --example mediaremote -- watch`, compare against
+  upstream's issues and newest commit, re-vendor and rebuild, or ship with the
+  switch defaulted off.
+- **Media islands:** one island per source that is playing (`aloud_media::island`,
+  ids `media:spotify`, `media:music`, `media:browser:<app>:<w>:<t>`,
+  `media:mediaremote:<bundle>`), at most four, most recently started kept,
+  priority Low. `Reading.playing` lists them; `Reading.now` is still the one
+  source the Now Playing view shows. Each island's Pause names its source in
+  its args (`player`, and `tab`/`host` for a browser) and `media_control` takes
+  that tab as `target`, so it never pauses the view's source instead. Because
+  MediaRemote names only one app, `read` now also asks Spotify, Music and the
+  browsers while it plays (the same reads the fallback path always did); with
+  nothing playing the cadence and gates are unchanged.
+- **Clipboard history:** off until the user flips it, local only (SQLite and
+  PNGs under `<data>/clipboard`), never logged or shown to a model. It polls
+  `changeCount`, skips `org.nspasteboard.ConcealedType` and friends, and skips
+  anything within 1.5s of an Aloud write — every clipboard write in
+  `aloud_paste` calls `note_own_write`, so a new writer there must too, or its
+  output lands in the user's history.
+
 ## Conventions
 
 - **Comments say why, not what.** A comment earns its place by explaining a
@@ -232,7 +397,36 @@ files and drifting apart.
   feature on `objc2` (a direct dep) fixes it. And a menu-bar/notch overlay must
   set its `NSWindow` level to `NSScreenSaverWindowLevel`; a floating-level
   window is clamped below the menu bar. `NSScreen` calls must run on the main
-  thread — the notch is measured once in `setup`.
+  thread — `aloud_screens::refresh` reads them in `setup` and again on every
+  screen-parameter change, and everything else reads the cache.
+- **`resources/` is gitignored, but `tauri.conf.json` bundles three globs in
+  it** (`resources/*`, `resources/engine/**`, `resources/mediaremote/**`) and
+  `tauri_build` fails when one matches nothing. `build.rs` drops an empty
+  `placeholder` into each missing folder on debug builds, so a fresh checkout
+  or worktree builds; a release build still fails until `stage-resources.sh`
+  has run. Never copy the real `resources/` into a worktree — its `.env` holds
+  real keys.
+- **The hotkey tap has never swallowed a dictation key.** `core-graphics`
+  0.24's tap trampoline maps a callback's `None` to "pass the original
+  event", so `Consume::Yes` and capture's swallow-all were always no-ops.
+  `crates/hotkey/src/macos.rs` now builds the tap on raw `CGEventTapCreate`
+  (also needed because `CGEventType` has no NX_SYSDEFINED, type 14), where
+  NULL really swallows — but only the volume and brightness keys use it, and
+  only with "Replace the macOS volume and brightness HUDs" on. Honouring the
+  matcher's verdict changes every binding at once; do it per binding, on
+  hardware. Brightness is decoded from NX_SYSDEFINED (key types 2/3) and from
+  plain key-downs 144/145; which one a given keyboard sends is unverified, so
+  both are handled (`aux::brightness_keycode`).
+
+- **Never position the overlay with tao's physical pixels across displays.**
+  Tao converts a monitor's origin with that monitor's scale and a window's
+  size/position with the window's *current* one, so with a 1x external beside
+  the 2x built-in the centre lands across the seam and the panel is clipped
+  (macOS draws a window on one display only). Place in AppKit points through
+  `aloud_screens::top_left_for`, which clamps to the chosen screen. Tao's
+  `cursor_position` has the same flaw; use `aloud_screens::mouse_location`.
+  `cargo run -p aloud-screens --example placement` prints every display and the
+  frame the overlay would take.
 
 ## Verifying
 

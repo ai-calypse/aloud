@@ -33,6 +33,25 @@
     "editable": ["/to", "/text"],
     "ask": "No recipient — cancel and ask again."
   },
+  "ALOUD_MAIL_SEND": {
+    "kind": "email", "verb": "Send",
+    "slots": [
+      { "role": "person", "path": "/to", "label": "To" },
+      { "role": "heading", "path": "/subject", "label": "Subject" },
+      { "role": "text", "path": "/body", "label": "Body" }
+    ],
+    "editable": ["/to", "/subject", "/body"],
+    "ask": "No recipient — cancel and ask again."
+  },
+  "ALOUD_FACETIME_CALL": {
+    "kind": "message", "verb": "Call", "noun": "", "to": "",
+    "slots": [
+      { "role": "person", "path": "/to", "label": "Call" },
+      { "role": "plain", "path": "/audio", "label": "Audio only" }
+    ],
+    "editable": ["/to"],
+    "ask": "No one to call — cancel and ask again."
+  },
   "ALOUD_DISCORD_MESSAGE": {
     "kind": "message", "verb": "Send", "noun": "Discord message",
     "slots": [
@@ -342,6 +361,20 @@
     ],
     "recoverable": "In Calendar's Trash for 30 days."
   },
+  "GOOGLECONTACTS_CREATE_CONTACT": {
+    "kind": "fallback", "verb": "Save", "noun": "contact",
+    "slots": [
+      { "role": "plain", "path": "/names/0/displayName", "label": "Name" },
+      { "role": "plain", "path": "/names/0/givenName", "label": "First name" },
+      { "role": "plain", "path": "/names/0/familyName", "label": "Last name" },
+      { "role": "person", "path": "/emailAddresses/0/value", "label": "Email" },
+      { "role": "person", "path": "/phoneNumbers/0/value", "label": "Phone" }
+    ],
+    "editable": [
+      "/names/0/displayName", "/names/0/givenName", "/names/0/familyName",
+      "/emailAddresses/0/value"
+    ]
+  },
   "GOOGLETASKS_INSERT_TASK": {
     "kind": "task", "verb": "Add",
     "slots": [
@@ -370,7 +403,10 @@
       { "role": "id", "path": "/team_id", "label": "Team" },
       { "role": "text", "path": "/description", "label": "Description" },
       { "role": "id", "path": "/assignee_id", "label": "Assignee" },
-      { "role": "plain", "path": "/priority", "label": "Priority" },
+      {
+        "role": "plain", "path": "/priority", "label": "Priority",
+        "labels": { "0": "No priority", "1": "Urgent", "2": "High", "3": "Medium", "4": "Low" }
+      },
       { "role": "list", "path": "/label_ids", "label": "Labels" },
       { "role": "when", "path": "/due_date", "label": "Due" },
       { "role": "id", "path": "/project_id", "label": "Project" },
@@ -451,7 +487,7 @@
     "risks": [{ "path": "/line_items", "text": "Anyone with the link can pay it." }]
   },
   "STRIPE_CREATE_CHARGE": {
-    "kind": "money", "verb": "Charge", "noun": "card", "tier": "strict",
+    "kind": "money", "verb": "Charge", "noun": "card", "to": "", "tier": "strict",
     "slots": [
       { "role": "money", "path": "/amount", "label": "Amount" },
       { "role": "id", "path": "/customer", "label": "Customer" },
@@ -466,7 +502,7 @@
     ]
   },
   "STRIPE_CREATE_PAYMENT_INTENT": {
-    "kind": "money", "verb": "Create", "noun": "payment", "tier": "strict",
+    "kind": "money", "verb": "Charge", "noun": "card", "to": "", "tier": "strict",
     "slots": [
       { "role": "money", "path": "/amount", "label": "Amount" },
       { "role": "id", "path": "/customer", "label": "Customer" },

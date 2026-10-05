@@ -5,13 +5,17 @@
 //! An action never fires without explicit approval: reads run straight through,
 //! writes surface a confirmation and wait for a yes. Drawn in the overlay's
 //! drop-down panel, like Ask, but this one collects a decision — hence the
-//! one-shot channel the approve/reject commands resolve.
+//! one-shot channel a click, a spoken reply or a countdown resolves.
 
-use aloud_store::Settings;
+use aloud_agent::permissions::{Gate, RunTaint};
+use aloud_agent::preview::GateReply;
+use aloud_store::{grants, Decision, Grant, Settings};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 use tokio::sync::oneshot;
@@ -19,20 +23,197 @@ use tokio::sync::oneshot;
 /// The window these events go to — the overlay's, not one of Agent's own.
 const LABEL: &str = "overlay";
 /// How long a write waits for a yes before giving up and declining.
-const CONFIRM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+const CONFIRM_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// The pending confirmation's reply channel, so approve/reject can wake the
-/// awaiting dispatch. Only one is ever in flight; a new command replaces it.
-///
-/// The original arguments ride along because the panel only ever sees the
-/// flattened strings `display_args` produced. Merging its edits back into the
-/// real nested shape needs the thing that was flattened.
+/// Every gate's number. An answer names the gate it is for, so a click meant
+/// for one card — or a countdown, or a reply — can never approve the next.
+static REVISION: AtomicU32 = AtomicU32::new(0);
+
+fn next_revision() -> u32 {
+    REVISION.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+/// The open gate. Only one is ever on screen; a new command clears it.
 #[derive(Default)]
 pub struct PendingConfirmation(Mutex<Option<Pending>>);
 
 struct Pending {
     reply: oneshot::Sender<Option<serde_json::Value>>,
+    /// The real arguments: edits are written into these, by pointer.
     args: serde_json::Value,
+    revision: u32,
+    /// The user reached for the card — pointer, focus, typing, a key press —
+    /// so no countdown may answer it any more.
+    held: bool,
+    /// Its countdown is running.
+    armed: bool,
+    /// The card as drawn and the command it belongs to, to draw it again after
+    /// a spoken reply took the panel away.
+    shown: ToolCall,
+    heard: String,
+    /// The grant an "Always allow" saves; None where the card offered none
+    /// (strict, or asked for by outside content), whatever the panel sends.
+    always: Option<Gate>,
+    /// The tool's schema, which an edit is coerced against.
+    schema: Option<serde_json::Value>,
+}
+
+/// What answered a gate. Whichever comes first takes it; the rest find nothing.
+#[derive(Debug)]
+enum How {
+    /// A button, with any fields the user edited, by pointer.
+    Click(GateDecision, Option<BTreeMap<String, String>>),
+    /// "Send it" or "cancel".
+    Voice(bool),
+    /// The exact-words countdown ran out on a card nobody held.
+    Deadline,
+    /// A new command, a closed panel, Escape.
+    Clear,
+}
+
+impl PendingConfirmation {
+    fn slot(&self) -> MutexGuard<'_, Option<Pending>> {
+        // Every write under this lock is one assignment, so a panic elsewhere
+        // cannot leave a gate half-written.
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Opens a gate unless one is still waiting. The panel shows one at a
+    /// time, so a second means two writes racing; refusing the newcomer keeps
+    /// the card on screen the one that is answerable.
+    fn open(&self, pending: Pending) -> bool {
+        let mut slot = self.slot();
+        if slot.as_ref().is_some_and(|p| !p.reply.is_closed()) {
+            return false;
+        }
+        *slot = Some(pending);
+        true
+    }
+
+    /// The card to show again and the command it belongs to, while its run is
+    /// still waiting on it.
+    fn waiting(&self) -> Option<(u32, ToolCall, String)> {
+        self.slot()
+            .as_ref()
+            .filter(|p| !p.reply.is_closed())
+            .map(|p| (p.revision, p.shown.clone(), p.heard.clone()))
+    }
+
+    /// Starts the card's countdown, once: how long it runs. None for a card
+    /// without one, one already held, or a revision no longer open.
+    fn arm(&self, revision: u32) -> Option<Duration> {
+        let mut slot = self.slot();
+        let pending = slot
+            .as_mut()
+            .filter(|p| p.revision == revision && !p.armed && !p.held)?;
+        let ms = pending.shown.preview.as_ref()?.auto_ms?;
+        pending.armed = true;
+        Some(Duration::from_millis(ms.into()))
+    }
+
+    /// Stops the countdown for good: the card now waits for a click or a
+    /// reply. `None` holds whichever card is open.
+    fn hold(&self, revision: Option<u32>) {
+        if let Some(pending) = self
+            .slot()
+            .as_mut()
+            .filter(|p| revision.is_none_or(|r| r == p.revision))
+        {
+            pending.held = true;
+            // Drawn again after a reply, it must not show a bar running down
+            // to a send that will never come.
+            if let Some(preview) = pending.shown.preview.as_deref_mut() {
+                preview.auto_ms = None;
+            }
+        }
+    }
+
+    /// Takes the gate `how` may answer: the one its revision names, and for a
+    /// deadline only a card still counting down. Clearing takes whatever is open.
+    fn take(&self, revision: u32, how: &How) -> Option<Pending> {
+        let mut slot = self.slot();
+        let answers = slot.as_ref().is_some_and(|p| match how {
+            How::Clear => true,
+            _ if p.reply.is_closed() => false,
+            How::Deadline => p.revision == revision && p.armed && !p.held,
+            How::Click(..) | How::Voice(_) => p.revision == revision,
+        });
+        if answers {
+            slot.take()
+        } else {
+            None
+        }
+    }
+
+    /// Writes spoken words over the card's text, as a new revision — a click
+    /// meant for the old words cannot send these. The card to show again, or
+    /// None when it has no text to replace.
+    fn replace(&self, revision: u32, text: &str) -> Option<(ToolCall, String)> {
+        let mut slot = self.slot();
+        let pending = slot.as_mut().filter(|p| p.revision == revision)?;
+        let preview = pending.shown.preview.as_deref_mut()?;
+        let args = aloud_agent::preview::replace_text(
+            preview,
+            &pending.args,
+            pending.schema.as_ref(),
+            text,
+        )?;
+        preview.revision = next_revision();
+        pending.revision = preview.revision;
+        pending.shown.args = display_args(&args);
+        pending.args = args;
+        (pending.held, pending.armed) = (false, false);
+        Some((pending.shown.clone(), pending.heard.clone()))
+    }
+}
+
+/// Sends a taken gate its answer. Returns whether it was approved, and the
+/// grant to save when the yes was "Always allow" on a card that offered it.
+fn settle(pending: Pending, how: How) -> (bool, Option<Gate>) {
+    let (decision, edits) = match how {
+        How::Click(decision, edits) => (decision, edits),
+        How::Voice(true) | How::Deadline => (GateDecision::AllowOnce, None),
+        How::Voice(false) | How::Clear => (GateDecision::Decline, None),
+    };
+    let answer = match (decision, edits) {
+        (GateDecision::Decline, _) => None,
+        (_, None) => Some(pending.args),
+        // The user approved the card they saw; edits it never offered are not
+        // that card, so nothing runs.
+        (_, Some(edits)) => pending
+            .shown
+            .preview
+            .as_deref()
+            .ok_or_else(|| "the card has no fields".to_string())
+            .and_then(|preview| {
+                aloud_agent::preview::apply_edits(
+                    &pending.args,
+                    &edits,
+                    preview,
+                    pending.schema.as_ref(),
+                )
+            })
+            .inspect_err(
+                |e| tracing::warn!(%e, "refusing an approval with edits the card did not offer"),
+            )
+            .ok(),
+    };
+    let approved = answer.is_some();
+    let always = pending
+        .always
+        .filter(|_| approved && decision == GateDecision::AllowAlways);
+    // A gone receiver means the run was already abandoned.
+    let _ = pending.reply.send(answer);
+    (approved, always)
+}
+
+/// The panel's answer to a gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum GateDecision {
+    AllowOnce,
+    AllowAlways,
+    Decline,
 }
 
 /// The pending question's reply channel. Separate from the confirmation above:
@@ -60,6 +241,17 @@ fn is_current(run: u64) -> bool {
     CURRENT_RUN.load(std::sync::atomic::Ordering::SeqCst) == run
 }
 
+/// One card or question on screen at a time, across every run: a prompt waits
+/// its turn here, first come first served.
+static PROMPT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Waits for the screen's one prompt slot. None when the run stopped being
+/// `current` while it waited — its prompt would land over the new run's panel.
+async fn prompt_turn(current: impl Fn() -> bool) -> Option<tokio::sync::MutexGuard<'static, ()>> {
+    let turn = PROMPT.lock().await;
+    current().then_some(turn)
+}
+
 /// One run's claim on the panel and where its events go.
 struct Run {
     ticket: u64,
@@ -70,7 +262,26 @@ struct Run {
     /// Whether any tool ran. A quiet run that only answered still has to show
     /// the answer somewhere bigger than the bar's one line.
     acted: AtomicBool,
+    /// Whether any tool failed or was declined: a toast says it all worked.
+    failed: AtomicBool,
+    /// The writes that ran and worked, in order, for the toast.
+    wrote: Mutex<Vec<Wrote>>,
     transcript: String,
+    /// Keys the history row, so a run reporting its end twice leaves one.
+    utterance_id: i64,
+    started: std::time::Instant,
+}
+
+/// A write that ran and worked, for the toast a run of them ends on.
+#[derive(Debug, Clone)]
+struct Wrote {
+    /// The app as its permission names it: "Notes", "gmail".
+    app: String,
+    /// Where its icon comes from: a Mac app's own for "macOS" and "Screen",
+    /// else the connected service's logo by this slug.
+    toolkit: String,
+    show: Option<ShowTarget>,
+    tidied: Option<String>,
 }
 
 impl Run {
@@ -102,6 +313,216 @@ impl Run {
             self.emit(app, AgentEvent::RunStarted(self.transcript.clone()));
         }
     }
+
+    /// Keeps how the run ended in the history, for Agents › Voice. Never fails
+    /// the run: the answer is already on its way to the user.
+    fn record_end(&self, app: &AppHandle, front: Option<&str>, outcome: &str, success: bool) {
+        let Some(state) = app.try_state::<crate::AppState>() else {
+            return;
+        };
+        let settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
+        state.pipeline.record_command(
+            &self.transcript,
+            outcome,
+            success,
+            front,
+            self.started.elapsed().as_millis() as i64,
+            self.utterance_id,
+            &settings,
+        );
+    }
+
+    /// Records a tool's result for the toast: a write that worked, or anything
+    /// that did not.
+    fn record(&self, success: bool, wrote: Option<Wrote>) {
+        if !success {
+            self.failed.store(true, Ordering::SeqCst);
+        } else if let Some(wrote) = wrote {
+            self.wrote
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(wrote);
+        }
+    }
+
+    /// Puts up the toast — an alert island, on the one path every island
+    /// takes, sent before `RunFinished` so a run's own panel collapses into
+    /// it. A quiet run's panel never opened, so its toast takes the window
+    /// only from nothing or from another toast — never from a panel the user
+    /// is in. Past `emit`, which keeps a quiet run silent.
+    fn toast(&self, app: &AppHandle, toast: Toast) {
+        let own_panel = !self.quiet.load(Ordering::SeqCst);
+        if !is_current(self.ticket) {
+            return;
+        }
+        let island = toast.island(self.ticket);
+        if own_panel {
+            crate::islands::takeover_from_run(app, island);
+        } else {
+            crate::islands::takeover(app, island);
+        }
+    }
+}
+
+impl Toast {
+    /// The toast as an alert island. Its action becomes a named one from the
+    /// webview's registry — `result.show` and `files.undoTidy` call the same
+    /// commands a finished row's Show and Undo do. One id per run, so a later
+    /// toast never answers for this one.
+    fn island(self, ticket: u64) -> aloud_islands::Island {
+        use aloud_islands::{Island, IslandAction, IslandKind, IslandTier};
+        let actions = match self.action {
+            Some(ToastAction::Show { app, target }) => {
+                vec![IslandAction::new("Show", "result.show")
+                    .arg("app", app)
+                    .arg("target", target)]
+            }
+            Some(ToastAction::Undo { folder }) => {
+                vec![IslandAction::new("Undo", "files.undoTidy").arg("folder", folder)]
+            }
+            None => Vec::new(),
+        };
+        let short = short_word(&self.text);
+        Island {
+            id: format!("toast:{ticket}"),
+            kind: IslandKind::Alert,
+            icon: self.icon,
+            title: self.text,
+            detail: Some(self.app),
+            // "Sent", "Done": a write that worked is a whisper, and its Show or
+            // Undo is one hover away. Aloud's own, so Focus never holds it.
+            short: Some(short),
+            actions,
+            tier: Some(IslandTier::Whisper),
+            ..Island::default()
+        }
+    }
+}
+
+/// The one word a whisper shows for a run's closing line: its first, when it
+/// is a word ("Sent the email to David" -> "Sent"), else "Done".
+fn short_word(text: &str) -> String {
+    match text.split_whitespace().next() {
+        Some(word)
+            if (2..=10).contains(&word.chars().count())
+                && word.chars().all(char::is_alphabetic) =>
+        {
+            word.to_string()
+        }
+        _ => "Done".to_string(),
+    }
+}
+
+/// The confirmation chip a run of writes that all worked ends on, under the
+/// notch — always-listening runs included, which otherwise report only to the
+/// bar's one line.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Toast {
+    /// What was done, in one line: the run's closing words — for Mac writes,
+    /// the tool's own confirmation.
+    pub text: String,
+    /// The app the last write acted in, and its icon as a data URI.
+    pub app: String,
+    pub icon: Option<String>,
+    pub action: Option<ToastAction>,
+}
+
+/// The one thing a toast offers: what a finished row already could.
+// ponytail: no Snooze — Reminders has no snooze tool to call; a
+// reminders-snooze tool is the upgrade, and then it is one more arm here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum ToastAction {
+    /// Brings back what the write made; see [`show_result`].
+    Show { app: String, target: String },
+    /// Puts a tidied folder back; see [`undo_tidy`].
+    Undo { folder: String },
+}
+
+/// The toast a finished run ends on, and the write it is about: only when every
+/// tool worked, at least one wrote, and the closing words fit one line — a run
+/// with anything to read keeps its panel instead. Undo outranks Show: a
+/// reverse is the rarer and the more urgent of the two.
+fn toast_for<'a>(wrote: &'a [Wrote], failed: bool, message: &str) -> Option<(&'a Wrote, Toast)> {
+    let last = wrote.last()?;
+    if failed || needs_reading(true, message) {
+        return None;
+    }
+    let action = wrote
+        .iter()
+        .rev()
+        .find_map(|w| w.tidied.clone())
+        .map(|folder| ToastAction::Undo { folder })
+        .or_else(|| {
+            wrote.iter().rev().find_map(|w| {
+                w.show.clone().map(|s| ToastAction::Show {
+                    app: s.app,
+                    target: s.target,
+                })
+            })
+        });
+    let text = match message.trim() {
+        "" => "Done".to_string(),
+        said => said.to_string(),
+    };
+    Some((
+        last,
+        Toast {
+            text,
+            app: last.app.clone(),
+            icon: None,
+            action,
+        },
+    ))
+}
+
+/// Where connected services' logos are kept.
+fn icons_dir() -> Option<std::path::PathBuf> {
+    aloud_notes::data_dir().ok().map(|dir| dir.join("icons"))
+}
+
+/// Whether a toolkit is a connected service rather than the Mac itself.
+fn is_service(toolkit: &str) -> bool {
+    !matches!(toolkit, "macOS" | "Screen" | "Browser")
+}
+
+/// The acting app's icon: a Mac app's own, else the service's kept logo.
+/// Never fetches; see [`fetch_logos`].
+fn icon_of(app: &str, toolkit: &str) -> Option<String> {
+    if is_service(toolkit) {
+        aloud_agent::icons::cached(&icons_dir()?, toolkit)
+    } else {
+        aloud_selection::app_icon(app)
+    }
+}
+
+/// [`icon_of`] off the calling task, started at once and given at most a beat
+/// once awaited: a card or toast is never held for its icon, which is the
+/// neutral glyph when the lookup runs late.
+fn icon_for(app: &str, toolkit: &str) -> impl std::future::Future<Output = Option<String>> {
+    let (app, toolkit) = (app.to_string(), toolkit.to_string());
+    let lookup = tauri::async_runtime::spawn_blocking(move || icon_of(&app, &toolkit));
+    async move {
+        tokio::time::timeout(Duration::from_millis(100), lookup)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .flatten()
+    }
+}
+
+/// Fetches, in the background, the logos of the services a command may use that
+/// are not kept yet, so its card can show them — the first command after a
+/// connection shows the glyph, every one after the logo.
+fn fetch_logos(composio_key: &str, toolkits: Vec<String>) {
+    let Some(dir) = icons_dir() else { return };
+    let Ok(composio) = aloud_agent::ComposioClient::new(composio_key) else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        aloud_agent::icons::fetch_missing(&dir, &composio, &toolkits).await;
+    });
 }
 
 /// What the user was looking at when they spoke, read before our panel took focus.
@@ -138,6 +559,10 @@ pub enum AgentEvent {
     Planned(Vec<PlannedCall>),
     /// A parsed action awaiting dispatch. A write pauses here for confirmation.
     ToolCall(ToolCall),
+    /// The open gate was answered other than by its own buttons — the
+    /// countdown, or a spoken reply — so the panel can stop asking. `false` is
+    /// a decline.
+    Decided(bool),
     ToolResult(ToolResult),
     /// The model needs something only the user can give. The run is suspended
     /// until `answer_agent`; the panel shows an input rather than a gate.
@@ -165,8 +590,12 @@ pub struct PlannedCall {
 pub struct ToolCall {
     /// e.g. "github.create_issue".
     pub name: String,
-    /// The target app, e.g. "github".
+    /// The target app, e.g. "github". On a gate, the app as its permission
+    /// names it: "Notes" rather than "macOS".
     pub app: String,
+    /// The app's icon as a data URI, on a gate; None draws a neutral glyph.
+    #[specta(optional)]
+    pub icon: Option<String>,
     /// Args as strings, not `serde_json::Value`: specta refuses to export its
     /// i64-backed number type. Non-string values keep their JSON form.
     pub args: std::collections::BTreeMap<String, String>,
@@ -176,6 +605,13 @@ pub struct ToolCall {
     /// gate event; the start event and reads carry none. Boxed so every other
     /// event is not sized to the card.
     pub preview: Option<Box<aloud_agent::preview::ActionPreview>>,
+    /// The gate may offer "Always allow": false for strict actions and for a
+    /// write outside content asked for.
+    pub can_always: bool,
+    /// The loop's step for this call: a round's calls all start before any
+    /// finishes, so a result finds its row by this. None on the fast path.
+    #[specta(optional)]
+    pub id: Option<u32>,
 }
 
 /// A question put to the user mid-run. `options` non-empty means the answer is
@@ -194,6 +630,14 @@ pub struct ToolResult {
     pub message: String,
     /// What the row's Show button brings back, when the step made something.
     pub show: Option<ShowTarget>,
+    /// A line the row keeps under it: why a saved grant refused the step. A
+    /// status line would be wiped by this very result.
+    pub note: Option<String>,
+    /// The folder a tidy-up sorted, which the row's Undo puts back.
+    pub tidied: Option<String>,
+    /// The [`ToolCall::id`] this result finishes.
+    #[specta(optional)]
+    pub id: Option<u32>,
 }
 
 /// A note id in Notes, a saved file, a folder in the app that opened it — for
@@ -218,10 +662,16 @@ fn show_of(show: Option<(String, String)>) -> Option<ShowTarget> {
 pub async fn run(
     app: &AppHandle,
     transcript: String,
+    utterance_id: i64,
     settings: &Settings,
     quiet: bool,
     cancelled: impl Fn() -> bool,
 ) -> Result<()> {
+    // "Send it" answers the card on screen. Only speech that is not a reply to
+    // it is a new command, which supersedes the run the card belongs to.
+    if answer_by_voice(app, &transcript) {
+        return Ok(());
+    }
     // Taking the ticket supersedes any run still in flight: its events stop
     // reaching the panel, and with `cancelled` below it stops at its next tool
     // instead of carrying on unseen.
@@ -229,7 +679,11 @@ pub async fn run(
         ticket: claim_run(),
         quiet: AtomicBool::new(quiet),
         acted: AtomicBool::new(false),
+        failed: AtomicBool::new(false),
+        wrote: Mutex::new(Vec::new()),
         transcript: transcript.clone(),
+        utterance_id,
+        started: std::time::Instant::now(),
     };
     let cancelled = || cancelled_or_superseded(run.ticket, &cancelled);
 
@@ -239,6 +693,17 @@ pub async fn run(
     // confirmation with no prompt on screen. After the claim, so the run being
     // superseded cannot put a question back in between.
     clear_pending(app);
+
+    // Routed before the panel opens, because a request for a place in the notch
+    // must never flash a run panel first: it opens the shell there and is done.
+    let installed = aloud_selection::installed_apps();
+    let fast = aloud_native::fast::route(&transcript, &installed);
+    if let Some(aloud_native::fast::Fast::Notch { section, sub, done }) = fast {
+        tracing::info_span!("agent_run", route = "fast").in_scope(|| {});
+        crate::overlay::open_notch(app, section, sub);
+        run.record_end(app, None, &done, true);
+        return Ok(());
+    }
 
     // Read before `show_panel`, which focuses our own window and would make us the front app. Our own
     // name means a panel still held focus from the last run, which says nothing about what the user is
@@ -283,11 +748,31 @@ pub async fn run(
         project,
         selection: selection.as_deref(),
     };
-    match execute(app, &run, &transcript, context, settings, cancelled).await {
+    match execute(app, &run, &transcript, context, settings, fast, cancelled).await {
         Ok(message) => {
-            if needs_reading(run.acted.load(Ordering::SeqCst), &message) {
-                run.surface(app);
+            let wrote = run
+                .wrote
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            match toast_for(&wrote, run.failed.load(Ordering::SeqCst), &message) {
+                Some((by, mut toast)) => {
+                    toast.icon = icon_for(&by.app, &by.toolkit).await;
+                    run.toast(app, toast);
+                }
+                None if needs_reading(run.acted.load(Ordering::SeqCst), &message) => {
+                    run.surface(app)
+                }
+                None => {}
             }
+            // Written before the panel hears of it: the Voice list refetches
+            // when the run reads as finished, and must find the row there.
+            run.record_end(
+                app,
+                front.as_deref(),
+                &message,
+                !run.failed.load(Ordering::SeqCst),
+            );
             run.emit(app, AgentEvent::RunFinished(message));
         }
         // A cancel is the user's own doing: close the panel rather than
@@ -304,7 +789,9 @@ pub async fn run(
             tracing::error!(%e, "agent failed");
             // An error is something to read, not a one-line status.
             run.surface(app);
-            run.emit(app, AgentEvent::RunError(format!("{e:#}")));
+            let error = format!("{e:#}");
+            run.record_end(app, front.as_deref(), &error, false);
+            run.emit(app, AgentEvent::RunError(error));
         }
     }
     Ok(())
@@ -324,13 +811,10 @@ fn is_cancelled(error: &anyhow::Error) -> bool {
     error.to_string() == "cancelled"
 }
 
-/// Drops any unanswered gate or question. Dropping a sender resolves whoever is
-/// waiting on it — as a declined write or an unanswered question — so an
-/// abandoned run never leaves a live channel behind.
+/// Drops any unanswered gate or question, as a declined write or an unanswered
+/// question, so an abandoned run never leaves a live channel behind.
 pub(crate) fn clear_pending(app: &AppHandle) {
-    if let Some(state) = app.try_state::<PendingConfirmation>() {
-        state.0.lock().unwrap().take();
-    }
+    resolve(app, 0, How::Clear);
     if let Some(state) = app.try_state::<PendingQuestion>() {
         state.0.lock().unwrap().take();
     }
@@ -347,17 +831,28 @@ async fn execute(
     transcript: &str,
     context: Context<'_>,
     settings: &Settings,
+    fast: Option<aloud_native::fast::Fast>,
     cancelled: impl Fn() -> bool,
 ) -> Result<String> {
+    // Cached for five minutes, so this is the read `run` just made.
     let installed = aloud_selection::installed_apps();
-
     // The fast path, before any language model: "open Slack", "pause", "volume 30" run their tool
     // directly, and "go to youtube", "search lofi on youtube" go straight to the browser engine.
     // Everything else, and a browser engine missing from this build, takes the brain below.
-    match aloud_native::fast::route(transcript, &installed) {
+    // (`run` routed already, so a notch open could skip the panel.)
+    match fast {
         Some(aloud_native::fast::Fast::Tool { name, args, done }) => {
             tracing::Span::current().record("route", "fast");
-            return run_fast(app, run, name, args, done, context).await;
+            let call = aloud_agent::ProposedCall {
+                name: name.to_string(),
+                args,
+                tool: None,
+                said: transcript.to_string(),
+                names: Default::default(),
+                gate: None,
+                step: None,
+            };
+            return run_fast(app, run, name, call, done, context).await;
         }
         Some(aloud_native::fast::Fast::Web { query }) => {
             let goal = serde_json::json!({ "goal": transcript, "query": query });
@@ -370,12 +865,17 @@ async fn execute(
                 None => {}
             }
         }
-        None => {}
+        // `run` handled these before the panel opened.
+        Some(aloud_native::fast::Fast::Notch { .. }) | None => {}
     }
 
-    let brains = aloud_agent::brains(&settings.groq_api_key, &settings.gemini_api_key)?;
+    let brains = aloud_agent::brains(
+        &settings.groq_api_key,
+        &settings.gemini_api_key,
+        &settings.nvidia_api_key,
+    )?;
     if brains.is_empty() {
-        bail!("Agent mode is unavailable — no Groq or Gemini credential is configured");
+        bail!("Agent mode is unavailable — no Groq, Gemini or NVIDIA credential is configured");
     }
     // Connected services are optional: without a Composio key the Mac's own tools still run.
     let composio = aloud_agent::ComposioClient::new(&settings.composio_api_key)?;
@@ -384,6 +884,17 @@ async fn execute(
         aloud_agent::command_tools(transcript, &installed, has_composio.then_some(&composio)).await;
     tracing::Span::current().record("tool_count", tools.len());
     tracing::Span::current().record("route", "brain");
+    if has_composio {
+        let mut toolkits: Vec<String> = tools
+            .iter()
+            .map(|t| t.toolkit.clone())
+            .filter(|t| is_service(t))
+            .chain(more.iter().cloned())
+            .collect();
+        toolkits.sort();
+        toolkits.dedup();
+        fetch_logos(&settings.composio_api_key, toolkits);
+    }
 
     let command = aloud_agent::with_context(
         transcript,
@@ -404,6 +915,7 @@ async fn execute(
             front: context.front,
             document: context.document,
             project: context.project,
+            selection: context.selection.is_some_and(|s| !s.trim().is_empty()),
         },
         aloud_agent::Callbacks {
             on_event: |event| {
@@ -414,6 +926,28 @@ async fn execute(
                     // The question goes out through this event before the loop waits on the reply, so
                     // the panel has to be up first.
                     aloud_agent::LoopEvent::Asked { .. } => run.surface(app),
+                    aloud_agent::LoopEvent::ToolCallResult {
+                        name,
+                        success,
+                        write_app,
+                        show,
+                        tidied,
+                        ..
+                    } => {
+                        if let Some(write_app) = write_app {
+                            audit(name, write_app, "ran", Some(*success));
+                        }
+                        let wrote = write_app.as_ref().map(|app| Wrote {
+                            app: app.clone(),
+                            toolkit: tools
+                                .iter()
+                                .find(|t| t.name == *name)
+                                .map_or_else(|| tool_app(name), |t| t.toolkit.clone()),
+                            show: show_of(show.clone()),
+                            tidied: tidied.clone(),
+                        });
+                        run.record(*success, wrote);
+                    }
                     _ => {}
                 }
                 run.emit(app, event_of(event))
@@ -427,13 +961,10 @@ async fn execute(
                     .as_ref()
                     .map(|t| t.toolkit.clone())
                     .unwrap_or_else(|| tool_app(&call.name));
-                let schema = call.tool.map(|t| t.parameters);
-                async move {
-                    match confirm_write(app, run, call.name, toolkit, schema, call.args).await {
-                        Some(args) => aloud_agent::Verdict::Run(args),
-                        None => aloud_agent::Verdict::Decline,
-                    }
-                }
+                let schema = call.tool.as_ref().map(|t| t.parameters.clone());
+                // No key, no reads: the card names ids from the run's own reads only.
+                let composio = has_composio.then_some(&composio);
+                permit_logged(app, run, call, toolkit, schema, composio)
             },
             // The question itself already went out through `on_event`; this only
             // opens the reply channel and waits on it.
@@ -451,37 +982,62 @@ async fn run_fast(
     app: &AppHandle,
     run: &Run,
     name: &'static str,
-    args: serde_json::Value,
+    call: aloud_agent::ProposedCall,
     done: String,
     context: Context<'_>,
 ) -> Result<String> {
     run.acted.store(true, Ordering::SeqCst);
-    let args = if aloud_native::low_risk(name, &args) {
-        run.emit(
-            app,
-            AgentEvent::ToolCall(ToolCall {
-                app: "macOS".to_string(),
-                name: name.to_string(),
-                args: display_args(&args),
-                requires_confirmation: false,
-                preview: None,
-            }),
-        );
-        args
+    // The row first, like the loop's start event; a gate's card folds into it.
+    run.emit(
+        app,
+        AgentEvent::ToolCall(ToolCall {
+            app: "macOS".to_string(),
+            icon: None,
+            name: name.to_string(),
+            args: display_args(&call.args),
+            requires_confirmation: false,
+            preview: None,
+            can_always: false,
+            id: None,
+        }),
+    );
+    // Untainted: the fast path parsed the user's own words, and no model read
+    // anything on the way here.
+    let gate = aloud_agent::permissions::gate(
+        name,
+        &call.args,
+        None,
+        &call.said,
+        context.front,
+        &RunTaint::new(false),
+    );
+    let write_app = gate.as_ref().map(|g| g.app.clone());
+    let args = if gate.is_none() {
+        call.args
     } else {
+        // Native writes read nothing to name, so no connected services either.
         let schema = aloud_native::params(name);
-        match confirm_write(
-            app,
-            run,
-            name.to_string(),
-            "macOS".to_string(),
-            schema,
-            args,
-        )
-        .await
-        {
-            Some(approved) => approved,
-            None => return Ok("Cancelled.".to_string()),
+        let call = aloud_agent::ProposedCall { gate, ..call };
+        match permit_logged(app, run, call, "macOS".to_string(), schema, None).await {
+            aloud_agent::Verdict::Run(approved) => approved,
+            refused => {
+                let note = match refused {
+                    aloud_agent::Verdict::Blocked(why) => Some(why),
+                    _ => None,
+                };
+                run.emit(
+                    app,
+                    AgentEvent::ToolResult(ToolResult {
+                        success: false,
+                        message: format!("{name} declined"),
+                        show: None,
+                        note: note.clone(),
+                        tidied: None,
+                        id: None,
+                    }),
+                );
+                return Ok(note.unwrap_or_else(|| "Cancelled.".to_string()));
+            }
         }
     };
     // After the gate, like the loop's: the row and the confirmation show what was asked.
@@ -498,14 +1054,30 @@ async fn run_fast(
             None,
         ),
     };
+    let show = show_of(show);
+    run.record(
+        result.is_ok(),
+        write_app.clone().map(|app| Wrote {
+            app,
+            toolkit: "macOS".to_string(),
+            show: show.clone(),
+            tidied: None,
+        }),
+    );
     run.emit(
         app,
         AgentEvent::ToolResult(ToolResult {
             success: result.is_ok(),
             message: format!("{name} {}", if result.is_ok() { "done" } else { "failed" }),
-            show: show_of(show),
+            show,
+            note: None,
+            tidied: None,
+            id: None,
         }),
     );
+    if let Some(write_app) = &write_app {
+        audit(name, write_app, "ran", Some(result.is_ok()));
+    }
     result
 }
 
@@ -524,10 +1096,13 @@ async fn run_direct(
         app,
         AgentEvent::ToolCall(ToolCall {
             app: "Browser".to_string(),
+            icon: None,
             name: name.clone(),
             args: [("goal".to_string(), transcript.to_string())].into(),
             requires_confirmation: false,
             preview: None,
+            can_always: false,
+            id: None,
         }),
     );
     loop {
@@ -558,6 +1133,9 @@ async fn run_direct(
                         success,
                         message: format!("{name} {}", if success { "done" } else { "failed" }),
                         show: None,
+                        note: None,
+                        tidied: None,
+                        id: None,
                     }),
                 );
                 if !success {
@@ -590,6 +1168,7 @@ async fn run_direct(
 }
 
 async fn await_answer(app: &AppHandle, run: &Run) -> Option<String> {
+    let _turn = prompt_turn(|| is_current(run.ticket)).await?;
     // A superseded run asking would take the reply slot from the current one.
     if !is_current(run.ticket) {
         return None;
@@ -624,46 +1203,146 @@ pub fn answer_agent(app: AppHandle, answer: Option<String>) {
     }
 }
 
+/// What the gate does with a write, given its saved grant. The named-app rule
+/// outranks an Always: outside content asked for this, so the user's yes to the
+/// app is not a yes to this. Never still refuses — that is safer, not riskier.
+/// Such a card offers no "Always allow": it is the wrong moment to widen one.
+fn decision(gate: &Gate, stored: Option<Grant>) -> Decision {
+    match grants::decide(stored, gate.default_always, gate.strict) {
+        Decision::Refuse => Decision::Refuse,
+        _ if gate.named_rule => Decision::Prompt { can_always: false },
+        decided => decided,
+    }
+}
+
+fn blocked(gate: &Gate) -> String {
+    format!("Blocked in Settings: {} · {}", gate.app, gate.action)
+}
+
+/// A gated write: runs with no card when its grant allows, refuses without one
+/// when the grant is Never, and otherwise asks. A call with no gate asks with
+/// no "Always allow" — the loop always sends one, so this is only fail-safe.
+async fn permit(
+    app: &AppHandle,
+    run: &Run,
+    call: aloud_agent::ProposedCall,
+    toolkit: String,
+    schema: Option<serde_json::Value>,
+    composio: Option<&aloud_agent::ComposioClient>,
+) -> aloud_agent::Verdict {
+    let decided = call
+        .gate
+        .as_ref()
+        .map_or(Decision::Prompt { can_always: false }, |g| {
+            decision(g, grants::get(&g.key))
+        });
+    match decided {
+        Decision::Run => aloud_agent::Verdict::Run(call.args),
+        Decision::Refuse => match &call.gate {
+            Some(gate) => aloud_agent::Verdict::Blocked(blocked(gate)),
+            None => aloud_agent::Verdict::Decline,
+        },
+        Decision::Prompt { can_always } => {
+            match confirm_write(app, run, call, toolkit, schema, composio, can_always).await {
+                Some(args) => aloud_agent::Verdict::Run(args),
+                None => aloud_agent::Verdict::Decline,
+            }
+        }
+    }
+}
+
 /// Surfaces a write tool for confirmation and awaits the panel's decision. Takes
-/// owned args so the returned future doesn't borrow the loop's transient data.
-/// `schema` is the tool's JSON schema, which the card reads its fields against.
+/// the call owned so the returned future doesn't borrow the loop's transient data.
+/// `schema` is the tool's JSON schema, which the card reads its fields against;
+/// `composio` makes the reads the card's mapping names, if any.
 async fn confirm_write(
     app: &AppHandle,
     run: &Run,
-    name: String,
+    call: aloud_agent::ProposedCall,
     toolkit: String,
     schema: Option<serde_json::Value>,
-    args: serde_json::Value,
+    composio: Option<&aloud_agent::ComposioClient>,
+    can_always: bool,
 ) -> Option<serde_json::Value> {
+    let _turn = prompt_turn(|| is_current(run.ticket)).await?;
     // A superseded run must not open a gate: its prompt would appear over the
     // new run's panel, and it would occupy the single confirmation slot the
     // current run needs. Declining is right — the user has moved on.
     if !is_current(run.ticket) {
-        tracing::info!(%name, run = run.ticket, "declining a write from a superseded run");
+        tracing::info!(name = %call.name, run = run.ticket, "declining a write from a superseded run");
         return None;
     }
-    // A gate needs the panel even on a quiet run: it is a question.
+    // A gate needs the panel even on a quiet run: it is a question. Up before
+    // the card's reads, so the wait for them is spent on screen.
     run.surface(app);
-    run.emit(
-        app,
-        AgentEvent::ToolCall(gate_call(name, toolkit, &args, schema.as_ref())),
-    );
-    await_confirmation(app, args).await
+    let ctx = aloud_agent::preview::Context {
+        said: &call.said,
+        names: &call.names,
+    };
+    // The card wears the app as its permission names it — Notes, not macOS.
+    let named = call
+        .gate
+        .as_ref()
+        .map_or_else(|| toolkit.clone(), |g| g.app.clone());
+    // Looked up beside the card's reads, never ahead of them.
+    let icon = icon_for(&named, &toolkit);
+    let mut event = gate_call(call.name.clone(), named, &call.args, schema.as_ref(), &ctx);
+    event.id = call.step;
+    if let (Some(composio), Some(preview)) = (composio, event.preview.as_deref_mut()) {
+        // Each read is cut off inside `enrich` (1.5s, all at once), so a slow
+        // service leaves an id unnamed rather than holding the gate back.
+        aloud_agent::preview::enrich(preview, &call.name, &call.args, |slug, args| {
+            let slug = slug.to_string();
+            async move { composio.read_cached(&slug, &args).await }
+        })
+        .await;
+        // A new command during those reads has the panel now.
+        if !is_current(run.ticket) {
+            return None;
+        }
+    }
+    event.icon = icon.await;
+    asks_for(&mut event, call.gate.as_ref(), can_always);
+    // After `enrich`, whose lookups may be what names the destination. A card
+    // offering "Always allow" is exactly one the grant left to the card: Ask,
+    // saved or by default, not strict, nothing outside content asked for.
+    if let Some(preview) = event.preview.as_deref_mut() {
+        preview.auto_ms = aloud_agent::preview::countdown(preview, can_always);
+    }
+    let always = call.gate.filter(|_| can_always);
+    await_confirmation(app, run, event, call.args, always, schema).await
 }
 
-/// The gate event for a write: the call plus the card that previews it.
+/// The permission the card asks for: its scope line, why it asks when a grant
+/// would otherwise have let it run, and whether "Always allow" is on offer.
+fn asks_for(call: &mut ToolCall, gate: Option<&Gate>, can_always: bool) {
+    call.can_always = can_always;
+    if let (Some(preview), Some(gate)) = (call.preview.as_mut(), gate) {
+        preview.scope = Some(format!("{} · {}", gate.app, gate.action));
+        preview.risks.extend(gate.reason.clone());
+    }
+}
+
+/// The gate event for a write: the call plus the card that previews it, drawn
+/// offline from the arguments and what the run's reads already named.
 fn gate_call(
     name: String,
-    toolkit: String,
+    app: String,
     args: &serde_json::Value,
     schema: Option<&serde_json::Value>,
+    ctx: &aloud_agent::preview::Context,
 ) -> ToolCall {
     ToolCall {
-        preview: Some(Box::new(aloud_agent::preview::build(&name, args, schema))),
-        app: toolkit,
+        preview: Some(Box::new(aloud_agent::preview::render(
+            &name, args, schema, ctx,
+        ))),
+        app,
+        icon: None,
         name,
         args: display_args(args),
         requires_confirmation: true,
+        can_always: false,
+        id: None,
     }
 }
 
@@ -701,18 +1380,27 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
         aloud_agent::LoopEvent::Asked { question, options } => {
             AgentEvent::Asked(Question { question, options })
         }
-        aloud_agent::LoopEvent::ToolCallStart { name, args } => AgentEvent::ToolCall(ToolCall {
-            app: tool_app(&name),
-            name,
-            args: display_args(&args),
-            // The gate is enforced in the loop; the panel just shows the call.
-            requires_confirmation: false,
-            preview: None,
-        }),
+        aloud_agent::LoopEvent::ToolCallStart { step, name, args } => {
+            AgentEvent::ToolCall(ToolCall {
+                app: tool_app(&name),
+                icon: None,
+                name,
+                args: display_args(&args),
+                // The gate is enforced in the loop; the panel just shows the call.
+                requires_confirmation: false,
+                preview: None,
+                can_always: false,
+                id: Some(step),
+            })
+        }
         aloud_agent::LoopEvent::ToolCallResult {
+            step,
             name,
             success,
             show,
+            note,
+            tidied,
+            ..
         } => AgentEvent::ToolResult(ToolResult {
             success,
             message: if success {
@@ -721,6 +1409,9 @@ fn event_of(event: aloud_agent::LoopEvent) -> AgentEvent {
                 format!("{name} failed")
             },
             show: show_of(show),
+            note,
+            tidied,
+            id: Some(step),
         }),
         aloud_agent::LoopEvent::RateLimited { seconds } => {
             AgentEvent::Status(format!("Rate limited — retrying in {seconds}s…"))
@@ -735,82 +1426,234 @@ fn tool_app(slug: &str) -> String {
     aloud_agent::toolkit_of_slug(slug)
 }
 
-/// Blocks until the panel approves or rejects. A dropped sender (panel closed,
-/// new command started) or a timeout reads as a rejection — a gate that can
-/// hang wedges the whole agent, and declining fails in the safe direction.
-async fn await_confirmation(app: &AppHandle, args: serde_json::Value) -> Option<serde_json::Value> {
-    let (tx, rx) = oneshot::channel();
-    if let Some(state) = app.try_state::<PendingConfirmation>() {
-        let mut slot = state.0.lock().unwrap();
-        // Replacing a live confirmation drops its sender, which resolves the
-        // waiting dispatch as "declined" without the user ever seeing a prompt.
-        // The panel renders one gate at a time, so a second one here means two
-        // writes are racing; refusing the newcomer is the honest answer, and it
-        // keeps the visible prompt the one that is actually answerable.
-        if slot.as_ref().is_some_and(|p| !p.reply.is_closed()) {
-            tracing::warn!("a confirmation is already open; declining the second");
-            return None;
-        }
-        *slot = Some(Pending { reply: tx, args });
-    } else {
+/// [`permit`], with its answer in the audit log.
+async fn permit_logged(
+    app: &AppHandle,
+    run: &Run,
+    call: aloud_agent::ProposedCall,
+    toolkit: String,
+    schema: Option<serde_json::Value>,
+    composio: Option<&aloud_agent::ComposioClient>,
+) -> aloud_agent::Verdict {
+    let tool = call.name.clone();
+    let scope = call
+        .gate
+        .as_ref()
+        .map_or_else(|| toolkit.clone(), |g| g.app.clone());
+    let verdict = permit(app, run, call, toolkit, schema, composio).await;
+    let decision = match verdict {
+        aloud_agent::Verdict::Run(_) => "allowed",
+        aloud_agent::Verdict::Decline => "declined",
+        aloud_agent::Verdict::Blocked(_) => "blocked",
+    };
+    audit(&tool, &scope, decision, None);
+    verdict
+}
+
+/// One line in the audit log. Never stops the action it records.
+fn audit(tool: &str, app: &str, decision: &str, ok: Option<bool>) {
+    let entry = aloud_store::audit::Entry {
+        tool,
+        app,
+        decision,
+        ok,
+    };
+    if let Err(e) = aloud_store::audit::append(&entry) {
+        tracing::warn!(%e, "could not write the audit log");
+    }
+}
+
+/// Opens the gate for `shown` and waits for whatever answers it first: a click,
+/// a spoken reply, the countdown, or the gate being cleared. A timeout declines
+/// — a gate that can hang wedges the whole agent, and declining fails in the
+/// safe direction.
+async fn await_confirmation(
+    app: &AppHandle,
+    run: &Run,
+    mut shown: ToolCall,
+    args: serde_json::Value,
+    always: Option<Gate>,
+    schema: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let Some(state) = app.try_state::<PendingConfirmation>() else {
         tracing::error!("PendingConfirmation state missing");
         return None;
+    };
+    let revision = next_revision();
+    if let Some(preview) = shown.preview.as_deref_mut() {
+        preview.revision = revision;
     }
+    let (tx, rx) = oneshot::channel();
+    // Open before the card is drawn, so a click as quick as its first frame
+    // finds the gate it is for.
+    let opened = state.open(Pending {
+        reply: tx,
+        args,
+        revision,
+        held: false,
+        armed: false,
+        shown: shown.clone(),
+        heard: run.transcript.clone(),
+        always,
+        schema,
+    });
+    if !opened {
+        tracing::warn!("a confirmation is already open; declining the second");
+        return None;
+    }
+    run.emit(app, AgentEvent::ToolCall(shown));
     match tokio::time::timeout(CONFIRM_TIMEOUT, rx).await {
         Ok(answer) => answer.unwrap_or(None),
         Err(_) => {
+            // The receiver is gone now, which leaves the gate inert to any
+            // late answer.
             tracing::warn!("confirmation timed out; treating as declined");
             None
         }
     }
 }
 
-/// Resolves the pending confirmation. Called by the panel's Cancel/Confirm
-/// buttons; `edits` carries any field the user filled in or corrected before
-/// approving, in the same flattened form the panel was given.
+/// Answers the open gate — see [`How`]. Whichever answer arrives first takes
+/// it; one naming another revision, or a deadline on a held card, finds
+/// nothing. "Always allow" saves the grant, so the next call like it runs with
+/// no card. Returns whether this answer was the one.
+fn resolve(app: &AppHandle, revision: u32, how: How) -> bool {
+    let Some(state) = app.try_state::<PendingConfirmation>() else {
+        return false;
+    };
+    let Some(pending) = state.take(revision, &how) else {
+        tracing::debug!(revision, ?how, "no open gate for this answer");
+        return false;
+    };
+    // The panel already knows what its own buttons said, and a cleared gate's
+    // panel is being closed or replaced.
+    let tell = matches!(how, How::Voice(_) | How::Deadline);
+    let quiet = matches!(how, How::Clear);
+    let (approved, always) = settle(pending, how);
+    if let Some(gate) = always {
+        if let Err(e) = grants::set(&gate.key, &gate.app, &gate.action, Grant::Always) {
+            tracing::warn!(%e, key = %gate.key, "could not save the grant; allowed once");
+        }
+    }
+    if tell {
+        emit(app, AgentEvent::Decided(approved));
+    }
+    if !approved && !quiet {
+        hide(app);
+    }
+    true
+}
+
+/// The gate's buttons. `edits` carries the fields the user changed, keyed by
+/// the pointer each card field names; `revision` is the card's own, so a click
+/// meant for one gate can never answer the next.
 #[tauri::command]
 #[specta::specta]
 pub fn confirm_agent(
     app: AppHandle,
-    approved: bool,
-    edits: Option<std::collections::BTreeMap<String, String>>,
+    decision: GateDecision,
+    edits: Option<BTreeMap<String, String>>,
+    revision: u32,
 ) {
+    resolve(&app, revision, How::Click(decision, edits));
+}
+
+/// Starts an exact-words card's countdown once the card is on screen, so the
+/// bar the user watches and the deadline that sends run together. At the
+/// deadline it is "Allow once" — unless the user reached for the card first.
+#[tauri::command]
+#[specta::specta]
+pub fn arm_agent(app: AppHandle, revision: u32) {
+    let Some(wait) = app
+        .try_state::<PendingConfirmation>()
+        .and_then(|state| state.arm(revision))
+    else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(wait).await;
+        resolve(&app, revision, How::Deadline);
+    });
+}
+
+/// Stops a card's countdown for good: the pointer is on it, a field has focus,
+/// or the user is typing. It then waits for a click or a reply.
+#[tauri::command]
+#[specta::specta]
+pub fn hold_agent(app: AppHandle, revision: u32) {
     if let Some(state) = app.try_state::<PendingConfirmation>() {
-        if let Some(pending) = state.0.lock().unwrap().take() {
-            let answer = approved.then(|| match edits {
-                Some(edits) => apply_edits(&pending.args, &edits),
-                None => pending.args.clone(),
-            });
-            // A gone receiver means the flow was already abandoned.
-            let _ = pending.reply.send(answer);
-        }
-    }
-    if !approved {
-        hide(&app);
+        state.hold(Some(revision));
     }
 }
 
-/// Folds the panel's edited strings back into a tool's real arguments.
-///
-/// The inverse of [`display_args`]: a field that was a string stays one, and a
-/// field that was flattened to JSON text is parsed back to the shape the tool
-/// expects. A value that no longer parses is kept as a string rather than
-/// dropped — a tool rejecting a bad argument says so, where a silently missing
-/// one just does the wrong thing.
-fn apply_edits(
-    original: &serde_json::Value,
-    edits: &std::collections::BTreeMap<String, String>,
-) -> serde_json::Value {
-    let mut out = original.as_object().cloned().unwrap_or_default();
-    for (key, edited) in edits {
-        let value = match original.get(key) {
-            Some(serde_json::Value::String(_)) | None => serde_json::Value::String(edited.clone()),
-            Some(_) => serde_json::from_str(edited)
-                .unwrap_or_else(|_| serde_json::Value::String(edited.clone())),
-        };
-        out.insert(key.clone(), value);
+/// A recording started over an open card: the user may be about to say
+/// "cancel", and the countdown must not send while they do.
+pub(crate) fn hold_open(app: &AppHandle) {
+    if let Some(state) = app.try_state::<PendingConfirmation>() {
+        state.hold(None);
     }
-    serde_json::Value::Object(out)
+}
+
+/// Answers the open card from speech, on every tier: "send it" approves,
+/// "cancel" declines, "make it …" rewrites its text, and nothing at all puts it
+/// back on screen. Returns false for anything else, which the caller runs as a
+/// new command — superseding the card.
+pub(crate) fn answer_by_voice(app: &AppHandle, said: &str) -> bool {
+    let Some(state) = app.try_state::<PendingConfirmation>() else {
+        return false;
+    };
+    let Some((revision, shown, heard)) = state.waiting() else {
+        return false;
+    };
+    if said.trim().is_empty() {
+        resurface(app, shown, heard);
+        return true;
+    }
+    let Some(reply) = aloud_agent::preview::gate_reply(said) else {
+        return false;
+    };
+    match reply {
+        GateReply::Approve => {
+            // A misheard yes can send money or publish, so every one is on the
+            // record and on screen.
+            tracing::info!(revision, said = %said.trim(), "card approved by voice");
+            resurface(app, shown, heard);
+            emit(
+                app,
+                AgentEvent::Status(format!("Approved by voice: “{}”", said.trim())),
+            );
+            resolve(app, revision, How::Voice(true));
+        }
+        GateReply::Decline => {
+            resolve(app, revision, How::Voice(false));
+        }
+        GateReply::Replace(text) => {
+            // A card with no text to rewrite comes back as it was.
+            let (shown, heard) = state.replace(revision, &text).unwrap_or((shown, heard));
+            resurface(app, shown, heard);
+        }
+    }
+    true
+}
+
+/// Puts the open card back on screen: the panel reopened on the command it
+/// belongs to when a recording took it away, then the card itself.
+// ponytail: the run's earlier step rows are not replayed — keeping its events
+// on the run is the upgrade if losing them confuses anyone.
+fn resurface(app: &AppHandle, shown: ToolCall, heard: String) {
+    if !crate::overlay::panel_open() {
+        crate::overlay::show_panel(app);
+        emit(app, AgentEvent::RunStarted(heard));
+    }
+    emit(app, AgentEvent::ToolCall(shown));
+}
+
+/// Sends to the panel outside any run: the answer to a gate belongs to the run
+/// waiting on it, which is the current one or its gate would be cleared.
+fn emit(app: &AppHandle, event: AgentEvent) {
+    if let Err(e) = event.emit_to(app, LABEL) {
+        tracing::warn!(%e, "could not send to agent panel");
+    }
 }
 
 pub fn hide(app: &AppHandle) {
@@ -828,6 +1671,22 @@ pub async fn show_result(app_name: String, target: String) -> Result<(), String>
         .map_err(|e| e.to_string())
 }
 
+/// Puts a tidied folder back as it was, from its finished row's Undo. The
+/// click is the yes, so no card: it reverses what the user already approved.
+#[tauri::command]
+#[specta::specta]
+pub async fn undo_tidy(folder: String) -> Result<(), String> {
+    let args = serde_json::json!({ "folder": folder });
+    tauri::async_runtime::spawn_blocking(move || {
+        aloud_native::execute("ALOUD_UNDO_ORGANIZE", &args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "undoing a tidy-up is not available on this Mac".to_string())?
+    .map(drop)
+    .map_err(|e| e.to_string())
+}
+
 /// Lets the panel dismiss itself on Escape or after showing a result.
 #[tauri::command]
 #[specta::specta]
@@ -841,8 +1700,54 @@ pub fn close_agent(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_whisper_shows_the_first_word_of_the_closing_line_or_done() {
+        assert_eq!(super::short_word("Sent the email to David"), "Sent");
+        assert_eq!(
+            super::short_word("Created: a note"),
+            "Done",
+            "punctuation is not a word"
+        );
+        assert_eq!(
+            super::short_word("Reorganisationed it"),
+            "Done",
+            "too long for a whisper"
+        );
+        assert_eq!(super::short_word(""), "Done");
+    }
+
     use super::*;
     use serde_json::json;
+
+    /// A round's calls run together, so two runs — or a gate and a browser
+    /// task's question — can reach for the screen at once. The second prompt
+    /// waits for the first; and if its run was replaced meanwhile, it shows
+    /// nothing at all.
+    #[test]
+    fn only_one_prompt_is_on_screen_at_a_time() {
+        tauri::async_runtime::block_on(async {
+            let first = prompt_turn(|| true).await.expect("a current run's turn");
+            let superseded = std::sync::Arc::new(AtomicBool::new(false));
+            let flag = superseded.clone();
+            let second = tauri::async_runtime::spawn(async move {
+                prompt_turn(move || !flag.load(Ordering::SeqCst))
+                    .await
+                    .is_some()
+            });
+            // Still waiting on the first card while its run is replaced.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            superseded.store(true, Ordering::SeqCst);
+            drop(first);
+            assert!(
+                !second.await.unwrap(),
+                "it waited, and then its run was gone"
+            );
+            assert!(
+                prompt_turn(|| true).await.is_some(),
+                "the slot is free again"
+            );
+        });
+    }
 
     /// A run is stopped only *between* tools, so a superseded one keeps
     /// executing and then emits — into the panel the next command already
@@ -873,46 +1778,172 @@ mod tests {
         assert!(claim_run() > second);
     }
 
-    /// The panel only ever sees `display_args`' flat strings, so approving a
-    /// gate has to rebuild the nested shape the tool expects. Getting this
-    /// wrong writes a contact with the address as a quoted JSON string, or
-    /// drops it entirely — both of which look like a successful save.
-    #[test]
-    fn edits_fold_back_into_the_shape_the_tool_expects() {
-        let original = json!({
-            "names": [{ "givenName": "Dad" }],
-            "emailAddresses": [],
-            "personFields": "names,emailAddresses",
-        });
-        let edits = [
-            (
-                "emailAddresses".to_string(),
-                r#"[{"value":"dad@example.com"}]"#.to_string(),
-            ),
-            (
-                "personFields".to_string(),
-                "names,emailAddresses".to_string(),
-            ),
-        ]
-        .into_iter()
-        .collect();
+    /// Opens a Slack card on `state` as the app would, counting down when
+    /// `auto_ms` is set: its revision and the run's end of the channel.
+    fn open_gate(
+        state: &PendingConfirmation,
+        auto_ms: Option<u32>,
+    ) -> (u32, oneshot::Receiver<Option<serde_json::Value>>) {
+        let names = aloud_agent::preview::Names::default();
+        let ctx = aloud_agent::preview::Context {
+            said: "",
+            names: &names,
+        };
+        let args = json!({ "channel": "general", "markdown_text": "standup moved" });
+        let mut shown = gate_call(
+            "SLACK_CHAT_POST_MESSAGE".into(),
+            "slack".into(),
+            &args,
+            None,
+            &ctx,
+        );
+        let revision = next_revision();
+        let preview = shown.preview.as_deref_mut().expect("a card");
+        (preview.revision, preview.auto_ms) = (revision, auto_ms);
+        let (reply, rx) = oneshot::channel();
+        assert!(state.open(Pending {
+            reply,
+            args,
+            revision,
+            held: false,
+            armed: false,
+            shown,
+            heard: "send standup moved to general".into(),
+            always: None,
+            schema: None,
+        }));
+        (revision, rx)
+    }
 
-        let merged = apply_edits(&original, &edits);
-        assert_eq!(merged["emailAddresses"][0]["value"], "dad@example.com");
-        // A string field stays a string rather than being parsed into a number
-        // or a bool that happens to look like one.
-        assert_eq!(merged["personFields"], "names,emailAddresses");
-        // Untouched keys survive.
-        assert_eq!(merged["names"][0]["givenName"], "Dad");
+    /// `resolve` without the app: whether `how` answered the gate.
+    fn answer(state: &PendingConfirmation, revision: u32, how: How) -> bool {
+        state
+            .take(revision, &how)
+            .map(|pending| settle(pending, how))
+            .is_some()
+    }
+
+    fn sent(rx: &mut oneshot::Receiver<Option<serde_json::Value>>) -> Option<serde_json::Value> {
+        rx.try_recv().expect("the gate was answered")
+    }
+
+    fn waiting(rx: &mut oneshot::Receiver<Option<serde_json::Value>>) -> bool {
+        matches!(rx.try_recv(), Err(oneshot::error::TryRecvError::Empty))
     }
 
     #[test]
-    fn an_edit_that_stops_being_json_is_kept_not_dropped() {
-        let original = json!({ "emailAddresses": [{ "value": "a@b.c" }] });
-        let edits = [("emailAddresses".to_string(), "not json".to_string())]
-            .into_iter()
-            .collect();
-        assert_eq!(apply_edits(&original, &edits)["emailAddresses"], "not json");
+    fn a_click_meant_for_one_gate_cannot_approve_the_next() {
+        let state = PendingConfirmation::default();
+        let (first, mut rx) = open_gate(&state, None);
+        assert!(answer(
+            &state,
+            first,
+            How::Click(GateDecision::Decline, None)
+        ));
+        assert_eq!(sent(&mut rx), None);
+
+        // The run writes again and the next card opens. A second click on the
+        // first one — a double click, a frame behind — arrives now.
+        let (second, mut rx) = open_gate(&state, None);
+        assert!(!answer(
+            &state,
+            first,
+            How::Click(GateDecision::AllowOnce, None)
+        ));
+        assert!(waiting(&mut rx));
+
+        // "Make it hey team" redraws the card as a new revision, so a click on
+        // the old words cannot send the new ones either.
+        let (shown, _) = state.replace(second, "hey team").expect("has text");
+        let third = shown.preview.as_ref().expect("a card").revision;
+        assert!(third > second);
+        assert!(!answer(
+            &state,
+            second,
+            How::Click(GateDecision::AllowOnce, None)
+        ));
+        assert!(answer(
+            &state,
+            third,
+            How::Click(GateDecision::AllowOnce, None)
+        ));
+        assert_eq!(
+            sent(&mut rx).expect("approved")["markdown_text"],
+            "hey team"
+        );
+    }
+
+    #[test]
+    fn a_held_gate_does_not_auto_approve() {
+        let state = PendingConfirmation::default();
+        let (revision, mut rx) = open_gate(&state, Some(aloud_agent::preview::AUTO_MS));
+        assert_eq!(state.arm(revision), Some(Duration::from_millis(3_000)));
+        assert_eq!(state.arm(revision), None, "one countdown per card");
+
+        // The pointer reached the card, or a recording started over it.
+        state.hold(None);
+        assert!(!answer(&state, revision, How::Deadline));
+        assert!(waiting(&mut rx));
+        // Shown again after a spoken reply, it no longer counts down.
+        let (_, shown, _) = state.waiting().expect("still open");
+        assert_eq!(shown.preview.expect("a card").auto_ms, None);
+        // It waits for a click instead.
+        assert!(answer(
+            &state,
+            revision,
+            How::Click(GateDecision::AllowOnce, None)
+        ));
+        assert!(sent(&mut rx).is_some());
+
+        // A card without a countdown never arms, so no deadline answers it.
+        let (revision, mut rx) = open_gate(&state, None);
+        assert_eq!(state.arm(revision), None);
+        assert!(!answer(&state, revision, How::Deadline));
+        assert!(waiting(&mut rx));
+    }
+
+    #[test]
+    fn undo_before_the_deadline_means_the_message_never_sends() {
+        let state = PendingConfirmation::default();
+        let (revision, mut rx) = open_gate(&state, Some(aloud_agent::preview::AUTO_MS));
+        state
+            .arm(revision)
+            .expect("an exact-words card counts down");
+        assert!(answer(
+            &state,
+            revision,
+            How::Click(GateDecision::Decline, None)
+        ));
+        assert_eq!(sent(&mut rx), None, "Undo declined it");
+
+        // Its deadline still fires, and finds nothing — not even the next card.
+        let (next, mut rx) = open_gate(&state, Some(aloud_agent::preview::AUTO_MS));
+        assert!(!answer(&state, revision, How::Deadline));
+        assert!(waiting(&mut rx));
+
+        // Left alone, a card sends at its own deadline, as Allow once.
+        state.arm(next).expect("counts down");
+        assert!(answer(&state, next, How::Deadline));
+        assert!(sent(&mut rx).is_some());
+    }
+
+    #[test]
+    fn an_approval_editing_a_field_the_card_did_not_offer_runs_nothing() {
+        let state = PendingConfirmation::default();
+        let moved = BTreeMap::from([("/channel".to_string(), "C0SECRET".to_string())]);
+        let (revision, mut rx) = open_gate(&state, None);
+        let how = How::Click(GateDecision::AllowOnce, Some(moved));
+        assert!(answer(&state, revision, how));
+        assert_eq!(sent(&mut rx), None);
+
+        let text = BTreeMap::from([("/markdown_text".to_string(), "hey".to_string())]);
+        let (revision, mut rx) = open_gate(&state, None);
+        assert!(answer(
+            &state,
+            revision,
+            How::Click(GateDecision::AllowOnce, Some(text))
+        ));
+        assert_eq!(sent(&mut rx).expect("approved")["markdown_text"], "hey");
     }
 
     /// An empty or whitespace answer is the user having dismissed the box, not
@@ -942,11 +1973,17 @@ mod tests {
             }
         });
         let args = json!({ "channel": "general", "markdown_text": "Standup moves to 10:30" });
+        let names = aloud_agent::preview::Names::default();
+        let ctx = aloud_agent::preview::Context {
+            said: "",
+            names: &names,
+        };
         let call = gate_call(
             "SLACK_CHAT_POST_MESSAGE".into(),
             "slack".into(),
             &args,
             Some(&schema),
+            &ctx,
         );
         assert!(call.requires_confirmation);
         let sent = serde_json::to_value(&call).expect("serialises");
@@ -965,17 +2002,167 @@ mod tests {
             "macOS".into(),
             &json!({ "name": "Safari" }),
             Some(&schema),
+            &ctx,
         );
         let preview = call.preview.expect("a preview");
-        assert_eq!(preview.title, "Quit app");
+        // Drawn by its hand mapping now, which names what it quits.
+        assert_eq!(preview.title, "Quit Safari");
         assert_eq!(preview.fields[0].value, "Safari");
     }
 
+    fn wrote(app: &str, show: Option<(&str, &str)>, tidied: Option<&str>) -> Wrote {
+        Wrote {
+            app: app.into(),
+            toolkit: "macOS".into(),
+            show: show.map(|(app, target)| ShowTarget {
+                app: app.into(),
+                target: target.into(),
+            }),
+            tidied: tidied.map(Into::into),
+        }
+    }
+
+    /// A toast says it all worked, so it is only due when it did: a write ran,
+    /// nothing failed or was declined, and the closing words fit one line.
     #[test]
-    fn a_field_the_tool_never_had_arrives_as_a_string() {
-        let edits = [("subject".to_string(), "Hello".to_string())]
-            .into_iter()
-            .collect();
-        assert_eq!(apply_edits(&json!({}), &edits)["subject"], "Hello");
+    fn a_toast_is_due_only_when_every_write_worked_and_nothing_needs_reading() {
+        let note = [wrote("Notes", Some(("Notes", "x-coredata://n/p1")), None)];
+        let (by, toast) = toast_for(&note, false, "Created the note “Groceries”.").expect("due");
+        assert_eq!(by.app, "Notes");
+        assert_eq!(toast.text, "Created the note “Groceries”.");
+        assert_eq!(toast.app, "Notes");
+
+        assert!(
+            toast_for(&[], false, "It is 4pm in Tokyo.").is_none(),
+            "an answer, no write"
+        );
+        assert!(
+            toast_for(&note, true, "Created the note.").is_none(),
+            "something failed"
+        );
+        assert!(
+            toast_for(&note, false, "Created the note.\nIt has 3 items.").is_none(),
+            "two lines are read in the panel"
+        );
+        assert!(toast_for(&note, false, &"long ".repeat(30)).is_none());
+    }
+
+    /// One action at most: Undo where a reverse exists, else Show, from the
+    /// latest write that offers either; none when nothing does.
+    #[test]
+    fn a_toast_offers_undo_over_show_and_nothing_it_cannot_do() {
+        let action = |writes: &[Wrote]| toast_for(writes, false, "Done.").unwrap().1.action;
+        let tidy = wrote("Finder", Some(("Finder", "~/Downloads")), Some("Downloads"));
+        let note = wrote("Notes", Some(("Notes", "x-coredata://n/p1")), None);
+        assert_eq!(
+            action(&[tidy.clone(), note.clone()]),
+            Some(ToastAction::Undo {
+                folder: "Downloads".into()
+            })
+        );
+        assert_eq!(
+            action(std::slice::from_ref(&note)),
+            Some(ToastAction::Show {
+                app: "Notes".into(),
+                target: "x-coredata://n/p1".into()
+            })
+        );
+        assert_eq!(action(&[wrote("Slack", None, None)]), None);
+        // The toast wears the last write's app, whatever offered the action.
+        let both = [note, wrote("Slack", None, None)];
+        assert_eq!(toast_for(&both, false, "Done.").unwrap().0.app, "Slack");
+        // Silence is still a line.
+        assert_eq!(toast_for(&[tidy], false, "  ").unwrap().1.text, "Done");
+    }
+
+    /// The toast rides the island queue now: an alert whose button names the
+    /// registry action that does what the row's Undo did, with its folder.
+    #[test]
+    fn a_toast_becomes_an_alert_island_with_a_named_action() {
+        let tidy = wrote("Finder", None, Some("Downloads"));
+        let (_, toast) = toast_for(&[tidy], false, "Sorted 24 files.").unwrap();
+        let island = toast.island(7);
+        assert_eq!(island.id, "toast:7");
+        assert_eq!(island.kind, aloud_islands::IslandKind::Alert);
+        assert_eq!(island.title, "Sorted 24 files.");
+        assert_eq!(island.detail.as_deref(), Some("Finder"));
+        assert_eq!(island.actions.len(), 1);
+        assert_eq!(island.actions[0].action, "files.undoTidy");
+        assert_eq!(island.actions[0].args["folder"], "Downloads");
+        // A write that worked is a whisper with its one word; the stage, not a
+        // queue lease, decides how long it lives.
+        assert_eq!(island.tier, Some(aloud_islands::IslandTier::Whisper));
+        assert_eq!(island.short.as_deref(), Some("Sorted"));
+        assert_eq!(island.source, aloud_islands::IslandSource::Own);
+    }
+
+    fn slack_send(named_rule: bool) -> Gate {
+        Gate {
+            key: "slack:send-and-share".into(),
+            app: "Slack".into(),
+            action: "send and share".into(),
+            default_always: false,
+            strict: false,
+            reason: named_rule
+                .then(|| "Outside content asked for this, and you didn't mention Slack".into()),
+            named_rule,
+        }
+    }
+
+    #[test]
+    fn an_always_allowed_send_shows_no_card() {
+        assert_eq!(
+            decision(&slack_send(false), Some(Grant::Always)),
+            Decision::Run
+        );
+        assert_eq!(
+            decision(&slack_send(false), None),
+            Decision::Prompt { can_always: true }
+        );
+    }
+
+    #[test]
+    fn never_refuses_without_asking() {
+        assert_eq!(
+            decision(&slack_send(false), Some(Grant::Never)),
+            Decision::Refuse
+        );
+        assert_eq!(
+            decision(&slack_send(true), Some(Grant::Never)),
+            Decision::Refuse,
+            "outside content cannot reopen a Never"
+        );
+        assert_eq!(
+            blocked(&slack_send(false)),
+            "Blocked in Settings: Slack · send and share"
+        );
+    }
+
+    /// The silent defence against injected instructions: a saved Always must
+    /// not let outside content send to an app the user never named.
+    #[test]
+    fn a_named_rule_gate_prompts_even_when_always_allowed() {
+        let gate = slack_send(true);
+        assert_eq!(
+            decision(&gate, Some(Grant::Always)),
+            Decision::Prompt { can_always: false }
+        );
+        let names = aloud_agent::preview::Names::default();
+        let ctx = aloud_agent::preview::Context {
+            said: "",
+            names: &names,
+        };
+        let mut call = gate_call(
+            "SLACK_SEND_MESSAGE".into(),
+            "slack".into(),
+            &json!({ "channel": "general", "markdown_text": "hi" }),
+            None,
+            &ctx,
+        );
+        asks_for(&mut call, Some(&gate), false);
+        let preview = call.preview.expect("a preview");
+        assert_eq!(preview.scope.as_deref(), Some("Slack · send and share"));
+        assert!(preview.risks.iter().any(|r| r.contains("Outside content")));
+        assert!(!call.can_always);
     }
 }

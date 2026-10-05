@@ -170,3 +170,15 @@ describe("createSpring response retuning", () => {
     driver.restore();
   });
 });
+
+// useFlip, the Home tiles' reorder, has no reduced-motion code of its own: this
+// is what it relies on. No frame is requested, the value is simply there.
+describe("createSpring under reduced motion", () => {
+  it("jumps to a new target in one frame instead of travelling", () => {
+    const frames: number[] = [];
+    const spring = createSpring((v) => frames.push(v), { reducedMotion: true });
+    spring.jump(100);
+    spring.to(240);
+    expect(frames).toEqual([100, 240]);
+  });
+});

@@ -8,6 +8,63 @@
 //! dropped, since a scripted body write turns checklists into bullets anyway;
 //! and `_` never italicises, so `snake_case` survives.
 
+use crate::script::{self, ScriptError};
+use serde_json::json;
+
+/// Writes `markdown` as a note in the Notes folder named `folder` (made if
+/// missing) and returns its Notes id. With `id`, that note is updated in place;
+/// a note that is gone, in Recently Deleted, or has pictures or files in it
+/// (rewriting would delete them) gets a fresh copy instead, so the id coming
+/// back may differ and the caller must keep it.
+///
+/// The first non-empty line is the title and the rest the body, as Notes
+/// itself reads a note. Nothing here brings Notes forward.
+pub fn sync_note(folder: &str, markdown: &str, id: Option<&str>) -> Result<String, ScriptError> {
+    let (title, rest) = split_title(markdown);
+    let out = script::run_jxa(
+        "Notes",
+        SYNC_JS,
+        &json!({ "folder": folder, "id": id, "body": note_body(&title, rest) }),
+    )?;
+    serde_json::from_str::<serde_json::Value>(&out)
+        .ok()
+        .and_then(|v| v["id"].as_str().map(str::to_owned))
+        .ok_or_else(|| ScriptError::Failed(format!("Notes did not say which note it wrote: {out}")))
+}
+
+const SYNC_JS: &str = r#"const Notes = Application("Notes");
+    let note = null;
+    if (ARG.id) {
+        try {
+            const old = Notes.notes.byId(ARG.id);
+            old.name();
+            if (old.container().name() !== "Recently Deleted" && old.attachments.length === 0) note = old;
+        } catch (e) {}
+    }
+    if (note) {
+        note.body = ARG.body;
+        return JSON.stringify({ id: note.id(), created: false });
+    }
+    const account = Notes.defaultAccount();
+    let folder = account.folders.whose({ name: ARG.folder })()[0];
+    if (!folder) {
+        folder = Notes.Folder({ name: ARG.folder });
+        account.folders.push(folder);
+    }
+    const made = Notes.Note({ body: ARG.body });
+    folder.notes.push(made);
+    return JSON.stringify({ id: made.id(), created: true });"#;
+
+/// The title Notes would show for `markdown` (its first non-empty line, minus
+/// heading marks) and what is left under it.
+fn split_title(markdown: &str) -> (String, &str) {
+    let trimmed = markdown.trim_start();
+    let (first, rest) = trimmed.split_once('\n').unwrap_or((trimmed, ""));
+    let title = first.trim().trim_start_matches('#').trim();
+    let title = if title.is_empty() { "Untitled" } else { title };
+    (title.to_string(), rest)
+}
+
 /// A whole note body: the title, then `markdown` below it.
 pub(crate) fn note_body(title: &str, markdown: &str) -> String {
     let mut body = format!("<div><h1>{}</h1></div>", escape(title.trim()));
@@ -134,6 +191,25 @@ mod tests {
             "<div><h1>Cake</h1></div><div>Ingredients</div>\
              <ul><li>flour</li><li>eggs</li><li>sugar</li></ul>"
         );
+    }
+
+    #[test]
+    fn the_first_line_is_the_title_and_is_not_repeated_in_the_body() {
+        let (title, rest) = split_title("\n\n## Call prep\nOpen with usage\n- roadmap");
+        assert_eq!(title, "Call prep");
+        assert_eq!(
+            note_body(&title, rest),
+            "<div><h1>Call prep</h1></div><div>Open with usage</div><ul><li>roadmap</li></ul>"
+        );
+        assert_eq!(split_title("only a title").1, "");
+        assert_eq!(split_title("###\nbody").0, "Untitled");
+    }
+
+    /// The text goes to the script as JSON argv, never into its source.
+    #[test]
+    fn the_sync_script_never_activates_notes_or_embeds_text() {
+        assert!(!SYNC_JS.contains("activate") && !SYNC_JS.contains(".show("));
+        assert!(SYNC_JS.contains("ARG.body"));
     }
 
     #[test]

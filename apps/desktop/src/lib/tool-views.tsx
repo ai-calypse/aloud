@@ -1,9 +1,9 @@
-import type { ReactNode } from "react";
-
 /**
  * What the agent panel draws for each tool. A registry rather than a switch:
  * any of Composio's 800+ toolkits can be connected, so a service's custom UI
- * is one entry. Anything unregistered falls back to a humanised label, no body.
+ * is one entry. Anything unregistered falls back to a humanised label. What a
+ * write's approval card shows, and which of its fields can be edited, is
+ * Rust's (`aloud_agent::preview` and `hand.json`), not this.
  */
 
 /** A tool call's arguments. Unknown shape — every read must be defensive. */
@@ -12,21 +12,6 @@ export type ToolArgs = Record<string, unknown>;
 export type ToolView = {
   /** Present tense, what is happening: "Drafting an email to Ana". */
   label: (args: ToolArgs) => string;
-  /** The one thing worth showing. Omitted means the label says it all. */
-  body?: (args: ToolArgs) => ReactNode;
-  /**
-   * Fields the approval gate lets the user fill in before confirming, replacing
-   * `body` there. Only worth declaring where the model routinely cannot know
-   * the value — an address it never found. Everywhere else an editable gate is
-   * a form standing between the user and the thing they asked for.
-   */
-  edits?: Editable[];
-  /**
-   * The question the gate asks before showing `edits`. Only meaningful with
-   * them: an editable gate is the agent proposing work of its own, so it asks
-   * before putting a form in front of someone who never wanted one.
-   */
-  ask?: (args: ToolArgs) => string;
   /**
    * The approval gate's title, where "<label> — this writes to <app>" would
    * misstate what a yes covers.
@@ -34,33 +19,10 @@ export type ToolView = {
   gate?: (args: ToolArgs) => string;
 };
 
-/** One field in an editable approval gate. */
-export type Editable = {
-  /** Stable across renders; also the React key. */
-  key: string;
-  label: string;
-  placeholder?: string;
-  get: (args: ToolArgs) => string;
-  /** Returns the whole argument object with this field replaced. */
-  set: (args: ToolArgs, value: string) => ToolArgs;
-};
-
 /** A string field, or "" when absent or not a string. */
 export function text(args: ToolArgs, key: string): string {
   const value = args[key];
   return typeof value === "string" ? value : "";
-}
-
-/**
- * The card every tool body sits in. Local rather than a components/ui
- * primitive: the white/10 hairline is the floating panel's material.
- */
-function ToolCard({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1 rounded-lg border border-white/10 bg-white/5 p-3">
-      {children}
-    </div>
-  );
 }
 
 /** "someone@example.com" → "someone", for a label that fits one line. */
@@ -73,78 +35,18 @@ function lookingFor(query: string): string {
   return query ? `Looking for ${query}` : "Looking through your contacts";
 }
 
-/** The email body, which is the whole point of a draft. */
-function emailBody(args: ToolArgs): ReactNode {
-  const body = text(args, "body");
-  const subject = text(args, "subject");
-  const to = text(args, "recipient_email");
-  if (!body && !subject && !to) return null;
-
-  return (
-    <ToolCard>
-      {/* The whole address, above everything else and never abbreviated. The
-          label says "to charlie" whether the address is charlie@… or a stranger
-          the lookup happened to return; this is the only place the gate states
-          who is actually being written to, so it is the line that has to be
-          right. A missing one is worse still — the tool would send to nobody or
-          to whatever it defaults to. */}
-      {to ? (
-        <p className="m-0 break-all text-ui text-muted-foreground">
-          To: <span className="text-ink">{to}</span>
-        </p>
-      ) : (
-        <p className="m-0 text-ui italic text-warning">
-          No recipient — cancel and ask again.
-        </p>
-      )}
-      {subject && <p className="m-0 text-ui font-medium">{subject}</p>}
-      {body ? (
-        <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
-          {body}
-        </p>
-      ) : (
-        // Surfaced rather than silently sent: an empty body reaching the
-        // confirmation is the model having dropped the content.
-        <p className="m-0 text-ui italic text-warning">
-          No message body — cancel and ask again.
-        </p>
-      )}
-    </ToolCard>
-  );
-}
-
-/** When and where, which is what you check before letting an event save. */
-function eventBody(args: ToolArgs): ReactNode {
-  const start = text(args, "start_datetime");
-  const location = text(args, "location");
-  if (!start && !location) return null;
-
-  return (
-    <ToolCard>
-      {start && (
-        <p className="m-0 text-ui font-medium">{start.replace("T", " ")}</p>
-      )}
-      {location && (
-        <p className="m-0 text-ui text-muted-foreground">{location}</p>
-      )}
-    </ToolCard>
-  );
-}
-
 const VIEWS: Record<string, ToolView> = {
   GMAIL_SEND_EMAIL: {
     label: (a) => {
       const to = text(a, "recipient_email");
       return to ? `Sending an email to ${who(to)}` : "Sending an email";
     },
-    body: emailBody,
   },
   GMAIL_CREATE_EMAIL_DRAFT: {
     label: (a) => {
       const to = text(a, "recipient_email");
       return to ? `Drafting an email to ${who(to)}` : "Drafting an email";
     },
-    body: emailBody,
   },
   GMAIL_FETCH_EMAILS: { label: () => "Reading your inbox" },
   GMAIL_LIST_DRAFTS: { label: () => "Looking through your drafts" },
@@ -160,21 +62,6 @@ const VIEWS: Record<string, ToolView> = {
       const repo = text(a, "repo");
       return repo ? `Opening an issue on ${repo}` : "Opening an issue";
     },
-    body: (a) => {
-      const title = text(a, "title");
-      const body = text(a, "body");
-      if (!title) return null;
-      return (
-        <ToolCard>
-          <p className="m-0 text-ui font-medium">{title}</p>
-          {body && (
-            <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
-              {body}
-            </p>
-          )}
-        </ToolCard>
-      );
-    },
   },
   GITHUB_LIST_REPOSITORY_ISSUES: {
     label: (a) => {
@@ -189,91 +76,29 @@ const VIEWS: Record<string, ToolView> = {
       const title = text(a, "summary");
       return title ? `Adding "${title}" to your calendar` : "Adding a calendar event";
     },
-    body: eventBody,
   },
   GOOGLECALENDAR_UPDATE_EVENT: {
     label: (a) => {
       const title = text(a, "summary");
       return title ? `Updating "${title}"` : "Updating a calendar event";
     },
-    body: eventBody,
   },
   GOOGLECALENDAR_FIND_EVENT: { label: () => "Looking through your calendar" },
   GOOGLECALENDAR_FIND_FREE_SLOTS: { label: () => "Finding a free slot" },
-  // Delete carries no title or time, only ids, so the gate shows the id rather
-  // than pretending to more.
   GOOGLECALENDAR_DELETE_EVENT: {
     label: () => "Deleting a calendar event",
-    body: (args) => {
-      const id = text(args, "event_id");
-      const calendar = text(args, "calendar_id");
-      if (!id) return null;
-      return (
-        <ToolCard>
-          <p className="m-0 text-ui font-medium">Event {id}</p>
-          {calendar && calendar !== "primary" && (
-            <p className="m-0 text-ui text-muted-foreground">{calendar}</p>
-          )}
-        </ToolCard>
-      );
-    },
   },
 
   GOOGLECONTACTS_SEARCH_CONTACTS: {
     label: (a) => lookingFor(text(a, "query")),
   },
-  // The People API takes names and addresses as arrays of objects, not the flat
-  // strings every other tool here uses, so both readers dig rather than `text`.
+  // The People API takes names as arrays of objects, not the flat strings
+  // every other tool here uses, so the reader digs rather than `text`.
   GOOGLECONTACTS_CREATE_CONTACT: {
     label: (a) => {
       const name = contactName(a);
       return name ? `Saving ${name} to your contacts` : "Saving a contact";
     },
-    // A contact you cannot see before approving is a contact you did not agree
-    // to — the address is the part that is easy to get wrong.
-    body: (a) => {
-      const name = contactName(a);
-      const email = contactEmail(a);
-      if (!name && !email) return null;
-      return (
-        <ToolCard>
-          {name && <p className="m-0 text-ui font-medium">{name}</p>}
-          {email && <p className="m-0 text-ui text-muted-foreground">{email}</p>}
-        </ToolCard>
-      );
-    },
-    ask: (a) => {
-      const name = contactName(a);
-      return name
-        ? `I could not find ${name}. Save them as a contact?`
-        : "Save this person as a contact?";
-    },
-    // The one gate worth making editable: the agent reaches it precisely when
-    // it could not find an address, so the field it most needs is the one field
-    // it cannot fill. Both write back the People API's nested shape, stringified
-    // the way `display_args` delivers it, so Rust parses it straight back.
-    edits: [
-      {
-        key: "name",
-        label: "Name",
-        placeholder: "Their name",
-        get: contactName,
-        set: (args, value) => ({
-          ...args,
-          names: JSON.stringify([{ givenName: value, displayName: value }]),
-        }),
-      },
-      {
-        key: "email",
-        label: "Email",
-        placeholder: "name@example.com",
-        get: contactEmail,
-        set: (args, value) => ({
-          ...args,
-          emailAddresses: JSON.stringify([{ value }]),
-        }),
-      },
-    ],
   },
 
   // Native macOS actions (aloud-native). Registered for real labels; the
@@ -293,80 +118,19 @@ const VIEWS: Record<string, ToolView> = {
       const title = text(a, "title");
       return title ? `Creating the note "${title}"` : "Creating a note";
     },
-    body: (a) => {
-      const line = text(a, "body");
-      return line ? (
-        <ToolCard>
-          <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
-            {line}
-          </p>
-        </ToolCard>
-      ) : null;
-    },
   },
   ALOUD_NOTES_APPEND: {
     label: (a) => {
       const title = text(a, "title");
       return title ? `Adding to "${title}"` : "Adding to the open note";
     },
-    body: (a) => {
-      const line = text(a, "body");
-      return line ? (
-        <ToolCard>
-          <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
-            {line}
-          </p>
-        </ToolCard>
-      ) : null;
-    },
   },
-  // The one with real blast radius. Same treatment GMAIL_SEND_EMAIL got after
-  // the wrong-recipient bug: the gate shows the FULL handle, never abbreviated,
-  // and the recipient is editable so a name that resolved to nothing — or to the
-  // wrong person — is fixable before it sends.
   ALOUD_MESSAGES_SEND: {
     label: (a) => {
       // `to_name` is who Rust resolved a spoken name to; `to` is then the handle.
       const to = text(a, "to_name") || text(a, "to");
       return to ? `Messaging ${to}` : "Sending a message";
     },
-    body: (a) => {
-      const to = text(a, "to");
-      const msg = text(a, "text");
-      return (
-        <ToolCard>
-          {to ? (
-            <p className="m-0 break-all text-ui text-muted-foreground">
-              To: <span className="text-ink">{to}</span>
-            </p>
-          ) : (
-            <p className="m-0 text-ui italic text-warning">
-              No recipient — cancel and ask again.
-            </p>
-          )}
-          {msg ? (
-            <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
-              {msg}
-            </p>
-          ) : (
-            <p className="m-0 text-ui italic text-warning">
-              No message — cancel and ask again.
-            </p>
-          )}
-        </ToolCard>
-      );
-    },
-    edits: [
-      {
-        key: "to",
-        label: "To",
-        placeholder: "+1 555 123 4567 or email",
-        get: (a) => text(a, "to"),
-        // A new handle is no longer the resolved person. Emptied, not deleted:
-        // Rust keeps any key the edits leave out.
-        set: (args, value) => ({ ...args, to: value, to_name: "" }),
-      },
-    ],
   },
   ALOUD_MAIL_SEND: {
     label: (a) => {
@@ -385,41 +149,6 @@ const VIEWS: Record<string, ToolView> = {
       const to = text(a, "to");
       return to ? `Messaging ${to} on Discord` : "Sending a Discord message";
     },
-    body: (a) => {
-      const to = text(a, "to");
-      const msg = text(a, "text");
-      return (
-        <ToolCard>
-          {to ? (
-            <p className="m-0 break-all text-ui text-muted-foreground">
-              To: <span className="text-ink">{to}</span>
-            </p>
-          ) : (
-            <p className="m-0 text-ui italic text-warning">
-              No recipient — cancel and ask again.
-            </p>
-          )}
-          {msg ? (
-            <p className="m-0 whitespace-pre-wrap text-ui leading-relaxed text-muted-foreground">
-              {msg}
-            </p>
-          ) : (
-            <p className="m-0 text-ui italic text-warning">
-              No message — cancel and ask again.
-            </p>
-          )}
-        </ToolCard>
-      );
-    },
-    edits: [
-      {
-        key: "to",
-        label: "To",
-        placeholder: "Name as it appears in Discord",
-        get: (a) => text(a, "to"),
-        set: (args, value) => ({ ...args, to: value }),
-      },
-    ],
   },
   ALOUD_PHOTO_BOOTH_TAKE_PHOTO: { label: () => "Taking a photo in Photo Booth" },
   ALOUD_PRESS_KEYS: {
@@ -577,11 +306,6 @@ function mediaLabel(app: string, a: Record<string, unknown>): string {
   }
 }
 
-/** The gate's editable fields for a tool; empty for the yes/no majority. */
-export function editsFor(name: string): Editable[] {
-  return viewFor(name).edits ?? [];
-}
-
 /**
  * A nested argument, back as a value.
  *
@@ -624,10 +348,6 @@ function contactName(args: ToolArgs): string {
     .join(" ");
 }
 
-function contactEmail(args: ToolArgs): string {
-  return firstOf(args, "emailAddresses", "value");
-}
-
 /** "SLACK_SEND_MESSAGE" → "Slack: send message"; the unregistered fallback. */
 export function humanise(slug: string): string {
   const [toolkit, ...rest] = slug.split("_");
@@ -650,27 +370,19 @@ export function labelFor(name: string, args: ToolArgs): string {
   }
 }
 
-export function bodyFor(name: string, args: ToolArgs): ReactNode {
-  try {
-    return viewFor(name).body?.(args) ?? null;
-  } catch {
-    return null;
-  }
+/**
+ * A step row's label: the registered one, else the title Rust gave the step's
+ * card ("Send message to launch"), else the slug humanised ("Slack: chat post
+ * message"), which is all an unregistered read has.
+ */
+export function rowLabel(name: string, args: ToolArgs, title?: string | null): string {
+  return name in VIEWS || !title ? labelFor(name, args) : title;
 }
 
 /** The approval gate's own title, or "" to use the label. */
 export function gateFor(name: string, args: ToolArgs): string {
   try {
     return viewFor(name).gate?.(args) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-/** The question an editable gate opens with, or "" when it has none. */
-export function askFor(name: string, args: ToolArgs): string {
-  try {
-    return viewFor(name).ask?.(args) ?? "";
   } catch {
     return "";
   }

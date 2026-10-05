@@ -1,12 +1,25 @@
 mod agent;
+mod clipboard;
 mod commands;
+// notch-today-focus: wiring begins
+mod focus;
+mod today;
+// notch-today-focus: wiring ends
+mod islands;
+mod keys; // notch-keys
+mod launcher;
 mod listen;
+mod media; // notch-media
+           // notch-mac: wiring begins
+mod mac;
+// notch-mac: wiring ends
 mod meeting;
-mod notch;
+mod nudges;
 mod overlay;
 mod pipeline;
 mod quota;
 mod sessions;
+mod shelf;
 mod sound;
 mod tray;
 
@@ -48,8 +61,6 @@ pub struct AppState {
     pub connectors: commands::ConnectorCache,
     /// Per-stage latency, written by the tracing layer and read by the dev panel.
     pub timings: Arc<Mutex<aloud_store::Timings>>,
-    /// Measured once on the main thread at launch; empty without a notch.
-    pub notch: Vec<notch::Notch>,
 }
 
 pub fn run() {
@@ -100,6 +111,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_settings,
             commands::update_settings,
             commands::get_stats,
+            commands::get_time_saved,
             commands::search_notes,
             commands::recent_notes,
             commands::default_prompt,
@@ -113,10 +125,13 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hotkeys_permitted,
             commands::permissions,
             commands::open_permission_settings,
+            commands::list_permissions,
+            commands::set_permission,
             commands::build_info,
             commands::overlay_displays,
             commands::recent_timings,
             commands::history_recent,
+            commands::history_voice_recent,
             commands::history_delete,
             commands::history_clear,
             commands::history_update_final,
@@ -134,8 +149,43 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::connect_connector,
             commands::disconnect_connector,
             overlay::set_panel_box,
+            overlay::set_notch_peek,
             overlay::set_panel_interactive,
             overlay::close_browse,
+            islands::islands,
+            islands::dismiss_island,
+            nudges::nudge_state,
+            nudges::nudge_recheck,
+            nudges::nudge_open_access_settings,
+            nudges::nudge_open,
+            // notch-today-focus: commands begin
+            focus::focus_state,
+            focus::focus_start,
+            focus::focus_pause,
+            focus::focus_resume,
+            focus::focus_skip,
+            focus::focus_stop,
+            focus::focus_stats,
+            focus::awake_start,
+            focus::awake_stop,
+            focus::quick_notes,
+            focus::save_quick_note,
+            focus::note_sync_marks,
+            focus::sync_quick_notes,
+            focus::open_note_in_notes,
+            today::weather,
+            today::set_weather_city,
+            today::clear_weather_city,
+            today::stock_quotes,
+            today::add_stock,
+            today::remove_stock,
+            today::calendar_events,
+            today::reminders_cached,
+            today::reminders_due,
+            today::calendar_day,
+            today::complete_reminder,
+            today::open_meeting_link,
+            // notch-today-focus: commands end
             sessions::agent_hook_status,
             sessions::install_agent_hooks,
             sessions::uninstall_agent_hooks,
@@ -145,10 +195,88 @@ fn specta_builder() -> Builder<tauri::Wry> {
             sessions::list_repo_branches,
             sessions::read_agent_transcript,
             quota::agent_quota,
+            // notch-media: the Media section's commands and event.
+            media::media_now_playing,
+            media::media_watch,
+            media::media_control,
+            media::media_seek,
+            media::media_set_speed,
+            media::media_source_icon,
+            media::media_recheck_browsers,
+            media::media_open_browser,
+            media::media_artwork,
+            media::media_lyrics,
+            media::sound_state,
+            media::sound_set_default,
+            media::sound_set_mic_muted,
+            media::bluetooth_devices,
+            media::bluetooth_connect,
+            media::open_automation_settings,
+            // -- notch Clipboard section (feat/notch-clipboard-launch) --
+            clipboard::clipboard_enabled,
+            clipboard::clipboard_set_enabled,
+            clipboard::clipboard_list,
+            clipboard::clipboard_copy,
+            clipboard::clipboard_paste,
+            clipboard::clipboard_action,
+            clipboard::clipboard_pin,
+            clipboard::clipboard_delete,
+            clipboard::clipboard_clear,
+            clipboard::snippet_list,
+            clipboard::snippet_save,
+            clipboard::snippet_delete,
+            clipboard::snippet_copy,
+            clipboard::snippet_paste,
+            clipboard::color_pick,
+            clipboard::color_list,
+            clipboard::color_copy,
+            clipboard::color_clear,
+            // -- end notch Clipboard section --
+            // -- notch Launch section (feat/notch-clipboard-launch) --
+            launcher::launcher_prefs,
+            launcher::launcher_open_app,
+            launcher::launcher_pin,
+            launcher::shortcut_list,
+            launcher::shortcut_run,
+            launcher::launcher_files,
+            launcher::launcher_recent_files,
+            launcher::launcher_open_path,
+            // -- end notch Launch section --
+            // notch-mac: wiring begins
+            mac::mac_stats,
+            mac::mac_battery,
+            mac::mac_privacy,
+            mac::mac_front_window,
+            mac::mac_snap,
+            mac::mac_watchers,
+            mac::set_mac_watcher,
+            // notch-mac: wiring ends
             agent::confirm_agent,
+            agent::arm_agent,
+            agent::hold_agent,
             agent::answer_agent,
             agent::close_agent,
             agent::show_result,
+            agent::undo_tidy,
+            // -- notch Shelf (aloud-shelf) --
+            shelf::shelf_items,
+            shelf::shelf_add,
+            shelf::shelf_remove,
+            shelf::shelf_clear,
+            shelf::shelf_convert,
+            shelf::shelf_zip,
+            shelf::shelf_unzip,
+            shelf::shelf_airdrop,
+            shelf::shelf_thumbnail,
+            shelf::shelf_prefs,
+            shelf::shelf_set_watch,
+            shelf::shots_recent,
+            shelf::shots_copy,
+            shelf::shots_capture,
+            shelf::downloads_recent,
+            shelf::drives_list,
+            shelf::drive_eject,
+            // -- end notch Shelf --
         ])
         .events(collect_events![
             pipeline::Phase,
@@ -161,9 +289,19 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::OverlayStyleChanged,
             overlay::OverlayDismiss,
             overlay::NotchHover,
+            overlay::NotchOpen,
+            islands::IslandChanged,
+            islands::IslandsWaiting,
+            nudges::NudgeStateChanged,
+            shelf::ShelfChanged,
+            // notch-today-focus: events begin
+            focus::FocusSnapshot,
+            // notch-today-focus: events end
             sessions::AgentSessions,
             sessions::AgentPermission,
             sessions::AgentPermissionResolved,
+            media::MediaNowPlaying,      // notch-media
+            clipboard::ClipboardChanged, // notch Clipboard section
             HotkeysPermitted,
             ConnectorsUpdated,
         ])
@@ -234,11 +372,14 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
                 hotkey_capture: hotkey_capture.clone(),
                 connectors: Default::default(),
                 timings: timings.clone(),
-                // Tauri's setup callback is the main thread, which NSScreen requires.
-                notch: notch::notched_screens(),
             });
             app.manage(agent::PendingConfirmation::default());
             app.manage(agent::PendingQuestion::default());
+
+            // Main thread (NSScreen). The displays are read here and again on
+            // every change, so a display plugged in later re-places the overlay.
+            aloud_screens::refresh();
+            overlay::watch_displays(app.handle());
 
             // Main thread required. A floating-level window is clamped below
             // the menu bar, which the wings style has to sit in.
@@ -264,6 +405,30 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             }
 
             sessions::start(app.handle());
+            media::start(app.handle()); // notch-media
+
+            // -- notch Shelf --
+            shelf::init(app.handle());
+            // -- end notch Shelf --
+
+            // notch Clipboard section: the store, and the pasteboard watcher.
+            clipboard::start(app.handle());
+
+            // notch Launch section: pins and recents.
+            launcher::start(app.handle());
+            // notch-mac: wiring begins
+            mac::start(app.handle());
+            // notch-mac: wiring ends
+
+            // notch-today-focus: setup begin
+            focus::init(app.handle());
+            today::init(app.handle());
+            let state = app.state::<AppState>();
+            let events = state.settings.lock().ok().map(|s| s.notch_events.clone());
+            if let Some(events) = events {
+                nudges::apply(app.handle(), &events);
+            }
+            // notch-today-focus: setup end
 
             tray::init(app)?;
 
@@ -274,6 +439,11 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             });
 
             commands::warm_connectors(app.handle().clone());
+
+            // notch-keys: wiring begins
+            // Before the key tap starts: it takes the tap's aux event stream.
+            keys::start(app.handle());
+            // notch-keys: wiring ends
 
             spawn_hotkey_listener(
                 app.handle().clone(),
@@ -333,6 +503,10 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
                 tray::show_main(_app);
+            }
+            // The Now Playing helper is a child process; a normal quit must not leave it.
+            if let tauri::RunEvent::Exit = _event {
+                aloud_media::mediaremote::shutdown();
             }
         });
 }

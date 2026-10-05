@@ -12,6 +12,7 @@ aloud-native = { path = "../native" }
 aloud-screen = { path = "../screen" }
 aloud-selection = { path = "../selection" }
 anyhow.workspace = true
+base64 = "0.22"
 chrono = "0.4"
 futures-util = "0.3"
 iana-time-zone = "0.1"
@@ -23,7 +24,7 @@ serde.workspace = true
 serde_json.workspace = true
 specta.workspace = true
 tracing.workspace = true
-tokio = { version = "1", features = ["time", "macros"] }
+tokio = { version = "1", features = ["time", "macros", "sync"] }
 
 [dev-dependencies]
 aloud-notes = { path = "../notes" }
