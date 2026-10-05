@@ -25,6 +25,7 @@ use serde_json::{json, Value};
 
 pub use catalogue::{editor_project, show};
 pub use contacts::prepare;
+pub use notes::sync_note;
 pub use script::{run, run_args, run_jxa, ScriptError};
 pub use search::{file_row, heading as search_heading};
 

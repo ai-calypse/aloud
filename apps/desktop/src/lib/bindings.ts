@@ -244,6 +244,18 @@ export const commands = {
 	 *  it will write.
 	 */
 	saveQuickNote: (path: string | null, text: string) => typedError<string, string>(__TAURI_INVOKE("save_quick_note", { path, text })),
+	/**  Which quick notes the Notes app has a current copy of. */
+	noteSyncMarks: () => typedError<SyncMark[], string>(__TAURI_INVOKE("note_sync_marks")),
+	/**
+	 *  Copies quick notes that are new or edited into the Notes app's "Aloud"
+	 *  folder: just `path`, or all of them. `async` + `spawn_blocking` because
+	 *  osascript can take seconds, and a sync command would hold the main thread.
+	 *  The notes are looked up here by path rather than trusting the webview with
+	 *  a file name.
+	 */
+	syncQuickNotes: (path: string | null) => typedError<SyncReport, string>(__TAURI_INVOKE("sync_quick_notes", { path })),
+	/**  Brings the Notes app's copy of a quick note forward. */
+	openNoteInNotes: (path: string) => typedError<null, string>(__TAURI_INVOKE("open_note_in_notes", { path })),
 	/**
 	 *  The forecast for the saved city, else wherever this connection is. Served
 	 *  from a 30-minute cache unless `refresh`; the webview's `fahrenheit` is
@@ -2153,6 +2165,31 @@ export type Stats = {
 export type StatsView = {
 	timeSavedSeconds: number | null,
 } & Stats;
+
+export type SyncMark = {
+	path: string,
+	state: SyncState,
+};
+
+/**
+ *  How far a copy into the Notes app got. `permission` is the one failure the
+ *  webview answers differently: the fix is a switch in System Settings, not a
+ *  retry.
+ */
+export type SyncReport = {
+	pushed: number,
+	error: string | null,
+	permission: boolean,
+};
+
+/**  Where a note stands against its copy in Notes. */
+export type SyncState = 
+/**  Never copied. */
+"new" | 
+/**  The copy in Notes matches. */
+"synced" | 
+/**  Copied once, then changed here. */
+"edited";
 
 /**
  *  One reading. Floats throughout: specta refuses 64-bit integers, and a

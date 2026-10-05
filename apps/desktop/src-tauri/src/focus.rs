@@ -237,3 +237,89 @@ pub fn save_quick_note(path: Option<String>, text: String) -> Result<String, Str
         .map(|p| p.to_string_lossy().into_owned())
         .map_err(|e| e.to_string())
 }
+
+/// The Notes folder Aloud's notes are copied into.
+const APPLE_FOLDER: &str = "Aloud";
+
+/// How far a copy into the Notes app got. `permission` is the one failure the
+/// webview answers differently: the fix is a switch in System Settings, not a
+/// retry.
+#[derive(Debug, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncReport {
+    pub pushed: u32,
+    pub error: Option<String>,
+    pub permission: bool,
+}
+
+/// Which quick notes the Notes app has a current copy of.
+#[tauri::command]
+#[specta::specta]
+pub fn note_sync_marks() -> Result<Vec<aloud_notes::sync::SyncMark>, String> {
+    let dir = aloud_notes::directory().map_err(|e| e.to_string())?;
+    let ledger = aloud_notes::sync::Ledger::load(
+        &aloud_notes::sync::ledger_path().map_err(|e| e.to_string())?,
+    );
+    Ok(aloud_notes::quick_notes(&dir)
+        .iter()
+        .map(|n| aloud_notes::sync::SyncMark {
+            path: n.path.to_string_lossy().into_owned(),
+            state: ledger.state(n),
+        })
+        .collect())
+}
+
+/// Copies quick notes that are new or edited into the Notes app's "Aloud"
+/// folder: just `path`, or all of them. `async` + `spawn_blocking` because
+/// osascript can take seconds, and a sync command would hold the main thread.
+/// The notes are looked up here by path rather than trusting the webview with
+/// a file name.
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_quick_notes(path: Option<String>) -> Result<SyncReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = aloud_notes::directory().map_err(|e| e.to_string())?;
+        let ledger = aloud_notes::sync::ledger_path().map_err(|e| e.to_string())?;
+        // Oldest first, so the newest note is the one Notes lists on top.
+        let notes: Vec<_> = aloud_notes::quick_notes(&dir)
+            .into_iter()
+            .rev()
+            .filter(|n| {
+                path.as_deref()
+                    .is_none_or(|p| n.path.to_string_lossy() == p)
+            })
+            .collect();
+        let (pushed, error) = aloud_notes::sync::sync_pending(&notes, &ledger, |note, id| {
+            aloud_native::sync_note(APPLE_FOLDER, &note.content, id)
+        });
+        Ok(SyncReport {
+            pushed: u32::try_from(pushed).unwrap_or(u32::MAX),
+            permission: matches!(error, Some(aloud_native::ScriptError::NotPermitted { .. })),
+            error: error.map(|e| e.to_string()),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Brings the Notes app's copy of a quick note forward.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_note_in_notes(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = aloud_notes::directory().map_err(|e| e.to_string())?;
+        let ledger = aloud_notes::sync::Ledger::load(
+            &aloud_notes::sync::ledger_path().map_err(|e| e.to_string())?,
+        );
+        let note = aloud_notes::quick_notes(&dir)
+            .into_iter()
+            .find(|n| n.path.to_string_lossy() == path)
+            .ok_or("that note is gone")?;
+        let id = ledger
+            .apple_id(&note)
+            .ok_or("that note is not in Notes yet")?;
+        aloud_native::show("Notes", id).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

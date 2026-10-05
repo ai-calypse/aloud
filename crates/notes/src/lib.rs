@@ -5,6 +5,8 @@
 //! ponytail: linear scan of all note files per query — plenty for years of
 //! meetings; SQLite FTS is the upgrade path if it ever feels slow.
 
+pub mod sync;
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Serialize;
