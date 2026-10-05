@@ -5,6 +5,7 @@
 //! it — all three are core here, so each OS gets a raw hook: CGEventTap on
 //! macOS, WH_KEYBOARD_LL on Windows. The logic lives in the pure [`matcher`].
 
+pub mod aux;
 pub mod capture;
 pub mod matcher;
 pub mod model;

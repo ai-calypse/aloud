@@ -6,6 +6,7 @@ mod focus;
 mod today;
 // notch-today-focus: wiring ends
 mod islands;
+mod keys; // notch-keys
 mod launcher;
 mod listen;
 mod media; // notch-media
@@ -418,6 +419,11 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             });
 
             commands::warm_connectors(app.handle().clone());
+
+            // notch-keys: wiring begins
+            // Before the key tap starts: it takes the tap's aux event stream.
+            keys::start(app.handle());
+            // notch-keys: wiring ends
 
             spawn_hotkey_listener(
                 app.handle().clone(),

@@ -1,22 +1,21 @@
 //! macOS backend: CGEventTap — the only way to see modifier-only holds and to
 //! swallow events before the focused app gets them. Needs Accessibility.
 
+use crate::aux;
 use crate::model::Key;
 use anyhow::{anyhow, Result};
 use core_foundation::base::TCFType;
+use core_foundation::mach_port::CFMachPort;
 use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
-use core_graphics::event::{
-    CGEvent, CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
-    CGEventType, EventField,
-};
+use core_graphics::event::{CGEvent, CGEventFlags, CGEventType, EventField};
+use foreign_types::ForeignType;
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::ffi::c_void;
 
 extern "C" {
-    /// Re-arms a tap the system switched off. `core-graphics` wraps this as
-    /// `CGEventTap::enable`, but the tap cannot be borrowed inside its own
-    /// callback, so we call it on the raw port instead.
-    fn CGEventTapEnable(tap: *const std::ffi::c_void, enable: bool);
+    /// Re-arms a tap the system switched off, on the raw port: the tap cannot
+    /// be borrowed inside its own callback.
+    fn CGEventTapEnable(tap: *const c_void, enable: bool);
 }
 
 /// macOS virtual keycodes for keys that report as flagsChanged, not keyDown.
@@ -156,78 +155,236 @@ pub fn is_trusted() -> bool {
     unsafe { AXIsProcessTrusted() }
 }
 
+/// The tap's event kinds as raw numbers. `core-graphics`' `CGEventType` has no
+/// NX_SYSDEFINED, and a callback handed an unlisted discriminant is undefined
+/// behaviour, so the tap is made here, on the raw API, and kinds stay `u32`.
+const KIND_KEY_DOWN: u32 = 10;
+const KIND_KEY_UP: u32 = 11;
+const KIND_FLAGS_CHANGED: u32 = 12;
+const KIND_SYSTEM_DEFINED: u32 = 14;
+const KIND_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
+const KIND_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
+
+const KEY_CAPS_LOCK: i64 = 57;
+/// `kCGEventFlagMaskAlphaShift`: set while Caps Lock is on.
+const FLAG_ALPHA_SHIFT: u64 = 0x0001_0000;
+
+type RawEventRef = core_graphics::sys::CGEventRef;
+type TapCallback = unsafe extern "C" fn(
+    proxy: *const c_void,
+    kind: u32,
+    event: RawEventRef,
+    user: *mut c_void,
+) -> RawEventRef;
+
+extern "C" {
+    fn CGEventTapCreate(
+        tap: u32,
+        place: u32,
+        options: u32,
+        mask: u64,
+        callback: TapCallback,
+        user: *mut c_void,
+    ) -> *mut c_void;
+    /// 0 is `kCGEventSourceStateCombinedSessionState`.
+    fn CGEventSourceFlagsState(state: i32) -> u64;
+}
+
+// `NSEvent` is the only public way to read NX_SYSDEFINED's `data1`; AppKit
+// must be linked for the class to exist in a binary that never uses it.
+#[link(name = "AppKit", kind = "framework")]
+extern "C" {}
+
+/// `CGEventRef` as Objective-C encodes it, so debug builds' message
+/// verification accepts it as the argument of `eventWithCGEvent:`.
+#[repr(transparent)]
+struct EventArg(RawEventRef);
+// SAFETY: a `CGEventRef` is a pointer to an opaque struct named `__CGEvent`.
+unsafe impl objc2::Encode for EventArg {
+    const ENCODING: objc2::Encoding =
+        objc2::Encoding::Pointer(&objc2::Encoding::Struct("__CGEvent", &[]));
+}
+
+/// Reads the volume key out of an NX_SYSDEFINED event, or None for any other
+/// system-defined event.
+fn read_system_key(event: &CGEvent) -> Option<aux::SystemKey> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    // `eventWithCGEvent:` returns an autoreleased object, and this thread has
+    // no pool of its own.
+    objc2::rc::autoreleasepool(|_| {
+        // SAFETY: `event` is live for the call; NSEvent copies what it needs
+        // and a nil result (not an NSEvent) is checked before use.
+        unsafe {
+            let ns: *mut AnyObject =
+                msg_send![class!(NSEvent), eventWithCGEvent: EventArg(event.as_ptr())];
+            if ns.is_null() {
+                return None;
+            }
+            let subtype: i16 = msg_send![ns, subtype];
+            let data1: isize = msg_send![ns, data1];
+            aux::decode_system_key(subtype, data1 as i64)
+        }
+    })
+}
+
+/// What the tap callback owns. Boxed and leaked to the C callback for as long
+/// as the run loop runs, which is the life of the thread.
+struct Tap {
+    // The tap callback is `Fn`, but the handler owns the matcher state and so
+    // must be `FnMut`. The run loop calls it on one thread, serially.
+    on_event: RefCell<Box<dyn FnMut(Option<RawEvent>) -> bool>>,
+    // Filled in after the tap exists. macOS disables a slow or interrupted tap
+    // via TapDisabledBy*, and without re-arming it every hotkey stays dead until
+    // relaunch. The tap outlives the callback, so the raw port stays valid.
+    port: Cell<*const c_void>,
+}
+
+impl Tap {
+    /// Whether to swallow the event.
+    fn handle(&self, kind: u32, event: &CGEvent) -> bool {
+        if matches!(kind, KIND_DISABLED_BY_TIMEOUT | KIND_DISABLED_BY_USER_INPUT) {
+            let port = self.port.get();
+            if !port.is_null() {
+                tracing::warn!(kind, "event tap disabled by the system; re-enabling");
+                unsafe { CGEventTapEnable(port, true) };
+            }
+            return false;
+        }
+
+        // Never let our own synthetic keystrokes drive our own hotkeys: a
+        // Session tap sees `aloud_paste`'s Cmd+C/Cmd+V as the user's own,
+        // which loops Activated/Deactivated for as long as a rewrite key is
+        // held. The pid is the reliable discriminator — real hardware
+        // reports 0, a posted event carries its poster's pid.
+        if event.get_integer_value_field(EventField::EVENT_SOURCE_UNIX_PROCESS_ID)
+            == i64::from(std::process::id())
+        {
+            return false;
+        }
+
+        let event_type = match kind {
+            KIND_KEY_DOWN => CGEventType::KeyDown,
+            KIND_KEY_UP => CGEventType::KeyUp,
+            KIND_FLAGS_CHANGED => CGEventType::FlagsChanged,
+            KIND_SYSTEM_DEFINED => return self.system_defined(event),
+            _ => return false,
+        };
+
+        // Caps Lock is a state, not a hold: it never drives the matcher, and
+        // a bare modifier is not typing. Passed through untouched.
+        if kind == KIND_FLAGS_CHANGED
+            && event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) == KEY_CAPS_LOCK
+        {
+            let on = event.get_flags().bits() & FLAG_ALPHA_SHIFT != 0;
+            if let Some(edge) = aux::caps_edge(on) {
+                aux::emit(edge);
+            }
+            return false;
+        }
+
+        // `None` for an unmapped key, but the handler still gets a say: it
+        // owns the matcher, the capture recorder and the typing signal.
+        //
+        // Its swallow verdict is not applied. Until the tap moved onto the raw
+        // API, `core-graphics` 0.24 turned `None` into "pass the original
+        // event", so the matcher's `Consume::Yes` and capture's swallow-all
+        // never ate a key, and the app shipped that way. Honouring them now
+        // would change every dictation binding at once, unverified, as a side
+        // effect of the volume keys; only the volume keys swallow.
+        // ponytail: apply it (`return verdict`) once Consume::Yes is exercised
+        // on hardware, binding by binding.
+        let _verdict = (self.on_event.borrow_mut())(decode(event_type, event));
+        false
+    }
+
+    /// A volume key. Never reaches the dictation handler.
+    fn system_defined(&self, event: &CGEvent) -> bool {
+        let Some(sys) = read_system_key(event) else {
+            return false;
+        };
+        let flags = event.get_flags();
+        let option = flags.contains(CGEventFlags::CGEventFlagAlternate);
+        let shift = flags.contains(CGEventFlags::CGEventFlagShift);
+        let swallow = aux::swallows_volume(option && !shift);
+        // The key-up is eaten too, or the focused app sees half a press; only
+        // the down is an event.
+        if sys.down {
+            aux::emit(aux::AuxEvent::Volume {
+                key: sys.key,
+                fine: option && shift,
+                swallowed: swallow,
+            });
+        }
+        swallow
+    }
+}
+
+unsafe extern "C" fn trampoline(
+    _proxy: *const c_void,
+    kind: u32,
+    event: RawEventRef,
+    user: *mut c_void,
+) -> RawEventRef {
+    // SAFETY: `user` is the `Tap` leaked in `run_tap`, alive while the loop runs.
+    let tap = unsafe { &*user.cast::<Tap>() };
+    // Borrowed from the system for this call: never dropped here.
+    // SAFETY: `event` is a live CGEventRef for the duration of the callback.
+    let event = std::mem::ManuallyDrop::new(unsafe { CGEvent::from_ptr(event) });
+    if tap.handle(kind, &event) {
+        // NULL is how a tap swallows.
+        std::ptr::null_mut()
+    } else {
+        event.as_ptr()
+    }
+}
+
 /// Runs a CGEventTap on the current thread's run loop. Blocks forever.
 pub fn run_tap<F>(on_event: F) -> Result<()>
 where
     F: FnMut(Option<RawEvent>) -> bool + 'static,
 {
-    // The tap callback is `Fn`, but the handler owns the matcher state and so
-    // must be `FnMut`. The run loop calls it on one thread, serially.
-    let on_event = RefCell::new(on_event);
+    let tap = Box::into_raw(Box::new(Tap {
+        on_event: RefCell::new(Box::new(on_event)),
+        port: Cell::new(std::ptr::null()),
+    }));
 
-    // Filled in after the tap exists. macOS disables a slow or interrupted tap
-    // via TapDisabledBy*, and without re-arming it every hotkey stays dead until
-    // relaunch. The tap outlives this closure, so the raw port stays valid.
-    let port: Rc<Cell<*const std::ffi::c_void>> = Rc::new(Cell::new(std::ptr::null()));
-    let port_cb = port.clone();
+    let mask = [
+        KIND_KEY_DOWN,
+        KIND_KEY_UP,
+        KIND_FLAGS_CHANGED,
+        KIND_SYSTEM_DEFINED,
+    ]
+    .into_iter()
+    .fold(0u64, |mask, kind| mask | 1 << kind);
+    // SAFETY: `trampoline` matches CGEventTapCallBack and `tap` outlives the
+    // tap. Session / head-insert / Default: Default (not ListenOnly) is what
+    // lets a callback swallow events.
+    let port = unsafe { CGEventTapCreate(1, 0, 0, mask, trampoline, tap.cast()) };
+    if port.is_null() {
+        // SAFETY: the tap never started, so nothing else holds `tap`.
+        drop(unsafe { Box::from_raw(tap) });
+        return Err(anyhow!(
+            "failed to create event tap — is Accessibility permission granted?"
+        ));
+    }
+    // SAFETY: CGEventTapCreate returns a +1 CFMachPort.
+    let mach_port = unsafe { CFMachPort::wrap_under_create_rule(port.cast()) };
+    // SAFETY: `tap` is live, and this thread is the only one that reads `port`.
+    unsafe { (*tap).port.set(port) };
 
-    let tap = CGEventTap::new(
-        CGEventTapLocation::Session,
-        CGEventTapPlacement::HeadInsertEventTap,
-        CGEventTapOptions::Default, // must be Default (not ListenOnly) to swallow events
-        vec![
-            CGEventType::KeyDown,
-            CGEventType::KeyUp,
-            CGEventType::FlagsChanged,
-        ],
-        move |_proxy, event_type, event| {
-            if matches!(
-                event_type,
-                CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput
-            ) {
-                let port = port_cb.get();
-                if !port.is_null() {
-                    tracing::warn!(?event_type, "event tap disabled by the system; re-enabling");
-                    unsafe { CGEventTapEnable(port, true) };
-                }
-                return Some(event.to_owned());
-            }
-
-            // Never let our own synthetic keystrokes drive our own hotkeys: a
-            // Session tap sees `aloud_paste`'s Cmd+C/Cmd+V as the user's own,
-            // which loops Activated/Deactivated for as long as a rewrite key is
-            // held. The pid is the reliable discriminator — real hardware
-            // reports 0, a posted event carries its poster's pid.
-            if event.get_integer_value_field(EventField::EVENT_SOURCE_UNIX_PROCESS_ID)
-                == i64::from(std::process::id())
-            {
-                return Some(event.to_owned());
-            }
-
-            // `None` for an unmapped key, but the handler still gets a say:
-            // while recording a binding *every* key must be swallowed, or the
-            // Return of a Cmd+Return submits whatever is focused underneath.
-            let swallow = (on_event.borrow_mut())(decode(event_type, event));
-            // Returning None swallows the event.
-            if swallow {
-                None
-            } else {
-                Some(event.to_owned())
-            }
-        },
-    )
-    .map_err(|_| anyhow!("failed to create event tap — is Accessibility permission granted?"))?;
-
-    port.set(tap.mach_port.as_concrete_TypeRef() as *const std::ffi::c_void);
-
-    let loop_source = tap
-        .mach_port
+    let loop_source = mach_port
         .create_runloop_source(0)
         .map_err(|_| anyhow!("failed to create run loop source"))?;
 
+    // Seeded so the first flagsChanged after launch is an edge only if Caps
+    // Lock really moved.
+    // SAFETY: plain query, no pointers.
+    aux::seed_caps(unsafe { CGEventSourceFlagsState(0) } & FLAG_ALPHA_SHIFT != 0);
+
     let run_loop = CFRunLoop::get_current();
     unsafe { run_loop.add_source(&loop_source, kCFRunLoopCommonModes) };
-    tap.enable();
+    unsafe { CGEventTapEnable(port, true) };
 
     tracing::info!("event tap running");
     CFRunLoop::run_current();

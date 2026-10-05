@@ -82,6 +82,7 @@ const EVENT_DEFAULTS: Required<NotchEvents> = {
   power: true,
   connectivity: true,
   banners: true,
+  replaceVolumeHud: false,
 };
 
 const EVENT_ROWS: { key: keyof NotchEvents; label: string; hint: string }[] = [
@@ -114,6 +115,11 @@ const EVENT_ROWS: { key: keyof NotchEvents; label: string; hint: string }[] = [
     key: "banners",
     label: "App banners",
     hint: "Things that happened elsewhere: a screenshot saved, a download finished.",
+  },
+  {
+    key: "replaceVolumeHud",
+    label: "Replace the macOS volume HUD",
+    hint: "The volume keys move the level in the notch instead of macOS's square on screen. Needs key-press whispers on; Option alone still opens Sound settings, Option+Shift moves a finer step. An output with no volume (HDMI) keeps macOS's behaviour.",
   },
 ];
 
