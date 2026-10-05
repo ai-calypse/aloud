@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
+import About from "./About";
 import Agents from "./Agents";
 import { pageView } from "./analytics";
 import Apps from "./Apps";
@@ -59,6 +60,7 @@ export default function App() {
         <Route path="/waitlist" element={<Waitlist />} />
         <Route path="/thanks" element={<Thanks />} />
         <Route path="/bugs" element={<Bugs />} />
+        <Route path="/about" element={<About />} />
         <Route path="/blog" element={<BlogIndex />} />
         <Route path="/blog/:slug" element={<BlogPost />} />
         <Route path="*" element={<NotFound />} />

@@ -237,3 +237,19 @@ textarea:focus-visible {
 .post .takeaways ul { margin: 0; }
 .post .note { padding: 14px 18px; border: 1px dashed var(--blue-500); border-radius: 12px; background: #f5f8fd; max-width: 62ch; }
 .post .faq { display: grid; gap: 8px; }
+.post table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.post caption { padding: 0 0 10px; text-align: left; font-weight: 600; }
+.post th, .post td { padding: 10px 12px; text-align: left; vertical-align: top; border-top: 1px solid var(--line); }
+.post thead th { border-top: 0; border-bottom: 2px solid var(--blue-500); font-size: 13px; }
+.post tbody th { font-weight: 600; width: 34%; }
+.post .tablewrap { overflow-x: auto; margin: 4px 0; }
+.post .cta { display: grid; justify-items: start; gap: 10px; padding: 22px; border-radius: 16px; background: var(--blue-700); color: #fff; }
+.post .cta .cta-title { font-family: var(--font-head); font-size: 1.35rem; font-weight: 500; letter-spacing: -0.02em; }
+.post .cta p { margin: 0; max-width: 52ch; }
+.post .cta a { color: var(--blue-900); text-decoration: none; }
+.post .cta-end { justify-items: center; text-align: center; }
+.post .cta-inline { margin: -4px 0; }
+.post .cta-inline a { display: inline-flex; text-decoration: none; color: inherit; }
+.post .related { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.post .related ul { display: grid; gap: 6px; }
+.post figure > img { width: auto; max-width: 100%; max-height: 340px; border-radius: 12px; }

@@ -4,7 +4,7 @@ import { GlossyButton, MacWindow, PillLabel } from "./components/ds";
 import SmartLink from "./components/SmartLink";
 import Sticker from "./components/Sticker";
 import { useCopy } from "./copy";
-import { POSTS, blocksHtml, formatDate, postPath, publicPosts } from "./blog/posts";
+import { AUTHOR, POSTS, formatDate, postHtml, postPath, publicPosts } from "./blog/posts";
 import NotFound from "./NotFound";
 import { useMeta } from "./seo";
 
@@ -56,19 +56,26 @@ export function BlogPost() {
   const post = POSTS.find((p) => p.slug === slug);
   const c = useCopy();
   const navigate = useNavigate();
-  useMeta(post ? `${post.title.replace(/\.$/, "")} · SpeakOS` : c.blog.title, { description: post?.description, noindex: post?.draft });
+  useMeta(post ? post.metaTitle : c.blog.title, { description: post?.description, noindex: post?.draft });
   if (!post) return <NotFound />;
   return (
     <main className={page} style={dots}>
       <Back href="/blog">{c.blog.all}</Back>
       <header className="relative flex w-full max-w-[760px] flex-col items-start gap-5">
         <Sticker rotate={5} className="absolute -top-2 right-0 w-[96px] md:-right-16 md:top-0 md:w-[150px]">
-          <img src={readingCat} alt="A cat reading a book" />
+          <img src={readingCat} alt="A close-up of an orange cat with a question mark above its head" />
         </Sticker>
         <PillLabel>{c.blog.pill}</PillLabel>
         <h1 className="t-section max-w-[640px]">{post.title}</h1>
         <p className="text-[14px] text-blue-100">
-          {formatDate(post.date)} · {c.blog.read(post.minutes)}
+          {c.blog.by} <SmartLink href={AUTHOR.url} className="underline underline-offset-2">{AUTHOR.name}</SmartLink> · {formatDate(post.date)}
+          {post.updated && ` · ${c.blog.updated} ${formatDate(post.updated)}`} · {c.blog.read(post.minutes)}
+          {post.checked && (
+            <>
+              <br />
+              {c.blog.checked} {formatDate(post.checked)}. <SmartLink href="/bugs" className="underline underline-offset-2">{c.blog.correct}</SmartLink>
+            </>
+          )}
         </p>
       </header>
       <MacWindow title={`${post.slug}.md`} className="w-full max-w-[760px]">
@@ -84,13 +91,8 @@ export function BlogPost() {
             navigate(href);
           }}
         >
-          {post.cover && <img src={post.cover.src} alt={post.cover.alt} width={1280} height={720} className="block w-full rounded-[12px]" />}
-          <div className="contents" dangerouslySetInnerHTML={{ __html: blocksHtml(post.blocks) }} />
-          <div className="pt-4">
-            <GlossyButton size="sm" href="/thanks" event="download_click">
-              {c.common.downloadMac}
-            </GlossyButton>
-          </div>
+          <img src={post.cover.src} alt={post.cover.alt} width={1280} height={720} fetchPriority="high" className="block w-full rounded-[12px]" />
+          <div className="contents" dangerouslySetInnerHTML={{ __html: postHtml(post) }} />
         </article>
       </MacWindow>
     </main>
