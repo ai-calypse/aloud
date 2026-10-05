@@ -24,6 +24,9 @@ import { ShelfGallery } from "./tune-shelf";
 import { MediaWidgetGallery } from "./tune-widgets-media"; // fixtures: Media widgets
 // --- Today widgets (w-today): fixtures live in tune-widgets-today.tsx ---
 import { TodayWidgetGallery } from "./tune-widgets-today";
+// --- Mac + Focus widget fixtures (feat/notch-widgets-mac-focus) ---
+import { MacFocusGallery } from "./tune-widgets-mac-focus";
+// --- end Mac + Focus widget fixtures ---
 import "./styles/notch.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
@@ -691,6 +694,11 @@ function NotchGallery() {
           <TodayWidgetGallery />
         </Specimen>
         {/* --- end Today widgets --- */}
+        {/* --- Mac + Focus widget fixtures (feat/notch-widgets-mac-focus) --- */}
+        <Specimen name="Widgets look · Mac and Focus" note="the Mac (Stats, Power, Privacy, Windows) and Focus (Timer, Keep Awake, Notes) boards, with fixtures and every empty or urgent state">
+          <MacFocusGallery />
+        </Specimen>
+        {/* --- end Mac + Focus widget fixtures --- */}
 
         <Specimen name="Empty" note="a view with nothing to show teaches what fills it">
           <Empty
