@@ -240,6 +240,20 @@
   justify-content: center;
 }
 
+/* A bar over a board (a search pill) as wide as the board under it. */
+.notch-board-bar {
+  width: calc(var(--notch-w-small) * 4 + var(--notch-w-gap) * 3);
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+/* The coding agents' permission card is drawn for a 380pt column; inside a
+   tile it takes the tile's width instead. */
+.notch-widget .perm {
+  min-width: 0;
+  max-width: none;
+}
+
 /* A lift on the whole tile, for the ones that open something. */
 .notch-widget[data-actionable]:hover {
   translate: 0 -1px;

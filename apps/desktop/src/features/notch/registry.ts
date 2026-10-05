@@ -25,6 +25,8 @@ import { FocusAwake, FocusNotes, FocusTimer } from "./views/Focus";
 import { TodayCalendar, TodayReminders, TodayStocks, TodayWeather } from "./views/Today";
 import { NowOverview } from "./views/Now";
 import { WidgetHome } from "./views/WidgetHome";
+import { WidgetCoding, WidgetUsage, WidgetVoice } from "./views/widgets/Agents";
+import { WidgetApps, WidgetShortcuts } from "./views/widgets/Launch";
 import { ShelfDownloads, ShelfDrives, ShelfFiles, ShelfShots } from "./views/Shelf";
 
 /**
@@ -70,15 +72,30 @@ export const SECTIONS: Section[] = [
       return d.agent && !d.agent.finished && !d.agent.error ? "Working on your command" : "";
     },
     subsections: [
-      { id: "voice", name: "Voice", features: ["Voice commands", "Approvals"], ready: true, view: AgentsVoice },
+      {
+        id: "voice",
+        name: "Voice",
+        features: ["Voice commands", "Approvals"],
+        ready: true,
+        view: AgentsVoice,
+        widgetView: WidgetVoice,
+      },
       {
         id: "coding",
         name: "Coding",
         features: ["Claude Code", "Codex", "Agent approvals"],
         ready: true,
         view: AgentsCoding,
+        widgetView: WidgetCoding,
       },
-      { id: "usage", name: "Usage", features: ["Plan usage", "AI usage tracker"], ready: true, view: AgentsUsage },
+      {
+        id: "usage",
+        name: "Usage",
+        features: ["Plan usage", "AI usage tracker"],
+        ready: true,
+        view: AgentsUsage,
+        widgetView: WidgetUsage,
+      },
       { id: "prs", name: "Pull requests", features: ["GitHub PRs"], ready: false },
       { id: "terminal", name: "Terminal", features: ["Notch terminal"], ready: false },
     ],
@@ -199,19 +216,30 @@ export const SECTIONS: Section[] = [
     name: "Launch",
     icon: LayoutGridIcon,
     subsections: [
-      { id: "apps", name: "Apps", features: ["App launcher"], ready: true, view: LaunchApps },
+      {
+        id: "apps",
+        name: "Apps",
+        features: ["App launcher"],
+        ready: true,
+        view: LaunchApps,
+        widgetView: WidgetApps,
+      },
       {
         id: "shortcuts",
         name: "Shortcuts",
         features: ["Apple Shortcuts"],
         ready: true,
         view: LaunchShortcuts,
+        widgetView: WidgetShortcuts,
       },
       {
         id: "search",
         name: "Search",
         features: ["Search apps, notes and files"],
         ready: true,
+        // No widgetView: its hits are four kinds of row (recent and found apps,
+        // notes, files) under an Enter-opens-the-first-hit box, which Siri
+        // Suggestions' four fixed rows cannot hold without hiding most of them.
         view: LaunchSearch,
       },
     ],

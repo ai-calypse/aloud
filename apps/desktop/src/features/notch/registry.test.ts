@@ -27,4 +27,29 @@ describe("registry widget views", () => {
       }
     }
   });
+
+  // `readySections` drops a subsection with no calm view, so a widget view on
+  // one would be unreachable, and `viewFor` would have nothing to fall back to.
+  it("gives every widget view a calm view to fall back to", () => {
+    for (const section of SECTIONS) {
+      for (const sub of section.subsections) {
+        if (sub.widgetView) expect(sub.view, `${section.id}/${sub.id}`).toBeDefined();
+      }
+    }
+  });
+
+  it("draws Agents and Launch as widgets, leaving Launch › Search calm", () => {
+    const sub = (s: string, id: string) =>
+      READY.find((x) => x.id === s)!.subsections.find((x) => x.id === id)!;
+    for (const [s, id] of [
+      ["agents", "voice"],
+      ["agents", "coding"],
+      ["agents", "usage"],
+      ["launch", "apps"],
+      ["launch", "shortcuts"],
+    ]) {
+      expect(sub(s, id).widgetView, `${s}/${id}`).toBeDefined();
+    }
+    expect(sub("launch", "search").widgetView).toBeUndefined();
+  });
 });
