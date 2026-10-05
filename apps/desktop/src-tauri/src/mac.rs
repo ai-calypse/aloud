@@ -5,10 +5,12 @@
 //! watchers below run for the app's life, because an island has to appear
 //! while the notch is closed.
 
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use aloud_islands::IslandKind;
+use aloud_mac::events::{self, Event, Sources};
 use aloud_mac::power::{self, Battery};
 use aloud_mac::privacy::{self, PrivacyUse};
 use aloud_mac::stats::{Sampler, SystemStats};
@@ -18,8 +20,10 @@ use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
 const PRIVACY_EVERY: Duration = Duration::from_secs(2);
-/// Battery moves in minutes; a `pmset` spawn every second poll would be waste.
-const BATTERY_EVERY_TICKS: u32 = 15;
+/// The OS says when a power source changed (`events::Event::BatteryMoved`), so
+/// `pmset` is read then and not on a timer. Set once at launch for the first
+/// reading, and again when the switch is turned back on.
+static BATTERY_DIRTY: AtomicBool = AtomicBool::new(true);
 
 static WATCHERS: Mutex<Watchers> = Mutex::new(Watchers {
     privacy: true,
@@ -39,12 +43,12 @@ pub fn start(app: &AppHandle) {
     if let Ok(path) = Watchers::path() {
         *WATCHERS.lock().unwrap_or_else(|e| e.into_inner()) = Watchers::load_from(&path);
     }
+    start_events(app);
     let app = app.clone();
     let spawned = std::thread::Builder::new()
         .name("mac-watch".into())
         .spawn(move || {
             let mut privacy = privacy::Watch::default();
-            let mut tick = 0u32;
             loop {
                 let on = watchers();
                 if on.privacy {
@@ -56,7 +60,7 @@ pub fn start(app: &AppHandle) {
                         crate::islands::takeover(&app, seen);
                     }
                 }
-                if on.battery && tick.is_multiple_of(BATTERY_EVERY_TICKS) {
+                if on.battery && BATTERY_DIRTY.swap(false, Ordering::Relaxed) {
                     let read = power::read();
                     let steps = BATTERY
                         .lock()
@@ -66,12 +70,30 @@ pub fn start(app: &AppHandle) {
                         apply(&app, step);
                     }
                 }
-                tick = tick.wrapping_add(1);
                 std::thread::sleep(PRIVACY_EVERY);
             }
         });
     if let Err(e) = spawned {
         tracing::warn!(%e, "could not start the mac watchers");
+    }
+}
+
+/// Charger, Low Power Mode, external displays, Wi-Fi and VPN, pushed by the
+/// OS. The sources go on the main run loop, which only the main thread can
+/// install them on (`aloud_mac::events` says why).
+fn start_events(app: &AppHandle) {
+    let handle = app.clone();
+    let emit: events::Emit = Arc::new(move |event| match event.island() {
+        // A whisper: the gate weighs it against Focus, typing and the user's
+        // Power / Connectivity switches.
+        Some(island) => crate::islands::takeover(&handle, island),
+        None => {
+            debug_assert_eq!(event, Event::BatteryMoved);
+            BATTERY_DIRTY.store(true, Ordering::Relaxed);
+        }
+    });
+    if let Err(e) = app.run_on_main_thread(move || events::start(Sources::ALL, emit)) {
+        tracing::warn!(%e, "could not start the system event sources");
     }
 }
 
@@ -187,6 +209,9 @@ pub fn set_mac_watcher(app: AppHandle, watcher: Watcher, on: bool) -> Result<(),
         current.set(watcher, on);
         *current
     };
+    if on && watcher == Watcher::Battery {
+        BATTERY_DIRTY.store(true, Ordering::Relaxed);
+    }
     if !on {
         match watcher {
             Watcher::Privacy => {
