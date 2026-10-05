@@ -7,7 +7,7 @@ import { InfoTile, Note, Pill, ShelfThumb, TurnOnTile, WatchTile } from "./shelf
 import { isImageName } from "./shelf-widgets";
 
 /**
- * Shelf › Downloads in the widgets look: the list as a Developer-style tile
+ * Shelf › Downloads as a widget board: the list as a Developer-style tile
  * (thumbnail, two lines, Show), how many finished today, and the latest one
  * on its own. A download drops from the notch the moment its last byte lands,
  * not when the browser starts it. Rows drag out as real files.

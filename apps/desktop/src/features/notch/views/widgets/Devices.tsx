@@ -26,10 +26,10 @@ async function load(): Promise<Loaded> {
 }
 
 /**
- * Media › Devices in the widgets look: Apple's Batteries family. The large
+ * Media › Devices as a widget board: Apple's Batteries family. The large
  * list is every paired device with its charge (and a Connect button for the
  * ones that are off), the medium tile is four rings, the small one the device
- * with the least left. The same read as the calm view, on the same slow clock.
+ * with the least left. Read on a slow clock.
  */
 export function WidgetMediaDevices() {
   const [loaded, refresh] = usePolled<Loaded>(load, POLL_MS, null);

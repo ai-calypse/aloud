@@ -1,11 +1,11 @@
 import { useCallback } from "react";
 import { commands, type NowPlaying, type Transport } from "@/lib/bindings";
-import { nextSpeed, positionAt } from "../../media";
+import { nextSpeed, positionAt } from "../media";
 
 /** How far the skip buttons jump a web video, which has no previous or next. */
 export const SKIP_MS = 10_000;
 
-export type Controls = {
+type Controls = {
   toggle: () => void;
   previous: () => void;
   next: () => void;
@@ -27,7 +27,7 @@ function send(now: NowPlaying, transport: Transport) {
 /**
  * The player's buttons, each showing its press at once (`patch`) and then
  * asking Rust; the next reading, about half a second on, corrects a guess.
- * The same commands and the same optimism as the calm Now Playing view.
+ * Home's music tile reads them.
  */
 export function usePlayerControls(
   now: NowPlaying | null,

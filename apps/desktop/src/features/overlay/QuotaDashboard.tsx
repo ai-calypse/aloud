@@ -24,7 +24,7 @@ export function recentQuota(maxAgeMs = 5 * 60_000): Quota | null {
   return lastQuota && Date.now() - lastQuota.at < maxAgeMs ? lastQuota.quota : null;
 }
 
-export function useQuota() {
+function useQuota() {
   const [quota, setQuota] = useState<Quota | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Opt-in: reading the token prompts for Keychain access, so nothing fetches

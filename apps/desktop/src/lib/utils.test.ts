@@ -16,7 +16,7 @@ describe("cn", () => {
     expect(cn("bg-notch-well", "bg-notch-raised")).toBe("bg-notch-raised");
   });
 
-  // Same trap for the Widgets look: a widget size and a widget colour are both
+  // Same trap for the widgets: a widget size and a widget colour are both
   // `text-<token>`, and the stroke and fill of a ring are not stroke widths.
   it("keeps a widget size, colour and rounded face side by side", () => {
     expect(cn("text-notch-w-numeral-s", "text-widget-acc-ink")).toBe(

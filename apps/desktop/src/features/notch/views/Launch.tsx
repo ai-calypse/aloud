@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileIcon, NotebookTextIcon, PinIcon } from "lucide-react";
+import { FileIcon, NotebookTextIcon } from "lucide-react";
 import {
   commands,
   type InstalledApp,
@@ -8,11 +8,9 @@ import {
   type Note,
 } from "@/lib/bindings";
 import { rank } from "@/lib/fuzzy";
-import { cn } from "@/lib/utils";
-import { Button, NOTCH_FOCUS } from "@/components/ui/button";
 import { AppIcon } from "@/components/notch/app-icon";
 import { SearchBox } from "@/components/notch/field";
-import { Empty, Label, List, Row, Value } from "@/components/notch/list";
+import { Empty, Label, List, Row } from "@/components/notch/list";
 import { useLoaded } from "../use-loaded";
 
 const NO_PREFS: LauncherPrefs = { pins: [], recents: [] };
@@ -55,131 +53,9 @@ export function useLauncher() {
   return { prefs, open, pin, error };
 }
 
-function AppTile({
-  app,
-  pinned,
-  onOpen,
-  onPin,
-}: {
-  app: InstalledApp;
-  pinned: boolean;
-  onOpen: () => void;
-  onPin: () => void;
-}) {
-  return (
-    <li className="group relative">
-      <button
-        type="button"
-        onClick={onOpen}
-        className={cn(
-          "flex w-full flex-col items-center gap-1 rounded-notch-row px-1 py-2 font-notch outline-none",
-          "transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
-          "hover:bg-notch-hover active:bg-notch-well",
-          NOTCH_FOCUS,
-          "focus-visible:outline-offset-[-2px]",
-        )}
-      >
-        <AppIcon icon={app.icon} label="" size="lg" />
-        <span className="w-full truncate text-center text-notch-meta text-notch-ink-2">{app.name}</span>
-      </button>
-      {/* Beside the open button, not inside it: a button in a button is invalid. */}
-      <button
-        type="button"
-        onClick={onPin}
-        aria-label={pinned ? `Unpin ${app.name}` : `Pin ${app.name}`}
-        aria-pressed={pinned}
-        className={cn(
-          "absolute top-1 right-1 inline-flex size-5 items-center justify-center rounded-notch-key text-notch-ink-3 outline-none",
-          "hover:text-notch-ink focus-visible:opacity-100 group-hover:opacity-100",
-          pinned ? "opacity-100" : "opacity-0",
-          NOTCH_FOCUS,
-        )}
-      >
-        <PinIcon className={cn("size-3", pinned && "fill-current")} strokeWidth={1.8} />
-      </button>
-    </li>
-  );
-}
-
-function Grid({ label, apps, prefs, onOpen, onPin }: {
-  label: string;
-  apps: InstalledApp[];
-  prefs: LauncherPrefs;
-  onOpen: (name: string) => void;
-  onPin: (name: string, pinned: boolean) => void;
-}) {
-  if (apps.length === 0) return null;
-  return (
-    <section className="mt-2 first:mt-0">
-      <Label>{label}</Label>
-      <ul
-        aria-label={label}
-        className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-0.5 p-0"
-      >
-        {apps.map((app) => {
-          const pinned = prefs.pins.includes(app.name);
-          return (
-            <AppTile
-              key={app.name}
-              app={app}
-              pinned={pinned}
-              onOpen={() => onOpen(app.name)}
-              onPin={() => onPin(app.name, !pinned)}
-            />
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
-
-/** Launch › Apps: every installed app, with pins and recents first. */
-export function LaunchApps() {
-  const [query, setQuery] = useState("");
-  const { prefs, open, pin, error } = useLauncher();
-  const { data: apps } = useLoaded(async () => {
-    const res = await commands.installedApps();
-    return res.status === "ok" ? res.data : null;
-  }, []);
-
-  const all = apps ?? NO_APPS;
-  const matches = useMemo(() => rank(all, query, (a) => a.name), [all, query]);
-  const grouped = useMemo(() => sections(all, prefs), [all, prefs]);
-
-  return (
-    <>
-      <div
-        onKeyDown={(e) => {
-          // Enter in the filter opens the best match, as a launcher should.
-          if (e.key === "Enter" && query.trim() && matches[0] && e.target instanceof HTMLInputElement) {
-            e.preventDefault();
-            void open(matches[0].name);
-          }
-        }}
-      >
-        <SearchBox label="Find an app" value={query} onChange={setQuery} className="mb-2" />
-      </div>
-      {error && <p className="m-0 mb-1 text-notch-meta text-notch-danger">{error}</p>}
-      {query.trim() ? (
-        matches.length === 0 ? (
-          <Empty title="No app by that name">Try fewer letters, or the first letters of each word.</Empty>
-        ) : (
-          <Grid label="Matches" apps={matches} prefs={prefs} onOpen={open} onPin={pin} />
-        )
-      ) : (
-        <>
-          <Grid label="Pinned" apps={grouped.pinned} prefs={prefs} onOpen={open} onPin={pin} />
-          <Grid label="Recent" apps={grouped.recent} prefs={prefs} onOpen={open} onPin={pin} />
-          <Grid label="All apps" apps={grouped.rest} prefs={prefs} onOpen={open} onPin={pin} />
-        </>
-      )}
-    </>
-  );
-}
-
 export type Run = { state: "running" } | { state: "done" } | { state: "failed"; message: string };
 
-/** The Shortcuts library and what each run last did; shared with the widgets look. */
+/** The Shortcuts library and what each run last did; shared with the Shortcuts board. */
 export function useShortcuts() {
   const [runs, setRuns] = useState<Record<string, Run>>({});
   const { data: names } = useLoaded(async () => {
@@ -196,68 +72,6 @@ export function useShortcuts() {
     }));
   };
   return { names, runs, run };
-}
-
-/** Launch › Shortcuts: the Apple Shortcuts library, each one a click away. */
-export function LaunchShortcuts() {
-  const [query, setQuery] = useState("");
-  const { names, runs, run } = useShortcuts();
-
-  if (names === null) return null;
-  if (names.length === 0) {
-    return (
-      <Empty
-        title="No shortcuts yet"
-        action={
-          <Button variant="notch" size="notch" onClick={() => void commands.launcherOpenApp("Shortcuts")}>
-            Open Shortcuts
-          </Button>
-        }
-      >
-        Shortcuts you make in the Shortcuts app show up here, one click to run.
-      </Empty>
-    );
-  }
-
-  const shown = rank(names, query, (n) => n);
-  return (
-    <>
-      {names.length > 6 && (
-        <SearchBox label="Find a shortcut" value={query} onChange={setQuery} className="mb-2" />
-      )}
-      <Label>Shortcuts</Label>
-      <List label="Shortcuts">
-        {shown.map((name) => {
-          const status = runs[name];
-          return (
-            <Row
-              key={name}
-              title={name}
-              subtitle={
-                status?.state === "failed" ? (
-                  <span className="text-notch-danger">Failed: {status.message}</span>
-                ) : undefined
-              }
-              trailing={
-                <span className="flex shrink-0 items-center gap-2">
-                  {status?.state === "running" && <Value>Running…</Value>}
-                  {status?.state === "done" && <Value className="text-notch-ok">Done</Value>}
-                  <Button
-                    variant="notch-quiet"
-                    size="notch"
-                    disabled={status?.state === "running"}
-                    onClick={() => void run(name)}
-                  >
-                    Run
-                  </Button>
-                </span>
-              }
-            />
-          );
-        })}
-      </List>
-    </>
-  );
 }
 
 type Hit = {

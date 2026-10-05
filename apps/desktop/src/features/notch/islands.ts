@@ -90,10 +90,10 @@ function stateRole({ id, icon, short }: Island): WidgetRole | undefined {
 }
 
 /**
- * The widgets look's colour for an island: its owner's accent. None for an
+ * The colour for an island: its owner's accent. None for an
  * urgent island (its own warning treatment and its word stand) and for an owner
  * with no role, which keep the shared ink. Colour only; the island's words and
- * geometry are the same in both looks.
+ * geometry do not depend on it.
  */
 export function islandRole(island: Island): WidgetRole | undefined {
   if (island.priority === "urgent") return undefined;
@@ -146,11 +146,10 @@ export function levelOf(island: Island): number | null {
 export type Tone = "ok" | "warn" | "danger";
 
 /**
- * The colour a takeover's glyph speaks in, in both looks, where the word alone
+ * The colour a takeover's glyph speaks in, where the word alone
  * is not enough: red for what is critical, green for a write that landed.
- * Everything else is colour only in the widgets look (`islandRole`); Calm
- * stays ink, so a 20% battery is red only there. Keyed on the id's prefix;
- * none leaves the shared ink.
+ * Everything else takes its owner's accent (`islandRole`), so a 20% battery
+ * is red there. Keyed on the id's prefix; none leaves the shared ink.
  */
 const ISLAND_TONES: [prefix: string, tone: Tone][] = [
   ["toast:", "ok"],

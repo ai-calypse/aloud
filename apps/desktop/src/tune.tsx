@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { BotIcon, CalendarIcon, MusicIcon, TimerIcon } from "lucide-react";
 import { overshoot, springCurve } from "./lib/spring-curve";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import type { CardKind } from "./lib/bindings";
@@ -18,7 +17,7 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "./index.css";
 import { WidgetGallery } from "./tune-widgets";
-// --- Widgets look › Shelf fixtures (tune-shelf.tsx) ---
+// --- Widget boards › Shelf fixtures (tune-shelf.tsx) ---
 import { ShelfGallery } from "./tune-shelf";
 // --- end Shelf fixtures ---
 import { MediaWidgetGallery } from "./tune-widgets-media"; // fixtures: Media widgets
@@ -343,20 +342,6 @@ function Tuner() {
             <Action onClick={() => send({ rest: true, islands: 2, open: { section: "now" } })}>
               Shell · Now
             </Action>
-            <Action
-              onClick={() =>
-                send({ rest: true, islands: 2, notchStyle: "widgets", open: { section: "now" } })
-              }
-            >
-              Shell · Now · Widgets
-            </Action>
-            <Action
-              onClick={() =>
-                send({ rest: true, islands: 2, notchStyle: "calm", open: { section: "now" } })
-              }
-            >
-              Shell · Now · Calm
-            </Action>
             <Action onClick={() => send({ rest: true, open: { section: "agents", sub: "voice" } })}>
               Shell · Voice
             </Action>
@@ -369,13 +354,9 @@ function Tuner() {
             <Action onClick={() => send({ rest: true, runs: true, open: { section: "agents", sub: "voice" } })}>
               Shell · Voice · history
             </Action>
-            <Action onClick={() => send({ rest: true, runs: true, notchStyle: "widgets", open: { section: "agents", sub: "voice" } })}>
-              Shell · Voice · history · Widgets
-            </Action>
             <Action onClick={() => send({ rest: true, islands: 2, hover: true })}>Hover · opens Home</Action>
             <Action onClick={() => send({ hover: false })}>Hover · leaves</Action>
             <Action onClick={() => send({ rest: true, agent: "pending" })}>Run + approval (compact)</Action>
-            <Action onClick={() => send({ rest: true, notchStyle: "widgets", agent: "pending" })}>Run + approval (compact · Widgets)</Action>
             <Action
               onClick={() =>
                 send({ rest: true, open: { section: "agents", sub: "voice" }, palette: true })
@@ -432,8 +413,8 @@ function Tuner() {
             {(
               ["volume", "brightness", "caps", "micMuted", "airpods", "charger", "lowPower", "wifi", "drive", "batteryLow"] as const
             ).map((takeover) => (
-              <Action key={takeover} onClick={() => send({ rest: true, notchStyle: "widgets", takeover, stay: true })}>
-                Widgets · {takeover}
+              <Action key={takeover} onClick={() => send({ rest: true, takeover, stay: true })}>
+                {takeover}
               </Action>
             ))}
           </div>
@@ -609,17 +590,17 @@ function NotchGallery() {
       className="flex-1 overflow-y-auto bg-notch px-10 py-8 font-notch text-notch-ink"
     >
       <div className="grid max-w-[720px] gap-9">
-        <Specimen name="SectionTabs" note="icon + label, a count where something needs you; ← → move, the underline springs">
+        <Specimen name="SectionTabs" note="text labels, a count where something needs you; ← → move, the underline springs">
           <div className="border-b border-notch-sep">
             <SectionTabs
               panelId="gallery-panel"
               value={section}
               onChange={setSection}
               items={[
-                { id: "now", label: "Now", icon: TimerIcon, shortcut: "⌘1" },
-                { id: "agents", label: "Agents", icon: BotIcon, count: 2, shortcut: "⌘2" },
-                { id: "media", label: "Media", icon: MusicIcon, shortcut: "⌘3" },
-                { id: "today", label: "Today", icon: CalendarIcon, shortcut: "⌘7" },
+                { id: "now", label: "Now", shortcut: "⌘1" },
+                { id: "agents", label: "Agents", count: 2, shortcut: "⌘2" },
+                { id: "media", label: "Media", shortcut: "⌘3" },
+                { id: "today", label: "Today", shortcut: "⌘7" },
               ]}
             />
           </div>
@@ -768,37 +749,37 @@ function NotchGallery() {
         </Specimen>
         {/* --- end Calm Home fixtures --- */}
 
-        <Specimen name="Widgets look" note="the Settings › Overlay option: Apple-style tiles; primitives, the Home board, empty and urgent states">
+        <Specimen name="Widget primitives" note="the tiles the widget-board sections are drawn with: frames, rings, capsules, numerals, event cards, accent roles">
           <WidgetGallery />
         </Specimen>
 
-        {/* --- Widgets look › Shelf fixtures: Files, Screenshots, Downloads, Drives --- */}
-        <Specimen name="Widgets look · Shelf" note="Files, Screenshots, Downloads and Drives as widgets, from labelled fixtures; with empty, off and nearly-full states">
+        {/* --- Shelf board fixtures: Downloads, Drives --- */}
+        <Specimen name="Widget boards · Shelf" note="Downloads and Drives as widget boards, from labelled fixtures; with empty, off and nearly-full states">
           <ShelfGallery />
         </Specimen>
         {/* --- end Shelf fixtures --- */}
         {/* --- FIXTURES: Media widgets (tune-widgets-media.tsx). Made-up data, tune page only. --- */}
-        <Specimen name="Widgets look · Media" note="Now Playing, Lyrics, Sound and Devices as widgets, every state; fixtures, never the app">
+        <Specimen name="Widget boards · Media" note="Sound and Devices as widget boards, every state; fixtures, never the app">
           <MediaWidgetGallery />
         </Specimen>
         {/* --- end FIXTURES --- */}
         {/* --- Today widgets (w-today) --- */}
-        <Specimen name="Widgets look · Today" note="Calendar, Reminders, Weather and Stocks: fixtures, then not-allowed, reading and empty states">
+        <Specimen name="Widget boards · Today" note="Calendar, Reminders, Weather and Stocks: fixtures, then not-allowed, reading and empty states">
           <TodayWidgetGallery />
         </Specimen>
         {/* --- end Today widgets --- */}
         {/* --- Mac + Focus widget fixtures (feat/notch-widgets-mac-focus) --- */}
-        <Specimen name="Widgets look · Mac and Focus" note="the Mac (Stats, Power, Privacy, Windows) and Focus (Timer, Keep Awake, Notes) boards, with fixtures and every empty or urgent state">
+        <Specimen name="Widget boards · Mac and Focus" note="the Mac (Stats, Power, Privacy, Windows) and Focus (Timer, Keep Awake, Notes) boards, with fixtures and every empty or urgent state">
           <MacFocusGallery />
         </Specimen>
         {/* --- end Mac + Focus widget fixtures --- */}
-        {/* --- Widgets look: Agents and Launch fixtures (feat/notch-widgets-agents-launch) --- */}
-        <Specimen name="Widgets look · Agents and Launch" note="fixtures: Voice, Coding, Usage, Apps and Shortcuts in their states; Launch › Search stays calm">
+        {/* --- Widget boards: Agents and Launch fixtures --- */}
+        <Specimen name="Widget boards · Agents and Launch" note="fixtures: Voice, a coding session in detail, Apps and Shortcuts in their states; Launch › Search stays a list">
           <AgentsLaunchGallery />
         </Specimen>
-        {/* --- end Widgets look: Agents and Launch fixtures --- */}
+        {/* --- end Widget boards: Agents and Launch fixtures --- */}
 
-        <Specimen name="Agents · Voice history and the coding composer" note="fixtures: past voice runs in both looks, with and without a live run, and the composer that moved to Coding">
+        <Specimen name="Agents · Voice history and the coding composer" note="fixtures: past voice runs as a board, with and without a live run, and the coding-agent composer">
           <CoherenceGallery />
         </Specimen>
 

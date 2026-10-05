@@ -1,5 +1,4 @@
 import { useState } from "react";
-import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { NOTCH_FOCUS } from "@/components/ui/button";
 import { SlidingPill } from "@/components/ui/motion";
@@ -9,7 +8,6 @@ import { onRovingKey } from "./roving";
 export type SectionTab = {
   id: string;
   label: string;
-  icon: LucideIcon;
   /** How many things here need the user. Absent or 0 draws nothing. */
   count?: number;
   /** The key that reaches it, for the tooltip: "⌘2". */
@@ -17,12 +15,10 @@ export type SectionTab = {
 };
 
 /**
- * The notch's top-level navigation: icon + label (+ a count where something
- * needs you), one underline that travels on a live spring between them.
- *
- * Labels are never dropped for icons alone — "Named, not memorised"
- * (PRODUCT.md); the reverse, a label with no icon, is Calm's text-only strip.
- * The strip is one Tab stop; arrows move between sections.
+ * The notch's top-level navigation: text labels (+ a count where something
+ * needs you), one underline that travels on a live spring between them. Every
+ * destination is a word, never an icon alone — "Named, not memorised"
+ * (PRODUCT.md). The strip is one Tab stop; arrows move between sections.
  *
  * ponytail: no overflow handling. The shell widens once more than six
  * sections are ready (NotchShell's `WIDTH`), which fits all nine with
@@ -37,7 +33,6 @@ export function SectionTabs({
   panelId,
   /** ↓ from the strip: hand focus to the body. */
   onExit,
-  icons = true,
   className,
 }: {
   items: SectionTab[];
@@ -45,8 +40,6 @@ export function SectionTabs({
   onChange: (id: string) => void;
   panelId: string;
   onExit?: () => void;
-  /** Calm's Home drops the glyphs: the names alone, each still a word. */
-  icons?: boolean;
   className?: string;
 }) {
   // A ref callback into state, so the underline re-measures the frame the
@@ -68,7 +61,7 @@ export function SectionTabs({
         onRovingKey(e, ids, value, onChange);
       }}
     >
-      {items.map(({ id, label, icon: Icon, count, shortcut }) => {
+      {items.map(({ id, label, count, shortcut }) => {
         const on = id === value;
         return (
           <button
@@ -94,7 +87,6 @@ export function SectionTabs({
               on && "text-notch-ink",
             )}
           >
-            {icons && <Icon className="size-3.5 opacity-85" strokeWidth={1.8} aria-hidden />}
             {label}
             {count ? (
               <Badge variant="notch-count" aria-label={`${count} need you`}>

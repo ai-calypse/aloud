@@ -3,19 +3,16 @@ import { XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppIcon } from "@/components/notch/app-icon";
 import { Switch } from "@/components/notch/controls";
-import { Empty, Lead, List, Row, Value } from "@/components/notch/list";
+import { Empty, Lead, List, Row } from "@/components/notch/list";
 import {
   commands,
   type ScreenShot,
-  type ShelfDownload,
-  type ShelfDrive,
   type ShelfImageFormat,
   type ShelfItem,
   type ShelfWatch,
 } from "@/lib/bindings";
 import { cn } from "@/lib/utils";
 import {
-  countToday,
   formatAgo,
   formatBytes,
   useDropToShelf,
@@ -137,7 +134,7 @@ function TurnOn({
   );
 }
 
-export const FORMATS: { id: ShelfImageFormat; label: string }[] = [
+const FORMATS: { id: ShelfImageFormat; label: string }[] = [
   { id: "png", label: "PNG" },
   { id: "jpeg", label: "JPEG" },
   { id: "heic", label: "HEIC" },
@@ -402,157 +399,3 @@ export function ShelfShots() {
     </>
   );
 }
-
-/**
- * Shelf › Downloads: what finished lately, from any browser. A download
- * drops from the notch the moment its last byte lands — not when the
- * browser starts it, and not for a half-written `.crdownload`.
- */
-export function ShelfDownloads() {
-  const { prefs, set } = useShelfPrefs();
-  const [note, setNote] = useNote();
-  useDropToShelf(setNote);
-  const on = prefs?.downloads ?? false;
-  const { items } = useShelfList<ShelfDownload>(
-    async () => {
-      const r = await commands.downloadsRecent(12);
-      if (r.status === "error") throw new Error(r.error);
-      return r.data;
-    },
-    "downloads",
-    on,
-  );
-
-  if (prefs && !on) {
-    return (
-      <TurnOn which="downloads" onSet={set} title="Download alerts are off">
-        Turn it on and the notch tells you when a download finishes, in any
-        browser, with a button to show it in Finder. macOS will ask once to let
-        Aloud see your Downloads folder.
-      </TurnOn>
-    );
-  }
-  const downloads = items ?? [];
-
-  return (
-    <>
-      {downloads.length === 0 ? (
-        <Empty title="No downloads yet">
-          Finished downloads from any browser appear here, newest first.
-        </Empty>
-      ) : (
-        <>
-          <Lead sub="Finished in the last 24 hours">
-            {countToday(downloads.map((d) => d.finished))} today
-          </Lead>
-          <List label="Recent downloads" className="mt-3">
-            {downloads.map((d) => (
-              <Row
-                key={d.path}
-                pointer={dragOut(d.path)}
-                lead={<Thumb path={d.path} image={/\.(png|jpe?g|gif|heic|webp|tiff?)$/i.test(d.name)} glyph="download" />}
-                title={d.name}
-                subtitle={`${formatBytes(d.size)} · ${formatAgo(d.finished)}`}
-                trailing={
-                  <Button variant="notch-quiet" size="notch" onClick={() => void commands.finderReveal(d.path)}>
-                    Show
-                  </Button>
-                }
-              />
-            ))}
-          </List>
-        </>
-      )}
-      {note && <Note>{note}</Note>}
-      {prefs && (
-        <WatchRow
-          which="downloads"
-          on={on}
-          onSet={set}
-          title="Download alerts"
-          subtitle="Drop a chip from the notch when a download finishes"
-        />
-      )}
-    </>
-  );
-}
-
-/**
- * Shelf › Drives: external drives and mounted disk images, each with Eject.
- * A drive that is in use says what is holding it rather than failing quietly.
- */
-export function ShelfDrives() {
-  const { prefs, set } = useShelfPrefs();
-  const [note, setNote] = useNote(10000);
-  useDropToShelf(setNote);
-  const [ejecting, setEjecting] = useState<string | null>(null);
-  const { items } = useShelfList<ShelfDrive>(
-    async () => {
-      const r = await commands.drivesList();
-      if (r.status === "error") throw new Error(r.error);
-      return r.data;
-    },
-    "drives",
-  );
-  const drives = items ?? [];
-
-  async function eject(drive: ShelfDrive) {
-    setEjecting(drive.mount);
-    setNote(null);
-    const r = await commands.driveEject(drive.mount);
-    setEjecting(null);
-    setNote(r.status === "ok" ? `${drive.name} is safe to disconnect` : r.error);
-  }
-
-  return (
-    <>
-      {drives.length === 0 ? (
-        <Empty title="No external drives">
-          Plug in a USB drive or SD card, or mount a disk image, and it shows up
-          here with an Eject button.
-        </Empty>
-      ) : (
-        <>
-          <Lead sub={drives.length === 1 ? "drive connected" : "drives connected"}>{drives.length}</Lead>
-          <List label="Drives" className="mt-3">
-            {drives.map((drive) => (
-              <Row
-                key={drive.mount}
-                lead={<AppIcon icon="drive" label="" size="md" />}
-                title={drive.name}
-                subtitle={[drive.bus, `${formatBytes(drive.free)} free of ${formatBytes(drive.size)}`]
-                  .filter(Boolean)
-                  .join(" · ")}
-                trailing={
-                  <>
-                    <Value>{drive.size > 0 ? `${Math.round(((drive.size - drive.free) / drive.size) * 100)}% full` : ""}</Value>
-                    <Button
-                      // The one primary only when there is one thing to eject.
-                      variant={drives.length === 1 ? "notch" : "notch-quiet"}
-                      size="notch"
-                      disabled={ejecting !== null}
-                      onClick={() => void eject(drive)}
-                    >
-                      {ejecting === drive.mount ? "Ejecting…" : "Eject"}
-                    </Button>
-                  </>
-                }
-              />
-            ))}
-          </List>
-        </>
-      )}
-      {note && <Note>{note}</Note>}
-      {prefs && (
-        <WatchRow
-          which="drives"
-          on={prefs.drives !== false}
-          onSet={set}
-          title="Drive alerts"
-          subtitle="Drop a chip from the notch when a drive is connected"
-        />
-      )}
-    </>
-  );
-}
-

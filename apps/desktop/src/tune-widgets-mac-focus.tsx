@@ -124,7 +124,7 @@ const PRIVACY_ON: PrivacyUse = { mic: true, camera: true, micApps: ["Zoom"] };
 
 export function MacFocusGallery() {
   return (
-    <div data-notch-style="widgets" className="grid max-w-[720px] gap-9 font-notch-w">
+    <div className="grid max-w-[720px] gap-9 font-notch-w">
       <Block name="Mac · Stats" note="fixture: CPU, memory and disk as Move, Exercise, Stand; network and heat beside them">
         <StatsBoard stats={STATS} />
       </Block>

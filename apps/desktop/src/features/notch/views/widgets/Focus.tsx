@@ -37,8 +37,8 @@ import { useQuickNotes } from "./useQuickNotes";
 /* Focus › Timer ---------------------------------------------------------- */
 
 /**
- * Focus › Timer in the widgets look: the big ring draining in Move red, the
- * calm view's controls on the tile beside it, and the streak and week as small
+ * Focus › Timer as a widget board: the big ring draining in Move red, the
+ * the controls on the tile beside it, and the streak and week as small
  * tiles. Rust keeps the time against the wall clock; this only reads it.
  */
 export function WidgetFocusTimer() {
@@ -208,7 +208,7 @@ export function TimerBoard({
 
 /* Focus › Keep Awake ----------------------------------------------------- */
 
-/** Focus › Keep Awake in the widgets look: Coffee, the state in a word, and the durations. */
+/** Focus › Keep Awake as a widget board: Coffee, the state in a word, and the durations. */
 export function WidgetFocusAwake() {
   const { snap } = useFocus();
   const [error, setError] = useState<string | null>(null);
@@ -275,9 +275,9 @@ export function AwakeBoard({
 /* Focus › Notes ---------------------------------------------------------- */
 
 /**
- * Focus › Notes in the widgets look: the Notes widget's yellow header over the
+ * Focus › Notes as a widget board: the Notes widget's yellow header over the
  * recent notes, and a second tile to write in. Autosave, opening an older
- * note and starting a new one are the calm view's, from one shared hook.
+ * note and starting a new one come from one shared hook.
  */
 export function WidgetFocusNotes() {
   const q = useQuickNotes();

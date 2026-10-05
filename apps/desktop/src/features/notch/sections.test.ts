@@ -1,21 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { BotIcon } from "lucide-react";
 import {
   readySections,
   resolveNav,
   sectionForShortcut,
   panelWidth,
   stepSubsection,
-  viewFor,
   type Section,
-  type Subsection,
 } from "./sections";
 
 const View = () => null;
 const section = (id: Section["id"], subs: [string, boolean][]): Section => ({
   id,
   name: id,
-  icon: BotIcon,
   subsections: subs.map(([sub, ready]) => ({ id: sub, name: sub, ready, view: ready ? View : undefined })),
 });
 
@@ -88,40 +84,9 @@ describe("stepSubsection", () => {
   });
 });
 
-describe("viewFor", () => {
-  const calm = () => null;
-  const widgets = () => null;
-  const both: Subsection = { id: "x", name: "x", ready: true, view: calm, widgetView: widgets };
-  const calmOnly: Subsection = { id: "y", name: "y", ready: true, view: calm };
-
-  it("prefers the widget view in the widgets look", () => {
-    expect(viewFor(both, "widgets")).toBe(widgets);
-  });
-
-  it("keeps the calm view in the calm look even when a widget view exists", () => {
-    expect(viewFor(both, "calm")).toBe(calm);
-  });
-
-  // The failure guarded: a subsection nobody drew as widgets going blank.
-  it("falls back to the calm view when there is no widget view", () => {
-    expect(viewFor(calmOnly, "widgets")).toBe(calm);
-  });
-
-  it("a widget view alone does not make a subsection ready", () => {
-    const widgetOnly: Section[] = [
-      { ...section("now", []), subsections: [{ id: "z", name: "z", ready: true, widgetView: widgets }] },
-    ];
-    expect(readySections(widgetOnly)).toEqual([]);
-  });
-});
-
 describe("panelWidth", () => {
-  it("keeps the calm widths: 640 up to six sections, 780 beyond", () => {
-    expect(panelWidth(6, "calm")).toBe(640);
-    expect(panelWidth(7, "calm")).toBe(780);
-  });
-
-  it("is 780 in the widgets look however few sections are ready", () => {
-    expect(panelWidth(2, "widgets")).toBe(780);
+  it("is 640 up to six sections and 780 beyond, which a widget board also needs", () => {
+    expect(panelWidth(6)).toBe(640);
+    expect(panelWidth(7)).toBe(780);
   });
 });

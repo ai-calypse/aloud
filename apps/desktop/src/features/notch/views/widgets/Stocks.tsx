@@ -11,9 +11,9 @@ import { Notice, Pill } from "./shared";
 import { moveOf } from "./today-logic";
 
 /**
- * Today › Stocks in the widgets look: Apple's Stocks list (symbol and name on
+ * Today › Stocks as a widget board: Apple's Stocks list (symbol and name on
  * the left, price and a green or red change on the right) and a tile to follow
- * another symbol. Quotes are the calm view's, fetched while this is open, each
+ * another symbol. Quotes are fetched while this is open, each
  * marked with what its market is doing so a closed market's last price is
  * never read as live.
  *

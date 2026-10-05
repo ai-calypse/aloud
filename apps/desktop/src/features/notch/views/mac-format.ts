@@ -1,19 +1,6 @@
 import type { ChargeState, Thermal } from "@/lib/bindings";
 import type { Tone } from "@/components/notch/meters";
 
-/** Quiet under 70%, amber approaching the cap, red near it. Beside the number, never instead of it. */
-export function usageTone(percent: number): Tone {
-  return percent >= 90 ? "danger" : percent >= 70 ? "warn" : "ink";
-}
-
-/** A tone as a text colour. Whole class names, so Tailwind sees them. */
-export const TONE_TEXT: Record<Tone, string> = {
-  ink: "",
-  ok: "text-notch-ok",
-  warn: "text-notch-warn",
-  danger: "text-notch-danger",
-};
-
 /** The Rust floats arrive as `null` when they were NaN; a bar and a number want 0. */
 export function num(n: number | null | undefined): number {
   return n != null && Number.isFinite(n) ? n : 0;
@@ -70,12 +57,4 @@ const THERMAL: Record<Thermal, { word: string; tone: Tone }> = {
 
 export function thermalReading(thermal: Thermal): { word: string; tone: Tone } {
   return THERMAL[thermal];
-}
-
-/** Who holds the mic or camera, as the lead says it. */
-export function privacyLead(mic: boolean, camera: boolean): string {
-  if (mic && camera) return "Mic and camera on";
-  if (camera) return "Camera on";
-  if (mic) return "Mic on";
-  return "All quiet";
 }

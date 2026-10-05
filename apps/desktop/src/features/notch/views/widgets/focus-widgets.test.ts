@@ -57,7 +57,7 @@ describe("timerFace", () => {
 });
 
 describe("timer words", () => {
-  it("names the primary button for each state, as the calm view does", () => {
+  it("names the primary button for each state, as a Start/Pause/Resume button should", () => {
     expect(primaryLabel(undefined)).toBe("Start");
     expect(primaryLabel(timer({ status: "idle" }))).toBe("Start");
     expect(primaryLabel(timer())).toBe("Pause");

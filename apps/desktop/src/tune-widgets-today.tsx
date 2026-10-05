@@ -105,7 +105,7 @@ export function TodayWidgetGallery() {
     <RemindersBoard items={items} error={error} now={NOON_OF_NOW} ticking={new Set(["r2"])} failed={null} onTick={noop} onReload={noop} />
   );
   return (
-    <div data-notch-style="widgets" className="grid max-w-[720px] gap-9 font-notch-w">
+    <div className="grid max-w-[720px] gap-9 font-notch-w">
       <Block name="Today · Calendar" note="fixtures: a Sunday at 2:05 PM with an overlap, a video link, an all-day event and hidden events">
         {calendar(EVENTS)}
       </Block>

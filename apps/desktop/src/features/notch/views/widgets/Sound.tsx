@@ -15,7 +15,7 @@ const POLL_MS = 2000;
 type Done = { status: "ok" } | { status: "error"; error: string };
 
 /**
- * Media › Sound in the widgets look: the output devices as a list tile, the
+ * Media › Sound as a widget board: the output devices as a list tile, the
  * inputs beside it, the microphone as a switch tile and where the sound is
  * going now. CoreAudio is the truth, so the lists are re-read on a short clock
  * and after every change rather than kept here.
@@ -98,7 +98,7 @@ export function SoundBoard({
  * as. Medium beside Now Playing, where it opens Sound; small here, where the
  * list is already on screen.
  */
-export function RouteTile({
+function RouteTile({
   size,
   sound,
   onOpen,

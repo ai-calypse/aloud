@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canUnzip, driveRoom, driveUsage, isImageName, itemMeta, selectedItem, splitShots } from "./shelf-widgets";
+import { driveRoom, driveUsage, isImageName } from "./shelf-widgets";
 
 describe("driveUsage", () => {
   it("is green with room, amber as it fills, red when nearly full, each with its word", () => {
@@ -19,40 +19,15 @@ describe("driveUsage", () => {
   });
 });
 
-describe("file actions", () => {
-  it("unzips only real .zip files", () => {
-    expect(canUnzip({ kind: "file", name: "Icons.ZIP" })).toBe(true);
-    expect(canUnzip({ kind: "folder", name: "backup.zip" })).toBe(false);
-    expect(canUnzip({ kind: "file", name: "zip.txt" })).toBe(false);
-  });
-
+describe("isImageName", () => {
   it("knows a picture by its extension", () => {
     expect(isImageName("Screen 4.PNG")).toBe(true);
     expect(isImageName("photo.heic")).toBe(true);
     expect(isImageName("notes.png.txt")).toBe(false);
   });
-
-  it("calls a folder a folder and sizes a file", () => {
-    expect(itemMeta({ kind: "folder", size: 96 })).toBe("Folder");
-    expect(itemMeta({ kind: "file", size: 1_400_000 })).toBe("1.4 MB");
-  });
 });
 
-describe("selection", () => {
-  it("drops a selection whose file left the shelf", () => {
-    const items = [{ id: "a" }, { id: "b" }];
-    expect(selectedItem(items, "b")).toBe(items[1]);
-    expect(selectedItem(items, "gone")).toBeNull();
-    expect(selectedItem(items, null)).toBeNull();
-  });
-});
-
-describe("shots and rooms", () => {
-  it("takes the newest as the hero", () => {
-    expect(splitShots([1, 2, 3])).toEqual({ latest: 1, rest: [2, 3] });
-    expect(splitShots([])).toEqual({ latest: null, rest: [] });
-  });
-
+describe("driveRoom", () => {
   it("writes a drive's room", () => {
     expect(driveRoom({ size: 16_000_000_000, free: 4_100_000_000 })).toBe("4.1 GB free of 16 GB");
   });

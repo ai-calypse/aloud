@@ -1485,13 +1485,6 @@ export type NotchOpen = {
 	sub: string | null,
 };
 
-/**
- *  How the open notch panel looks. `Calm` is the monochrome panel; `Widgets`
- *  redraws it as Apple-style widgets (docs/design/notch-personality.html). Only
- *  the look changes: the sections, shortcuts and closed notch are the same.
- */
-export type NotchStyle = "calm" | "widgets";
-
 export type Note = {
 	path: string,
 	title: string,
@@ -1875,8 +1868,6 @@ export type Settings = {
 	showMenuBarIcon?: boolean,
 	/**  Drop-down pill or menu-bar wings; wings are macOS-only. */
 	overlayStyle?: OverlayStyle,
-	/**  Calm (monochrome) or Widgets (Apple-style tiles) for the open notch. */
-	notchStyle?: NotchStyle,
 	/**  How the notch's takeovers behave: Quiet mode, Focus, per-source switches. */
 	notchEvents?: NotchEvents,
 	/**

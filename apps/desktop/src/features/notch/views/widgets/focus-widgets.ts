@@ -42,8 +42,7 @@ export function primaryLabel(s: TimerState | undefined): string {
 }
 
 /**
- * The timer ring's face. Idle shows the chosen preset full, as the calm view
- * does; a countdown's ring is what is *left* (it drains), and a stopwatch has
+ * The timer ring's face. Idle shows the chosen preset full; a countdown's ring is what is *left* (it drains), and a stopwatch has
  * no end to drain towards, so it has numerals and no ring.
  */
 export function timerFace(

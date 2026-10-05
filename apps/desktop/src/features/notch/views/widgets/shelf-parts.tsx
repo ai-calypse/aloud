@@ -9,7 +9,7 @@ import { useThumb } from "../shelf-data";
 /**
  * The pieces the four Shelf boards share: buttons that read as widget
  * controls, a quiet status line, a tile for "nothing here yet", and the
- * on/off tile for a folder watcher. Behaviour is the calm views'; only the
+ * on/off tile for a folder watcher. Behaviour is the shelf's own; only the
  * look is new.
  */
 
@@ -139,7 +139,7 @@ type OnSet = (which: ShelfWatch, on: boolean) => Promise<string | null>;
 /**
  * A folder watcher that is off: what it would do, and the one button. One
  * that cannot start (macOS has not allowed the folder yet) says why and
- * stays off, as the calm view's `TurnOn`.
+ * stays off.
  */
 export function TurnOnTile({
   label,

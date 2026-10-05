@@ -28,12 +28,12 @@ import {
 const HOUR = 3_600_000;
 
 /**
- * Today › Calendar in the widgets look: Apple's Calendar family. A large tile
+ * Today › Calendar as a widget board: Apple's Calendar family. A large tile
  * (today beside tomorrow on an hour axis), a month with a red dot on today,
  * and an agenda that carries what the axis cannot: every remaining event with
  * its Join button, and the refresh when there is nothing.
  *
- * Reads the same hook as the calm view, so the first read still opens
+ * Reads `useCalendar`, so the first read still opens
  * Calendar on purpose (the Home board never does).
  */
 export function WidgetCalendar() {
@@ -390,7 +390,7 @@ export function MonthTile({ now }: { now: number }) {
 /**
  * Calendar, agenda: everything the axis does not carry. Every remaining event
  * for today and tomorrow, so an event in "N more events" is still here with
- * its Join; the next one's button is the inverted one, as in the calm view.
+ * its Join; the next one's button is the inverted one,.
  */
 export function AgendaTile({
   today,

@@ -1,63 +1,17 @@
-import type { AgentSession, Quota } from "@/lib/bindings";
+import type { AgentSession } from "@/lib/bindings";
 import { pendingStep, type Run, type Step } from "@/lib/agent-steps";
-import { resetsIn, truncate } from "@/lib/format";
+import { truncate } from "@/lib/format";
 import type { WidgetRole } from "@/components/notch/widgets";
-import { percent, shownWindows } from "@/features/overlay/QuotaDashboard";
 
 /**
- * What the Agents widgets say, worked out from the data the calm views read.
+ * What the Agents widgets say, worked out from the data the notch reads.
  * Apart from the components so the words, which can silently be wrong, are
  * testable; the components only place them.
  */
 
-/** Screen Time's three chart colours, one per plan window and always the same one. */
-const SHORT: Record<string, string> = { "5-hour window": "5-hour", "Week · Opus": "Opus" };
-
-const WINDOW_ROLE: Record<string, WidgetRole> = {
-  "5-hour window": "blue",
-  Week: "cyan",
-  "Week · Opus": "orange",
-};
-
-export type UsageBar = {
-  label: string;
-  /** Four columns share 310pt, so the column heading is the short name. */
-  short: string;
-  /** Whole percent, what the words say. */
-  percent: number;
-  /** 0…1, what the bar and the meter draw. */
-  value: number;
-  role: WidgetRole;
-  resets: string | null;
-  /** Said beside the number once a window is close to its cap; colour alone never says it. */
-  warning: string | null;
-};
-
-/** The calm view's thresholds (70 amber, 90 red), as words. */
+/** The plan-usage thresholds (70 amber, 90 red), as words. */
 export function usageWarning(pct: number): string | null {
   return pct >= 90 ? "Nearly full" : pct >= 70 ? "Getting full" : null;
-}
-
-export function usageBars(quota: Quota | null, now = Date.now()): UsageBar[] {
-  return shownWindows(quota).map(([label, w]) => {
-    const pct = Math.round(percent(w));
-    const left = w.resetsAt ? resetsIn(w.resetsAt, now) : "";
-    return {
-      label,
-      short: SHORT[label] ?? label,
-      percent: pct,
-      value: pct / 100,
-      role: WINDOW_ROLE[label] ?? "blue",
-      resets: left ? `Resets in ${left}` : null,
-      warning: usageWarning(pct),
-    };
-  });
-}
-
-/** Past-the-plan spend, only when there is some, as the calm view's Extra usage row. */
-export function extraUsage(quota: Quota | null): number | null {
-  const x = quota?.extraUsagePercent;
-  return x != null && x > 0 ? Math.round(x) : null;
 }
 
 /** One coding session as a tile says it: a word for its state, then what it is doing. */

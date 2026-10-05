@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { BotIcon } from "lucide-react";
 import type { NotchAction } from "./actions";
 import { paletteEntries, searchPalette } from "./search";
 import { readySections, type Section } from "./sections";
@@ -9,7 +8,6 @@ const ALL: Section[] = [
   {
     id: "agents",
     name: "Agents",
-    icon: BotIcon,
     subsections: [
       { id: "coding", name: "Coding", features: ["Claude Code", "Agent approvals"], ready: true, view: View },
       { id: "prs", name: "Pull requests", features: ["GitHub PRs"], ready: false },
@@ -18,7 +16,6 @@ const ALL: Section[] = [
   {
     id: "media",
     name: "Media",
-    icon: BotIcon,
     subsections: [{ id: "playing", name: "Now Playing", features: ["Synced lyrics"], ready: false }],
   },
 ];

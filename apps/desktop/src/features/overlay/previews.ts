@@ -891,7 +891,7 @@ export const TAKEOVER_PREVIEWS = {
     dismissible: false,
     tier: "card",
   },
-  // The system events, one per colour the design gives them (widgets look).
+  // The system events, one per colour the design gives them.
   caps: sysWhisper("hud:caps", "caps", "Caps Lock", "Caps Lock", "hud"),
   micMuted: sysWhisper("hud:mic", "mic-off", "Microphone", "Mic muted", "hud"),
   brightness: { ...sysWhisper("hud:brightness", "brightness", "Brightness", null, "hud"), level: 70 },

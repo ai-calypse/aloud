@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { SearchIcon, SettingsIcon, XIcon } from "lucide-react";
+import { SearchIcon, SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Materialize } from "@/components/ui/motion";
 import { Kbd } from "@/components/notch/controls";
@@ -18,7 +18,6 @@ import {
   resolveNav,
   sectionForShortcut,
   stepSubsection,
-  viewFor,
   type Nav,
 } from "./sections";
 
@@ -35,8 +34,8 @@ const PANEL_ID = "notch-panel";
  * switched mid-morph bends the morph rather than restarting it.
  */
 export function NotchShell({ nav }: { nav: Nav }) {
-  const { navigate, close, palette, setPalette, ...data } = useNotch();
-  const width = panelWidth(READY.length, data.style);
+  const { navigate, palette, setPalette, ...data } = useNotch();
+  const width = panelWidth(READY.length);
   const body = useRef<HTMLDivElement>(null);
   const place = resolveNav(READY, nav);
   // Read by the key handler, which subscribes once rather than per render.
@@ -79,11 +78,9 @@ export function NotchShell({ nav }: { nav: Nav }) {
 
   if (!place) return null;
   const { section, sub } = place;
-  const View = viewFor(sub, data.style)!;
-  // Calm's chrome, as the prototype draws it: text tabs, no switcher for a
-  // lone subsection, a caption in the footer, a gear where Widgets has ×.
-  // Widgets keeps what it shipped.
-  const calm = data.style !== "widgets";
+  const View = sub.view!;
+  // The chrome, as the prototype draws it: text tabs, no switcher for a lone
+  // subsection, a caption in the footer, a gear to the settings.
   const lone = section.subsections.length === 1;
   const status = section.status?.(data) ?? "";
   // One index across every subsection, so Materialize enters from the side
@@ -110,11 +107,9 @@ export function NotchShell({ nav }: { nav: Nav }) {
             navigate(id as Nav["section"]);
           }}
           onExit={() => focusFirst(body.current)}
-          icons={!calm}
           items={READY.map((s) => ({
             id: s.id,
             label: s.name,
-            icon: s.icon,
             count: s.count?.(data),
             shortcut: `⌘${SECTIONS.findIndex((x) => x.id === s.id) + 1}`,
           }))}
@@ -130,24 +125,18 @@ export function NotchShell({ nav }: { nav: Nav }) {
           <SearchIcon />
           <Kbd>⌘K</Kbd>
         </Button>
-        {calm ? (
-          <Button
-            variant="notch-quiet"
-            size="notch-icon"
-            aria-label="Settings"
-            title="Settings"
-            onClick={() => void openSettings()}
-          >
-            <SettingsIcon />
-          </Button>
-        ) : (
-          <Button variant="notch-quiet" size="notch-icon" aria-label="Close" title="Close (esc)" onClick={close}>
-            <XIcon />
-          </Button>
-        )}
+        <Button
+          variant="notch-quiet"
+          size="notch-icon"
+          aria-label="Settings"
+          title="Settings"
+          onClick={() => void openSettings()}
+        >
+          <SettingsIcon />
+        </Button>
       </header>
 
-      {!(calm && lone) && (
+      {!lone && (
         <div className="flex min-h-[44px] items-center justify-between gap-3 px-3.5 pt-2.5">
           {/* A lone subsection needs no switcher; its name is the section's. */}
           {section.subsections.length > 1 ? (
@@ -174,7 +163,7 @@ export function NotchShell({ nav }: { nav: Nav }) {
         id={PANEL_ID}
         role="tabpanel"
         aria-labelledby={`notch-tab-${section.id}`}
-        className={cn("max-h-[420px] overflow-y-auto px-4 pb-3", calm && lone ? "pt-2" : "pt-3.5")}
+        className={cn("max-h-[420px] overflow-y-auto px-4 pb-3", lone ? "pt-2" : "pt-3.5")}
       >
         {palette && <Palette onPick={pick} onClose={() => setPalette(false)} />}
         {/* Hidden, not unmounted, under the palette: a run's approval gate
@@ -187,27 +176,12 @@ export function NotchShell({ nav }: { nav: Nav }) {
         </div>
       </div>
 
-      <footer
-        className={cn(
-          "flex items-center gap-3.5 border-t border-notch-sep px-4 py-2 text-notch-label text-notch-ink-3",
-          calm ? "justify-between" : "justify-end",
-        )}
-      >
-        {calm && <span className="truncate">{[section.name, section.blurb].filter(Boolean).join(" · ")}</span>}
+      <footer className="flex items-center justify-between gap-3.5 border-t border-notch-sep px-4 py-2 text-notch-label text-notch-ink-3">
+        <span className="truncate">{[section.name, section.blurb].filter(Boolean).join(" · ")}</span>
         <span className="flex shrink-0 items-center gap-3.5">
           <span className="flex items-center gap-1.5">
             <Kbd>⌘1–9</Kbd> sections
           </span>
-          {!calm && (
-            <>
-              <span className="flex items-center gap-1.5">
-                <Kbd>⇥</Kbd> next
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Kbd>⌘K</Kbd> search
-              </span>
-            </>
-          )}
           <span className="flex items-center gap-1.5">
             <Kbd>esc</Kbd> close
           </span>

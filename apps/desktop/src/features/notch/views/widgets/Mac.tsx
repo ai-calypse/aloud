@@ -50,9 +50,9 @@ import {
 const STATS_POLL_MS = 2000;
 
 /**
- * Mac › Stats in the widgets look: Fitness's three rings for CPU, Memory and
- * Disk, with network and heat beside them. Polls only while mounted, like the
- * calm view: `usePoll` lives and dies with the view.
+ * Mac › Stats as a widget board: Fitness's three rings for CPU, Memory and
+ * Disk, with network and heat beside them. Polls only while mounted: `usePoll`
+ * lives and dies with the view.
  */
 export function WidgetMacStats() {
   const stats = usePoll(async () => {
@@ -163,7 +163,7 @@ function Rate({
 /** The estimate moves in minutes; ten seconds keeps a plug-in noticed promptly. */
 const POWER_POLL_MS = 10_000;
 
-/** Mac › Power in the widgets look: the Batteries widget, with its watcher switch kept on the tile. */
+/** Mac › Power as a widget board: the Batteries widget, with its watcher switch kept on the tile. */
 export function WidgetMacPower() {
   // `null` is a Mac with no battery; `undefined` is not read yet.
   const battery = usePoll(() => commands.macBattery(), POWER_POLL_MS);
@@ -275,7 +275,7 @@ export function PowerBoard({
 const PRIVACY_POLL_MS = 1000;
 
 /**
- * Mac › Privacy in the widgets look: a tile each for the microphone and the
+ * Mac › Privacy as a widget board: a tile each for the microphone and the
  * camera, lit when in use, and the tile that carries the watcher switch.
  */
 export function WidgetMacPrivacy() {
@@ -386,7 +386,7 @@ function PrivacyTile({
 /** Slow on purpose: the front window changes when the user moves, not while they read. */
 const WINDOWS_POLL_MS = 2000;
 
-/** Mac › Windows in the widgets look: a snap grid of miniature screens. */
+/** Mac › Windows as a widget board: a snap grid of miniature screens. */
 export function WidgetMacWindows() {
   const front = usePoll(() => commands.macFrontWindow(), WINDOWS_POLL_MS);
   const [said, setSaid] = useState("");
@@ -415,7 +415,7 @@ export function WindowsBoard({
   onSnap: (id: Snap) => void;
   onOpenSettings: () => void;
 }) {
-  // Like the calm view: nothing while the first read is on its way.
+  // Nothing while the first read is on its way.
   if (!front) return null;
 
   if (!front.trusted) {

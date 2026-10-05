@@ -9,90 +9,12 @@ import {
   SegBar,
   Spark,
   WIDGET_ROLES,
-  WidgetBoard,
   WidgetFrame,
 } from "./components/notch/widgets";
-import type {
-  AgentPermission,
-  AgentSession,
-  Battery,
-  FocusSnapshot,
-  Island,
-  NowPlaying,
-  Weather,
-} from "./lib/bindings";
-import {
-  AgentsTile,
-  BatteryTile,
-  CalendarTile,
-  MusicTile,
-  TimerTile,
-  WeatherTile,
-} from "./features/notch/views/WidgetHome";
-
 /**
- * The Widgets look's fixtures for the tune page: every primitive, and the
- * Home board's tiles with real-shaped data and again with every source empty.
- * Fixtures are labelled as such and live only here; the app never shows them.
+ * The widget primitives' fixtures for the tune page. Fixtures are labelled as
+ * such and live only here; the app never shows them.
  */
-
-const MIN = 60_000;
-
-const NOW: NowPlaying = {
-  player: "spotify",
-  source: { app: "Spotify", host: null, tab: null },
-  state: "playing",
-  title: "Night Drive",
-  artist: "Halcyon",
-  album: "Neon",
-  durationMs: 200_000,
-  positionMs: 42_000,
-  speedPct: 100,
-  artworkUrl: null,
-  song: null,
-} as NowPlaying;
-
-const WEATHER: Weather = {
-  place: "Oakland",
-  temperature: 21,
-  feelsLike: 20,
-  sky: "partlyCloudy",
-  summary: "Partly cloudy",
-  isDay: true,
-  days: [{ day: "2026-10-04", sky: "partlyCloudy", high: 24, low: 15 }],
-};
-
-const BATTERY: Battery = { percent: 82, state: "discharging", minutes: 300, cycles: 120, health: 94 };
-
-const SNAP = (now: number): FocusSnapshot =>
-  ({
-    awake: { active: false, until: null, minutes: null },
-    timer: {
-      mode: "pomodoro",
-      phase: "focus",
-      status: "running",
-      round: 2,
-      rounds: 4,
-      preset: { focus: 25, rest: 5 },
-      at: now + 19 * MIN + 42_000,
-      heldMs: 0,
-      totalMs: 25 * MIN,
-    },
-  }) as FocusSnapshot;
-
-const NEXT: Island = {
-  id: "calendar:next",
-  kind: "live",
-  priority: "normal",
-  icon: "calendar",
-  title: "Design sync",
-  detail: "in 25 min",
-  actions: [],
-  expires: null,
-  dismissible: false,
-};
-
-const SESSIONS = [{ id: "a", busy: true }, { id: "b", busy: true }, { id: "c", busy: false }] as AgentSession[];
 
 function Block({ name, note, children }: { name: string; note: string; children: ReactNode }) {
   return (
@@ -108,46 +30,9 @@ export function WidgetGallery() {
   const [level, setLevel] = useState(0.62);
   const [count, setCount] = useState(59);
   const [scrub, setScrub] = useState(0.35);
-  const now = Date.now();
 
   return (
-    <div data-notch-style="widgets" className="grid max-w-[720px] gap-9 font-notch-w">
-      <Block name="Widgets · Home board" note="fixtures with every source present: music, weather, agents, calendar, timer, battery">
-        <WidgetBoard label="Home fixtures">
-          <MusicTile now={NOW} art={null} onToggle={() => {}} onOpen={() => {}} />
-          <WeatherTile data={WEATHER} loading={false} onOpen={() => {}} />
-          <AgentsTile sessions={SESSIONS} permissions={[]} onOpen={() => {}} />
-          <CalendarTile islands={[NEXT]} now={now} onOpen={() => {}} />
-          <TimerTile snap={SNAP(now)} now={now} onOpen={() => {}} />
-          <BatteryTile battery={BATTERY} onOpen={() => {}} />
-        </WidgetBoard>
-      </Block>
-
-      <Block name="Widgets · Home, every source empty" note="what a new Mac, or one with everything off, shows: honest empty tiles, nothing invented">
-        <WidgetBoard label="Home, empty">
-          <MusicTile now={null} art={null} onToggle={() => {}} onOpen={() => {}} />
-          <WeatherTile data={null} loading={false} onOpen={() => {}} />
-          <AgentsTile sessions={[]} permissions={[]} onOpen={() => {}} />
-          <CalendarTile islands={[]} now={now} onOpen={() => {}} />
-          <TimerTile snap={null} now={now} onOpen={() => {}} />
-          <BatteryTile battery={null} onOpen={() => {}} />
-        </WidgetBoard>
-      </Block>
-
-      <Block name="Widgets · Home, urgent states" note="agents waiting on you, a low battery, paused timer, paused track">
-        <WidgetBoard label="Home, urgent">
-          <MusicTile now={{ ...NOW, state: "paused" }} art={null} onToggle={() => {}} />
-          <WeatherTile data={null} loading onOpen={() => {}} />
-          <AgentsTile sessions={SESSIONS} permissions={[{ id: "p" } as AgentPermission]} onOpen={() => {}} />
-          <CalendarTile islands={[]} now={now} />
-          <TimerTile
-            snap={{ ...SNAP(now), timer: { ...SNAP(now).timer, status: "paused", heldMs: 5 * MIN } }}
-            now={now}
-          />
-          <BatteryTile battery={{ ...BATTERY, percent: 8 }} />
-        </WidgetBoard>
-      </Block>
-
+    <div className="grid max-w-[720px] gap-9 font-notch-w">
       <Block name="WidgetFrame" note="small, medium, large; the label under it; the live (gauge) treatment is the deepest shade of the accent">
         <div className="flex flex-wrap items-start gap-5">
           <WidgetFrame size="small" label="Plain">

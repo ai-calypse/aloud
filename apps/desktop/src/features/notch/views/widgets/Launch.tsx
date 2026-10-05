@@ -16,10 +16,10 @@ import { Idle, Pill, WidgetSearch } from "./agents-parts";
  * ------------------------------------------------------------------------- */
 
 /**
- * Launch › Apps in the widgets look: App Store's blue tile for what is
+ * Launch › Apps as a widget board: App Store's blue tile for what is
  * pinned, Siri Suggestions' vibrant one for what was opened lately, and a
- * Large tile for every app. The filter and Enter-opens-the-best-match are the
- * calm view's: typing swaps the board for the matches, with the one Enter
+ * Large tile for every app. The filter and Enter-opens-the-best-match work
+ * so: typing swaps the board for the matches, with the one Enter
  * would open called out beside them.
  */
 export function WidgetApps() {
@@ -243,7 +243,7 @@ function TopHit({ app, onOpen }: { app: InstalledApp; onOpen: () => void }) {
 const PER_TILE = 4;
 
 /**
- * Launch › Shortcuts in the widgets look: a coloured tile per shortcut, four to
+ * Launch › Shortcuts as a widget board: a coloured tile per shortcut, four to
  * a Medium widget, each saying Running…, Done or Failed in words. Tapping runs
  * it. A failure's message, which a tile has no room for, is read under the board.
  */

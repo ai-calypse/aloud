@@ -7,23 +7,19 @@ import type {
   AgentTranscript,
   InstalledApp,
   LauncherPrefs,
-  Quota,
 } from "./lib/bindings";
 // The cards and rows the widgets frame (approvals, previews, Finder results) are styled here.
 import "./styles/overlay.css";
 import type { Run } from "./lib/agent-steps";
 import { AGENT_PREVIEW, CARD_PREVIEWS, FINDER_PREVIEWS } from "./features/overlay/previews";
-import { usageBars, extraUsage } from "./features/notch/views/widgets/agents-logic";
 import {
   CodingDetail,
-  CodingList,
-  UsageBoard,
   VoiceRun,
 } from "./features/notch/views/widgets/Agents";
 import { AppsBoard, ShortcutsBoard } from "./features/notch/views/widgets/Launch";
 
 /**
- * Fixtures for the widgets look's Agents and Launch views: real-shaped data
+ * Fixtures for the Agents and Launch widget boards: real-shaped data
  * through the same presentational components the notch uses, in the states a
  * Mac only reaches by holding a key, running agents or waiting for a plan
  * limit. Labelled as fixtures; the app never shows them.
@@ -32,7 +28,6 @@ import { AppsBoard, ShortcutsBoard } from "./features/notch/views/widgets/Launch
 const noop = () => {};
 const MIN = 60_000;
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
-const later = (ms: number) => new Date(Date.now() + ms).toISOString();
 
 const done = { success: true, message: "done", show: null, note: null, tidied: null };
 
@@ -156,13 +151,6 @@ const TRANSCRIPT: AgentTranscript = {
   costUsd: 1.42,
 };
 
-const QUOTA: Quota = {
-  fiveHour: { percent: 42, resetsAt: later(2 * 60 * MIN + 10 * MIN) },
-  sevenDay: { percent: 31, resetsAt: later(3 * 24 * 60 * MIN) },
-  sevenDayOpus: { percent: 91, resetsAt: later(3 * 24 * 60 * MIN) },
-  extraUsagePercent: 12,
-};
-
 const APP_NAMES = [
   "Arc", "Calendar", "Claude", "Figma", "Finder", "Ghostty", "Mail", "Messages", "Notes",
   "Notion", "Safari", "Slack", "Spotify", "Xcode", "Zed", "Preview", "Photos", "Music", "Maps", "Terminal",
@@ -197,7 +185,7 @@ export function AgentsLaunchGallery() {
   const grouped = split(APPS, PREFS);
   const matches = APPS.filter((a) => a.name.toLowerCase().includes("s"));
   return (
-    <div data-notch-style="widgets" className="grid w-[780px] gap-9 font-notch-w">
+    <div className="grid w-[780px] gap-9 font-notch-w">
       <Block name="Agents › Voice · at an approval" note="the run's steps and the gate it is waiting on; the gate is the app's own card in a tile">
         <VoiceRun run={AGENT_PREVIEW} onDecide={noop} />
       </Block>
@@ -214,12 +202,6 @@ export function AgentsLaunchGallery() {
         <VoiceRun run={RUN_QUESTION} />
       </Block>
 
-      <Block name="Agents › Coding · a session each" note="busy, asking permission (its card first) and idle">
-        <CodingList sessions={SESSIONS} permissions={[PERMISSION]} onSelect={noop} onResolve={noop} onPeek={noop} onNew={noop} />
-      </Block>
-      <Block name="Agents › Coding · empty" note="no sessions: the calm view's words">
-        <CodingList sessions={[]} permissions={[]} onSelect={noop} onResolve={noop} onPeek={noop} onNew={noop} />
-      </Block>
       <Block name="Agents › Coding · one session" note="the latest message and tool calls, subagents, usage, the approval if it is asking">
         <CodingDetail
           session={SESSIONS[0]}
@@ -242,14 +224,6 @@ export function AgentsLaunchGallery() {
         />
       </Block>
 
-      <Block name="Agents › Usage · plan read" note="Screen Time: blue, cyan and orange bars, one per window, the shortest as the big number; extra usage as a fourth column">
-        <UsageBoard idle={false} error={null} loaded bars={usageBars(QUOTA)} extra={extraUsage(QUOTA)} onStart={noop} />
-      </Block>
-      <Block name="Agents › Usage · not asked yet, and no data" note="the opt-in before macOS asks for the Keychain, and a plan with no windows">
-        <UsageBoard idle error="Not signed in to Claude Code" loaded={false} bars={[]} extra={null} onStart={noop} />
-        <div className="h-9" />
-        <UsageBoard idle={false} error={null} loaded bars={[]} extra={null} onStart={noop} />
-      </Block>
 
       <Block name="Launch › Apps" note="pinned (App Store blue), recent (Siri Suggestions), every app in the Large tile; hover an icon for its pin">
         <AppsBoard
@@ -292,7 +266,7 @@ export function AgentsLaunchGallery() {
           onRun={noop}
         />
       </Block>
-      <Block name="Launch › Shortcuts · empty" note="no library yet: the calm view's words and its one action">
+      <Block name="Launch › Shortcuts · empty" note="no library yet: the words and the one action">
         <ShortcutsBoard names={[]} shown={[]} runs={{}} query="" onQuery={noop} onRun={noop} />
       </Block>
     </div>

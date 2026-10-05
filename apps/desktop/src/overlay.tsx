@@ -16,7 +16,6 @@ import {
   type ApprovalReply,
   type Island,
   type IslandAction,
-  type NotchStyle,
   type OverlayStyle,
   type Phase,
 } from "./lib/bindings";
@@ -36,7 +35,6 @@ import { NotchToast, toastForm } from "./features/overlay/NotchToast";
 import { useDwell } from "./features/overlay/useDwell";
 import { ListeningCat, CatPeek } from "./features/overlay/NotchAgents";
 import { AgentRun } from "./features/overlay/AgentRun";
-import { VoiceRun } from "./features/notch/views/widgets/Agents";
 import { NotchShell } from "./features/notch/NotchShell";
 import { HOVER_INTENT_MS, homeNav, shellState } from "./features/notch/hover";
 import { useHoverIntent } from "./features/notch/useHoverIntent";
@@ -165,11 +163,6 @@ function Overlay() {
   const [catImages, setCatImages] = useState(true);
   const [catImagesDictation, setCatImagesDictation] = useState(true);
   const [catImagesAgents, setCatImagesAgents] = useState(true);
-  // The notch's look. Calm until Settings says otherwise (the default in
-  // `Settings`); `?notchStyle=widgets` shows the other in the browser preview.
-  const [notchStyle, setNotchStyle] = useState<NotchStyle>(
-    new URLSearchParams(location.search).get("notchStyle") === "widgets" ? "widgets" : "calm",
-  );
   // The enlarged cat preview: the stage + session it belongs to (from which the
   // image and caption derive) and the on-screen box to grow it from. Rendered
   // fixed at the root so it escapes the list's scroll clip; a 48px avatar hover
@@ -390,7 +383,7 @@ function Overlay() {
     }
   }, []);
 
-  // Read the cat toggles and the notch look from Settings. Called on mount and on each style event
+  // Read the cat toggles from Settings. Called on mount and on each style event
   // and new dictation; `invoke` throws synchronously in the browser preview
   // (no Tauri), where the defaults stand.
   const refreshCatSettings = useCallback(() => {
@@ -399,7 +392,6 @@ function Overlay() {
         setCatImages(s.catImages ?? true);
         setCatImagesDictation(s.catImagesDictation ?? true);
         setCatImagesAgents(s.catImagesAgents ?? true);
-        setNotchStyle(s.notchStyle ?? "calm");
       });
     } catch {
       /* browser preview: no Tauri, keep the defaults */
@@ -1029,7 +1021,6 @@ function Overlay() {
       if (command.runs !== undefined) setRuns(command.runs ? VOICE_RUN_PREVIEWS : []);
       if (command.waiting !== undefined) setWaiting(command.waiting);
       if (command.islands !== undefined) setIslands(livePreviews(command.islands));
-      if (command.notchStyle) setNotchStyle(command.notchStyle);
       if (command.open) {
         setBrowsing(true);
         navigate(command.open.section, command.open.sub);
@@ -1262,7 +1253,6 @@ function Overlay() {
       className="overlay-root"
       ref={root}
       data-exiting={dismissing || peekLeaving || undefined}
-      data-notch-style={notchStyle}
       // Belt-and-suspenders close. The primary popover dismiss is now
       // focus-loss in Rust (`dismiss_on_focus_loss`) — a click outside the
       // panel rect reaches the app behind *and* resigns the overlay's key
@@ -1375,7 +1365,6 @@ function Overlay() {
                   sessions,
                   permissions,
                   islands,
-                  style: notchStyle,
                   runs,
                   removeRun,
                   act: actOnIsland,
@@ -1394,24 +1383,14 @@ function Overlay() {
               </NotchProvider>
           ) : compact && agent ? (
             // A command shows itself, in place: the run and nothing else, the
-            // way it did before the sections. The look follows Settings.
-            notchStyle === "widgets" ? (
-              <VoiceRun
-                key={agent.heard}
-                run={agent}
-                bodyRef={answerRef}
-                onExpand={openVoice}
-                onDecide={decideRun}
-              />
-            ) : (
-              <AgentRun
-                key={agent.heard}
-                run={agent}
-                bodyRef={answerRef}
-                onExpand={openVoice}
-                onDecide={decideRun}
-              />
-            )
+            // way it did before the sections.
+            <AgentRun
+              key={agent.heard}
+              run={agent}
+              bodyRef={answerRef}
+              onExpand={openVoice}
+              onDecide={decideRun}
+            />
           ) : resting ? (
             // At rest the panel is exactly the cutout and this body is empty —
             // unless islands are live, when it widens beside the camera to

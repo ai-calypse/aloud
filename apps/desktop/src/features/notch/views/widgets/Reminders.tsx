@@ -10,10 +10,10 @@ import { Aside, AgendaNotice, Notice, QuietPill } from "./shared";
 import { reminderCounts } from "./today-logic";
 
 /**
- * Today › Reminders in the widgets look: Apple's Reminders widget (a red count
+ * Today › Reminders as a widget board: Apple's Reminders widget (a red count
  * and title over rows on hairlines, an unfilled radio for each) with two small
  * tiles that say how many are due and how many have slipped. Ticking one off
- * is the same single write as in the calm view, to Reminders itself.
+ * is one write, to Reminders itself.
  */
 export function WidgetReminders() {
   const { items, error, reload, setItems } = useReminders();

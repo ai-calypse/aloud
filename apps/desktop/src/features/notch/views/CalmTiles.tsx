@@ -35,7 +35,7 @@ import {
   calmWeather,
   type AgentRow,
 } from "./calm-home";
-import { SKY } from "./Today";
+import { SKY } from "./sky";
 
 /**
  * The eight Calm tiles. Each is pure of data fetching: it takes what it says

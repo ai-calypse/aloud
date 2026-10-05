@@ -1,48 +1,15 @@
-import type { BtDevice, Device, NowPlaying } from "@/lib/bindings";
+import type { BtDevice, Device } from "@/lib/bindings";
 import type { WidgetRole } from "@/components/notch/widgets";
 import { lowest } from "../../media";
 import { batteryTone } from "../mac-format";
 
 /**
- * What the Media widgets say, worked out from the data the calm views already
- * read. Apart from the components so the words, the ring values and the line
- * selection, which can silently be wrong, are testable on their own.
+ * What the Sound and Devices boards say, worked out from the data the notch
+ * already has. Apart from the components so the words and the ring values,
+ * which can silently be wrong, are testable on their own.
  */
 
-/**
- * Music is the pink tile; a web page (a podcast, a talk, any video) is the
- * purple Podcasts one, so the two kinds of source read differently at a glance.
- */
-export function sourceRole(now: NowPlaying): Extract<WidgetRole, "media" | "podcast"> {
-  return now.player === "browser" ? "podcast" : "media";
-}
-
-/** The label under the tile, which is what Apple names the widget. */
-export function sourceLabel(now: NowPlaying): string {
-  return now.player === "browser" ? "Podcasts" : "Music";
-}
-
-export type LineTone = "current" | "near" | "far";
-
-/**
- * How loud a lyric line is: the one being sung, its neighbours either side,
- * the rest. `index` is `lineAt`'s, so -1 (before the first line) has nothing
- * current and only the first line near.
- */
-export function lineTone(i: number, index: number): LineTone {
-  if (i === index) return "current";
-  return Math.abs(i - index) === 1 ? "near" : "far";
-}
-
-/**
- * The line to rest the scroll on. Before the first line is sung the view
- * waits on the first, not on a blank above it.
- */
-export function restLine(index: number): number {
-  return Math.max(index, 0);
-}
-
-/** The calm Sound view's lead: "Playing through bluetooth", or the Mac itself. */
+/** The Sound board's lead: "Playing through bluetooth", or the Mac itself. */
 export function outputLine(output: Pick<Device, "transport"> | undefined): string {
   return `Playing through ${output?.transport ? output.transport.toLowerCase() : "this Mac"}`;
 }

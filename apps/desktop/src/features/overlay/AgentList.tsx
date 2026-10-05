@@ -7,7 +7,6 @@ import {
   type AgentTranscriptEntry,
   type ApprovalReply,
 } from "@/lib/bindings";
-import { MessageResponse } from "@/components/ai-elements/message";
 import { Empty } from "@/components/notch/list";
 import {
   agentStage,
@@ -15,8 +14,7 @@ import {
   stageSeed,
   type AgentStage,
 } from "@/lib/agent-stage";
-import { formatCost, tokenSummary, truncate } from "@/lib/format";
-import { baseName, PermissionCard } from "./PermissionCards";
+import { PermissionCard } from "./PermissionCards";
 import {
   AgentAvatar,
   rowState,
@@ -26,16 +24,8 @@ import {
 } from "./agentIdentity";
 
 /**
- * The user's prompt can be a whole paragraph; capped so it never fills the
- * notch. The full text is on the `<p>`'s title, and the detail view a click
- * opens is where the rest lives.
- */
-const PROMPT_CHARS = 140;
-
-/**
  * The stage cat as a round avatar with a corner status badge, and the hover that
- * pops the meme up large. One component so the list row and the drilled-in
- * detail show the exact same thing — they used to carry byte-identical copies.
+ * pops the meme up large.
  */
 function StageAvatar({
   session,
@@ -178,7 +168,7 @@ export function AgentList({
   );
 }
 
-/** A session's transcript, read once per session when `enabled`; shared with the widgets look. */
+/** A session's transcript, read once per session when `enabled`; shared with the coding detail board. */
 export function useTranscript(sessionId: string, enabled: boolean) {
   const [transcript, setTranscript] = useState<AgentTranscript | null>(null);
   const [transcriptError, setTranscriptError] = useState<string | null>(null);
@@ -197,202 +187,6 @@ export function useTranscript(sessionId: string, enabled: boolean) {
     };
   }, [enabled, sessionId]);
   return { transcript, transcriptError };
-}
-
-/**
- * One agent in full: avatar + tag, cwd, prompt, the approve/deny card if it is
- * asking (so the decision sits with the terminal it belongs to), the live
- * "Now" tool, and every subagent: Agents › Coding, drilled into.
- *
- * Reads live: it is handed the session straight from the `agentSessions`
- * state, which the event listener replaces on every poll.
- *
- * `onBack` renders the "‹ All agents" link only when given.
- */
-export function AgentDetailBody({
-  session,
-  permission,
-  onResolve,
-  onBack,
-  onPeek,
-}: {
-  session: AgentSession;
-  permission: AgentPermission | null;
-  onResolve: (id: string, reply: ApprovalReply) => void;
-  onBack?: () => void;
-  onPeek: PeekFn;
-}) {
-  const state = rowState(session);
-  const stage = agentStage(session, permission !== null);
-
-  // The transcript backs both the usage line (in the meta) and the thread list.
-  // Only the clicked-in detail (onBack) reads it; the hover peek stays compact.
-  const { transcript, transcriptError } = useTranscript(session.id, Boolean(onBack));
-
-  return (
-    <div className="agent-detail">
-      {onBack && (
-        <button className="agent-detail__back" onClick={onBack}>
-          ‹ All agents
-        </button>
-      )}
-      {/* The same stage avatar as the list, so the detail view matches. The
-          live state sits right here beside it — a small dot + word — instead of
-          taking its own row below. */}
-      <div className="agent-detail__meta">
-        <StageAvatar session={session} stage={stage} state={state} onPeek={onPeek} />
-        <div className="agent-detail__id">
-          <span className="agent-detail__tag" data-state={state}>
-            {rowTag(session)}
-          </span>
-          <span className="agent-detail__state" data-state={state}>
-            <span className="agent-detail__state-dot" aria-hidden />
-            {session.tool ?? (session.busy ? "thinking…" : "idle")}
-          </span>
-        </div>
-      </div>
-      {/* Folder + usage share a line below the header, so big token counts
-          don't crowd the model tag. Just the folder name, not the full path —
-          the leaf is what identifies the session. */}
-      {(session.cwd || (transcript && transcript.entries.length > 0)) && (
-        <div className="agent-detail__subline">
-          {session.cwd && (
-            <span className="agent-detail__cwd" title={session.cwd}>
-              {baseName(session.cwd)}
-            </span>
-          )}
-          {transcript && transcript.entries.length > 0 && (
-            <span className="agent-detail__usage">
-              {transcript.costUsd != null && transcript.costUsd > 0 && (
-                <span className="agent-detail__cost">{formatCost(transcript.costUsd)}</span>
-              )}
-              {tokenSummary(
-                transcript.inputTokens,
-                transcript.cacheReadTokens,
-                transcript.outputTokens,
-              )}
-            </span>
-          )}
-        </div>
-      )}
-      {session.prompt ? (
-        <p className="agent-detail__prompt" title={session.prompt}>
-          You: {truncate(session.prompt, PROMPT_CHARS)}
-        </p>
-      ) : (
-        session.title && (
-          <p className="agent-detail__prompt" title={session.title}>
-            {truncate(session.title, PROMPT_CHARS)}
-          </p>
-        )
-      )}
-
-      {/* The card for this exact agent — the whole point of the detail view. */}
-      {permission && (
-        <PermissionCard request={permission} queued={0} onResolve={onResolve} />
-      )}
-
-      {/* The full thread — only in the clicked-in detail. Usage now lives up in
-          the meta line; this is just the collapsible conversation. */}
-      {onBack && <AgentTranscriptView data={transcript} error={transcriptError} />}
-
-      {session.subagents.length > 0 && (
-        <div className="agent-detail__subs">
-          <span className="agent-detail__label">
-            Subagents ({session.subagents.length})
-          </span>
-          <ul className="subagents">
-            {session.subagents.map((sub, i) => (
-              <li className="subagent-row" key={i}>
-                <span
-                  className="agent-row__state"
-                  data-state={sub.busy ? "busy" : "done"}
-                  aria-hidden
-                />
-                <span className="subagent-row__label">{sub.label}</span>
-                {sub.tool && <span className="subagent-row__tool">{sub.tool}</span>}
-                {sub.model && <span className="subagent-row__model">{sub.model}</span>}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * The session's thread as one interleaved stream: your prompts, Claude's
- * messages (markdown), and tool calls in the order they happened, newest at the
- * bottom. Always shown — the `.jsonl` read is already lazy (on detail open), and
- * the parser caps at the last 20 entries so this stays a recent-activity window.
- */
-/**
- * The activity view — deliberately spare. Not the whole thread: Claude's
- * *latest* message, and a short list of the *recent* tool calls as ticks. The
- * full transcript is one glance's worth of "what's it saying + what did it just
- * do", not an archive to scroll.
- */
-function AgentTranscriptView({
-  data,
-  error,
-}: {
-  data: AgentTranscript | null;
-  error: string | null;
-}) {
-  if (error) {
-    return <p className="agent-detail__transcript-empty">{error}</p>;
-  }
-  if (!data) {
-    return <p className="agent-detail__transcript-empty">Reading…</p>;
-  }
-  if (data.entries.length === 0) {
-    return <p className="agent-detail__transcript-empty">No activity yet.</p>;
-  }
-
-  // The last assistant message, without copying the array (findLast needs a
-  // newer TS lib target than the project uses).
-  let latest: AgentTranscriptEntry | undefined;
-  for (let i = data.entries.length - 1; i >= 0; i--) {
-    if (data.entries[i].kind === "assistant") {
-      latest = data.entries[i];
-      break;
-    }
-  }
-  const ticks = toolTicks(data.entries);
-
-  return (
-    <div
-      className="activity"
-      // Keep the newest content in view as it updates — the box scrolls
-      // internally, so the panel (and the notch) never resizes.
-      ref={(el) => {
-        if (!el) return;
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => {
-            el.scrollTop = el.scrollHeight;
-          }),
-        );
-      }}
-    >
-      {latest && <AssistantRow text={latest.text} />}
-      {ticks.length > 0 && (
-        <ul className="ticks">
-          {ticks.map((tick, i) => (
-            <li className="tick" data-error={tick.isError || undefined} key={i}>
-              <span className="tick__mark" aria-hidden>
-                {tick.isError ? "✗" : "✓"}
-              </span>
-              <span className="tick__text" title={tick.title}>
-                {tick.text}
-              </span>
-              {tick.count > 1 && <span className="tick__count">×{tick.count}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
 }
 
 /** One collapsed line of tool activity. */
@@ -425,18 +219,4 @@ export function toolTicks(entries: AgentTranscriptEntry[], max = 6): Tick[] {
     }
   }
   return ticks.slice(-max);
-}
-
-/**
- * Claude's latest message, as markdown. No clamp or "Show more" — the activity
- * box is a fixed-height scroll area, so a long message just scrolls in place
- * rather than growing the panel (which would re-animate the notch). Plain: no
- * per-message measuring, which was itself a source of height jitter.
- */
-function AssistantRow({ text }: { text: string }) {
-  return (
-    <div className="msg">
-      <MessageResponse>{text}</MessageResponse>
-    </div>
-  );
 }

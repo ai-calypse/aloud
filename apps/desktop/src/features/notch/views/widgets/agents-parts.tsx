@@ -27,7 +27,7 @@ export function Idle({
 }
 
 /**
- * The widgets look's button: Music's white pill for the one thing a tile is
+ * The widget boards' button: Music's white pill for the one thing a tile is
  * for, a neutral one for the rest. Words always; a glyph only beside them.
  */
 export function Pill({

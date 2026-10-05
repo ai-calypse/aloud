@@ -88,9 +88,7 @@ function appIcon(name: string): string {
 
 // ── settings ─────────────────────────────────────────────────────────────
 
-// The look follows `?notchStyle=` so the tuner's iframe keeps choosing it.
 const SETTINGS = (): Settings => ({
-  notchStyle: params.get("notchStyle") === "widgets" ? "widgets" : "calm",
   catImages: true,
   catImagesDictation: true,
   catImagesAgents: true,

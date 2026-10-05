@@ -1,71 +1,19 @@
 import { describe, expect, it } from "vitest";
-import type { AgentSession, Quota } from "@/lib/bindings";
+import type { AgentSession } from "@/lib/bindings";
 import type { Run, Step } from "@/lib/agent-steps";
-import { extraUsage, runSummary, sessionLabel, sessionState, stepRole, usageBars, usageWarning } from "./agents-logic";
+import { runSummary, sessionLabel, sessionState, stepRole, usageWarning } from "./agents-logic";
 
-const NOW = Date.parse("2026-10-04T12:00:00Z");
 const session = (over: Partial<AgentSession> = {}) =>
   ({ id: "a", agent: "claude", title: "", prompt: null, cwd: null, tool: null, busy: false, ...over }) as AgentSession;
 const step = (over: Partial<Step> = {}): Step =>
   ({ name: "X", app: "Notes", args: {}, requiresConfirmation: false, ...over }) as Step;
 const run = (over: Partial<Run> = {}): Run => ({ heard: "x", steps: [], ...over });
 
-describe("usageBars", () => {
-  const quota: Quota = {
-    fiveHour: { percent: 42.4, resetsAt: "2026-10-04T14:10:00Z" },
-    sevenDay: { percent: 93, resetsAt: null },
-    sevenDayOpus: null,
-    extraUsagePercent: null,
-  };
-
-  it("keeps each window on its own Screen Time colour and skips the ones the plan left out", () => {
-    const bars = usageBars(quota, NOW);
-    expect(bars.map((b) => [b.label, b.role])).toEqual([
-      ["5-hour window", "blue"],
-      ["Week", "cyan"],
-    ]);
-  });
-
-  it("gives each window a heading short enough for a four-column row", () => {
-    expect(usageBars({ ...quota, sevenDayOpus: { percent: 5, resetsAt: null } }, NOW).map((b) => b.short)).toEqual([
-      "5-hour",
-      "Week",
-      "Opus",
-    ]);
-  });
-
-  it("rounds to the whole percent the words say and keeps the bar on the same number", () => {
-    const [five] = usageBars(quota, NOW);
-    expect(five.percent).toBe(42);
-    expect(five.value).toBe(0.42);
-    expect(five.resets).toBe("Resets in 2h");
-  });
-
-  it("names a window near its cap in words, as the calm view colours it", () => {
-    const [five, week] = usageBars(quota, NOW);
-    expect(five.warning).toBeNull();
-    expect(week.warning).toBe("Nearly full");
-    expect(week.resets).toBeNull();
+describe("usageWarning", () => {
+  it("names a window near its cap in words, as the bar colours it", () => {
+    expect(usageWarning(93)).toBe("Nearly full");
     expect(usageWarning(70)).toBe("Getting full");
     expect(usageWarning(69.9)).toBeNull();
-  });
-
-  it("clamps what the API sends out of range, like the calm bar", () => {
-    const q = { ...quota, fiveHour: { percent: 140, resetsAt: null } };
-    expect(usageBars(q, NOW)[0].percent).toBe(100);
-  });
-
-  it("is empty before the first read", () => {
-    expect(usageBars(null, NOW)).toEqual([]);
-  });
-});
-
-describe("extraUsage", () => {
-  it("shows spend past the plan only when there is some", () => {
-    const base = { fiveHour: null, sevenDay: null, sevenDayOpus: null };
-    expect(extraUsage({ ...base, extraUsagePercent: 0 })).toBeNull();
-    expect(extraUsage({ ...base, extraUsagePercent: null })).toBeNull();
-    expect(extraUsage({ ...base, extraUsagePercent: 12.6 })).toBe(13);
   });
 });
 

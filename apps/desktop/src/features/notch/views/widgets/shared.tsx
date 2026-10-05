@@ -49,8 +49,7 @@ export function QuietPill({
 
 /**
  * A tile that has a sentence to say instead of data: the source is still
- * loading, is not allowed, failed or is empty. Same words as the calm views,
- * drawn as a widget so the board never shows a hole.
+ * loading, is not allowed, failed or is empty. Drawn as a widget so the board never shows a hole.
  */
 export function Notice({
   size = "medium",
@@ -85,7 +84,7 @@ export function Notice({
 }
 
 /**
- * A failed Calendar or Reminders read, as the calm views tell it: a missing
+ * A failed Calendar or Reminders read, as a sentence: a missing
  * Automation grant has one button, the System Settings flow; anything else
  * says what happened and offers a retry.
  */

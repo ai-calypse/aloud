@@ -3,8 +3,7 @@ import type { EventTone } from "@/components/notch/widgets";
 import { nextEvent, overdue } from "@/lib/today";
 
 /**
- * What the Today widgets say, worked out from the same data the calm views
- * read. Apart from the components so the parts that can silently be wrong (a
+ * What the Today widgets say, worked out from the Today hooks' data. Apart from the components so the parts that can silently be wrong (a
  * month starting on the wrong weekday, an event drawn an hour off, a range
  * bar past its track) are testable on their own.
  */

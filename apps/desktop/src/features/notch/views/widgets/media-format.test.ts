@@ -1,18 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { BtDevice, NowPlaying } from "@/lib/bindings";
+import type { BtDevice } from "@/lib/bindings";
 import {
   batterySummary,
   deviceLevel,
   leastLeft,
   levelAccent,
   levels,
-  lineTone,
   micWord,
   outputLine,
-  restLine,
   rowSubtitle,
-  sourceLabel,
-  sourceRole,
 } from "./media-format";
 
 const device = (over: Partial<BtDevice> = {}): BtDevice => ({
@@ -22,31 +18,6 @@ const device = (over: Partial<BtDevice> = {}): BtDevice => ({
   connected: true,
   batteries: [{ label: "", percent: 80 }],
   ...over,
-});
-
-describe("sourceRole", () => {
-  // A web video is not a Music track: it wears the Podcasts purple.
-  it("is Music pink for an app and Podcasts purple for a browser tab", () => {
-    expect(sourceRole({ player: "spotify" } as NowPlaying)).toBe("media");
-    expect(sourceRole({ player: "mediaRemote" } as NowPlaying)).toBe("media");
-    expect(sourceRole({ player: "browser" } as NowPlaying)).toBe("podcast");
-    expect(sourceLabel({ player: "browser" } as NowPlaying)).toBe("Podcasts");
-    expect(sourceLabel({ player: "music" } as NowPlaying)).toBe("Music");
-  });
-});
-
-describe("lineTone and restLine", () => {
-  it("makes the sung line current and the ones either side near", () => {
-    expect([0, 1, 2, 3, 4].map((i) => lineTone(i, 2))).toEqual(["far", "near", "current", "near", "far"]);
-  });
-
-  // Before the first stamp nothing is sung: no line may light up, and the
-  // scroll rests on the first line rather than a negative row.
-  it("highlights nothing before the first line, and rests on it", () => {
-    expect([0, 1, 2].map((i) => lineTone(i, -1))).toEqual(["near", "far", "far"]);
-    expect(restLine(-1)).toBe(0);
-    expect(restLine(7)).toBe(7);
-  });
 });
 
 describe("outputLine and micWord", () => {

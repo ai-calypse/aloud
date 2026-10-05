@@ -6,8 +6,8 @@ import { batteryWidget } from "../widget-home";
 import { chargeSentence, formatGb, num, thermalReading } from "../mac-format";
 
 /**
- * What the Mac widgets say, worked out from the same readings the calm views
- * use. Apart from the components so ring values and words, which can silently
+ * What the Mac widgets say, worked out from the readings the Mac boards
+ * share. Apart from the components so ring values and words, which can silently
  * be wrong, are testable.
  */
 

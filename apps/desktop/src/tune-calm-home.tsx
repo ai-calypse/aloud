@@ -144,7 +144,7 @@ function dataFor(s: Scene): CalmBoardData {
 const noop = () => {};
 const ON = { open: noop, toggle: noop, previous: noop, next: noop, seek: noop, run: noop };
 
-const TABS = SECTIONS.map((s) => ({ id: s.id, label: s.name, icon: s.icon, shortcut: undefined }));
+const TABS = SECTIONS.map((s) => ({ id: s.id, label: s.name, shortcut: undefined }));
 
 /** The panel as the shell draws it for Calm, around a board of fixtures. */
 function Panel({ children, caption }: { children: ReactNode; caption: string }) {
@@ -156,7 +156,6 @@ function Panel({ children, caption }: { children: ReactNode; caption: string }) 
           panelId="calm-fixture"
           value="now"
           onChange={noop}
-          icons={false}
           items={TABS}
         />
         <Button variant="notch-quiet" size="notch" aria-label="Search sections, features and actions">

@@ -1,6 +1,4 @@
 import type { ComponentType } from "react";
-import type { LucideIcon } from "lucide-react";
-import type { NotchStyle } from "@/lib/bindings";
 import type { NotchData } from "./context";
 
 /**
@@ -33,12 +31,6 @@ export type Subsection = {
    */
   ready: boolean;
   view?: ComponentType;
-  /**
-   * The same subsection drawn for the Widgets look. Optional on purpose: a
-   * subsection without one shows its calm `view` in either style, so the look
-   * can land section by section (see `viewFor`).
-   */
-  widgetView?: ComponentType;
 };
 
 export type Section = {
@@ -46,7 +38,6 @@ export type Section = {
   name: string;
   /** What the section is for, in a few words: the footer's caption, "Mac · The machine". */
   blurb?: string;
-  icon: LucideIcon;
   /** How many things here need the user right now: the tab's count. */
   count?: (data: NotchData) => number;
   /** One quiet line beside the subsections: what is live here. */
@@ -74,22 +65,13 @@ export function readySections(sections: Section[]): Section[] {
 }
 
 /**
- * What a subsection draws in `style`: its widget view when the user chose
- * Widgets and one exists, else the calm view. The fallback is the point: a
- * subsection nobody has designed as widgets yet is never blank.
- */
-export function viewFor(sub: Subsection, style: NotchStyle): ComponentType | undefined {
-  return (style === "widgets" && sub.widgetView) || sub.view;
-}
-
-/**
  * The body's width. 640 holds up to six labelled section tabs plus ⌘K and
- * close; all nine need the prototype's 780 (measured in Geist at 13px). The
- * widgets look is always 780: four 158pt tiles and their gaps are 698pt wide.
- * Fixed per build and style, so it never changes while a panel is open.
+ * settings; all nine need the prototype's 780 (measured in Geist at 13px),
+ * which is also what a widget board needs (four 158pt tiles and their gaps are
+ * 698pt wide). Fixed per build, so it never changes while a panel is open.
  */
-export function panelWidth(readyCount: number, style: NotchStyle): number {
-  return style === "widgets" || readyCount > 6 ? 780 : 640;
+export function panelWidth(readyCount: number): number {
+  return readyCount > 6 ? 780 : 640;
 }
 
 /**

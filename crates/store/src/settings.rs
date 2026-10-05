@@ -29,17 +29,6 @@ pub enum OverlayStyle {
     Wings,
 }
 
-/// How the open notch panel looks. `Calm` is the monochrome panel; `Widgets`
-/// redraws it as Apple-style widgets (docs/design/notch-personality.html). Only
-/// the look changes: the sections, shortcuts and closed notch are the same.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub enum NotchStyle {
-    #[default]
-    Calm,
-    Widgets,
-}
-
 /// What the notch's takeovers may do (`aloud_islands::gate`). Quiet is the
 /// only one that is off by default: the rest are the notch doing its job.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -201,8 +190,6 @@ pub struct Settings {
     pub show_menu_bar_icon: bool,
     /// Drop-down pill or menu-bar wings; wings are macOS-only.
     pub overlay_style: OverlayStyle,
-    /// Calm (monochrome) or Widgets (Apple-style tiles) for the open notch.
-    pub notch_style: NotchStyle,
     /// How the notch's takeovers behave: Quiet mode, Focus, per-source switches.
     pub notch_events: NotchEvents,
     /// Whether a coding agent's permission request opens the notch by itself.
@@ -282,7 +269,6 @@ impl Default for Settings {
             mute_system_audio: false,
             show_menu_bar_icon: true,
             overlay_style: OverlayStyle::DropPill,
-            notch_style: NotchStyle::Calm,
             notch_events: NotchEvents::default(),
             // On: a blocked agent is usually why the user looks up. The
             // toggle exists for people who find the self-opening notch rude.
@@ -377,13 +363,11 @@ impl Settings {
                 events.entry("replaceSystemHuds").or_insert(old);
             }
         }
-        // An unrecognised `overlayStyle` (or `notchStyle`, from a newer build)
-        // is dropped so the field defaults. Asking serde whether it parses
+        // An unrecognised `overlayStyle` (from a newer build) is dropped so the field defaults. Asking serde whether it parses
         // beats a per-dead-value rename list, which once collided with a live
         // name. The document must not fail over one stale enum — that would
         // reset the file, and the API keys are in it.
         drop_if_unparseable::<OverlayStyle>(&mut raw, "overlayStyle");
-        drop_if_unparseable::<NotchStyle>(&mut raw, "notchStyle");
         serde_json::from_value(raw)
     }
 
@@ -722,9 +706,6 @@ mod rename_tests {
         }
     }
 
-    /// The widgets look is a choice the user made: it must survive a restart,
-    /// an old file with no `notchStyle` must open Calm, and a value from a
-    /// newer build must cost that one field, not the keys beside it.
     /// An old settings file has no `notchEvents`, and a partial one (a switch
     /// from a newer build is unknown, one is missing) must keep every other
     /// switch at its default rather than resetting the group.
@@ -745,22 +726,18 @@ mod rename_tests {
         );
     }
 
+    /// The notch had a `notchStyle` setting (Calm or Widgets) until it became
+    /// one look. A file saved by that build still carries the key; it must load
+    /// and cost nothing else, the API keys beside it above all.
     #[test]
-    fn the_notch_style_defaults_to_calm_and_survives_a_restart() {
-        assert_eq!(Settings::default().notch_style, NotchStyle::Calm);
-        let old = Settings::from_json(r#"{ "groqApiKey": "keep-me" }"#).expect("old file");
-        assert_eq!(old.notch_style, NotchStyle::Calm);
-
-        let saved = serde_json::to_string(&NotchStyle::Widgets).expect("must serialize");
-        assert_eq!(saved, r#""widgets""#);
-        let reloaded = Settings::from_json(&format!(r#"{{ "notchStyle": {saved} }}"#))
-            .expect("settings must parse");
-        assert_eq!(reloaded.notch_style, NotchStyle::Widgets);
-
-        let future = Settings::from_json(r#"{ "notchStyle": "alive", "groqApiKey": "keep-me" }"#)
-            .expect("an unknown style must not fail the document");
-        assert_eq!(future.notch_style, NotchStyle::Calm);
-        assert_eq!(future.groq_api_key, "keep-me");
+    fn a_settings_file_with_the_retired_notch_style_still_loads() {
+        for style in ["widgets", "calm", "alive"] {
+            let old = Settings::from_json(&format!(
+                r#"{{ "notchStyle": "{style}", "groqApiKey": "keep-me" }}"#
+            ))
+            .expect("a retired key must not fail the document");
+            assert_eq!(old.groq_api_key, "keep-me");
+        }
     }
 
     /// The pill serialized as `"pill"`, the exact string the loader rewrote, so

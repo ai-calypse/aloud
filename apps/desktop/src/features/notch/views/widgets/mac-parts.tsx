@@ -99,7 +99,7 @@ export function Choice({
 }
 
 /**
- * The widgets look's on/off. The calm `Switch` is a raised grey on the notch's
+ * The widget boards' on/off. The ordinary `Switch` is a raised grey on the notch's
  * black, which vanishes on a #252525 tile when off; this one is a white track
  * with a dark knob when on and the neutral track with a white knob when off,
  * so the state shows in the knob's side as well as its tone.

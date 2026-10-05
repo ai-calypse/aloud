@@ -32,7 +32,7 @@ const NOTCH_COLORS = [
   "notch-acc-ink",
 ];
 
-/** The Widgets look's colours (`widget-*` in index.css), by role. */
+/** The widget colours (`widget-*` in index.css), by role. */
 const WIDGET_COLORS = [
   "widget-tile",
   "widget-tile-2",

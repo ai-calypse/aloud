@@ -5,8 +5,6 @@ import {
   formatMinutes,
   formatRate,
   num,
-  privacyLead,
-  usageTone,
 } from "./mac-format";
 
 describe("mac formatting", () => {
@@ -44,14 +42,5 @@ describe("mac formatting", () => {
     expect(batteryTone(8, "discharging")).toBe("danger");
     expect(batteryTone(8, "charging")).toBe("ok");
     expect(batteryTone(60, "discharging")).toBe("ink");
-  });
-
-  it("tones a usage meter at 70 and 90", () => {
-    expect([usageTone(40), usageTone(70), usageTone(95)]).toEqual(["ink", "warn", "danger"]);
-  });
-
-  it("leads with what is on", () => {
-    expect(privacyLead(false, false)).toBe("All quiet");
-    expect(privacyLead(true, true)).toBe("Mic and camera on");
   });
 });

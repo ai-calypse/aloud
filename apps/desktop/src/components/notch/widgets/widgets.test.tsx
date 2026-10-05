@@ -63,8 +63,8 @@ describe("Capsule", () => {
   });
 });
 
-// The Calm Home props are all optional, and the Widgets look must draw exactly
-// what it did: each default below is the class it always had, with no style.
+// The Calm Home props are all optional, and the widget boards must draw exactly
+// what they did: each default below is the class it always had, with no style.
 describe("Calm primitive props", () => {
   it("fills a vertical capsule from the bottom, ending flat and filling its parent", () => {
     const out = html(<Capsule value={0.25} label="Battery" vertical />);

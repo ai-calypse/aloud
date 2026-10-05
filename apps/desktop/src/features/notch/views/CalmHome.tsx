@@ -32,7 +32,7 @@ import {
   TimerTile,
   WeatherTile,
 } from "./CalmTiles";
-import { SKIP_MS, usePlayerControls } from "./widgets/playback";
+import { SKIP_MS, usePlayerControls } from "./playback";
 
 /** The charge moves in minutes; half a minute keeps the tile honest without a busy poll. */
 const BATTERY_POLL_MS = 30_000;
@@ -157,9 +157,8 @@ function useDictateHint(): string {
 }
 
 /**
- * Now › Overview in the Calm look: the Home board, on the real data the
- * notch already reads (the same hooks the Widgets Home and the Media, Focus
- * and Mac views use). Calendar is the island and the clock, never a script:
+ * Now › Overview: the Home board, on the real data the
+ * notch already reads (the same hooks the Media, Focus and Mac boards use). Calendar is the island and the clock, never a script:
  * opening Home must not launch Calendar.app. Plan usage is only what the
  * Usage view already fetched, because reading it prompts for the Keychain.
  */

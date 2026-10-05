@@ -1,4 +1,4 @@
-import type { CardKind, NotchStyle, OverlayStyle, Phase } from "./bindings";
+import type { CardKind, OverlayStyle, Phase } from "./bindings";
 import type { SectionId } from "@/features/notch/sections";
 import type { TakeoverPreview } from "@/features/overlay/previews";
 
@@ -16,8 +16,6 @@ import type { TakeoverPreview } from "@/features/overlay/previews";
 export type PreviewCommand = {
   phase?: Phase;
   style?: OverlayStyle;
-  /** The open panel's look: Settings › Overlay's choice, without saving it. */
-  notchStyle?: NotchStyle;
   /**
    * The live dictation transcript. `stream` includes a mid-way revision, which
    * is the case that can make the panel jitter.

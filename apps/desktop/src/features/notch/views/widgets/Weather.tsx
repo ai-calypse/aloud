@@ -6,14 +6,14 @@ import type { Weather } from "@/lib/bindings";
 import { degrees } from "@/lib/today";
 import { cn } from "@/lib/utils";
 import { useWeather } from "../../useToday";
-import { SKY } from "../Today";
+import { SKY } from "../sky";
 import { Notice, Pill, QuietPill } from "./shared";
 import { dayLabel, rangeBar, weekRange } from "./today-logic";
 
 /**
- * Today › Weather in the widgets look: Apple's Weather widget (a blue tile, a
+ * Today › Weather as a widget board: Apple's Weather widget (a blue tile, a
  * Light temperature, the sky, and the days as low-to-high bars) beside a Place
- * tile that keeps what the calm view can do: change the city, go back to this
+ * tile that keeps the controls: change the city, go back to this
  * Mac's location, refresh.
  *
  * There is no hourly row: the weather read is five days, and an hour strip
@@ -181,8 +181,8 @@ export function ForecastTile({ data }: { data: Weather }) {
 }
 
 /**
- * Weather, place: where the forecast is for, and the three things the calm view
- * lets you do about it. The saved city, else wherever this connection is: a
+ * Weather, place: where the forecast is for, and the three things you can
+ * do about it. The saved city, else wherever this connection is: a
  * coarse guess, so the city field is one tap away.
  */
 export function PlaceTile({

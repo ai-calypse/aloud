@@ -54,7 +54,7 @@ describe("statRings", () => {
 });
 
 describe("rateParts", () => {
-  it("joins back to the calm view's formatRate, so the two looks never disagree", () => {
+  it("joins back to formatRate, so the number and its unit never disagree", () => {
     for (const b of [null, 0, 812, 1000, 812_000, 1_400_000, 250_000_000]) {
       const { value, unit } = rateParts(b);
       expect(`${value} ${unit}`).toBe(formatRate(b));
@@ -127,7 +127,7 @@ describe("privacyTile", () => {
 
 describe("snap glyphs", () => {
   // A new snap with no drawing would be an empty box in the grid.
-  it("draws every snap the calm view offers", () => {
+  it("draws every snap the Windows board offers", () => {
     for (const s of SNAPS) expect(SNAP_REGION[s.id], s.id).toBeTruthy();
   });
 

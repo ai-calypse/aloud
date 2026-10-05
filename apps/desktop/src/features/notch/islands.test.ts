@@ -94,7 +94,7 @@ describe("islandRole", () => {
     expect(islandRole({ ...island("battery"), priority: "urgent" })).toBeUndefined();
   });
 
-  // The events were drawn in plain ink in the widgets look: each takes the
+  // Each event takes the
   // colour docs/design/notch-events.html gives it.
   it("gives every system event the design's colour", () => {
     const ev = (id: string, patch: Partial<Island> = {}) => islandRole({ ...island(id), ...patch });
@@ -175,7 +175,8 @@ describe("takeovers", () => {
     expect(capsuleText(alert({ title: "Muted" }))).toBe("Muted");
   });
 
-  // Calm stays ink: a 20% battery is red only in the widgets look (islandRole).
+  // The tone is only for what the word alone cannot say; a 20% battery is red
+  // through its role (islandRole).
   it("speaks red for what is critical and green for a write that landed", () => {
     expect(islandTone(alert({ id: "mac:battery-low" }))).toBeUndefined();
     expect(islandTone(alert({ id: "x", priority: "urgent" }))).toBe("danger");

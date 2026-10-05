@@ -6,7 +6,6 @@ import {
   LoaderCircleIcon,
   Maximize2Icon,
   MicIcon,
-  PlusIcon,
   Trash2Icon,
   TriangleAlertIcon,
   XIcon,
@@ -37,19 +36,14 @@ import {
 import { toolTicks, useTranscript } from "@/features/overlay/AgentList";
 import { AskGate, ConfirmGate, FinderGrid, ShowButton, UndoButton } from "@/features/overlay/AgentRun";
 import { AGENT_NAME, AgentAvatar, rowName, rowTag, type PeekFn } from "@/features/overlay/agentIdentity";
-import { CodingAgentComposer } from "@/features/overlay/CodingAgentComposer";
 import { PermissionCard, baseName } from "@/features/overlay/PermissionCards";
-import { useQuota } from "@/features/overlay/QuotaDashboard";
 import { useNotch } from "../../context";
 import { justFinished, liveRun, voiceRow, voiceStats, type VoiceRow } from "../../voice-runs";
 import {
-  extraUsage,
   runSummary,
   sessionLabel,
   sessionState,
   stepRole,
-  usageBars,
-  type UsageBar,
 } from "./agents-logic";
 import { Idle, Pill } from "./agents-parts";
 
@@ -61,7 +55,7 @@ const wordClass = (role: WidgetRole | undefined) => (role ? "text-widget-acc-ink
  * ------------------------------------------------------------------------- */
 
 /**
- * Agents › Voice in the widgets look: the command running now as a board (the
+ * Agents › Voice as a widget board: the command running now as a board (the
  * command and its steps in one Large tile, then either the approval it is
  * waiting on or its answer, how far it got and where it stands), and under it
  * the past runs, newest first, in a Large tile with two small ones counting
@@ -445,92 +439,11 @@ function StepGlyph({ step, pending }: { step: Step; pending: boolean }) {
  * ------------------------------------------------------------------------- */
 
 /**
- * Agents › Coding in the widgets look: a Medium tile per session (its cat, its
- * state in words, what it is doing) that opens the session, and a Large tile
- * for the approval the first waiting request needs. One card at a time: every
- * permission card answers Enter for itself, so two on screen would approve both.
+ * The approval card the first waiting request needs, and a session's tile and
+ * detail board: what Agents › Coding opens a session into. One card at a time:
+ * every permission card answers Enter for itself, so two on screen would
+ * approve both.
  */
-export function WidgetCoding() {
-  const { sessions, permissions, selected, select, resolvePermission, showPeek, bodyRef } =
-    useNotch();
-  // The form is the calm one: it is a text form, not a view of data, and a
-  // second copy would drift.
-  const [composing, setComposing] = useState(false);
-  const session = sessions.find((s) => s.id === selected);
-  if (composing) {
-    return <CodingAgentComposer bodyRef={bodyRef} onClose={() => setComposing(false)} />;
-  }
-  if (session) {
-    return (
-      <CodingDetail
-        session={session}
-        permission={permissions.find((p) => p.sessionId === session.id) ?? null}
-        queued={permissions.filter((p) => p.sessionId !== session.id).length}
-        onResolve={resolvePermission}
-        onBack={() => select(null)}
-        onPeek={showPeek}
-      />
-    );
-  }
-  return (
-    <CodingList
-      sessions={sessions}
-      permissions={permissions}
-      onSelect={select}
-      onResolve={resolvePermission}
-      onPeek={showPeek}
-      onNew={() => setComposing(true)}
-    />
-  );
-}
-
-export function CodingList({
-  sessions,
-  permissions,
-  onSelect,
-  onResolve,
-  onPeek,
-  onNew,
-}: {
-  sessions: AgentSession[];
-  permissions: AgentPermission[];
-  onSelect: (id: string) => void;
-  onResolve: (id: string, reply: ApprovalReply) => void;
-  onPeek: PeekFn;
-  onNew: () => void;
-}) {
-  const askingIds = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
-  return (
-    <WidgetBoard label="Coding agents">
-      {permissions[0] && (
-        <ApprovalTile request={permissions[0]} queued={permissions.length - 1} onResolve={onResolve} />
-      )}
-      <WidgetFrame size="small" label="New coding agent" ground="deep" onActivate={onNew}>
-        <div className="flex h-full flex-col justify-between p-3.5">
-          <PlusIcon aria-hidden className="size-6 text-widget-ink-2" strokeWidth={1.6} />
-          <p className="m-0 text-notch-w-headline leading-tight font-semibold">New agent</p>
-        </div>
-      </WidgetFrame>
-      {sessions.length === 0 ? (
-        <WidgetFrame size="medium" label="Coding agents">
-          <Idle icon={<BotIcon strokeWidth={1.6} />} title="No coding agents running">
-            Claude Code and Codex sessions show up here while they work, with any approval they are waiting on.
-          </Idle>
-        </WidgetFrame>
-      ) : (
-        sessions.map((session) => (
-          <SessionTile
-            key={session.id}
-            session={session}
-            asking={askingIds.has(session.id)}
-            onOpen={() => onSelect(session.id)}
-            onPeek={onPeek}
-          />
-        ))
-      )}
-    </WidgetBoard>
-  );
-}
 
 /** A waiting request as a Large tile; `queued` is how many more are behind it. */
 function ApprovalTile({
@@ -748,156 +661,5 @@ function ActivityTile({ data, error }: { data: AgentTranscript | null; error: st
     <WidgetFrame size="large" label="Activity">
       <div className="h-full overflow-y-auto overscroll-contain p-3.5 text-notch-w-body leading-snug">{body}</div>
     </WidgetFrame>
-  );
-}
-
-/* ---------------------------------------------------------------------------
- * Agents › Usage
- * ------------------------------------------------------------------------- */
-
-/**
- * Agents › Usage in the widgets look: Screen Time. The shortest window leads as
- * the big numeral, and the plan's windows are the bars in Screen Time's blue,
- * cyan and orange. Same opt-in as the calm view: macOS asks before Claude
- * Code's sign-in is read, so nothing is fetched until the user says so.
- */
-export function WidgetUsage() {
-  const { quota, error, on, start } = useQuota();
-  const bars = usageBars(quota);
-  return (
-    <UsageBoard
-      idle={!on && !quota}
-      error={error}
-      loaded={quota !== null}
-      bars={bars}
-      extra={extraUsage(quota)}
-      onStart={start}
-    />
-  );
-}
-
-export function UsageBoard({
-  idle,
-  error,
-  loaded,
-  bars,
-  extra,
-  onStart,
-}: {
-  idle: boolean;
-  error: string | null;
-  loaded: boolean;
-  bars: UsageBar[];
-  extra: number | null;
-  onStart: () => void;
-}) {
-  // A lone tile sits in the middle columns rather than hanging off the left edge.
-  const centred = "col-start-2";
-  if (idle) {
-    return (
-      <WidgetBoard label="Plan usage">
-        <WidgetFrame size="medium" label="Plan usage" className={centred}>
-          <Idle icon={<BotIcon strokeWidth={1.6} />} title="Claude's plan limits">
-            Read from Claude Code&apos;s sign-in. macOS asks once before Aloud can read it.
-            <span className="mt-2 flex flex-wrap items-center gap-2">
-              <Pill onClick={onStart}>Show plan usage</Pill>
-              {error && <span>{error}</span>}
-            </span>
-          </Idle>
-        </WidgetFrame>
-      </WidgetBoard>
-    );
-  }
-  if (bars.length === 0) {
-    return (
-      <WidgetBoard label="Plan usage">
-        <WidgetFrame size="medium" label="Plan usage" className={centred}>
-          <Idle icon={<BotIcon strokeWidth={1.6} />} title={error ?? (loaded ? "No usage data" : "Reading…")} />
-        </WidgetFrame>
-      </WidgetBoard>
-    );
-  }
-  const [lead] = bars;
-  return (
-    <WidgetBoard label="Plan usage">
-      <WidgetFrame size="large" label="Plan usage" className={centred}>
-        <div className="flex h-full flex-col p-3.5">
-          <div className="flex items-center gap-2.5">
-            <span
-              aria-hidden
-              className="grid size-7 shrink-0 place-items-center rounded-full bg-widget-tile-2 text-widget-ink-2"
-            >
-              <BotIcon className="size-4" strokeWidth={1.8} />
-            </span>
-            <div data-w-role={lead.role}>
-              <Numeral text={`${lead.percent}%`} size="s" />
-            </div>
-            <span className="min-w-0 truncate text-notch-w-meta leading-tight font-medium text-widget-ink-2">
-              of the {lead.label.toLowerCase()}
-              {lead.resets && <br />}
-              {lead.resets}
-            </span>
-          </div>
-
-          {/* The chart: gridlines at 0, 50 and 100 as Screen Time's 0m/30m/60m. */}
-          <div className="relative mt-4 mb-4 flex-1">
-            {["100%", "50%", "0%"].map((tick, i) => (
-              <div
-                key={tick}
-                className="absolute inset-x-0 flex -translate-y-1/2 items-center gap-1.5"
-                // Evenly spaced; the arithmetic is the layout, not a value to tokenise.
-                style={{ top: `${i * 50}%` }}
-              >
-                <span className="h-px flex-1 bg-widget-sep" />
-                <span className="w-7 -translate-y-px text-right text-notch-w-over text-widget-ink-2 tabular-nums">
-                  {tick}
-                </span>
-              </div>
-            ))}
-            <div className="absolute inset-y-0 right-9 left-2 flex items-end justify-around">
-              {bars.map((b) => (
-                <div
-                  key={b.label}
-                  role="meter"
-                  aria-label={b.label}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={b.percent}
-                  aria-valuetext={`${b.percent}%${b.warning ? `, ${b.warning}` : ""}`}
-                  data-w-role={b.role}
-                  className="w-9 rounded-t-notch-chip bg-widget-acc transition-[height] duration-[var(--spring-dur)] ease-[var(--spring)]"
-                  // The bar's height is the reading itself.
-                  style={{ height: `${b.value * 100}%`, minHeight: b.percent > 0 ? 3 : 0 }}
-                />
-              ))}
-            </div>
-          </div>
-
-          <ul className="m-0 grid list-none grid-flow-col auto-cols-fr gap-2 p-0">
-            {bars.map((b) => (
-              <UsageColumn key={b.label} bar={b} />
-            ))}
-            {extra !== null && (
-              <li data-w-role="move" className="min-w-0">
-                <div className="truncate text-notch-w-meta font-medium text-widget-acc-ink">Extra</div>
-                <div className="text-notch-w-headline leading-tight font-semibold">{extra}%</div>
-                <div className="truncate text-notch-w-meta text-widget-ink-2">Past limits</div>
-              </li>
-            )}
-          </ul>
-        </div>
-      </WidgetFrame>
-    </WidgetBoard>
-  );
-}
-
-/** Screen Time's column under the chart: a category in its colour, its amount, a line of context. */
-function UsageColumn({ bar }: { bar: UsageBar }) {
-  return (
-    <li data-w-role={bar.role} className="min-w-0">
-      <div className="truncate text-notch-w-meta font-medium text-widget-acc-ink">{bar.short}</div>
-      <div className="text-notch-w-headline leading-tight font-semibold tabular-nums">{bar.percent}%</div>
-      <div className="truncate text-notch-w-meta text-widget-ink-2">{bar.warning ?? bar.resets ?? " "}</div>
-    </li>
   );
 }

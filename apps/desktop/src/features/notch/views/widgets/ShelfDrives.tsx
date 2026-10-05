@@ -7,7 +7,7 @@ import { InfoTile, Note, Pill, WatchTile } from "./shelf-parts";
 import { driveRoom, driveUsage } from "./shelf-widgets";
 
 /**
- * Shelf › Drives in the widgets look: one tile per external drive or mounted
+ * Shelf › Drives as a widget board: one tile per external drive or mounted
  * disk image, its fullness a ring (green, amber, red, always with the
  * percentage and a word), and Eject. A drive that is in use says what is
  * holding it rather than failing quietly.

@@ -1,16 +1,11 @@
-import { useState, type ReactNode } from "react";
-import type { ScreenShot, ShelfDownload, ShelfDrive, ShelfItem } from "./lib/bindings";
+import type { ReactNode } from "react";
+import type { ShelfDownload, ShelfDrive } from "./lib/bindings";
 import { thumbs } from "./features/notch/views/shelf-data";
 import { DownloadsBoard } from "./features/notch/views/widgets/ShelfDownloads";
 import { DrivesBoard } from "./features/notch/views/widgets/ShelfDrives";
-import { FilesBoard } from "./features/notch/views/widgets/ShelfFiles";
-import { ShotsBoard } from "./features/notch/views/widgets/ShelfShots";
-import { TurnOnTile } from "./features/notch/views/widgets/shelf-parts";
-import { WidgetBoard } from "./components/notch/widgets";
-import { CameraIcon } from "lucide-react";
 
 /**
- * Widgets look › Shelf fixtures for the tune page. Everything here is a
+ * Shelf board fixtures (Downloads, Drives) for the tune page. Everything here is a
  * labelled fixture: the app never shows it. The thumbnails are generated
  * gradients seeded into the real thumbnail cache (`shelf-data`), so the tiles
  * run their real `useThumb` path with no Tauri behind it.
@@ -34,37 +29,6 @@ const seed = (path: string, hue: number, kind?: "page" | "shot") => {
   thumbs.set(path, Promise.resolve(art(hue, kind)));
   return path;
 };
-
-const FILE_NAMES: [string, boolean, "file" | "folder"][] = [
-  ["report-q3.pdf", false, "file"],
-  ["demo.mov", false, "file"],
-  ["icons.zip", false, "file"],
-  ["mock.png", true, "file"],
-  ["notes.md", false, "file"],
-  ["Screen 4.png", true, "file"],
-  ["invoice.pdf", false, "file"],
-  ["Assets", false, "folder"],
-  ["deck.key", false, "file"],
-  ["photo.heic", true, "file"],
-  ["contract.pdf", false, "file"],
-];
-
-const ITEMS: ShelfItem[] = FILE_NAMES.map(([name, image, kind], i) => ({
-  id: `f${i}`,
-  name,
-  path: image ? seed(`/fixture/files/${name}`, i * 47) : `/fixture/files/${name}`,
-  original: `/fixture/${name}`,
-  kind,
-  size: 400_000 + i * 730_000,
-  added: SEC - i * 600,
-  image,
-}));
-
-const SHOTS: ScreenShot[] = Array.from({ length: 7 }, (_, i) => ({
-  name: `Screenshot 2026-10-04 at 10.${40 - i}.12.png`,
-  path: seed(`/fixture/shots/${i}`, 200 + i * 30),
-  taken: SEC - 30 - i * 1900,
-}));
 
 const DOWNLOADS: ShelfDownload[] = [
   ["Aloud-0.9.2.dmg", 84_000_000, 120],
@@ -99,67 +63,9 @@ function Block({ name, note, children }: { name: string; note: string; children:
   );
 }
 
-/** Selection and the format picker are live here; the commands are not wired. */
-function FilesFixture({ items, dragging = false, first }: { items: ShelfItem[]; dragging?: boolean; first?: string }) {
-  const [selected, setSelected] = useState<string | null>(first ?? null);
-  const [converting, setConverting] = useState<string | null>(null);
-  return (
-    <FilesBoard
-      items={items}
-      dragging={dragging}
-      busy={null}
-      selectedId={selected}
-      converting={converting}
-      onSelect={(id) => {
-        setSelected(id);
-        setConverting(null);
-      }}
-      onConverting={setConverting}
-      onAirdrop={none}
-      onZip={none}
-      onClear={none}
-      onUnzip={none}
-      onRemove={none}
-      onConvert={none}
-    />
-  );
-}
-
 export function ShelfGallery() {
   return (
-    <div data-notch-style="widgets" className="grid max-w-[720px] gap-9 font-notch-w">
-      <Block name="Shelf · Files" note="fixture: 11 files (scrolls past nine), a picture selected; click another, then Convert for the formats">
-        <FilesFixture items={ITEMS} first="f3" />
-      </Block>
-      <Block name="Shelf · Files, a zip and a folder" note="fixture: Unzip appears for a .zip only; a folder has no Convert and says Folder">
-        <FilesFixture items={ITEMS.slice(0, 9)} first="f2" />
-      </Block>
-      <Block name="Shelf · Files, empty and over the drop" note="the calm view's words; the panel is the drop target, so it says release">
-        <div className="grid gap-6">
-          <FilesFixture items={[]} />
-          <FilesFixture items={[]} dragging />
-        </div>
-      </Block>
-      <Block name="Shelf · Screenshots" note="fixture: seven, newest leading; Copy, Show, drag out; capture tiles; the alerts switch">
-        <ShotsBoard shots={SHOTS} onCopy={none} watch={WATCH} />
-      </Block>
-      <Block name="Shelf · Screenshots, empty and off" note="empty with the one action; then the watcher off, with macOS's permission note">
-        <div className="grid gap-6">
-          <ShotsBoard shots={[]} onCopy={none} watch={WATCH} />
-          <WidgetBoard label="Screenshots off">
-            <TurnOnTile
-              label="Screenshots"
-              icon={<CameraIcon strokeWidth={1.6} />}
-              which="shots"
-              onSet={async () => "macOS has not let Aloud see that folder yet. Allow it in System Settings, then try again."}
-              title="Screenshot shelf is off"
-            >
-              Turn it on and each new screenshot drops from the notch, ready to copy, show in Finder or drag into
-              another app. macOS will ask once to let Aloud see the folder your screenshots go to.
-            </TurnOnTile>
-          </WidgetBoard>
-        </div>
-      </Block>
+    <div className="grid max-w-[720px] gap-9 font-notch-w">
       <Block name="Shelf · Downloads" note="fixture: six downloads, the list, today's count, the latest">
         <DownloadsBoard downloads={DOWNLOADS} watch={WATCH} now={NOW} />
       </Block>
