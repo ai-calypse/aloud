@@ -18,6 +18,9 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "./index.css";
 import { WidgetGallery } from "./tune-widgets";
+// --- Mac + Focus widget fixtures (feat/notch-widgets-mac-focus) ---
+import { MacFocusGallery } from "./tune-widgets-mac-focus";
+// --- end Mac + Focus widget fixtures ---
 import "./styles/notch.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
@@ -669,6 +672,12 @@ function NotchGallery() {
         <Specimen name="Widgets look" note="the Settings › Overlay option: Apple-style tiles; primitives, the Home board, empty and urgent states">
           <WidgetGallery />
         </Specimen>
+
+        {/* --- Mac + Focus widget fixtures (feat/notch-widgets-mac-focus) --- */}
+        <Specimen name="Widgets look · Mac and Focus" note="the Mac (Stats, Power, Privacy, Windows) and Focus (Timer, Keep Awake, Notes) boards, with fixtures and every empty or urgent state">
+          <MacFocusGallery />
+        </Specimen>
+        {/* --- end Mac + Focus widget fixtures --- */}
 
         <Specimen name="Empty" note="a view with nothing to show teaches what fills it">
           <Empty
