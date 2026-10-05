@@ -1,9 +1,31 @@
-//! Dictation history, in a bundled-SQLite table.
+//! Dictation and command history, in a bundled-SQLite table.
+//!
+//! A dictation row keeps what was said and what was pasted. A command row (an
+//! agent or ask run) keeps what was said and how the run ended: the answer, or
+//! the error. Never the steps, the tool arguments or anything a tool read.
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::path::Path;
+
+/// What a history row records. Dictations paste text; commands (agent and ask
+/// runs, whichever key started them) end in an answer or an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum Kind {
+    Dictation,
+    Command,
+}
+
+impl Kind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Kind::Dictation => "dictation",
+            Kind::Command => "command",
+        }
+    }
+}
 
 /// The i64s are exported as `number`: specta forbids that by default (JS loses
 /// precision past 2^53), but row ids, unix seconds and ms durations are all far
@@ -16,10 +38,15 @@ pub struct Entry {
     /// Unix seconds.
     #[specta(type = specta_typescript::Number)]
     pub created_at: i64,
-    /// What the transcriber returned.
+    pub kind: Kind,
+    /// What the transcriber returned. For a command, what the user said.
     pub raw_transcript: String,
-    /// What was actually pasted, after cleanup.
+    /// What was actually pasted, after cleanup. For a command, how the run
+    /// ended: its answer, or the error that stopped it.
     pub final_transcript: String,
+    /// False for a command that ended in an error. Dictations are always true:
+    /// a failed one writes no row.
+    pub success: bool,
     pub app_name: Option<String>,
     #[specta(type = specta_typescript::Number)]
     pub duration_ms: i64,
@@ -119,6 +146,19 @@ impl History {
             )
             .context("adding history.audio_path")?;
         }
+        if version < 3 {
+            // One transaction: SQLite rolls DDL back too, so a failure between
+            // the two columns cannot leave `kind` added with `user_version`
+            // still 2 and every later open failing on a duplicate column.
+            conn.execute_batch(
+                "BEGIN;
+                 ALTER TABLE history ADD COLUMN kind TEXT NOT NULL DEFAULT 'dictation';
+                 ALTER TABLE history ADD COLUMN success INTEGER NOT NULL DEFAULT 1;
+                 PRAGMA user_version = 3;
+                 COMMIT;",
+            )
+            .context("adding history.kind and history.success")?;
+        }
         Ok(())
     }
 
@@ -148,10 +188,63 @@ impl History {
         Ok(id)
     }
 
-    /// Newest first.
+    /// Records how a command ended, once per `utterance_id`: a run that
+    /// finishes and then errors in cleanup, or is reported twice, still leaves
+    /// one row. Returns the new row's id, or `None` when the run already has
+    /// one.
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_run(
+        &self,
+        created_at: i64,
+        said: &str,
+        outcome: &str,
+        success: bool,
+        app_name: Option<&str>,
+        duration_ms: i64,
+        utterance_id: i64,
+        retention: Retention,
+    ) -> Result<Option<i64>> {
+        let written = self.conn.execute(
+            "INSERT INTO history (created_at, raw_transcript, final_transcript, app_name,
+                                  duration_ms, utterance_id, kind, success)
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+             WHERE NOT EXISTS (SELECT 1 FROM history WHERE utterance_id = ?6 AND kind = ?7)",
+            rusqlite::params![
+                created_at,
+                said,
+                outcome,
+                app_name,
+                duration_ms,
+                utterance_id,
+                Kind::Command.as_str(),
+                success
+            ],
+        )?;
+        if written == 0 {
+            return Ok(None);
+        }
+        let id = self.conn.last_insert_rowid();
+        self.prune(retention)?;
+        Ok(Some(id))
+    }
+
+    /// The newest dictations, newest first. Commands are left out on purpose:
+    /// every caller of this (the Run Log, the tray's History menu, retry) works
+    /// from a transcript it can paste or re-transcribe, which a command row is
+    /// not. See [`History::recent_voice`] for both kinds.
     pub fn recent(&self, limit: usize) -> Result<Vec<Entry>> {
+        self.query_recent("WHERE kind = 'dictation'", limit)
+    }
+
+    /// Everything said to Aloud, dictations and commands together, newest
+    /// first: what Agents › Voice lists.
+    pub fn recent_voice(&self, limit: usize) -> Result<Vec<Entry>> {
+        self.query_recent("", limit)
+    }
+
+    fn query_recent(&self, filter: &str, limit: usize) -> Result<Vec<Entry>> {
         let mut stmt = self.conn.prepare(&format!(
-            "{SELECT} ORDER BY created_at DESC, id DESC LIMIT ?1"
+            "{SELECT} {filter} ORDER BY created_at DESC, id DESC LIMIT ?1"
         ))?;
         let rows = stmt.query_map([limit as i64], read_entry)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -306,7 +399,7 @@ impl History {
 
 /// Shared by every read, so a new column cannot reach one query and not another.
 const SELECT: &str = "SELECT id, created_at, raw_transcript, final_transcript, app_name,
-                             duration_ms, utterance_id, audio_path FROM history";
+                             duration_ms, utterance_id, audio_path, kind, success FROM history";
 
 fn read_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
     Ok(Entry {
@@ -318,6 +411,11 @@ fn read_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
         duration_ms: row.get(5)?,
         utterance_id: row.get(6)?,
         audio_path: row.get(7)?,
+        kind: match row.get::<_, String>(8)?.as_str() {
+            "command" => Kind::Command,
+            _ => Kind::Dictation,
+        },
+        success: row.get(9)?,
     })
 }
 
@@ -650,5 +748,132 @@ mod tests {
         insert(&history, 100, "gone", 50);
         history.clear().unwrap();
         assert!(history.recent(10).unwrap().is_empty());
+    }
+
+    fn run(history: &History, at: i64, said: &str, utterance: i64) -> Option<i64> {
+        history
+            .insert_run(
+                at,
+                said,
+                "Done.",
+                true,
+                Some("Safari"),
+                900,
+                utterance,
+                Retention::entries(50),
+            )
+            .unwrap()
+    }
+
+    /// The migration adds columns to a table people already have rows in: those
+    /// rows are dictations, and they must still be there, still dictations.
+    #[test]
+    fn a_dictation_only_database_upgrades_with_every_row_kept_as_a_dictation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.sqlite");
+
+        // Byte-for-byte the user_version = 2 schema, with a row in it.
+        {
+            let old = Connection::open(&path).unwrap();
+            old.execute_batch(
+                "CREATE TABLE history (
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at       INTEGER NOT NULL,
+                    raw_transcript   TEXT NOT NULL,
+                    final_transcript TEXT NOT NULL,
+                    app_name         TEXT,
+                    duration_ms      INTEGER NOT NULL DEFAULT 0,
+                    utterance_id     INTEGER,
+                    audio_path       TEXT
+                );
+                PRAGMA user_version = 2;
+                INSERT INTO history (created_at, raw_transcript, final_transcript, utterance_id)
+                VALUES (100, 'um hello', 'Hello.', 7);",
+            )
+            .unwrap();
+        }
+
+        let history = History::open(&path).unwrap();
+        let rows = history.recent(10).unwrap();
+        assert_eq!(rows.len(), 1, "the pre-existing row must survive");
+        assert_eq!(rows[0].kind, Kind::Dictation);
+        assert!(rows[0].success);
+        assert_eq!(rows[0].final_transcript, "Hello.");
+
+        // And a reopen must not add the columns a second time.
+        run(&history, 200, "open safari", 8);
+        drop(history);
+        let reopened = History::open(&path).unwrap();
+        assert_eq!(reopened.recent_voice(10).unwrap().len(), 2);
+    }
+
+    /// A run reports its end from two places (the result and the error path);
+    /// two rows for one command would list it twice in Voice.
+    #[test]
+    fn a_run_is_recorded_once_whatever_reports_it() {
+        let history = History::open_in_memory().unwrap();
+        assert!(run(&history, 100, "what time is it", 41).is_some());
+        assert_eq!(run(&history, 101, "what time is it", 41), None);
+        assert!(run(&history, 102, "pause", 42).is_some());
+        assert_eq!(history.recent_voice(10).unwrap().len(), 2);
+    }
+
+    /// Every existing reader of `recent` works from a transcript it can paste
+    /// or re-transcribe; a command row would show there as a dictation that
+    /// cannot be retried.
+    #[test]
+    fn dictation_readers_never_see_commands_and_voice_sees_both() {
+        let history = History::open_in_memory().unwrap();
+        insert(&history, 100, "a dictation", 50);
+        run(&history, 200, "a command", 3);
+
+        let dictations = history.recent(10).unwrap();
+        assert_eq!(dictations.len(), 1);
+        assert_eq!(dictations[0].final_transcript, "a dictation");
+
+        let voice = history.recent_voice(10).unwrap();
+        assert_eq!(voice.len(), 2);
+        assert_eq!(voice[0].kind, Kind::Command, "newest first");
+        assert_eq!(voice[0].raw_transcript, "a command");
+        assert_eq!(voice[1].kind, Kind::Dictation);
+    }
+
+    #[test]
+    fn a_failed_run_keeps_its_error_and_is_marked_failed() {
+        let history = History::open_in_memory().unwrap();
+        history
+            .insert_run(
+                100,
+                "email david",
+                "Gmail is not connected",
+                false,
+                None,
+                10,
+                5,
+                Retention::entries(50),
+            )
+            .unwrap();
+        let row = &history.recent_voice(10).unwrap()[0];
+        assert!(!row.success);
+        assert_eq!(row.final_transcript, "Gmail is not connected");
+    }
+
+    /// "Deletable through the existing delete and clear": one table, one budget.
+    #[test]
+    fn commands_share_the_delete_clear_and_entry_cap_of_dictations() {
+        let history = History::open_in_memory().unwrap();
+        for i in 0..5 {
+            history
+                .insert_run(i, "say", "ok", true, None, 1, i, Retention::entries(3))
+                .unwrap();
+        }
+        assert_eq!(history.recent_voice(10).unwrap().len(), 3);
+
+        let newest = history.recent_voice(10).unwrap()[0].id;
+        history.delete(newest).unwrap();
+        assert_eq!(history.recent_voice(10).unwrap().len(), 2);
+
+        history.clear().unwrap();
+        assert!(history.recent_voice(10).unwrap().is_empty());
     }
 }
