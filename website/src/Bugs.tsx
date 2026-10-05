@@ -8,10 +8,10 @@ import { useMeta } from "./seo";
 
 type State = "idle" | "sending" | "done" | "error" | "unconfigured";
 
-// Posts {"description", "email", "macos"} as JSON to VITE_BUGS_URL (any form backend:
-// Formspree, a Cloudflare Worker, a Google Apps Script). Until it is set the page says
-// so, so no report is silently dropped.
-const ENDPOINT = import.meta.env.VITE_BUGS_URL as string | undefined;
+// api/form.ts emails each report through ZeptoMail. VITE_BUGS_URL points the form at another
+// backend (it gets the same JSON). The function answers 503 until its token is set, and the
+// page says so rather than dropping the report silently.
+const ENDPOINT = (import.meta.env.VITE_BUGS_URL as string | undefined) || "/api/form";
 
 const field = "rounded-[12px] border border-line bg-surface-page px-4 py-3 text-[16px] placeholder:text-ink-muted";
 
@@ -24,16 +24,15 @@ export default function Bugs() {
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!ENDPOINT) return setState("unconfigured");
     const f = new FormData(e.currentTarget);
     setState("sending");
     try {
       const res = await fetch(ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ description: f.get("description"), email: f.get("email"), macos: f.get("macos") }),
+        body: JSON.stringify({ kind: "bugs", description: f.get("description"), email: f.get("email"), macos: f.get("macos"), hp: f.get("hp") }),
       });
-      setState(res.ok ? "done" : "error");
+      setState(res.ok ? "done" : res.status === 503 ? "unconfigured" : "error");
       if (res.ok) track("bug_report");
     } catch {
       setState("error");
@@ -61,6 +60,7 @@ export default function Bugs() {
 
       <MacWindow title={c.window} className="w-full max-w-[460px]">
         <form data-clarity-mask="True" onSubmit={submit} className="flex flex-col gap-4 p-6 text-ink">
+          <input name="hp" tabIndex={-1} autoComplete="off" aria-hidden="true" className="absolute -left-[9999px] size-px opacity-0" />
           <label className="flex flex-col gap-2 text-[14px] font-medium">
             {c.what}
             <textarea name="description" required rows={5} placeholder={c.whatPlaceholder} className={`${field} resize-y font-normal`} />

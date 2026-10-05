@@ -10,10 +10,10 @@ import { useMeta } from "./seo";
 
 type State = "idle" | "sending" | "done" | "error" | "unconfigured";
 
-// Posts {"email": "...", "platform": "windows"} as JSON to VITE_WAITLIST_URL (any form
-// backend: Formspree, a Cloudflare Worker, a Google Apps Script). Until it is set
-// the page says so, so no signup is silently dropped.
-const ENDPOINT = import.meta.env.VITE_WAITLIST_URL as string | undefined;
+// api/form.ts emails each signup through ZeptoMail. VITE_WAITLIST_URL points the form at
+// another backend (it gets the same JSON). The function answers 503 until its token is set,
+// and the page says so rather than dropping the signup silently.
+const ENDPOINT = (import.meta.env.VITE_WAITLIST_URL as string | undefined) || "/api/form";
 
 export default function Waitlist() {
   const c = useCopy();
@@ -23,8 +23,7 @@ export default function Waitlist() {
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!ENDPOINT) return setState("unconfigured");
-    const email = new FormData(e.currentTarget).get("email");
+    const f = new FormData(e.currentTarget);
     setState("sending");
     try {
       const res = await fetch(ENDPOINT, {
@@ -33,9 +32,9 @@ export default function Waitlist() {
           "Content-Type": "application/json",
           Accept: "application/json",
         },
-        body: JSON.stringify({ email, platform: "windows" }),
+        body: JSON.stringify({ kind: "waitlist", email: f.get("email"), platform: "windows", hp: f.get("hp") }),
       });
-      setState(res.ok ? "done" : "error");
+      setState(res.ok ? "done" : res.status === 503 ? "unconfigured" : "error");
       if (res.ok) track("waitlist_join");
     } catch {
       setState("error");
@@ -72,6 +71,7 @@ export default function Waitlist() {
             <form data-clarity-mask="True" onSubmit={submit} className="flex flex-col gap-4 p-6">
               <h1 className="t-card">{c.waitlist.h1}</h1>
               <p className="text-ink-muted">{c.waitlist.p}</p>
+              <input name="hp" tabIndex={-1} autoComplete="off" aria-hidden="true" className="absolute -left-[9999px] size-px opacity-0" />
               <input
                 name="email"
                 type="email"
