@@ -26,6 +26,7 @@ import { TodayCalendar, TodayReminders, TodayStocks, TodayWeather } from "./view
 import { NowOverview } from "./views/Now";
 import { WidgetHome } from "./views/WidgetHome";
 import { ShelfDownloads, ShelfDrives, ShelfFiles, ShelfShots } from "./views/Shelf";
+import { WidgetShelfFiles } from "./views/widgets/ShelfFiles";
 
 /**
  * Every section of the notch panel and every subsection in it, in tab order —
@@ -129,6 +130,7 @@ export const SECTIONS: Section[] = [
         features: ["File shelf", "AirDrop", "Image converter", "Zip"],
         ready: true,
         view: ShelfFiles,
+        widgetView: WidgetShelfFiles,
       },
       {
         id: "shots",
