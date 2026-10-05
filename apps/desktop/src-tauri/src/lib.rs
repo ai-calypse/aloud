@@ -14,7 +14,6 @@ mod media; // notch-media
 mod mac;
 // notch-mac: wiring ends
 mod meeting;
-mod notch;
 mod nudges;
 mod overlay;
 mod pipeline;
@@ -62,8 +61,6 @@ pub struct AppState {
     pub connectors: commands::ConnectorCache,
     /// Per-stage latency, written by the tracing layer and read by the dev panel.
     pub timings: Arc<Mutex<aloud_store::Timings>>,
-    /// Measured once on the main thread at launch; empty without a notch.
-    pub notch: Vec<notch::Notch>,
 }
 
 pub fn run() {
@@ -375,11 +372,14 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
                 hotkey_capture: hotkey_capture.clone(),
                 connectors: Default::default(),
                 timings: timings.clone(),
-                // Tauri's setup callback is the main thread, which NSScreen requires.
-                notch: notch::notched_screens(),
             });
             app.manage(agent::PendingConfirmation::default());
             app.manage(agent::PendingQuestion::default());
+
+            // Main thread (NSScreen). The displays are read here and again on
+            // every change, so a display plugged in later re-places the overlay.
+            aloud_screens::refresh();
+            overlay::watch_displays(app.handle());
 
             // Main thread required. A floating-level window is clamped below
             // the menu bar, which the wings style has to sit in.

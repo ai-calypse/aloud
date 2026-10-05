@@ -1,9 +1,11 @@
 //! The recording pill: a small always-on-top window showing dictation state.
 
 use crate::pipeline::Phase;
+use aloud_screens::Notch;
 use aloud_store::settings::{OverlayDisplay, OverlayStyle};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_specta::Event;
@@ -140,22 +142,16 @@ pub fn install_drag(app: &AppHandle) {
 pub fn install_drag(_app: &AppHandle) {}
 
 /// The notch of the screen this overlay will land on, if that screen has one.
-/// Matched by logical size — Tauri and AppKit disagree on origin and axis, but
-/// not on a screen's point size.
-fn target_notch(window: &WebviewWindow) -> Option<crate::notch::Notch> {
-    let notches = window
-        .app_handle()
-        .try_state::<crate::AppState>()
-        .map(|s| s.notch.clone())?;
-    if notches.is_empty() {
-        return None;
-    }
+/// Read off the screen [`chosen_screen`] picks — the same one the window is
+/// placed on, so the two cannot disagree. Off macOS there is no notch.
+#[cfg(target_os = "macos")]
+fn target_notch(window: &WebviewWindow) -> Option<Notch> {
+    chosen_screen(window.app_handle())?.notch
+}
 
-    let monitor = resolve_monitor(window).ok().flatten()?;
-    let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
-    notches
-        .into_iter()
-        .find(|n| (n.screen_w - size.width).abs() < 2.0 && (n.screen_h - size.height).abs() < 2.0)
+#[cfg(not(target_os = "macos"))]
+fn target_notch(_window: &WebviewWindow) -> Option<Notch> {
+    None
 }
 
 /// The style to draw for `phase`, and the notch geometry the top-welded styles
@@ -163,7 +159,7 @@ fn target_notch(window: &WebviewWindow) -> Option<crate::notch::Notch> {
 ///
 /// Wings *flank* the notch, so they need a notched screen — and they fall back
 /// to the drop pill on an error, where a 40pt wing would hide the message.
-fn style_for(window: &WebviewWindow, phase: Phase) -> (OverlayStyle, Option<crate::notch::Notch>) {
+fn style_for(window: &WebviewWindow, phase: Phase) -> (OverlayStyle, Option<Notch>) {
     let notch = target_notch(window);
     // Always-listening sits in the menu bar all day; a drop pill would hang a
     // panel over whatever the user is doing.
@@ -225,16 +221,31 @@ pub fn show(app: &AppHandle, phase: Phase) {
 
     // Both sent *after* `show`: a hidden window's webview is created lazily, so
     // an event emitted before it lands with nothing listening.
-    let style_event = OverlayStyleChanged {
-        style,
+    send_style(app, style, notch);
+    if let Err(e) = phase.emit_to(app, LABEL) {
+        tracing::warn!(%e, "could not send phase to overlay");
+    }
+}
+
+/// What the webview was last told to draw, so a display change can re-send it
+/// with the new screen's notch instead of guessing what is on screen.
+static LAST_STYLE: Mutex<OverlayStyle> = Mutex::new(OverlayStyle::DropPill);
+
+/// Tells the webview which style to draw and the notch to weld to. Wings need a
+/// notch to flank, so a notchless screen always gets the drop pill.
+fn send_style(app: &AppHandle, style: OverlayStyle, notch: Option<Notch>) {
+    *LAST_STYLE.lock().unwrap_or_else(|e| e.into_inner()) = style;
+    let event = OverlayStyleChanged {
+        style: if notch.is_some() {
+            style
+        } else {
+            OverlayStyle::DropPill
+        },
         notch_width: notch.map_or(0.0, |n| n.width),
         notch_height: notch.map_or(0.0, |n| n.height),
     };
-    if let Err(e) = style_event.emit_to(app, LABEL) {
+    if let Err(e) = event.emit_to(app, LABEL) {
         tracing::warn!(%e, "could not send overlay style");
-    }
-    if let Err(e) = phase.emit_to(app, LABEL) {
-        tracing::warn!(%e, "could not send phase to overlay");
     }
 }
 
@@ -280,20 +291,13 @@ pub fn show_panel(app: &AppHandle) {
     INTERACTIVE.store(true, Ordering::SeqCst);
 
     let notch = target_notch(&window);
-    // Forced rather than read from settings: a 40pt wing has nowhere to put the
-    // content. `effectiveStyle` in overlay.tsx makes the same call.
-    let style = OverlayStyleChanged {
-        style: OverlayStyle::DropPill,
-        notch_width: notch.map_or(0.0, |n| n.width),
-        notch_height: notch.map_or(0.0, |n| n.height),
-    };
     if let Err(e) = position_top_center(&window, 0.0) {
         tracing::warn!(%e, "could not position answer panel");
     }
     let _ = window.show();
-    if let Err(e) = style.emit_to(app, LABEL) {
-        tracing::warn!(%e, "could not send overlay style");
-    }
+    // Forced rather than read from settings: a 40pt wing has nowhere to put the
+    // content. `effectiveStyle` in overlay.tsx makes the same call.
+    send_style(app, OverlayStyle::DropPill, notch);
     // Keys but not clicks: `ignoresMouseEvents` does not gate the keyboard, so
     // the panel can take focus while clicks still fall through. It gets clicks
     // only while the pointer is over it — see [`track_cursor`].
@@ -346,6 +350,16 @@ static PEEKING: AtomicBool = AtomicBool::new(false);
 #[specta::specta]
 pub fn set_notch_peek(app: AppHandle, open: bool) {
     let was = PEEKING.swap(open, Ordering::SeqCst);
+    // The resting window may have been left on a screen that is no longer the
+    // chosen one (a display arrived or left while it sat idle); Home opening is
+    // when it has to be where the user is looking.
+    if open {
+        if let Some(window) = window(&app) {
+            if let Err(e) = position_top_center(&window, 0.0) {
+                tracing::warn!(%e, "could not position the hover-opened home");
+            }
+        }
+    }
     // A takeover held back by the peek may come back now that it is gone.
     if was && !open {
         crate::islands::panel_closed(&app);
@@ -379,14 +393,7 @@ pub fn show_toast(app: &AppHandle, own_panel: bool) -> bool {
     let _ = window.set_ignore_cursor_events(true);
     let _ = window.show();
     // The toast hangs from the notch like the panel does, whatever the bar's style.
-    let style = OverlayStyleChanged {
-        style: OverlayStyle::DropPill,
-        notch_width: notch.map_or(0.0, |n| n.width),
-        notch_height: notch.map_or(0.0, |n| n.height),
-    };
-    if let Err(e) = style.emit_to(app, LABEL) {
-        tracing::warn!(%e, "could not send overlay style");
-    }
+    send_style(app, OverlayStyle::DropPill, notch);
     track_cursor(app);
     true
 }
@@ -480,7 +487,7 @@ pub fn set_panel_box(width: f64, height: f64) {
 /// Takes the already-resolved notch: [`target_notch`] enumerates the displays,
 /// so a caller that already has it (`show`, `show_notch`) must not pay for a
 /// second resolution.
-fn reset_panel_box_to_notch(notch: Option<crate::notch::Notch>) {
+fn reset_panel_box_to_notch(notch: Option<Notch>) {
     let (w, h) = notch.map_or((0.0, 0.0), |n| (n.width, n.height));
     set_panel_box(w, h);
 }
@@ -566,14 +573,7 @@ pub fn show_notch(app: &AppHandle) {
     // Resting: the click region is the cutout, never a leftover panel box.
     reset_panel_box_to_notch(notch);
 
-    let style = OverlayStyleChanged {
-        style: OverlayStyle::DropPill,
-        notch_width: notch.map_or(0.0, |n| n.width),
-        notch_height: notch.map_or(0.0, |n| n.height),
-    };
-    if let Err(e) = style.emit_to(app, LABEL) {
-        tracing::warn!(%e, "could not send notch style");
-    }
+    send_style(app, OverlayStyle::DropPill, notch);
     track_cursor(app);
 }
 
@@ -587,14 +587,37 @@ fn cursor_over_panel(window: &WebviewWindow) -> tauri::Result<bool> {
     let scale = window.scale_factor()?;
     let origin = window.outer_position()?.to_logical::<f64>(scale);
     let canvas = window.outer_size()?.to_logical::<f64>(scale);
-    let cursor = window.cursor_position()?.to_logical::<f64>(scale);
+    let Some(cursor) = cursor_logical(window, scale)? else {
+        return Ok(false);
+    };
 
     Ok(point_in_panel(
-        (cursor.x, cursor.y),
+        cursor,
         (origin.x, origin.y),
         canvas.width,
         panel,
     ))
+}
+
+/// The pointer in the same logical, top-left-origin space as `outer_position`.
+///
+/// Tao's `cursor_position` scales the pointer by the *primary* display's factor
+/// and `to_logical(scale)` undoes it with the *window's*, so on a 1x external
+/// beside a 2x built-in the pointer reads twice too far out and the notch on
+/// the external never sees a hover. AppKit points need no scale at all.
+#[cfg(target_os = "macos")]
+fn cursor_logical(_window: &WebviewWindow, _scale: f64) -> tauri::Result<Option<(f64, f64)>> {
+    let primary_height = aloud_screens::current().first().map(|s| s.frame.h);
+    Ok(aloud_screens::mouse_location()
+        .zip(primary_height)
+        // The same flip tao applies to the window's own origin.
+        .map(|((x, y), height)| (x, height - y)))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn cursor_logical(window: &WebviewWindow, scale: f64) -> tauri::Result<Option<(f64, f64)>> {
+    let cursor = window.cursor_position()?.to_logical::<f64>(scale);
+    Ok(Some((cursor.x, cursor.y)))
 }
 
 /// Whether `cursor` is over the panel drawn in a window at `origin`. The panel
@@ -767,9 +790,81 @@ fn chosen_monitor(
     picked.or(primary)
 }
 
+/// The screen the overlay should land on, per the "Show on" setting, falling
+/// back to the primary. `None` only with no displays at all.
+#[cfg(target_os = "macos")]
+fn chosen_screen(app: &AppHandle) -> Option<aloud_screens::Screen> {
+    let screens = aloud_screens::current();
+    let i = pick_screen(
+        &settings(app).overlay_display,
+        &screens,
+        aloud_screens::mouse_location(),
+    )?;
+    screens.into_iter().nth(i)
+}
+
+/// [`chosen_monitor`] over AppKit screens: the primary is the menu-bar screen,
+/// `NSScreen.screens[0]`, and the cursor's screen is the one whose frame holds
+/// the pointer.
+#[cfg(target_os = "macos")]
+fn pick_screen(
+    display: &OverlayDisplay,
+    screens: &[aloud_screens::Screen],
+    mouse: Option<(f64, f64)>,
+) -> Option<usize> {
+    let names: Vec<_> = screens.iter().map(|s| Some(s.name.clone())).collect();
+    let cursor = mouse.and_then(|at| aloud_screens::locate(screens, at));
+    chosen_monitor(display, &names, (!screens.is_empty()).then_some(0), cursor)
+}
+
+/// Top-centres `window` on the screen the user picked, in AppKit points.
+///
+/// Not tao's `set_position`: it turns a monitor's origin into pixels with that
+/// monitor's scale and the window's size and position with the window's
+/// *current* one, so with a 1x external beside the 2x built-in the centre lands
+/// across the seam and the panel is drawn on one screen and clipped by the
+/// next. Points are the one space all displays share; the frame is also
+/// clamped to the chosen screen (see `aloud_screens::top_left_for`).
+///
+/// Only `top_margin` is a design measurement; it is in points too.
+#[cfg(target_os = "macos")]
+pub fn position_top_center(window: &WebviewWindow, top_margin: f64) -> tauri::Result<()> {
+    use objc2_app_kit::NSWindow;
+    use objc2_foundation::NSPoint;
+
+    let Some(screen) = chosen_screen(window.app_handle()) else {
+        return Ok(()); // headless; leave it wherever it is
+    };
+    let target = window.clone();
+    // NSWindow is main-thread only, and callers are on tokio workers.
+    window.run_on_main_thread(move || {
+        let Ok(ptr) = target.ns_window() else { return };
+        // Safety: `ns_window` returns this webview's live `NSWindow`, and this
+        // closure runs on the main thread.
+        let ns_window: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+        let now = ns_window.frame();
+        let size = (now.size.width, now.size.height);
+        let (x, top) = aloud_screens::top_left_for(screen.frame, size, top_margin);
+        // Placement is idempotent and runs on every show; only a real move is
+        // worth a log line.
+        if (now.origin.x - x).abs() < 0.5 && (now.origin.y + size.1 - top).abs() < 0.5 {
+            return;
+        }
+        tracing::info!(
+            on = %screen,
+            window = ?size,
+            x,
+            top,
+            screens = %aloud_screens::current().iter().map(ToString::to_string).collect::<Vec<_>>().join("; "),
+            "placing overlay"
+        );
+        ns_window.setFrameTopLeftPoint(NSPoint::new(x, top));
+    })
+}
+
 /// The monitor the overlay should land on, per the "Show on" setting, falling
-/// back to the primary. `Ok(None)` only when headless. Shared by positioning
-/// and notch lookup so the two cannot disagree about which screen it is on.
+/// back to the primary. `Ok(None)` only when headless.
+#[cfg(not(target_os = "macos"))]
 fn resolve_monitor(window: &WebviewWindow) -> tauri::Result<Option<tauri::Monitor>> {
     let mut monitors = window.available_monitors()?;
     let names: Vec<_> = monitors.iter().map(|m| m.name().cloned()).collect();
@@ -792,6 +887,11 @@ fn resolve_monitor(window: &WebviewWindow) -> tauri::Result<Option<tauri::Monito
 /// already, and dividing the window size by the *monitor's* scale is wrong
 /// whenever the two screens differ — half a window's width of error at 2x vs 1x.
 /// Only `top_margin` is logical, because it is a design measurement.
+///
+/// ponytail: Windows keeps tao's physical-pixel path. Windows reports one
+/// coordinate space for every monitor under per-monitor DPI awareness; if a
+/// mixed-DPI straddle shows up there, port the `aloud_screens` clamp to it.
+#[cfg(not(target_os = "macos"))]
 pub fn position_top_center(window: &WebviewWindow, top_margin: f64) -> tauri::Result<()> {
     let Some(monitor) = resolve_monitor(window)? else {
         return Ok(()); // headless; leave it wherever it is
@@ -815,6 +915,61 @@ pub fn position_top_center(window: &WebviewWindow, top_margin: f64) -> tauri::Re
 
     window.set_position(tauri::PhysicalPosition::new(x, y))?;
     Ok(())
+}
+
+/// How long a burst of screen-parameter notifications must be quiet before the
+/// overlay is re-placed. One plug posts several, and the first arrives while
+/// macOS is still moving windows between spaces.
+#[cfg(target_os = "macos")]
+const DISPLAY_SETTLE: Duration = Duration::from_millis(300);
+
+#[cfg(target_os = "macos")]
+static DISPLAY_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Re-places the overlay whenever a display is connected, removed, re-arranged
+/// or switched to another resolution. Main thread, once, after
+/// `aloud_screens::refresh`.
+#[cfg(target_os = "macos")]
+pub fn watch_displays(app: &AppHandle) {
+    let app = app.clone();
+    aloud_screens::watch(move || {
+        let generation = DISPLAY_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(DISPLAY_SETTLE).await;
+            if DISPLAY_GENERATION.load(Ordering::SeqCst) == generation {
+                after_display_change(&app);
+            }
+        });
+    });
+}
+
+/// ponytail: macOS only. Windows would want `WM_DISPLAYCHANGE`; tao does not
+/// surface it, and a window placed before an unplug there stays until the next
+/// show re-places it.
+#[cfg(not(target_os = "macos"))]
+pub fn watch_displays(_app: &AppHandle) {}
+
+/// The displays changed under a window that may already be up: put it back on
+/// the chosen screen, and hand the webview the new screen's notch (a built-in
+/// with one and an external without, or the reverse, change what it welds to).
+/// A hidden window is left for its next `show` to place.
+#[cfg(target_os = "macos")]
+fn after_display_change(app: &AppHandle) {
+    let Some(window) = window(app) else { return };
+    if !window.is_visible().unwrap_or(false) {
+        return;
+    }
+    if let Err(e) = position_top_center(&window, 0.0) {
+        tracing::warn!(%e, "could not re-position overlay after a display change");
+    }
+    let notch = target_notch(&window);
+    // An open panel's box is its own; only the resting cutout is ours to reset.
+    if !PANEL_OPEN.load(Ordering::SeqCst) {
+        reset_panel_box_to_notch(notch);
+    }
+    let style = *LAST_STYLE.lock().unwrap_or_else(|e| e.into_inner());
+    send_style(app, style, notch);
 }
 
 /// Sends the live input level to the pill.
@@ -885,6 +1040,57 @@ mod tests {
 
         // Headless: nothing to position against, and no panic.
         assert_eq!(chosen_monitor(&named, &[], None, None), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn screen(name: &str, x: f64, y: f64, w: f64, h: f64) -> aloud_screens::Screen {
+        aloud_screens::Screen {
+            name: name.into(),
+            frame: aloud_screens::Rect { x, y, w, h },
+            scale: 1.0,
+            notch: None,
+        }
+    }
+
+    /// The "Show on" setting over real AppKit geometry: the notch lookup and the
+    /// placement both read this one answer, so it is what keeps the panel and
+    /// its cutout on the same display.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn show_on_resolves_against_appkit_screens() {
+        let screens = [
+            screen("Built-in Retina Display", 0.0, 0.0, 1512.0, 982.0),
+            screen("DELL U2720Q", 1512.0, -98.0, 1920.0, 1080.0),
+        ];
+        let pick = |d: &OverlayDisplay, at| pick_screen(d, &screens, at);
+
+        assert_eq!(
+            pick(&OverlayDisplay::Primary, Some((2000.0, 400.0))),
+            Some(0)
+        );
+        assert_eq!(
+            pick(&OverlayDisplay::Active, Some((2000.0, 400.0))),
+            Some(1)
+        );
+        assert_eq!(
+            pick(&OverlayDisplay::Active, Some((2000.0, 982.0))),
+            Some(1),
+            "the pointer on the notch row of the external is on the external"
+        );
+        assert_eq!(pick(&OverlayDisplay::Active, None), Some(0));
+        assert_eq!(
+            pick(
+                &OverlayDisplay::Named("DELL U2720Q".into()),
+                Some((10.0, 10.0))
+            ),
+            Some(1)
+        );
+        assert_eq!(
+            pick(&OverlayDisplay::Named("Gone".into()), Some((10.0, 10.0))),
+            Some(0),
+            "an unplugged display falls back to the menu-bar screen"
+        );
+        assert_eq!(pick_screen(&OverlayDisplay::Primary, &[], None), None);
     }
 
     /// The reported bug: with an answer open, most of the screen stopped taking
