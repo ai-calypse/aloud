@@ -1,0 +1,18 @@
+[package]
+name = "aloud-screens"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Where the displays are, in AppKit points, and where a window top-centred on one of them goes"
+
+[dependencies]
+tracing.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.5"
+# relax-sign-encoding: NSScreen.screens would abort a debug build without it
+# (see CLAUDE.md), and this crate's own example has no src-tauri to unify the
+# feature for it.
+objc2 = { version = "0.5", features = ["relax-sign-encoding"] }
+objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSEvent", "NSResponder", "NSScreen"] }
+objc2-foundation = { version = "0.2", features = ["NSArray", "NSGeometry", "NSNotification", "NSOperation", "NSString", "NSThread", "block2"] }

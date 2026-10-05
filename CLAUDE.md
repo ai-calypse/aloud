@@ -30,6 +30,7 @@ crates/
   notify/              other apps' notifications: a read-only watcher over Notification Center's DB
   paste/               clipboard snapshot/restore, synthetic paste
   screen/              screen control through Cua Driver: read, click, type
+  screens/             displays in AppKit points, notch geometry, overlay placement
   selection/           reading the focused app and its selected text
   store/               settings, history, stats, migrations, timings
   transcribe/          local whisper.cpp + cloud whisper + Deepgram streaming
@@ -396,7 +397,8 @@ short version:
   feature on `objc2` (a direct dep) fixes it. And a menu-bar/notch overlay must
   set its `NSWindow` level to `NSScreenSaverWindowLevel`; a floating-level
   window is clamped below the menu bar. `NSScreen` calls must run on the main
-  thread — the notch is measured once in `setup`.
+  thread — `aloud_screens::refresh` reads them in `setup` and again on every
+  screen-parameter change, and everything else reads the cache.
 - **`resources/` is gitignored, but `tauri.conf.json` bundles three globs in
   it** (`resources/*`, `resources/engine/**`, `resources/mediaremote/**`) and
   `tauri_build` fails when one matches nothing. `build.rs` drops an empty
@@ -415,6 +417,16 @@ short version:
   hardware. Brightness is decoded from NX_SYSDEFINED (key types 2/3) and from
   plain key-downs 144/145; which one a given keyboard sends is unverified, so
   both are handled (`aux::brightness_keycode`).
+
+- **Never position the overlay with tao's physical pixels across displays.**
+  Tao converts a monitor's origin with that monitor's scale and a window's
+  size/position with the window's *current* one, so with a 1x external beside
+  the 2x built-in the centre lands across the seam and the panel is clipped
+  (macOS draws a window on one display only). Place in AppKit points through
+  `aloud_screens::top_left_for`, which clamps to the chosen screen. Tao's
+  `cursor_position` has the same flaw; use `aloud_screens::mouse_location`.
+  `cargo run -p aloud-screens --example placement` prints every display and the
+  frame the overlay would take.
 
 ## Verifying
 

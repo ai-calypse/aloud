@@ -316,7 +316,20 @@ pub async fn finder_reveal(path: String) -> CmdResult<()> {
 /// dropped: the setting stores a name, so such a row could never match back.
 #[tauri::command]
 #[specta::specta]
-pub fn overlay_displays(app: AppHandle) -> CmdResult<Vec<String>> {
+pub fn overlay_displays(
+    #[cfg_attr(target_os = "macos", allow(unused_variables))] app: AppHandle,
+) -> CmdResult<Vec<String>> {
+    // The names the overlay matches on (`overlay::pick_screen`), which on macOS
+    // are AppKit's — tao's are "Monitor #<model number>", the same for two
+    // identical displays and not what System Settings shows.
+    #[cfg(target_os = "macos")]
+    {
+        Ok(aloud_screens::current()
+            .into_iter()
+            .map(|s| s.name)
+            .collect())
+    }
+    #[cfg(not(target_os = "macos"))]
     Ok(app
         .available_monitors()
         .map_err(|e| e.to_string())?
