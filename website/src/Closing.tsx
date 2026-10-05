@@ -68,7 +68,7 @@ export default function Closing() {
               width={192}
               height={206}
               loading="lazy"
-              className="pointer-events-none absolute left-[7%] top-[70%] w-[14%] md:top-[77.5%] md:w-[10%] [filter:drop-shadow(0_2px_5px_rgb(0_0_60/0.45))]"
+              className="pointer-events-none absolute left-[20%] top-[70%] w-[14%] md:top-[77.5%] md:w-[10%] [filter:drop-shadow(0_2px_5px_rgb(0_0_60/0.45))]"
             />
           </picture>
         </div>
