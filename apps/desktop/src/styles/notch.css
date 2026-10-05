@@ -231,7 +231,13 @@
    Geist panel: the rebind is scoped here, so a row, button or card a tile
    holds (all `font-notch`) follows it and the chrome around does not. */
 .notch-board,
-.notch-board-bar {
+.notch-board-bar,
+/* The islands, whispers, peeks, cards and nudges were picked as drawn in the
+   widgets look, so they speak SF too; the toast chip and the run stay Calm. */
+.island-pill,
+.peek,
+.toast[data-tier="card"],
+.nudge {
   --font-notch: var(--font-notch-w);
   font-family: var(--font-notch);
 }
