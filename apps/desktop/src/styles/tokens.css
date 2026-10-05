@@ -226,12 +226,12 @@
   --radius-notch-track: 9px; /* a segmented control's outer track */
   --radius-notch-panel: 24px; /* the panel's bottom corners, fully open */
 
-  /* --- The Widgets look ----------------------------------------------------
+  /* --- Widget boards -------------------------------------------------------
      Apple's widget library, read from the CarPlay Design System Figma file
      (docs/design/figma-carplay-index.md). Raw values only here: nothing reads
-     them until the overlay root says data-notch-style="widgets", and Calm
-     never does. Components use the `w-*` utilities (index.css), and a
-     widget's accent comes from its role (below), never from a hex. */
+     them until a widget does, and a Calm list never does. Components use the
+     `w-*` utilities (index.css), and a widget's accent comes from its role
+     (below), never from a hex. */
 
   /* Surfaces */
   --notch-w-tile: #1c1c1e; /* Calendar, Reminders, Notes, Screen Time */
@@ -308,7 +308,7 @@
      shade toward black. */
   --notch-w-fill-mix: 76%;
 
-  /* Type. SF is the system face, so this look is a Mac one: it costs no font
+  /* Type. SF is the system face, so the boards are a Mac look: it costs no font
      file, and Windows falls through to system-ui. Rounded only where the Figma
      file says (Fitness lines). */
   --font-notch-w: -apple-system, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
@@ -334,12 +334,6 @@
   --notch-w-gap: calc(22px * var(--notch-w-scale));
   --radius-notch-w-tile: 22px;
   --radius-notch-w-card: 5px; /* an event card; its bar is 3px */
-}
-
-/* The look itself: the panel's chrome speaks SF too. Calm has no rule here, so
-   it cannot move. */
-[data-notch-style="widgets"] {
-  --font-notch: var(--font-notch-w);
 }
 
 /* A Calm tile and its state. `data-notch-tile` rebinds the widget primitives'

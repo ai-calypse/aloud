@@ -175,7 +175,7 @@
   --text-notch-tile-title: var(--text-notch-tile-title);
   --tracking-notch-n: var(--tracking-notch-n);
 
-  /* The Widgets look (tokens.css, `--notch-w-*`). `widget-` utilities read the
+  /* Widget boards (tokens.css, `--notch-w-*`). `widget-` utilities read the
      per-widget variables a role sets (`data-w-role`), with the neutral value
      as the fallback, so a frame with no role still draws. */
   --color-widget-tile: var(--w-tile, var(--notch-w-tile));

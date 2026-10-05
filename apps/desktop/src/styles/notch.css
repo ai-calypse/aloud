@@ -195,11 +195,11 @@
 
 /* The coding agents were monospace to read as a terminal echo; Geist Mono
    keeps that and joins the panel's family. */
-.notch-shell :is(.agents, .agent-detail) {
+.notch-shell .agents {
   font-family: var(--font-notch-mono);
 }
 
-/* --- The Widgets look (components/notch/widgets) -------------------------
+/* --- Widget boards (components/notch/widgets) ----------------------------
  * Sizes are the one thing a utility cannot say without an arbitrary value, so
  * they are rules over tokens: small, medium and large as Apple draws them,
  * scaled together by --notch-w-scale. Colours are the `widget-*` utilities. */
@@ -226,7 +226,16 @@
   height: var(--notch-w-large);
 }
 
-/* A board: four small tiles across, each row a tile and the label under it. */
+/* A board: four small tiles across, each row a tile and the label under it.
+   A board and its bar speak SF, as the widgets they imitate do, inside the
+   Geist panel: the rebind is scoped here, so a row, button or card a tile
+   holds (all `font-notch`) follows it and the chrome around does not. */
+.notch-board,
+.notch-board-bar {
+  --font-notch: var(--font-notch-w);
+  font-family: var(--font-notch);
+}
+
 .notch-board {
   display: grid;
   grid-template-columns: repeat(4, var(--notch-w-small));
@@ -261,12 +270,11 @@
   transition: stroke-dashoffset var(--dur-drain) linear;
 }
 
-/* --- Islands, in the widgets look ----------------------------------------
- * Only colour changes (the type already follows --font-notch, which the look
- * rebinds); the closed notch's geometry and behaviour are the shared ones
- * above. An island with a role (islandRole) speaks in that
- * accent's ink, the accent-ink rule that keeps words at AA. */
-[data-notch-style="widgets"] [data-w-role] .island-pill__detail:not([data-urgent]) {
+/* --- Island accents ------------------------------------------------------
+ * An island with a role (islandRole) speaks in that accent's ink, the
+ * accent-ink rule that keeps words at AA. Colour only: the closed notch's
+ * geometry and behaviour are the shared ones above. */
+[data-w-role] .island-pill__detail:not([data-urgent]) {
   color: var(--w-ink);
 }
 

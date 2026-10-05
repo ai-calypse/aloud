@@ -25,24 +25,25 @@
   color: var(--notch-warn);
 }
 
-/* The widgets look speaks each event's role (islandRole), as the design does:
-   the whisper's glyph and level fill in the accent, its track tinted; a peek
+/* Every takeover speaks its role (islandRole), as the design does: the
+   whisper's glyph and level fill in the accent, its track tinted; a peek
    or card's glyph tile tinted with the accent's ink on it. The word already
-   takes the accent ink (notch.css). Calm keeps the ink and the tones above. */
-[data-notch-style="widgets"] .island-pill--whisper[data-w-role] .island-pill__side [role="img"] {
+   takes the accent ink (notch.css). An island with no role keeps the ink and
+   the tones above. */
+.island-pill--whisper[data-w-role] .island-pill__side [role="img"] {
   color: var(--w-acc);
 }
 
-[data-notch-style="widgets"] .island-pill--whisper[data-w-role] .level-bar {
+.island-pill--whisper[data-w-role] .level-bar {
   background: var(--w-track);
 }
 
-[data-notch-style="widgets"] .island-pill--whisper[data-w-role] .level-bar__fill {
+.island-pill--whisper[data-w-role] .level-bar__fill {
   background: var(--w-acc);
 }
 
-[data-notch-style="widgets"] .peek[data-w-role] .peek__side [role="img"],
-[data-notch-style="widgets"] .toast[data-w-role] > [role="img"] {
+.peek[data-w-role] .peek__side [role="img"],
+.toast[data-w-role] > [role="img"] {
   background: var(--w-track);
   color: var(--w-ink);
 }
