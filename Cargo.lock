@@ -366,6 +366,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "aloud-notify"
+version = "0.1.0"
+dependencies = [
+ "aloud-islands",
+ "plist",
+ "rusqlite",
+ "serde",
+ "specta",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "aloud-paste"
 version = "0.1.0"
 dependencies = [

@@ -200,6 +200,11 @@ pub struct Island {
     #[serde(default)]
     #[specta(optional)]
     pub short: Option<String>,
+    /// A peek or card's second line, after the bold title: what the message
+    /// says, when the meeting starts. Shown and forgotten, like the rest.
+    #[serde(default)]
+    #[specta(optional)]
+    pub body: Option<String>,
     #[serde(default)]
     pub source: IslandSource,
     /// Set by the gate, never by a producer: a peek or card shown as a side
