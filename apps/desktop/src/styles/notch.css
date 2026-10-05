@@ -102,17 +102,20 @@
   animation: ask-out var(--dur-fast) var(--ease-in) both;
 }
 
+/* Tight on purpose: both sides take the wider one's width, so every px here
+   is paid twice across the closed notch. The camera side needs little, the
+   hardware notch already clears it. */
 .island-pill__side {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
-  padding: 0 8px 0 12px;
+  padding: 0 4px 0 9px;
 }
 
 .island-pill__side--right {
   justify-content: flex-end;
-  padding: 0 12px 0 8px;
+  padding: 0 9px 0 4px;
 }
 
 .island-pill__item {
@@ -123,7 +126,7 @@
 }
 
 .island-pill__detail {
-  max-width: 12ch;
+  max-width: 10ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

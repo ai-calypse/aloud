@@ -31,8 +31,8 @@ export function applyIsland(islands: Island[], { change, order }: IslandChanged)
 export const PILL = {
   icon: 18,
   gap: 6,
-  /** `.island-pill__detail`'s 12ch cap, at the pill's 12px digits. */
-  detail: 84,
+  /** `.island-pill__detail`'s 10ch cap, at the pill's 12px digits. */
+  detail: 70,
   disc: 22,
   /** How much of a disc the next one covers, as an avatar stack does. */
   overlap: 7,
@@ -46,7 +46,7 @@ export const STACK_MAX = 3;
 /**
  * What the closed notch draws for its live activities, whatever their number:
  * the most important in full (`lead`), the next few as overlapping glyph discs
- * (`stack`, nearest the camera first), and the remainder as a count. It never
+ * (`stack`, tucked after the lead's icon), and the remainder as a count. It never
  * grows with the number of activities, which is what keeps the notch the size
  * of a notch.
  */
@@ -56,25 +56,26 @@ export function pillLayout(live: Island[]): { lead: Island | null; stack: Island
 }
 
 /**
- * Each side's width in px. One activity spans the camera (icon left, value
- * right); more put the lead's icon and value left and the stack right.
- * Pill-wide, the notch is twice the wider side plus the camera.
+ * Each side's width in px. Icons go left (the lead's, then the stack tucked
+ * after it) and the lead's value right, with any "+N", so one activity and
+ * many share a shape. Pill-wide, the notch is twice the wider side plus the
+ * camera: putting the value with the stack instead left one side short and
+ * padded out to match the other.
  */
 export function pillSideWidths(live: Island[]): { left: number; right: number } {
   const { lead, stack, more } = pillLayout(live);
   if (!lead) return { left: 0, right: 0 };
-  if (stack.length === 0) return { left: PILL.icon, right: PILL.detail };
-  const discs = PILL.disc + (stack.length - 1) * (PILL.disc - PILL.overlap);
+  const discs = stack.length ? PILL.gap + PILL.disc + (stack.length - 1) * (PILL.disc - PILL.overlap) : 0;
   return {
-    left: PILL.icon + PILL.gap + PILL.detail,
-    right: discs + (more > 0 ? PILL.gap + PILL.more : 0),
+    left: PILL.icon + discs,
+    right: PILL.detail + (more > 0 ? PILL.gap + PILL.more : 0),
   };
 }
 
-/** The widest a side ever gets: the lead in full, or a full stack and its count. */
+/** The widest a side ever gets: every icon of a full stack, or the value and its count. */
 export const PILL_SIDE_MAX = Math.max(
-  PILL.icon + PILL.gap + PILL.detail,
-  PILL.disc + (STACK_MAX - 1) * (PILL.disc - PILL.overlap) + PILL.gap + PILL.more,
+  PILL.icon + PILL.gap + PILL.disc + (STACK_MAX - 1) * (PILL.disc - PILL.overlap),
+  PILL.detail + PILL.gap + PILL.more,
 );
 
 /** The accent each owner's island speaks in, by the prefix of its id (`media:browser:…`). */

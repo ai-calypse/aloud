@@ -62,7 +62,6 @@ export function IslandPill({
   waiting?: number;
 }) {
   const { lead, stack, more } = pillLayout(live);
-  const single = live.length === 1 ? live[0] : null;
   const stackRef = useRef<HTMLDivElement>(null);
   // The discs slide into their new places when one joins, leaves or re-ranks.
   useFlip(stackRef, stack.map((i) => i.id).join("|"));
@@ -87,22 +86,11 @@ export function IslandPill({
         {lead && (
           <span className="island-pill__item" data-w-role={islandRole(lead)}>
             <IslandIcon island={lead} sessions={sessions} permissions={permissions} />
-            {/* One activity spans both sides: its value goes right. */}
-            {!single && <Detail island={lead} />}
           </span>
         )}
-      </div>
-      <span className="island-pill__camera" aria-hidden />
-      <div
-        className="island-pill__side island-pill__side--right"
-        // One activity's value sits here, outside its item.
-        data-w-role={single ? islandRole(single) : undefined}
-      >
-        {single ? (
-          <Detail island={single} />
-        ) : (
-          // The first disc is nearest the camera and on top; the rest tuck
-          // under it, so the stack reads outward from the lead.
+        {stack.length > 0 && (
+          // The others tuck in after the lead's icon, each under the one
+          // before it, so the stack reads outward from the lead.
           <div className="island-pill__stack" ref={stackRef}>
             {stack.map((island, i) => (
               <span
@@ -118,6 +106,14 @@ export function IslandPill({
             ))}
           </div>
         )}
+      </div>
+      <span className="island-pill__camera" aria-hidden />
+      <div
+        className="island-pill__side island-pill__side--right"
+        // The lead's value sits here, outside its item.
+        data-w-role={lead ? islandRole(lead) : undefined}
+      >
+        {lead && <Detail island={lead} />}
         {rest > 0 && <span className="island-pill__more">+{rest}</span>}
       </div>
     </div>
