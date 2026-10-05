@@ -75,4 +75,19 @@ describe("registry widget views", () => {
       ["devices", true],
     ]);
   });
+
+  it("draws Agents and Launch as widgets, leaving Launch › Search calm", () => {
+    const sub = (s: string, id: string) =>
+      READY.find((x) => x.id === s)!.subsections.find((x) => x.id === id)!;
+    for (const [s, id] of [
+      ["agents", "voice"],
+      ["agents", "coding"],
+      ["agents", "usage"],
+      ["launch", "apps"],
+      ["launch", "shortcuts"],
+    ]) {
+      expect(sub(s, id).widgetView, `${s}/${id}`).toBeDefined();
+    }
+    expect(sub("launch", "search").widgetView).toBeUndefined();
+  });
 });

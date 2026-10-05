@@ -27,6 +27,7 @@ import { TodayWidgetGallery } from "./tune-widgets-today";
 // --- Mac + Focus widget fixtures (feat/notch-widgets-mac-focus) ---
 import { MacFocusGallery } from "./tune-widgets-mac-focus";
 // --- end Mac + Focus widget fixtures ---
+import { AgentsLaunchGallery } from "./tune-widgets-agents-launch";
 import "./styles/notch.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
@@ -699,6 +700,11 @@ function NotchGallery() {
           <MacFocusGallery />
         </Specimen>
         {/* --- end Mac + Focus widget fixtures --- */}
+        {/* --- Widgets look: Agents and Launch fixtures (feat/notch-widgets-agents-launch) --- */}
+        <Specimen name="Widgets look · Agents and Launch" note="fixtures: Voice, Coding, Usage, Apps and Shortcuts in their states; Launch › Search stays calm">
+          <AgentsLaunchGallery />
+        </Specimen>
+        {/* --- end Widgets look: Agents and Launch fixtures --- */}
 
         <Specimen name="Empty" note="a view with nothing to show teaches what fills it">
           <Empty

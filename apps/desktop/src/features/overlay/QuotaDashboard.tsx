@@ -13,7 +13,7 @@ import { Bar, type Tone } from "@/components/notch/meters";
  */
 const QUOTA_POLL_MS = 60_000;
 
-export function QuotaDashboard() {
+export function useQuota() {
   const [quota, setQuota] = useState<Quota | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Opt-in: reading the token prompts for Keychain access, so nothing fetches
@@ -43,6 +43,24 @@ export function QuotaDashboard() {
     };
   }, [on]);
 
+  return { quota, error, on, start: () => setOn(true) };
+}
+
+/** The windows the plan reports, labelled, skipping the ones it left out. */
+export function shownWindows(quota: Quota | null): [string, QuotaWindow][] {
+  const windows: [string, QuotaWindow | null][] = quota
+    ? [
+        ["5-hour window", quota.fiveHour],
+        ["Week", quota.sevenDay],
+        ["Week · Opus", quota.sevenDayOpus],
+      ]
+    : [];
+  return windows.filter((entry): entry is [string, QuotaWindow] => entry[1] != null);
+}
+
+export function QuotaDashboard() {
+  const { quota, error, on, start } = useQuota();
+
   // Idle: an explanation and a button, no fetch, no prompt until asked.
   if (!on && !quota) {
     return (
@@ -51,7 +69,7 @@ export function QuotaDashboard() {
           Claude's plan limits, read from Claude Code's sign-in. macOS asks once
           before Aloud can read it.
         </p>
-        <Button variant="notch" size="notch" onClick={() => setOn(true)}>
+        <Button variant="notch" size="notch" onClick={start}>
           Show plan usage
         </Button>
         {error && <p className="m-0 text-notch-meta text-notch-ink-3">{error}</p>}
@@ -59,14 +77,7 @@ export function QuotaDashboard() {
     );
   }
 
-  const windows: [string, QuotaWindow | null][] = quota
-    ? [
-        ["5-hour window", quota.fiveHour],
-        ["Week", quota.sevenDay],
-        ["Week · Opus", quota.sevenDayOpus],
-      ]
-    : [];
-  const shown = windows.filter((entry): entry is [string, QuotaWindow] => entry[1] != null);
+  const shown = shownWindows(quota);
   if (shown.length === 0) {
     return (
       <p className="m-0 font-notch text-notch-body text-notch-ink-3">
@@ -109,7 +120,7 @@ export function QuotaDashboard() {
   );
 }
 
-function percent(w: QuotaWindow): number {
+export function percent(w: QuotaWindow): number {
   return Math.min(100, Math.max(0, w.percent ?? 0));
 }
 
