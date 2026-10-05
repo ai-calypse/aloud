@@ -128,7 +128,8 @@ fn caps(on: bool) -> Island {
 fn mic(muted: bool) -> Island {
     hud(
         "hud:mic",
-        "mute",
+        // The glyph carries the state, so the webview can colour it (red muted).
+        if muted { "mic-off" } else { "mic" },
         "Microphone",
         Some(if muted { "Mic muted" } else { "Mic on" }),
     )

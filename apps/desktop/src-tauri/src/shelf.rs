@@ -166,18 +166,30 @@ fn alert(e: Spec) -> Island {
     }
 }
 
-fn shot_island(shot: &Shot, thumb: Option<String>) -> Island {
+/// `copied`: it is already on the clipboard, so the whisper says so and offers
+/// only Show; when copying failed it keeps the Copy button.
+fn shot_island(shot: &Shot, thumb: Option<String>, copied: bool) -> Island {
+    let show = IslandAction::new("Show", "shelf.reveal").arg("path", &shot.path);
     alert(Spec {
         id: format!("shot:{}", shot.path),
-        title: "Screenshot saved".into(),
+        title: if copied {
+            "Screenshot copied"
+        } else {
+            "Screenshot saved"
+        }
+        .into(),
         detail: shot.name.clone(),
-        short: "Saved",
+        short: if copied { "Copied" } else { "Saved" },
         // The picture itself is the icon: a screenshot has no app to borrow one from.
         icon: thumb,
-        actions: vec![
-            IslandAction::new("Copy", "shelf.copyShot").arg("path", &shot.path),
-            IslandAction::new("Show", "shelf.reveal").arg("path", &shot.path),
-        ],
+        actions: if copied {
+            vec![show]
+        } else {
+            vec![
+                IslandAction::new("Copy", "shelf.copyShot").arg("path", &shot.path),
+                show,
+            ]
+        },
         priority: IslandPriority::Normal,
         source: IslandSource::Banners,
     })
@@ -231,12 +243,17 @@ fn show(app: &AppHandle, island: Island) {
 }
 
 fn on_shot(app: &AppHandle, shot: Shot) {
+    // Every screenshot lands on the clipboard as well as on disk, so it can be
+    // pasted at once without holding Control while taking it.
+    let copied = shots::copy(Path::new(&shot.path))
+        .inspect_err(|e| tracing::warn!("screenshot not copied: {e:#}"))
+        .is_ok();
     let thumb = {
         let state = app.state::<ShelfState>();
         thumb::data_uri(&state.thumbs(), Path::new(&shot.path), THUMB_PX).ok()
     };
     changed(app, ShelfArea::Shots);
-    show(app, shot_island(&shot, thumb));
+    show(app, shot_island(&shot, thumb, copied));
 }
 
 fn on_download(app: &AppHandle, d: Download) {
@@ -515,12 +532,25 @@ mod tests {
             path: "/d/Screenshot a.png".into(),
             taken: 0,
         };
-        let island = shot_island(&shot, None);
+        let island = shot_island(&shot, None, false);
         let names: Vec<_> = island.actions.iter().map(|a| a.action.as_str()).collect();
         assert_eq!(names, ["shelf.copyShot", "shelf.reveal"]);
         assert!(island
             .actions
             .iter()
             .all(|a| a.args.get("path") == Some(&shot.path)));
+    }
+
+    #[test]
+    fn a_screenshot_already_copied_says_so_and_drops_its_copy_button() {
+        let shot = Shot {
+            name: "Screenshot a.png".into(),
+            path: "/d/Screenshot a.png".into(),
+            taken: 0,
+        };
+        let island = shot_island(&shot, None, true);
+        assert_eq!(island.short.as_deref(), Some("Copied"));
+        let names: Vec<_> = island.actions.iter().map(|a| a.action.as_str()).collect();
+        assert_eq!(names, ["shelf.reveal"]);
     }
 }

@@ -7,6 +7,7 @@ import {
   capsuleText,
   dwellMs,
   isCapsule,
+  islandRole,
   islandTone,
   opensOnHover,
   takeoverTier,
@@ -62,6 +63,7 @@ export function NotchToast({
   useDwell(dwellMs(island), hovering, onLeave);
   const form = toastForm(island, hovering);
   const tone = islandTone(island);
+  const role = islandRole(island);
 
   const run = (action: IslandAction) =>
     void onAction(action).then((done) => (done ? onLeave() : setFailed(action.action)));
@@ -83,7 +85,7 @@ export function NotchToast({
   if (form === "peek") {
     const [first] = island.actions;
     return (
-      <div className="peek" data-open={hovering || undefined} data-tone={tone} role="status">
+      <div className="peek" data-open={hovering || undefined} data-tone={tone} data-w-role={role} role="status">
         {/* The top row is the notch's own: the app on one side of the camera,
             what to do about it on the other. A whisper takes it over. */}
         <div className="peek__top">
@@ -117,7 +119,7 @@ export function NotchToast({
   }
 
   return (
-    <div className="toast" data-tier="card" data-tone={tone} role="status">
+    <div className="toast" data-tier="card" data-tone={tone} data-w-role={role} role="status">
       <button className="toast__close" aria-label="Dismiss" onClick={onLeave}>
         <XIcon size={9} strokeWidth={3} />
       </button>

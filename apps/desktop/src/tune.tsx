@@ -418,6 +418,15 @@ function Tuner() {
         </Section>
 
         <Section title="Notch events">
+          <div className="mb-1.5 grid grid-cols-2 gap-1.5">
+            {(
+              ["volume", "brightness", "caps", "micMuted", "airpods", "charger", "lowPower", "wifi", "drive", "batteryLow"] as const
+            ).map((takeover) => (
+              <Action key={takeover} onClick={() => send({ rest: true, notchStyle: "widgets", takeover, stay: true })}>
+                Widgets · {takeover}
+              </Action>
+            ))}
+          </div>
           <div className="grid grid-cols-2 gap-1.5">
             <Action onClick={() => send({ rest: true, takeover: "volume", stay: true })}>
               Whisper · volume

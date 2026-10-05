@@ -55,14 +55,39 @@ const ISLAND_ROLES: Record<string, WidgetRole> = {
   media: "media",
   timer: "move",
   battery: "ok",
-  download: "info",
   calendar: "calendar",
   // The takeovers from Shelf and the clipboard; a run's own `toast:` keeps the
   // shared ink and speaks green through `islandTone` instead.
   shot: "info",
-  drive: "info",
   clipboard: "info",
+  // The system events, as docs/design/notch-events.html colours them: drives,
+  // downloads and the network cyan, devices and displays info blue.
+  drive: "cyan",
+  download: "cyan",
+  net: "cyan",
+  bt: "info",
+  display: "info",
 };
+
+/**
+ * The events whose colour is their state, so the prefix alone cannot say it.
+ * Each reads the glyph or word Rust already chose for that state.
+ */
+function stateRole({ id, icon, short }: Island): WidgetRole | undefined {
+  if (id === "hud:volume") return "orange";
+  if (id === "hud:brightness") return "sun";
+  if (id === "hud:caps") return "info";
+  if (id === "hud:mic") return icon === "mic-off" ? "alert" : "ok";
+  if (id.startsWith("bt:low:")) return "sun";
+  if (id === "power:charger") return icon === "bolt" ? "ok" : undefined;
+  if (id === "power:lowpower") return short === "Low Power" ? "sun" : undefined;
+  // `mac:battery-full` shares the low battery's prefix.
+  if (id === "mac:battery-full") return "ok";
+  if (id.startsWith("mac:battery")) return "alert";
+  // Apple's own dots: green camera, orange microphone.
+  if (id.startsWith("mac:privacy")) return icon === "camera" ? "ok" : "orange";
+  return undefined;
+}
 
 /**
  * The widgets look's colour for an island: its owner's accent. None for an
@@ -72,7 +97,7 @@ const ISLAND_ROLES: Record<string, WidgetRole> = {
  */
 export function islandRole(island: Island): WidgetRole | undefined {
   if (island.priority === "urgent") return undefined;
-  return ISLAND_ROLES[island.id.split(":")[0]];
+  return stateRole(island) ?? ISLAND_ROLES[island.id.split(":")[0]];
 }
 
 /**
@@ -121,13 +146,13 @@ export function levelOf(island: Island): number | null {
 export type Tone = "ok" | "warn" | "danger";
 
 /**
- * The colour a takeover's glyph speaks in, where the word alone is not
- * enough: red for what is critical, green for a write that landed. Keyed on
- * the id's prefix, the way `ISLAND_ROLES` is; none leaves the shared ink.
+ * The colour a takeover's glyph speaks in, in both looks, where the word alone
+ * is not enough: red for what is critical, green for a write that landed.
+ * Everything else is colour only in the widgets look (`islandRole`); Calm
+ * stays ink, so a 20% battery is red only there. Keyed on the id's prefix;
+ * none leaves the shared ink.
  */
 const ISLAND_TONES: [prefix: string, tone: Tone][] = [
-  ["mac:battery", "danger"],
-  ["mac:privacy", "warn"],
   ["toast:", "ok"],
   ["clipboard:", "ok"],
 ];

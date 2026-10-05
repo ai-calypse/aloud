@@ -704,6 +704,30 @@ const LIVE_PREVIEWS: Island[] = [
  * webview (tier resolved, dwell set). Fixtures for the tuner and the browser
  * preview: no Rust here, so nothing ranks them or holds one back.
  */
+function sysWhisper(
+  id: string,
+  icon: string,
+  title: string,
+  short: string | null,
+  source: Island["source"],
+): Island {
+  return {
+    id,
+    kind: "alert",
+    priority: "normal",
+    icon,
+    title,
+    detail: null,
+    actions: [],
+    expires: null,
+    dismissible: false,
+    tier: "whisper",
+    short,
+    dwellMs: 1800,
+    source,
+  };
+}
+
 export const TAKEOVER_PREVIEWS = {
   /** A key press: a bar and its number, updated in place. */
   volume: {
@@ -828,6 +852,15 @@ export const TAKEOVER_PREVIEWS = {
     dismissible: false,
     tier: "card",
   },
+  // The system events, one per colour the design gives them (widgets look).
+  caps: sysWhisper("hud:caps", "caps", "Caps Lock", "Caps Lock", "hud"),
+  micMuted: sysWhisper("hud:mic", "mic-off", "Microphone", "Mic muted", "hud"),
+  brightness: { ...sysWhisper("hud:brightness", "brightness", "Brightness", null, "hud"), level: 70 },
+  airpods: sysWhisper("bt:70:ae:2a", "headphones", "AirPods Pro", "88%", "connectivity"),
+  charger: sysWhisper("power:charger", "bolt", "Charging", "46%", "power"),
+  lowPower: sysWhisper("power:lowpower", "battery", "Low Power Mode on", "Low Power", "power"),
+  wifi: sysWhisper("net:wifi", "wifi", "Wi-Fi connected", "Wi-Fi on", "connectivity"),
+  drive: sysWhisper("drive:/Volumes/Backup", "drive", "Backup connected", "Connected", "connectivity"),
 } satisfies Record<string, Island>;
 
 export type TakeoverPreview = keyof typeof TAKEOVER_PREVIEWS;
