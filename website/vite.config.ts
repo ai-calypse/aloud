@@ -3,19 +3,18 @@ import { join, resolve } from "node:path";
 import { defineConfig, loadEnv, type Plugin, type ResolvedConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { POSTS, postPath, publicPosts, type Block } from "./src/blog/posts.ts";
+import { POSTS, blocksHtml, postPath, publicPosts } from "./src/blog/posts.ts";
 
 // Indexable routes. /thanks and the 404 are noindex, so they stay out of the sitemap.
 const ROUTES = ["/", "/privacy", "/bugs", "/waitlist"];
 
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-const blockHtml = (b: Block) => ("h" in b ? `<h2>${esc(b.h)}</h2>` : "p" in b ? `<p>${esc(b.p)}</p>` : `<ul>${b.ul.map((li) => `<li>${esc(li)}</li>`).join("")}</ul>`);
 
 // The app is client-rendered, so a crawler that does not run JavaScript sees an empty page.
 // Blog pages get their real text, title and description written into static HTML at build time;
 // React replaces it the moment it boots. ponytail: only /blog is prerendered, the other routes
 // still depend on the crawler running JS. Prerendering the rest means SSR-safe components.
-type Static = { path: string; title: string; description: string; body: string; noindex: boolean; ld?: object };
+type Static = { path: string; title: string; description: string; body: string; noindex: boolean; image?: string; ld?: object[] };
 function staticPages(site: string): Static[] {
   const pub = publicPosts();
   const list = POSTS.map((p): Static => ({
@@ -23,17 +22,25 @@ function staticPages(site: string): Static[] {
     title: `${p.title.replace(/\.$/, "")} · SpeakOS`,
     description: p.description,
     noindex: Boolean(p.draft),
-    body: `<article><h1>${esc(p.title)}</h1><p>${p.date}</p>${p.blocks.map(blockHtml).join("")}</article>`,
-    ld: {
-      "@context": "https://schema.org",
-      "@type": "BlogPosting",
-      headline: p.title.replace(/\.$/, ""),
-      description: p.description,
-      datePublished: p.date,
-      author: { "@type": "Organization", name: "SpeakOS", url: site },
-      image: `${site}/og.jpg`,
-      mainEntityOfPage: `${site}${postPath(p)}`,
-    },
+    body: `<article><h1>${esc(p.title)}</h1><p>${p.date}</p>${p.cover ? `<img src="${p.cover.src}" alt="${esc(p.cover.alt)}" />` : ""}${blocksHtml(p.blocks)}</article>`,
+    image: p.cover ? `${site}${p.cover.src}` : undefined,
+    ld: [
+      {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        headline: p.title.replace(/\.$/, ""),
+        description: p.description,
+        datePublished: p.date,
+        author: { "@type": "Organization", name: "SpeakOS", url: site },
+        image: p.cover ? `${site}${p.cover.src}` : `${site}/og.jpg`,
+        mainEntityOfPage: `${site}${postPath(p)}`,
+      },
+      ...p.blocks.flatMap((b) =>
+        "faq" in b
+          ? [{ "@context": "https://schema.org", "@type": "FAQPage", mainEntity: b.faq.map(([q, a]) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1") } })) }]
+          : [],
+      ),
+    ],
   }));
   const index: Static = {
     path: "/blog",
@@ -55,10 +62,11 @@ function renderStatic(shell: string, site: string, pg: Static) {
   for (const k of ["og:title", "twitter:title"]) html = meta(html, k, pg.title);
   html = meta(html, "og:url", url);
   html = meta(html, "og:type", pg.ld ? "article" : "website");
+  if (pg.image) for (const k of ["og:image", "twitter:image"]) html = meta(html, k, pg.image);
   const head = [
     `<link rel="canonical" href="${url}" />`,
     pg.noindex ? `<meta name="robots" content="noindex" />` : "",
-    pg.ld ? `<script type="application/ld+json">${JSON.stringify(pg.ld).replace(/</g, "\\u003c")}</script>` : "",
+    ...(pg.ld ?? []).map((o) => `<script type="application/ld+json">${JSON.stringify(o).replace(/</g, "\\u003c")}</script>`),
     `<style>.static-copy{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}</style>`,
     `<noscript><style>.static-copy{position:static;width:auto;height:auto;max-width:720px;margin:0 auto;padding:24px;font-family:system-ui,sans-serif}</style></noscript>`,
   ].join("\n    ");

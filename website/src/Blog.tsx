@@ -1,10 +1,10 @@
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import readingCat from "./assets/memes/reading-cat.webp";
 import { GlossyButton, MacWindow, PillLabel } from "./components/ds";
 import SmartLink from "./components/SmartLink";
 import Sticker from "./components/Sticker";
 import { useCopy } from "./copy";
-import { POSTS, formatDate, postPath, publicPosts, type Block } from "./blog/posts";
+import { POSTS, blocksHtml, formatDate, postPath, publicPosts } from "./blog/posts";
 import NotFound from "./NotFound";
 import { useMeta } from "./seo";
 
@@ -20,15 +20,6 @@ function Back({ href, children }: { href: string; children: string }) {
     </div>
   );
 }
-
-const Body = ({ b }: { b: Block }) =>
-  "h" in b ? <h2>{b.h}</h2> : "p" in b ? <p>{b.p}</p> : (
-    <ul>
-      {b.ul.map((li) => (
-        <li key={li}>{li}</li>
-      ))}
-    </ul>
-  );
 
 export function BlogIndex() {
   const c = useCopy();
@@ -64,6 +55,7 @@ export function BlogPost() {
   const { slug } = useParams();
   const post = POSTS.find((p) => p.slug === slug);
   const c = useCopy();
+  const navigate = useNavigate();
   useMeta(post ? `${post.title.replace(/\.$/, "")} · SpeakOS` : c.blog.title, { description: post?.description, noindex: post?.draft });
   if (!post) return <NotFound />;
   return (
@@ -80,10 +72,20 @@ export function BlogPost() {
         </p>
       </header>
       <MacWindow title={`${post.slug}.md`} className="w-full max-w-[760px]">
-        <article className="post flex flex-col gap-5 p-6 text-[17px] leading-[1.65] text-ink md:p-10">
-          {post.blocks.map((b, i) => (
-            <Body key={i} b={b} />
-          ))}
+        <article
+          className="post flex flex-col gap-5 p-6 text-[17px] leading-[1.65] text-ink md:p-10"
+          // Our own copy, rendered by the same function that writes the static HTML. In-site links
+          // go through the router so they do not reload the page.
+          onClick={(e) => {
+            const a = (e.target as Element).closest("a");
+            const href = a?.getAttribute("href");
+            if (!a || !href?.startsWith("/") || e.metaKey || e.ctrlKey || e.shiftKey) return;
+            e.preventDefault();
+            navigate(href);
+          }}
+        >
+          {post.cover && <img src={post.cover.src} alt={post.cover.alt} width={1280} height={720} className="block w-full rounded-[12px]" />}
+          <div className="contents" dangerouslySetInnerHTML={{ __html: blocksHtml(post.blocks) }} />
           <div className="pt-4">
             <GlossyButton size="sm" href="/thanks" event="download_click">
               {c.common.downloadMac}
