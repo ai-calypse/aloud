@@ -25,6 +25,10 @@ import { FocusAwake, FocusNotes, FocusTimer } from "./views/Focus";
 import { TodayCalendar, TodayReminders, TodayStocks, TodayWeather } from "./views/Today";
 import { NowOverview } from "./views/Now";
 import { WidgetHome } from "./views/WidgetHome";
+import { WidgetCalendar } from "./views/widgets/Calendar";
+import { WidgetReminders } from "./views/widgets/Reminders";
+import { WidgetStocks } from "./views/widgets/Stocks";
+import { WidgetWeather } from "./views/widgets/Weather";
 import { ShelfDownloads, ShelfDrives, ShelfFiles, ShelfShots } from "./views/Shelf";
 
 /**
@@ -174,10 +178,10 @@ export const SECTIONS: Section[] = [
     name: "Today",
     icon: CalendarIcon,
     subsections: [
-      { id: "calendar", name: "Calendar", features: ["Calendar"], ready: true, view: TodayCalendar },
-      { id: "reminders", name: "Reminders", features: ["Reminders"], ready: true, view: TodayReminders },
-      { id: "weather", name: "Weather", features: ["Weather"], ready: true, view: TodayWeather },
-      { id: "stocks", name: "Stocks", features: ["Stocks ticker"], ready: true, view: TodayStocks },
+      { id: "calendar", name: "Calendar", features: ["Calendar"], ready: true, view: TodayCalendar, widgetView: WidgetCalendar },
+      { id: "reminders", name: "Reminders", features: ["Reminders"], ready: true, view: TodayReminders, widgetView: WidgetReminders },
+      { id: "weather", name: "Weather", features: ["Weather"], ready: true, view: TodayWeather, widgetView: WidgetWeather },
+      { id: "stocks", name: "Stocks", features: ["Stocks ticker"], ready: true, view: TodayStocks, widgetView: WidgetStocks },
       { id: "inbox", name: "Inbox", features: ["Notification mirror"], ready: false },
     ],
   },
