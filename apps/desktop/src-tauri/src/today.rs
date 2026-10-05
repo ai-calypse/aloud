@@ -260,7 +260,7 @@ pub fn init(app: &AppHandle) {
                 .unwrap_or_default();
             crate::nudges::calendar_tick(&app, &events, now_ms());
             ticks += 1;
-            if ticks % 2 == 0 {
+            if ticks.is_multiple_of(2) {
                 crate::nudges::reminders_tick(&app, now_ms()).await;
             }
             tokio::time::sleep(Duration::from_secs(60)).await;

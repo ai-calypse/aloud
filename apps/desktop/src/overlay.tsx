@@ -69,6 +69,7 @@ import "./index.css";
 import "./styles/overlay.css";
 import "./styles/notch.css";
 import "./styles/events.css";
+import "./styles/nudges.css";
 
 const LABEL: Record<Phase, string> = {
   idle: "",

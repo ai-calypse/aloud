@@ -495,6 +495,7 @@ function handle(cmd: string, a: Record<string, unknown> = {}): unknown {
     case "mac_snap": return "Moved Safari to the left half";
 
     case "installed_apps": return APPS;
+    case "nudge_state": return { kind: "needsAccess" };
     case "launcher_prefs": return LAUNCHER;
     case "shortcut_list": return SHORTCUTS;
     case "launcher_recent_files": return FILES;

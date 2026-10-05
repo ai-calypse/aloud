@@ -112,19 +112,17 @@ pub fn nudge_open(bundle: String) -> Result<(), String> {
         return Err("that is not an app".into());
     }
     #[cfg(target_os = "macos")]
-    {
-        let ok = std::process::Command::new("open")
-            .args(["-b", &bundle])
-            .status()
-            .is_ok_and(|s| s.success());
-        return if ok {
-            Ok(())
-        } else {
-            Err("could not open it".into())
-        };
-    }
+    let opened = std::process::Command::new("open")
+        .args(["-b", &bundle])
+        .status()
+        .is_ok_and(|s| s.success());
     #[cfg(not(target_os = "macos"))]
-    Err("opening an app is macOS-only".into())
+    let opened = false;
+    if opened {
+        Ok(())
+    } else {
+        Err("could not open it".into())
+    }
 }
 
 // ---- mirrored notifications -------------------------------------------------

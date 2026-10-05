@@ -34,6 +34,7 @@ import { CoherenceGallery } from "./tune-coherence";
 // --- end Calm Home fixtures ---
 import "./styles/notch.css";
 import "./styles/events.css";
+import "./styles/nudges.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
 
@@ -424,6 +425,40 @@ function Tuner() {
           <p className="mt-2 mb-0 text-caption text-ink-2">
             A toast sent at rest grows out of the notch; Run → toast plays a
             run's panel collapsing into one. Each leaves after 4s, or on ×.
+          </p>
+        </Section>
+
+        <Section title="Nudges">
+          <div className="grid grid-cols-2 gap-1.5">
+            {(
+              [
+                ["nudgeMsg", "Messages"],
+                ["nudgeMail", "Mail"],
+                ["nudgeSlack", "Slack"],
+                ["nudgeCal", "Calendar soon"],
+                ["nudgeRem", "Reminder due"],
+                ["nudgeAirdrop", "AirDrop"],
+                ["nudgeGeneric", "Generic app"],
+                ["nudgeCall", "Call (card)"],
+                ["nudgeMsgTyping", "Typing (capsule)"],
+              ] as const
+            ).map(([takeover, name]) => (
+              <Action key={takeover} onClick={() => send({ rest: true, takeover, stay: true })}>
+                {name}
+              </Action>
+            ))}
+            <Action onClick={() => send({ rest: true, takeover: "nudgeMsg", stay: true, hover: true })}>
+              Messages · hover
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "nudgeMsg", stay: true, waiting: 2 })}>
+              Messages · +2 waiting
+            </Action>
+          </div>
+          <p className="mt-2 mb-0 text-caption text-ink-2">
+            Other apps' notifications, an event about to start, a reminder come
+            due: the same routing as Rust's island event, one fixture per kind.
+            The only buttons are Open and Join; Aloud cannot answer a call or
+            reply for you. Icons are stand-ins for the app's own.
           </p>
         </Section>
 
