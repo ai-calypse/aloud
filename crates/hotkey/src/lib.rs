@@ -22,7 +22,47 @@ use windows as backend;
 use anyhow::Result;
 use matcher::{Consume, Input, State};
 use model::{Binding, Config, Event};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+/// When the last key that types something went down, as milliseconds past
+/// [`epoch`] plus one — zero is "never". Only a time: no key, no text.
+static LAST_KEYSTROKE: AtomicU64 = AtomicU64::new(0);
+
+/// A fixed origin for [`LAST_KEYSTROKE`], since an `Instant` does not fit an atomic.
+fn epoch() -> Instant {
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    *EPOCH.get_or_init(Instant::now)
+}
+
+/// How long ago the user last pressed a key that types, or None if they have
+/// not since launch. The notch reads it to keep a takeover off their text; it
+/// costs one atomic load.
+pub fn since_last_keystroke() -> Option<Duration> {
+    let stamp = LAST_KEYSTROKE.load(Ordering::Relaxed).checked_sub(1)?;
+    Some(
+        epoch()
+            .elapsed()
+            .saturating_sub(Duration::from_millis(stamp)),
+    )
+}
+
+/// Whether this event is the user typing. A bare modifier is not: holding Fn
+/// to dictate must not look like typing, or the dictation's own result would
+/// be pushed off the screen. An unmapped key (digits, Return, punctuation)
+/// arrives as None and is typing.
+fn is_typing(raw: Option<(model::Key, bool)>) -> bool {
+    match raw {
+        None => true,
+        Some((key, down)) => down && key.logical_modifier().is_none(),
+    }
+}
+
+fn note_keystroke() {
+    let stamp = u64::try_from(epoch().elapsed().as_millis()).unwrap_or(u64::MAX - 1);
+    LAST_KEYSTROKE.store(stamp + 1, Ordering::Relaxed);
+}
 
 /// One armed recording: where to send the gesture, and which request it is.
 ///
@@ -75,6 +115,9 @@ where
         // Capture runs ahead of the matcher and swallows everything, unmapped
         // keys included: recording a hotkey must not fire the one it replaces,
         // nor let the keys pressed reach the app underneath.
+        if is_typing(raw.as_ref().map(|r| (r.key, r.down))) {
+            note_keystroke();
+        }
         let Some(raw) = raw else {
             was_armed |= capture_poison_if_armed(&capture, &mut recorder);
             return was_armed;
@@ -204,6 +247,28 @@ fn capture_event(
 mod tests {
     use super::*;
     use model::Key;
+
+    /// The failure this guards: counting the dictation key as typing, so a
+    /// result pasted right after a hold was treated as arriving under the
+    /// user's hands and shrunk.
+    #[test]
+    fn a_modifier_is_not_typing_but_a_letter_and_an_unmapped_key_are() {
+        assert!(!is_typing(Some((Key::Fn, true))));
+        assert!(!is_typing(Some((Key::LeftCommand, true))));
+        assert!(is_typing(Some((Key::Char('a'), true))));
+        assert!(
+            !is_typing(Some((Key::Char('a'), false))),
+            "a release is not a press"
+        );
+        assert!(is_typing(None));
+    }
+
+    #[test]
+    fn a_keystroke_is_timed_and_nothing_else() {
+        note_keystroke();
+        let ago = since_last_keystroke().expect("one was just noted");
+        assert!(ago < Duration::from_secs(5));
+    }
 
     fn armed() -> (CaptureSlot, std::sync::mpsc::Receiver<Binding>) {
         let (tx, rx) = std::sync::mpsc::channel();

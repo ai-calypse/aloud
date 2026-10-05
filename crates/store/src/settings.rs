@@ -40,6 +40,38 @@ pub enum NotchStyle {
     Widgets,
 }
 
+/// What the notch's takeovers may do (`aloud_islands::gate`). Quiet is the
+/// only one that is off by default: the rest are the notch doing its job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(default, rename_all = "camelCase")]
+pub struct NotchEvents {
+    /// Everything one tier smaller: a card becomes a peek, a peek a whisper.
+    pub quiet: bool,
+    /// Hold ordinary system events while a macOS Focus is on.
+    pub focus_aware: bool,
+    /// Volume, mic mute, Caps Lock: whispers for a key you pressed.
+    pub huds: bool,
+    /// Battery, charger and Low Power Mode.
+    pub power: bool,
+    /// Drives, displays, Wi-Fi, VPN and Bluetooth.
+    pub connectivity: bool,
+    /// What happened in another app: a screenshot, a finished download.
+    pub banners: bool,
+}
+
+impl Default for NotchEvents {
+    fn default() -> Self {
+        Self {
+            quiet: false,
+            focus_aware: true,
+            huds: true,
+            power: true,
+            connectivity: true,
+            banners: true,
+        }
+    }
+}
+
 /// Which monitor the overlay appears on. `Named` stores the OS name, not an
 /// index: indices are reassigned on unplug, so a saved index changes meaning.
 /// A name that no longer resolves falls back to the primary.
@@ -162,6 +194,8 @@ pub struct Settings {
     pub overlay_style: OverlayStyle,
     /// Calm (monochrome) or Widgets (Apple-style tiles) for the open notch.
     pub notch_style: NotchStyle,
+    /// How the notch's takeovers behave: Quiet mode, Focus, per-source switches.
+    pub notch_events: NotchEvents,
     /// Whether a coding agent's permission request opens the notch by itself.
     /// Off means the request waits quietly — the Agents surface flags it, and
     /// the user opens the notch when they hover. The hook waits either way.
@@ -240,6 +274,7 @@ impl Default for Settings {
             show_menu_bar_icon: true,
             overlay_style: OverlayStyle::DropPill,
             notch_style: NotchStyle::Calm,
+            notch_events: NotchEvents::default(),
             // On: a blocked agent is usually why the user looks up. The
             // toggle exists for people who find the self-opening notch rude.
             agent_open_on_permission: true,
@@ -656,6 +691,26 @@ mod rename_tests {
     /// The widgets look is a choice the user made: it must survive a restart,
     /// an old file with no `notchStyle` must open Calm, and a value from a
     /// newer build must cost that one field, not the keys beside it.
+    /// An old settings file has no `notchEvents`, and a partial one (a switch
+    /// from a newer build is unknown, one is missing) must keep every other
+    /// switch at its default rather than resetting the group.
+    #[test]
+    fn notch_events_default_to_on_except_quiet_and_survive_a_partial_file() {
+        let fresh = Settings::from_json("{}").expect("must parse");
+        assert_eq!(fresh.notch_events, NotchEvents::default());
+        assert!(!fresh.notch_events.quiet && fresh.notch_events.focus_aware);
+        assert!(fresh.notch_events.huds && fresh.notch_events.banners);
+
+        let partial =
+            Settings::from_json(r#"{ "notchEvents": { "quiet": true, "power": false } }"#)
+                .expect("must parse");
+        assert!(partial.notch_events.quiet && !partial.notch_events.power);
+        assert!(
+            partial.notch_events.focus_aware && partial.notch_events.connectivity,
+            "unmentioned switches keep their defaults"
+        );
+    }
+
     #[test]
     fn the_notch_style_defaults_to_calm_and_survives_a_restart() {
         assert_eq!(Settings::default().notch_style, NotchStyle::Calm);
