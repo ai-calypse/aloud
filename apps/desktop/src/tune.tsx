@@ -18,6 +18,9 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "./index.css";
 import { WidgetGallery } from "./tune-widgets";
+// --- Widgets look › Shelf fixtures (tune-shelf.tsx) ---
+import { ShelfGallery } from "./tune-shelf";
+// --- end Shelf fixtures ---
 import "./styles/notch.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
@@ -669,6 +672,12 @@ function NotchGallery() {
         <Specimen name="Widgets look" note="the Settings › Overlay option: Apple-style tiles; primitives, the Home board, empty and urgent states">
           <WidgetGallery />
         </Specimen>
+
+        {/* --- Widgets look › Shelf fixtures: Files, Screenshots, Downloads, Drives --- */}
+        <Specimen name="Widgets look · Shelf" note="Files, Screenshots, Downloads and Drives as widgets, from labelled fixtures; with empty, off and nearly-full states">
+          <ShelfGallery />
+        </Specimen>
+        {/* --- end Shelf fixtures --- */}
 
         <Specimen name="Empty" note="a view with nothing to show teaches what fills it">
           <Empty

@@ -134,7 +134,7 @@ export function FilesBoard({
                 )}
               >
                 <span className="grid flex-1 place-items-center">
-                  <ShelfThumb path={it.path} image={it.image} glyph={glyphOf(it)} className="size-12.5 rounded-md" />
+                  <ShelfThumb path={it.path} image={it.image} glyph={glyphOf(it)} className="size-14 rounded-md bg-widget-label text-widget-on" />
                 </span>
                 {/* The band under each row of thumbnails is how Apple's widget sets the names off. */}
                 <span className="w-full truncate bg-widget-ink/5 px-1.5 py-1.5 text-center text-notch-w-over text-widget-label">
