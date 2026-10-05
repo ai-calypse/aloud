@@ -450,6 +450,7 @@ fn agents_island(rows: &[AgentSession], asking: usize) -> Option<aloud_islands::
         )],
         expires: None,
         dismissible: false,
+        ..Island::default()
     })
 }
 

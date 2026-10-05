@@ -262,6 +262,7 @@ pub fn show_panel(app: &AppHandle) {
     HIDE_GENERATION.fetch_add(1, Ordering::SeqCst);
     PANEL_OPEN.store(true, Ordering::SeqCst);
     TOAST.store(false, Ordering::SeqCst);
+    crate::islands::panel_opened(app);
     // Interactive from the first frame — the webview confirms via
     // `set_panel_interactive`, but a card must not wait a round-trip to
     // take its first click.
@@ -293,6 +294,13 @@ pub fn show_panel(app: &AppHandle) {
 /// True while the window is up for a toast, which a later toast may replace
 /// but a passing run may not take for anything else.
 static TOAST: AtomicBool = AtomicBool::new(false);
+
+/// Whether the user is in a panel — an ask, a run, a browse of the notch —
+/// as opposed to the window being up for a toast. What the takeover gate
+/// means by "the panel is open".
+pub fn user_panel_open() -> bool {
+    PANEL_OPEN.load(Ordering::SeqCst) && !TOAST.load(Ordering::SeqCst)
+}
 
 /// Puts the window up for a toast; false when it may not have it. A run hands
 /// its own open panel over (`own_panel`); otherwise the toast takes the window
@@ -381,6 +389,10 @@ pub fn set_panel_interactive(app: AppHandle, open: bool) {
     // effect race ahead of `closeAsk`/`closeAgent` and no-op the teardown.
     if open {
         PANEL_OPEN.store(true, Ordering::SeqCst);
+        // A browse opened over a toast is the user's panel now: left set, the
+        // next toast would think it may replace it.
+        TOAST.store(false, Ordering::SeqCst);
+        crate::islands::panel_opened(&app);
     }
     if let Some(window) = window(&app) {
         // Focus rides along so text inputs (a deny message, a freeform answer)
@@ -582,6 +594,7 @@ pub fn end_panel(app: &AppHandle) {
     }
     reset_to_resting(app);
     rest(app);
+    crate::islands::panel_closed(app);
 }
 
 /// Whether a panel (an answer, a question, a browse) is up, which nothing

@@ -1,12 +1,12 @@
-//! Battery state for Mac › Power, and what it raises: a chip at 20%, a pinned
-//! dismissible island below 10%, and a chip when fully charged.
+//! Battery state for Mac › Power, and what it raises: a whisper at 20%, a card
+//! below 10%, and a whisper when fully charged.
 //!
 //! `pmset -g batt` is the charge, state and time estimate — the same numbers
 //! as the menu bar, which `ioreg`'s own `TimeRemaining` is not (it read 178
 //! minutes where pmset said 7:20). `ioreg` supplies what pmset has no word
 //! for: cycle count and capacity health.
 
-use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority};
+use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority, IslandSource, IslandTier};
 use serde::{Deserialize, Serialize};
 
 use crate::Step;
@@ -123,13 +123,13 @@ pub fn parse_ioreg(text: &str) -> (Option<u32>, Option<u8>) {
     (value("CycleCount"), health)
 }
 
-/// At or below this on battery the notch drops a chip, like the system alert.
+/// At or below this on battery the notch whispers, like the system alert.
 pub const LOW: u8 = 20;
-/// At or below this it stays up beside the camera: the machine is about to
+/// At or below this it becomes a card that stays up: the machine is about to
 /// sleep.
 pub const CRITICAL: u8 = 10;
 
-/// The pinned island, only while critical.
+/// The card, only while critical.
 pub const LOW_ID: &str = "mac:battery";
 pub const LOW_CHIP_ID: &str = "mac:battery-low";
 pub const FULL_ID: &str = "mac:battery-full";
@@ -138,52 +138,57 @@ fn open_power() -> IslandAction {
     IslandAction::new("Show", "mac.power")
 }
 
-/// The critical-battery island: live until the Mac is plugged in or the user
-/// dismisses it, so it is the one thing here that can sit beside the camera.
+/// The critical-battery card: sticky until the Mac is plugged in or the user
+/// dismisses it, because the machine is about to sleep.
 fn critical_island(b: &Battery) -> Island {
     Island {
         id: LOW_ID.into(),
-        kind: IslandKind::Live,
+        kind: IslandKind::Alert,
         priority: IslandPriority::Urgent,
+        tier: Some(IslandTier::Card),
         icon: Some("battery".into()),
         title: "Battery low".into(),
         detail: Some(format!("{}%", b.percent)),
+        short: Some(format!("{}%", b.percent)),
         actions: vec![open_power()],
-        expires: None,
         dismissible: true,
+        source: IslandSource::Power,
+        ..Island::default()
     }
 }
 
-/// The chip at 20%. An alert, so it drops once from the notch and goes; the
-/// pinned island above is for when it is truly urgent.
+/// The whisper at 20%: a red number beside the camera, with the Power pane a
+/// hover away. The card above is for when it is truly urgent.
 fn low_chip(b: &Battery) -> Island {
     Island {
         id: LOW_CHIP_ID.into(),
         kind: IslandKind::Alert,
         priority: IslandPriority::Normal,
+        tier: Some(IslandTier::Whisper),
         icon: Some("battery".into()),
         title: "Battery low".into(),
         detail: Some(format!("{}%", b.percent)),
+        short: Some(format!("{}%", b.percent)),
         actions: vec![open_power()],
-        // The webview ends an alert after its own four seconds; this is only
-        // the backstop (see agent.rs ALERT_BACKSTOP_MS).
-        expires: Some(30_000),
-        dismissible: false,
+        source: IslandSource::Power,
+        ..Island::default()
     }
 }
 
-/// The full-charge chip. An alert, so it drops once from the notch and goes.
+/// The full-charge whisper: low priority, so it only shows if the notch is idle.
 fn full_island() -> Island {
     Island {
         id: FULL_ID.into(),
         kind: IslandKind::Alert,
-        priority: IslandPriority::Normal,
+        priority: IslandPriority::Low,
+        tier: Some(IslandTier::Whisper),
         icon: Some("battery".into()),
         title: "Fully charged".into(),
         detail: Some("100%".into()),
+        short: Some("Full".into()),
         actions: vec![open_power()],
-        expires: Some(30_000),
-        dismissible: false,
+        source: IslandSource::Power,
+        ..Island::default()
     }
 }
 
@@ -316,11 +321,11 @@ mod tests {
         assert!(pushes(&steps, LOW_CHIP_ID));
         assert!(!pushes(&steps, LOW_ID), "not pinned above 10%");
         assert!(matches!(&steps[..], [Step::Remove(LOW_ID), Step::Push(i)]
-                if i.kind == IslandKind::Alert));
+                if i.kind == IslandKind::Alert && i.tier == Some(IslandTier::Whisper)));
 
         let steps = watch.update(Some(&battery(10, ChargeState::Discharging)));
         assert!(matches!(&steps[0], Step::Push(i)
-            if i.id == LOW_ID && i.kind == IslandKind::Live
+            if i.id == LOW_ID && i.tier == Some(IslandTier::Card)
                 && i.priority == IslandPriority::Urgent && i.dismissible));
         assert!(!pushes(&steps, LOW_CHIP_ID), "the chip is not repeated");
     }

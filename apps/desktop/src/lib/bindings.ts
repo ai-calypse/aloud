@@ -535,6 +535,7 @@ export const events = {
 	focus: makeEvent<FocusSnapshot>("focus"),
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
 	island: makeEvent<IslandChanged>("island"),
+	islandsWaiting: makeEvent<IslandsWaiting>("islands-waiting"),
 	mediaNowPlaying: makeEvent<MediaNowPlaying>("media-now-playing"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
@@ -1206,6 +1207,33 @@ export type Island = {
 	 *  puts it straight back.
 	 */
 	dismissible?: boolean,
+	/**
+	 *  The size of the takeover. None is what every push made before tiers
+	 *  means: an alert is a [`Tier::Peek`], and a live island is no takeover
+	 *  at all — see [`Island::takeover_tier`].
+	 */
+	tier?: IslandTier | null,
+	/**
+	 *  A level for a bar, 0–100: volume, brightness. Updates to it alone are
+	 *  rate-limited by [`Queue::push`].
+	 */
+	level?: number | null,
+	/**
+	 *  How long it stays, in milliseconds, before it leaves on its own. None
+	 *  is its tier's default ([`gate::dwell_ms`]); a card has none.
+	 */
+	dwellMs?: number | null,
+	/**
+	 *  A whisper's one word or number — "Sent", "20%" — which `detail`
+	 *  (the app, for an alert) cannot be.
+	 */
+	short?: string | null,
+	source?: IslandSource,
+	/**
+	 *  Set by the gate, never by a producer: a peek or card shown as a side
+	 *  capsule because the user is typing, opened by pointing at it.
+	 */
+	shrunk?: boolean,
 };
 
 /**  A button on an island. */
@@ -1245,7 +1273,7 @@ export type IslandKind =
  *  Now › Overview while it lasts.
  */
 "live" | 
-/**  Just happened: the chip that drops out of the notch, then goes. */
+/**  Just happened: a takeover, drawn at its [`Tier`]'s size, then gone. */
 "alert";
 
 /**  What it costs to miss. Declared in rank order, so `Ord` is the ranking. */
@@ -1256,6 +1284,54 @@ export type IslandPriority =
 "high" | 
 /**  Waiting on the user: an agent asking, a call ringing. */
 "urgent";
+
+/**
+ *  Who raised a takeover, which decides the rules that apply to it and the
+ *  Settings switch that can silence it.
+ */
+export type IslandSource = 
+/**
+ *  Aloud's own: a confirmation, a timer, a failed action. Never held back
+ *  by Focus and never switched off here.
+ */
+"own" | 
+/**
+ *  The user pressed a key for it (volume, mic mute, Caps Lock): it draws
+ *  at once, even over a whisper or a card, because it was asked for.
+ */
+"hud" | 
+/**  Battery, charger, Low Power Mode. */
+"power" | 
+/**  Drives, displays, Wi-Fi, VPN, Bluetooth. */
+"connectivity" | 
+/**  Something that happened in another app: a screenshot, a download. */
+"banners";
+
+/**
+ *  How much of the notch a takeover takes: size follows the cost of missing it.
+ *  Declared smallest first, so `Ord` is the size.
+ */
+export type IslandTier = 
+/**
+ *  A side extension at the notch's own height: a glyph and one word or
+ *  number, 1.2–2 s, no buttons.
+ */
+"whisper" | 
+/**  One extra row: app, title, one line, 4 s, opens on hover. */
+"peek" | 
+/**
+ *  The big drop, sticky, with buttons. Only for something that needs the
+ *  user: a call, an approval, battery under 10%, a failed critical action.
+ */
+"card";
+
+/**
+ *  How many takeovers are waiting for their turn: the "+N" the webview draws
+ *  on whatever is showing. Distinct items, never repeats.
+ */
+export type IslandsWaiting = {
+	count: number,
+};
 
 /**
  *  A physical key, side-specific where the distinction matters — Right Option
@@ -1335,6 +1411,25 @@ export type MeetingPhase =
 export type ModelDownload = number | null;
 
 export type Modifier = "command" | "control" | "option" | "shift" | "function";
+
+/**
+ *  What the notch's takeovers may do (`aloud_islands::gate`). Quiet is the
+ *  only one that is off by default: the rest are the notch doing its job.
+ */
+export type NotchEvents = {
+	/**  Everything one tier smaller: a card becomes a peek, a peek a whisper. */
+	quiet?: boolean,
+	/**  Hold ordinary system events while a macOS Focus is on. */
+	focusAware?: boolean,
+	/**  Volume, mic mute, Caps Lock: whispers for a key you pressed. */
+	huds?: boolean,
+	/**  Battery, charger and Low Power Mode. */
+	power?: boolean,
+	/**  Drives, displays, Wi-Fi, VPN and Bluetooth. */
+	connectivity?: boolean,
+	/**  What happened in another app: a screenshot, a finished download. */
+	banners?: boolean,
+};
 
 /**
  *  Whether the pointer is over the notch.
@@ -1739,6 +1834,8 @@ export type Settings = {
 	overlayStyle?: OverlayStyle,
 	/**  Calm (monochrome) or Widgets (Apple-style tiles) for the open notch. */
 	notchStyle?: NotchStyle,
+	/**  How the notch's takeovers behave: Quiet mode, Focus, per-source switches. */
+	notchEvents?: NotchEvents,
 	/**
 	 *  Whether a coding agent's permission request opens the notch by itself.
 	 *  Off means the request waits quietly — the Agents surface flags it, and

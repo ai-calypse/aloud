@@ -279,6 +279,7 @@ pub fn island(events: &[Event], now: i64) -> Option<Island> {
             .collect(),
         expires: None,
         dismissible: false,
+        ..Island::default()
     })
 }
 

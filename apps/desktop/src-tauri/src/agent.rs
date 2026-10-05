@@ -331,17 +331,17 @@ impl Run {
     /// is in. Past `emit`, which keeps a quiet run silent.
     fn toast(&self, app: &AppHandle, toast: Toast) {
         let own_panel = !self.quiet.load(Ordering::SeqCst);
-        if is_current(self.ticket) && crate::overlay::show_toast(app, own_panel) {
-            crate::islands::push(app, toast.island(self.ticket));
+        if !is_current(self.ticket) {
+            return;
+        }
+        let island = toast.island(self.ticket);
+        if own_panel {
+            crate::islands::takeover_from_run(app, island);
+        } else {
+            crate::islands::takeover(app, island);
         }
     }
 }
-
-/// How long an alert may stay in the queue if the webview never says it is
-/// done. Not the toast's dwell — that is the webview's four seconds, paused
-/// while the pointer is on it — only a backstop so a toast dropped by a
-/// dictation starting over it cannot linger in the queue.
-const ALERT_BACKSTOP_MS: u32 = 30_000;
 
 impl Toast {
     /// The toast as an alert island. Its action becomes a named one from the
@@ -349,7 +349,7 @@ impl Toast {
     /// commands a finished row's Show and Undo do. One id per run, so a later
     /// toast never answers for this one.
     fn island(self, ticket: u64) -> aloud_islands::Island {
-        use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority};
+        use aloud_islands::{Island, IslandAction, IslandKind, IslandTier};
         let actions = match self.action {
             Some(ToastAction::Show { app, target }) => {
                 vec![IslandAction::new("Show", "result.show")
@@ -361,17 +361,34 @@ impl Toast {
             }
             None => Vec::new(),
         };
+        let short = short_word(&self.text);
         Island {
             id: format!("toast:{ticket}"),
             kind: IslandKind::Alert,
-            priority: IslandPriority::Normal,
             icon: self.icon,
             title: self.text,
             detail: Some(self.app),
+            // "Sent", "Done": a write that worked is a whisper, and its Show or
+            // Undo is one hover away. Aloud's own, so Focus never holds it.
+            short: Some(short),
             actions,
-            expires: Some(ALERT_BACKSTOP_MS),
-            dismissible: false,
+            tier: Some(IslandTier::Whisper),
+            ..Island::default()
         }
+    }
+}
+
+/// The one word a whisper shows for a run's closing line: its first, when it
+/// is a word ("Sent the email to David" -> "Sent"), else "Done".
+fn short_word(text: &str) -> String {
+    match text.split_whitespace().next() {
+        Some(word)
+            if (2..=10).contains(&word.chars().count())
+                && word.chars().all(char::is_alphabetic) =>
+        {
+            word.to_string()
+        }
+        _ => "Done".to_string(),
     }
 }
 
@@ -1635,6 +1652,22 @@ pub fn close_agent(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_whisper_shows_the_first_word_of_the_closing_line_or_done() {
+        assert_eq!(super::short_word("Sent the email to David"), "Sent");
+        assert_eq!(
+            super::short_word("Created: a note"),
+            "Done",
+            "punctuation is not a word"
+        );
+        assert_eq!(
+            super::short_word("Reorganisationed it"),
+            "Done",
+            "too long for a whisper"
+        );
+        assert_eq!(super::short_word(""), "Done");
+    }
+
     use super::*;
     use serde_json::json;
 

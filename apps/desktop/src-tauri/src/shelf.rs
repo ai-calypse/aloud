@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
-use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority};
+use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority, IslandSource, IslandTier};
 use aloud_shelf::downloads::{self, Download};
 use aloud_shelf::drives::{self, Change, Drive};
 use aloud_shelf::files::{Item, Shelf, ShelfImageFormat};
@@ -22,9 +22,6 @@ type CmdResult<T> = Result<T, String>;
 const LABEL: &str = "overlay";
 /// Thumbnails are drawn at 30px; twice that is sharp on a Retina panel.
 const THUMB_PX: u32 = 64;
-/// How long a Shelf alert may sit in the queue if the webview never clears
-/// it — the chip's own dwell is the webview's four seconds.
-const ALERT_BACKSTOP_MS: u32 = 30_000;
 
 /// Which list changed, so the view showing it can read it again.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
@@ -138,76 +135,99 @@ fn stop(app: &AppHandle, which: ShelfWatch) {
 
 // ---- islands ---------------------------------------------------------------
 
-fn alert(
+/// What a Shelf event is, for its whisper: the sentence a hover opens, the
+/// word the whisper itself shows, and how much it matters.
+struct Spec {
+    id: String,
     title: String,
-    detail: &str,
+    detail: String,
+    short: &'static str,
     icon: Option<String>,
     actions: Vec<IslandAction>,
-    id: String,
-) -> Island {
+    priority: IslandPriority,
+    source: IslandSource,
+}
+
+/// A whisper: Shelf news is something that happened, not something that needs
+/// the user. The buttons (Copy, Show, Eject) are one hover away.
+fn alert(e: Spec) -> Island {
     Island {
-        id,
+        id: e.id,
         kind: IslandKind::Alert,
-        priority: IslandPriority::Normal,
-        icon,
-        title,
-        detail: Some(detail.to_string()),
-        actions,
-        expires: Some(ALERT_BACKSTOP_MS),
-        dismissible: false,
+        priority: e.priority,
+        icon: e.icon,
+        title: e.title,
+        detail: Some(e.detail),
+        short: Some(e.short.into()),
+        actions: e.actions,
+        tier: Some(IslandTier::Whisper),
+        source: e.source,
+        ..Island::default()
     }
 }
 
 fn shot_island(shot: &Shot, thumb: Option<String>) -> Island {
-    alert(
-        "Screenshot saved".into(),
-        &shot.name,
+    alert(Spec {
+        id: format!("shot:{}", shot.path),
+        title: "Screenshot saved".into(),
+        detail: shot.name.clone(),
+        short: "Saved",
         // The picture itself is the icon: a screenshot has no app to borrow one from.
-        thumb,
-        vec![
+        icon: thumb,
+        actions: vec![
             IslandAction::new("Copy", "shelf.copyShot").arg("path", &shot.path),
             IslandAction::new("Show", "shelf.reveal").arg("path", &shot.path),
         ],
-        format!("shot:{}", shot.path),
-    )
+        priority: IslandPriority::Normal,
+        source: IslandSource::Banners,
+    })
 }
 
 fn download_island(d: &Download) -> Island {
-    alert(
-        format!("Downloaded {}", d.name),
-        "Downloads",
-        None,
-        vec![IslandAction::new("Show", "shelf.reveal").arg("path", &d.path)],
-        format!("download:{}", d.path),
-    )
+    alert(Spec {
+        id: format!("download:{}", d.path),
+        title: format!("Downloaded {}", d.name),
+        detail: "Downloads".into(),
+        short: "Downloaded",
+        icon: None,
+        actions: vec![IslandAction::new("Show", "shelf.reveal").arg("path", &d.path)],
+        // Finished downloads are nice to know and never urgent: shown only to
+        // an idle notch.
+        priority: IslandPriority::Low,
+        source: IslandSource::Banners,
+    })
 }
 
 fn drive_island(d: &Drive) -> Island {
-    alert(
-        format!("{} connected", d.name),
-        &d.bus,
-        None,
-        vec![IslandAction::new("Eject", "shelf.eject").arg("mount", &d.mount)],
-        format!("drive:{}", d.mount),
-    )
+    alert(Spec {
+        id: format!("drive:{}", d.mount),
+        title: format!("{} connected", d.name),
+        detail: d.bus.clone(),
+        short: "Connected",
+        icon: None,
+        actions: vec![IslandAction::new("Eject", "shelf.eject").arg("mount", &d.mount)],
+        priority: IslandPriority::Normal,
+        source: IslandSource::Connectivity,
+    })
 }
 
 fn ejected_island(name: &str, mount: &str) -> Island {
-    alert(
-        format!("{name} is safe to disconnect"),
-        "Disk",
-        None,
-        Vec::new(),
-        format!("drive:{mount}"),
-    )
+    alert(Spec {
+        id: format!("drive:{mount}"),
+        title: format!("{name} is safe to disconnect"),
+        detail: "Disk".into(),
+        short: "Safe to remove",
+        icon: None,
+        actions: Vec::new(),
+        priority: IslandPriority::Normal,
+        source: IslandSource::Connectivity,
+    })
 }
 
-/// A Shelf alert drops from the notch — unless the user is in a panel, which
-/// it must not take the window from; the list in Shelf still gets it.
+/// A Shelf event goes through the gate like every takeover: with a panel open
+/// it waits (or goes stale) and the list in Shelf still has it.
 fn show(app: &AppHandle, island: Island) {
-    if crate::overlay::show_toast(app, false) {
-        crate::islands::push(app, island);
-    }
+    crate::islands::takeover(app, island);
 }
 
 fn on_shot(app: &AppHandle, shot: Shot) {

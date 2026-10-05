@@ -1,7 +1,7 @@
 //! What the timer and keep-awake put in the closed notch. Pure: state and a
 //! clock in, an [`Island`] out, so the wording is tested rather than eyeballed.
 
-use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority};
+use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority, IslandTier};
 
 use crate::awake::AwakeState;
 use crate::timer::{Finished, TimerMode, TimerPhase, TimerState, TimerStatus};
@@ -75,6 +75,7 @@ pub fn timer(s: &TimerState, now: i64) -> Option<Island> {
         actions: vec![action],
         expires: None,
         dismissible: false,
+        ..Island::default()
     })
 }
 
@@ -92,8 +93,8 @@ pub fn finished(f: &Finished) -> Island {
         title: title.into(),
         detail: Some(detail),
         actions: vec![IslandAction::new("Start", "focus.resume")],
-        expires: Some(8_000),
-        dismissible: false,
+        tier: Some(IslandTier::Peek),
+        ..Island::default()
     }
 }
 
@@ -117,6 +118,7 @@ pub fn awake(s: &AwakeState, now: i64) -> Option<Island> {
         actions: vec![IslandAction::new("Stop", "focus.awakeOff")],
         expires: None,
         dismissible: false,
+        ..Island::default()
     })
 }
 

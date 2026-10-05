@@ -222,24 +222,20 @@ pub async fn color_pick(
     .map_err(|e| e.to_string())?
     .map_err(err)?;
     if let Some(hex) = &picked {
-        // The sampler takes focus from the panel, so the answer is a toast:
+        // The sampler takes focus from the panel, so the answer is a whisper:
         // what was copied, where the user is looking.
-        if crate::overlay::show_toast(&app, false) {
-            crate::islands::push(
-                &app,
-                aloud_islands::Island {
-                    id: "clipboard:color".into(),
-                    kind: aloud_islands::IslandKind::Alert,
-                    priority: aloud_islands::IslandPriority::Normal,
-                    icon: None,
-                    title: format!("Copied {hex}"),
-                    detail: Some("Color picker".into()),
-                    actions: Vec::new(),
-                    expires: Some(30_000),
-                    dismissible: false,
-                },
-            );
-        }
+        crate::islands::takeover(
+            &app,
+            aloud_islands::Island {
+                id: "clipboard:color".into(),
+                kind: aloud_islands::IslandKind::Alert,
+                title: format!("Copied {hex}"),
+                detail: Some("Color picker".into()),
+                short: Some("Copied".into()),
+                tier: Some(aloud_islands::IslandTier::Whisper),
+                ..aloud_islands::Island::default()
+            },
+        );
     }
     Ok(picked)
 }

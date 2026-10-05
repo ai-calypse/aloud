@@ -75,6 +75,7 @@ pub fn island(now: &NowPlaying, art: Option<String>) -> Island {
         actions: vec![pause(now)],
         expires: None,
         dismissible: false,
+        ..Island::default()
     }
 }
 

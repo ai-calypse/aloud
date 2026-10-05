@@ -279,6 +279,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::OverlayDismiss,
             overlay::NotchHover,
             islands::IslandChanged,
+            islands::IslandsWaiting,
             shelf::ShelfChanged,
             // notch-today-focus: events begin
             focus::FocusSnapshot,

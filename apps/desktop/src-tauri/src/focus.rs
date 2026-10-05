@@ -133,7 +133,7 @@ async fn ticker(app: AppHandle) {
             if let Some(session) = done.session {
                 record(&focus, session);
             }
-            crate::islands::push(&app, island::finished(&done));
+            crate::islands::takeover(&app, island::finished(&done));
         }
         let awake_changed = *lock(&focus.last_awake) != lock(&focus.awake).state();
         publish(&app, &focus, finished.is_some() || awake_changed);

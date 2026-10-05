@@ -13,7 +13,7 @@
 //! - **Camera:** `DeviceIsRunningSomewhere` on every CMIO device. CMIO has no
 //!   per-process property, so the camera is on or off, never by name.
 
-use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority};
+use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority, IslandTier};
 use serde::{Deserialize, Serialize};
 
 use crate::Step;
@@ -93,6 +93,31 @@ pub fn island(u: &PrivacyUse) -> Island {
         actions: vec![IslandAction::new("Show", "mac.privacy")],
         expires: None,
         dismissible: false,
+        ..Island::default()
+    }
+}
+
+/// The whisper at the first sighting, beside the standing island: the island
+/// is the indicator that stays, this is the moment it started.
+pub const SEEN_ID: &str = "mac:privacy-seen";
+
+fn sighting(u: &PrivacyUse) -> Island {
+    let short = match (u.camera, u.mic) {
+        (true, true) => "Camera + mic",
+        (true, false) => "Camera",
+        _ => "Mic",
+    };
+    Island {
+        id: SEEN_ID.into(),
+        kind: IslandKind::Alert,
+        priority: IslandPriority::High,
+        tier: Some(IslandTier::Whisper),
+        icon: Some(if u.camera { "camera" } else { "mic" }.into()),
+        title: island(u).title,
+        detail: island(u).detail,
+        short: Some(short.into()),
+        actions: vec![IslandAction::new("Show", "mac.privacy")],
+        ..Island::default()
     }
 }
 
@@ -101,16 +126,30 @@ pub fn island(u: &PrivacyUse) -> Island {
 #[derive(Debug, Default)]
 pub struct Watch {
     quiet: u8,
+    /// An island is up, so the next in-use read is not a first sighting.
+    up: bool,
+    fresh: bool,
 }
 
 impl Watch {
     pub fn update(&mut self, u: &PrivacyUse) -> Option<Step> {
         if u.mic || u.camera {
             self.quiet = 0;
+            self.fresh |= !self.up;
+            self.up = true;
             return Some(Step::Push(island(u)));
         }
         self.quiet = self.quiet.saturating_add(1);
-        (self.quiet == QUIET_POLLS).then_some(Step::Remove(ID))
+        if self.quiet == QUIET_POLLS {
+            self.up = false;
+            return Some(Step::Remove(ID));
+        }
+        None
+    }
+
+    /// Once per start of use, right after the [`Watch::update`] that saw it.
+    pub fn take_sighting(&mut self, u: &PrivacyUse) -> Option<Island> {
+        std::mem::take(&mut self.fresh).then(|| sighting(u))
     }
 }
 
@@ -389,5 +428,34 @@ mod tests {
             None,
             "removed once, not every poll"
         );
+    }
+
+    /// The failure: a whisper on every poll while a call is on, which is the
+    /// standing island's job — and none when a blip came back within two polls.
+    #[test]
+    fn the_whisper_marks_the_start_of_use_only() {
+        let mut watch = Watch::default();
+        let mic = using(true, false, &["Zoom"]);
+        watch.update(&mic);
+        let seen = watch.take_sighting(&mic).expect("the first sighting");
+        assert_eq!(seen.tier, Some(IslandTier::Whisper));
+        assert_eq!(seen.short.as_deref(), Some("Mic"));
+
+        watch.update(&mic);
+        assert!(
+            watch.take_sighting(&mic).is_none(),
+            "not again on the next poll"
+        );
+        watch.update(&PrivacyUse::default());
+        watch.update(&mic);
+        assert!(
+            watch.take_sighting(&mic).is_none(),
+            "a blip is not a new start"
+        );
+
+        watch.update(&PrivacyUse::default());
+        watch.update(&PrivacyUse::default());
+        watch.update(&mic);
+        assert!(watch.take_sighting(&mic).is_some(), "a real second call is");
     }
 }

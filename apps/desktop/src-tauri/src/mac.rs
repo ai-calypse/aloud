@@ -48,8 +48,12 @@ pub fn start(app: &AppHandle) {
             loop {
                 let on = watchers();
                 if on.privacy {
-                    if let Some(step) = privacy.update(&privacy::read()) {
+                    let read = privacy::read();
+                    if let Some(step) = privacy.update(&read) {
                         apply(&app, step);
+                    }
+                    if let Some(seen) = privacy.take_sighting(&read) {
+                        crate::islands::takeover(&app, seen);
                     }
                 }
                 if on.battery && tick.is_multiple_of(BATTERY_EVERY_TICKS) {
@@ -81,15 +85,12 @@ pub fn island_dismissed(id: &str) {
 fn apply(app: &AppHandle, step: Step) {
     match step {
         Step::Remove(id) => crate::islands::remove(app, id),
-        Step::Push(island) => {
-            // An alert drops from the notch, which `show_toast` has to allow
-            // first: it refuses while the user is in a panel, and that chip
-            // is not worth taking the window for.
-            if island.kind == IslandKind::Alert && !crate::overlay::show_toast(app, false) {
-                return;
-            }
-            crate::islands::push(app, island);
+        // An alert is a takeover: the gate decides whether it shows, waits or
+        // is not worth the notch's attention (a panel open, Focus, typing).
+        Step::Push(island) if island.kind == IslandKind::Alert => {
+            crate::islands::takeover(app, island);
         }
+        Step::Push(island) => crate::islands::push(app, island),
     }
 }
 
@@ -188,7 +189,10 @@ pub fn set_mac_watcher(app: AppHandle, watcher: Watcher, on: bool) -> Result<(),
     };
     if !on {
         match watcher {
-            Watcher::Privacy => crate::islands::remove(&app, privacy::ID),
+            Watcher::Privacy => {
+                crate::islands::remove(&app, privacy::ID);
+                crate::islands::remove(&app, privacy::SEEN_ID);
+            }
             Watcher::Battery => {
                 crate::islands::remove(&app, power::LOW_ID);
                 crate::islands::remove(&app, power::LOW_CHIP_ID);
