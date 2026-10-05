@@ -694,6 +694,14 @@ pub fn history_recent(state: State<'_, AppState>, limit: u32) -> CmdResult<Vec<E
     to_string_err(state.pipeline.history(limit as usize))
 }
 
+/// The newest `limit` things said to Aloud, dictations and commands together,
+/// for Agents › Voice in the notch.
+#[tauri::command]
+#[specta::specta]
+pub fn history_voice_recent(state: State<'_, AppState>, limit: u32) -> CmdResult<Vec<Entry>> {
+    to_string_err(state.pipeline.voice_history(limit as usize))
+}
+
 /// Row ids cross the boundary as i32 because specta refuses to export i64
 /// (see [`Entry`]). SQLite hands out ids by insertion count and retention caps
 /// the table in the hundreds, so 2^31 is not a reachable ceiling.

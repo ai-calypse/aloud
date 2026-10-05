@@ -103,7 +103,11 @@ all run one agent) and **Meeting**. A command goes:
 
 1. **Fast path, no model** — `aloud_native::fast`: open/quit installed apps,
    play/pause/next, volume, and obvious web commands ("go to youtube", "search
-   lofi on youtube") straight to the browser engine.
+   lofi on youtube") straight to the browser engine. A bare section name
+   ("show my agents", "open the shelf", "show clipboard", "open today", "show
+   my timer", "show media") opens the notch shell there (`Fast::Notch`, the
+   `notch-open` event); a run otherwise shows only itself, in a compact panel,
+   and never opens the sections.
 2. **The brain** — one tool-calling model at a time, best first
    (`aloud_agent::brains`): Groq `openai/gpt-oss-120b`, then Gemini
    Flash-Lite, then NVIDIA's `nemotron-3.5-lightning` (fast, but it wanders
@@ -165,7 +169,8 @@ the dashboard lines a branch's run up against the brain's previous one. It
 reads real use from the same folder (`timings.sqlite`, `history.sqlite`,
 `engine/log.jsonl`) and shows it apart from the eval, never blended. A
 command's words are deliberately not in the timings DB, so a real command
-shows its route, tools and rounds but not what was said.
+shows its route, tools and rounds but not what was said. They are in
+`history.sqlite` instead (below), which the dashboard reads for dictations only.
 
 Screen control is the last tier, on trycua's Cua Driver (`crates/screen`, which
 shells out to `cua-driver call`): read an app's accessibility tree as numbered

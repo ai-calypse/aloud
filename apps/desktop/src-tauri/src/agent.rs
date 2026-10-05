@@ -267,6 +267,9 @@ struct Run {
     /// The writes that ran and worked, in order, for the toast.
     wrote: Mutex<Vec<Wrote>>,
     transcript: String,
+    /// Keys the history row, so a run reporting its end twice leaves one.
+    utterance_id: i64,
+    started: std::time::Instant,
 }
 
 /// A write that ran and worked, for the toast a run of them ends on.
@@ -309,6 +312,24 @@ impl Run {
             crate::overlay::show_panel(app);
             self.emit(app, AgentEvent::RunStarted(self.transcript.clone()));
         }
+    }
+
+    /// Keeps how the run ended in the history, for Agents › Voice. Never fails
+    /// the run: the answer is already on its way to the user.
+    fn record_end(&self, app: &AppHandle, front: Option<&str>, outcome: &str, success: bool) {
+        let Some(state) = app.try_state::<crate::AppState>() else {
+            return;
+        };
+        let settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();
+        state.pipeline.record_command(
+            &self.transcript,
+            outcome,
+            success,
+            front,
+            self.started.elapsed().as_millis() as i64,
+            self.utterance_id,
+            &settings,
+        );
     }
 
     /// Records a tool's result for the toast: a write that worked, or anything
@@ -641,6 +662,7 @@ fn show_of(show: Option<(String, String)>) -> Option<ShowTarget> {
 pub async fn run(
     app: &AppHandle,
     transcript: String,
+    utterance_id: i64,
     settings: &Settings,
     quiet: bool,
     cancelled: impl Fn() -> bool,
@@ -660,6 +682,8 @@ pub async fn run(
         failed: AtomicBool::new(false),
         wrote: Mutex::new(Vec::new()),
         transcript: transcript.clone(),
+        utterance_id,
+        started: std::time::Instant::now(),
     };
     let cancelled = || cancelled_or_superseded(run.ticket, &cancelled);
 
@@ -669,6 +693,17 @@ pub async fn run(
     // confirmation with no prompt on screen. After the claim, so the run being
     // superseded cannot put a question back in between.
     clear_pending(app);
+
+    // Routed before the panel opens, because a request for a place in the notch
+    // must never flash a run panel first: it opens the shell there and is done.
+    let installed = aloud_selection::installed_apps();
+    let fast = aloud_native::fast::route(&transcript, &installed);
+    if let Some(aloud_native::fast::Fast::Notch { section, sub, done }) = fast {
+        tracing::info_span!("agent_run", route = "fast").in_scope(|| {});
+        crate::overlay::open_notch(app, section, sub);
+        run.record_end(app, None, &done, true);
+        return Ok(());
+    }
 
     // Read before `show_panel`, which focuses our own window and would make us the front app. Our own
     // name means a panel still held focus from the last run, which says nothing about what the user is
@@ -713,7 +748,7 @@ pub async fn run(
         project,
         selection: selection.as_deref(),
     };
-    match execute(app, &run, &transcript, context, settings, cancelled).await {
+    match execute(app, &run, &transcript, context, settings, fast, cancelled).await {
         Ok(message) => {
             let wrote = run
                 .wrote
@@ -730,6 +765,14 @@ pub async fn run(
                 }
                 None => {}
             }
+            // Written before the panel hears of it: the Voice list refetches
+            // when the run reads as finished, and must find the row there.
+            run.record_end(
+                app,
+                front.as_deref(),
+                &message,
+                !run.failed.load(Ordering::SeqCst),
+            );
             run.emit(app, AgentEvent::RunFinished(message));
         }
         // A cancel is the user's own doing: close the panel rather than
@@ -746,7 +789,9 @@ pub async fn run(
             tracing::error!(%e, "agent failed");
             // An error is something to read, not a one-line status.
             run.surface(app);
-            run.emit(app, AgentEvent::RunError(format!("{e:#}")));
+            let error = format!("{e:#}");
+            run.record_end(app, front.as_deref(), &error, false);
+            run.emit(app, AgentEvent::RunError(error));
         }
     }
     Ok(())
@@ -786,14 +831,16 @@ async fn execute(
     transcript: &str,
     context: Context<'_>,
     settings: &Settings,
+    fast: Option<aloud_native::fast::Fast>,
     cancelled: impl Fn() -> bool,
 ) -> Result<String> {
+    // Cached for five minutes, so this is the read `run` just made.
     let installed = aloud_selection::installed_apps();
-
     // The fast path, before any language model: "open Slack", "pause", "volume 30" run their tool
     // directly, and "go to youtube", "search lofi on youtube" go straight to the browser engine.
     // Everything else, and a browser engine missing from this build, takes the brain below.
-    match aloud_native::fast::route(transcript, &installed) {
+    // (`run` routed already, so a notch open could skip the panel.)
+    match fast {
         Some(aloud_native::fast::Fast::Tool { name, args, done }) => {
             tracing::Span::current().record("route", "fast");
             let call = aloud_agent::ProposedCall {
@@ -818,7 +865,8 @@ async fn execute(
                 None => {}
             }
         }
-        None => {}
+        // `run` handled these before the panel opened.
+        Some(aloud_native::fast::Fast::Notch { .. }) | None => {}
     }
 
     let brains = aloud_agent::brains(

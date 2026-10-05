@@ -13,16 +13,16 @@ use std::path::Path;
 /// runs, whichever key started them) end in an answer or an error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub enum Kind {
+pub enum EntryKind {
     Dictation,
     Command,
 }
 
-impl Kind {
+impl EntryKind {
     fn as_str(self) -> &'static str {
         match self {
-            Kind::Dictation => "dictation",
-            Kind::Command => "command",
+            EntryKind::Dictation => "dictation",
+            EntryKind::Command => "command",
         }
     }
 }
@@ -38,7 +38,7 @@ pub struct Entry {
     /// Unix seconds.
     #[specta(type = specta_typescript::Number)]
     pub created_at: i64,
-    pub kind: Kind,
+    pub kind: EntryKind,
     /// What the transcriber returned. For a command, what the user said.
     pub raw_transcript: String,
     /// What was actually pasted, after cleanup. For a command, how the run
@@ -216,7 +216,7 @@ impl History {
                 app_name,
                 duration_ms,
                 utterance_id,
-                Kind::Command.as_str(),
+                EntryKind::Command.as_str(),
                 success
             ],
         )?;
@@ -412,8 +412,8 @@ fn read_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
         utterance_id: row.get(6)?,
         audio_path: row.get(7)?,
         kind: match row.get::<_, String>(8)?.as_str() {
-            "command" => Kind::Command,
-            _ => Kind::Dictation,
+            "command" => EntryKind::Command,
+            _ => EntryKind::Dictation,
         },
         success: row.get(9)?,
     })
@@ -796,7 +796,7 @@ mod tests {
         let history = History::open(&path).unwrap();
         let rows = history.recent(10).unwrap();
         assert_eq!(rows.len(), 1, "the pre-existing row must survive");
-        assert_eq!(rows[0].kind, Kind::Dictation);
+        assert_eq!(rows[0].kind, EntryKind::Dictation);
         assert!(rows[0].success);
         assert_eq!(rows[0].final_transcript, "Hello.");
 
@@ -833,9 +833,9 @@ mod tests {
 
         let voice = history.recent_voice(10).unwrap();
         assert_eq!(voice.len(), 2);
-        assert_eq!(voice[0].kind, Kind::Command, "newest first");
+        assert_eq!(voice[0].kind, EntryKind::Command, "newest first");
         assert_eq!(voice[0].raw_transcript, "a command");
-        assert_eq!(voice[1].kind, Kind::Dictation);
+        assert_eq!(voice[1].kind, EntryKind::Dictation);
     }
 
     #[test]

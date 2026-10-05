@@ -300,6 +300,11 @@ async fn judge(
             aloud_engine::BROWSER_TASK.to_string(),
             json!({ "goal": case.input }),
         )),
+        // Not a tool at all, but the cases name it so the section is asserted.
+        Some(Fast::Notch { section, sub, .. }) => Some((
+            "NOTCH_OPEN".to_string(),
+            json!({ "section": section, "sub": sub.unwrap_or("") }),
+        )),
         None => {
             trace.route = "brain";
             let aloud_agent::CommandTools { tools, more } =

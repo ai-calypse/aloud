@@ -67,7 +67,7 @@ fn main() {
             println!("organize is covered by `cargo test -p aloud-native organize`.");
             println!("To try it live, use the app — the gate previews every move first.");
         }
-        // What the fast path makes of an utterance, then running it (web tasks only print).
+        // What the fast path makes of an utterance, then running it (web tasks and notch opens only print).
         [cmd, said] if cmd == "fast" => {
             let started = std::time::Instant::now();
             let installed = aloud_selection::installed_apps();
@@ -79,6 +79,13 @@ fn main() {
                 }
                 Some(aloud_native::fast::Fast::Web { query }) => {
                     println!("→ browser task (engine), query {query:?}")
+                }
+                Some(aloud_native::fast::Fast::Notch { section, sub, done }) => {
+                    println!(
+                        "→ open the notch at {section}/{}",
+                        sub.unwrap_or("(as last left)")
+                    );
+                    println!("  says: {done}");
                 }
                 None => println!("→ the brain"),
             }

@@ -85,6 +85,11 @@ export const commands = {
 	/**  The newest `limit` dictations, for the Run Log pane. */
 	historyRecent: (limit: number) => typedError<Entry[], string>(__TAURI_INVOKE("history_recent", { limit })),
 	/**
+	 *  The newest `limit` things said to Aloud, dictations and commands together,
+	 *  for Agents › Voice in the notch.
+	 */
+	historyVoiceRecent: (limit: number) => typedError<Entry[], string>(__TAURI_INVOKE("history_voice_recent", { limit })),
+	/**
 	 *  Row ids cross the boundary as i32 because specta refuses to export i64
 	 *  (see [`Entry`]). SQLite hands out ids by insertion count and retention caps
 	 *  the table in the hundreds, so 2^31 is not a reachable ceiling.
@@ -172,6 +177,8 @@ export const commands = {
 	disconnectConnector: (connectionId: string) => typedError<null, string>(__TAURI_INVOKE("disconnect_connector", { connectionId })),
 	/**  Records the panel's settled box, so the click region can be exactly it. */
 	setPanelBox: (width: number | null, height: number | null) => __TAURI_INVOKE<void>("set_panel_box", { width, height }),
+	/**  The webview reporting its hover-opened Home, see [`PEEKING`]. */
+	setNotchPeek: (open: boolean) => __TAURI_INVOKE<void>("set_notch_peek", { open }),
 	/**
 	 *  The webview declaring its interactive state; see [`INTERACTIVE`].
 	 * 
@@ -540,6 +547,7 @@ export const events = {
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
 	notchHover: makeEvent<NotchHover>("notch-hover"),
+	notchOpen: makeEvent<NotchOpen>("notch-open"),
 	overlayDismiss: makeEvent<OverlayDismiss>("overlay-dismiss"),
 	overlayError: makeEvent<OverlayError>("overlay-error"),
 	overlayStyle: makeEvent<OverlayStyleChanged>("overlay-style"),
@@ -1011,10 +1019,19 @@ export type Entry = {
 	id: number,
 	/**  Unix seconds. */
 	createdAt: number,
-	/**  What the transcriber returned. */
+	kind: EntryKind,
+	/**  What the transcriber returned. For a command, what the user said. */
 	rawTranscript: string,
-	/**  What was actually pasted, after cleanup. */
+	/**
+	 *  What was actually pasted, after cleanup. For a command, how the run
+	 *  ended: its answer, or the error that stopped it.
+	 */
 	finalTranscript: string,
+	/**
+	 *  False for a command that ended in an error. Dictations are always true:
+	 *  a failed one writes no row.
+	 */
+	success: boolean,
 	appName: string | null,
 	durationMs: number,
 	/**
@@ -1028,6 +1045,12 @@ export type Entry = {
 	 */
 	audioPath: string | null,
 };
+
+/**
+ *  What a history row records. Dictations paste text; commands (agent and ask
+ *  runs, whichever key started them) end in an answer or an error.
+ */
+export type EntryKind = "dictation" | "command";
 
 export type Event = {
 	/**  Unique per occurrence: a recurring event's uid is shared by all of them. */
@@ -1450,6 +1473,16 @@ export type NotchEvents = {
  */
 export type NotchHover = {
 	over: boolean,
+};
+
+/**
+ *  Asks the overlay to open the notch panel at a section: what "show my agents"
+ *  resolves to on the fast path. `sub` is `None` for "wherever that section was
+ *  last left".
+ */
+export type NotchOpen = {
+	section: string,
+	sub: string | null,
 };
 
 /**

@@ -169,8 +169,15 @@ async fn run_requests(shared: Arc<Shared>, mut queue: mpsc::UnboundedReceiver<(u
             continue;
         }
         let cancelled = || shared.generation.load(Ordering::SeqCst) != generation;
-        if let Err(e) =
-            crate::agent::run(&shared.app, request, &shared.settings, true, cancelled).await
+        if let Err(e) = crate::agent::run(
+            &shared.app,
+            request,
+            aloud_store::timings::next_utterance_id(),
+            &shared.settings,
+            true,
+            cancelled,
+        )
+        .await
         {
             tracing::error!(%e, "always-listening request failed");
         }

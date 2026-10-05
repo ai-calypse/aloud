@@ -47,6 +47,17 @@ pub struct NotchHover {
     pub over: bool,
 }
 
+/// Asks the overlay to open the notch panel at a section: what "show my agents"
+/// resolves to on the fast path. `sub` is `None` for "wherever that section was
+/// last left".
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
+#[serde(rename_all = "camelCase")]
+#[tauri_specta(event_name = "notch-open")]
+pub struct NotchOpen {
+    pub section: String,
+    pub sub: Option<String>,
+}
+
 /// Tells the overlay to play its exit, ahead of the window actually going away:
 /// the pill collapses while the window is still up, and [`hide`] takes the
 /// window away once it has.
@@ -291,6 +302,22 @@ pub fn show_panel(app: &AppHandle) {
     track_cursor(app);
 }
 
+/// Opens the full notch panel at `section`, for a command that asked for one.
+/// It is [`show_panel`] (the panel owns the window and the keyboard from the
+/// first frame, so the run's closing `Idle` cannot hide it) plus the place to
+/// land: the webview takes that as a temporary jump, so the next click on the
+/// notch still opens where the user last chose.
+pub fn open_notch(app: &AppHandle, section: &str, sub: Option<&str>) {
+    show_panel(app);
+    let open = NotchOpen {
+        section: section.to_string(),
+        sub: sub.map(str::to_string),
+    };
+    if let Err(e) = open.emit_to(app, LABEL) {
+        tracing::warn!(%e, "could not send notch open");
+    }
+}
+
 /// True while the window is up for a toast, which a later toast may replace
 /// but a passing run may not take for anything else.
 static TOAST: AtomicBool = AtomicBool::new(false);
@@ -299,7 +326,30 @@ static TOAST: AtomicBool = AtomicBool::new(false);
 /// as opposed to the window being up for a toast. What the takeover gate
 /// means by "the panel is open".
 pub fn user_panel_open() -> bool {
-    PANEL_OPEN.load(Ordering::SeqCst) && !TOAST.load(Ordering::SeqCst)
+    (PANEL_OPEN.load(Ordering::SeqCst) && !TOAST.load(Ordering::SeqCst))
+        || PEEKING.load(Ordering::SeqCst)
+}
+
+/// True while the notch has opened itself under the pointer (Home, on hover)
+/// and nothing has been clicked or typed yet.
+///
+/// Deliberately not [`PANEL_OPEN`]: that flag takes keyboard focus and makes a
+/// click-away dismiss, and a pointer merely resting on the notch must not
+/// steal the keyboard from the app the user is typing in. It counts as the
+/// user's panel for the takeover gate alone, so a banner waits instead of
+/// replacing Home under the pointer; leaving, or clicking in (which becomes a
+/// real panel through [`set_panel_interactive`]), ends it.
+static PEEKING: AtomicBool = AtomicBool::new(false);
+
+/// The webview reporting its hover-opened Home, see [`PEEKING`].
+#[tauri::command]
+#[specta::specta]
+pub fn set_notch_peek(app: AppHandle, open: bool) {
+    let was = PEEKING.swap(open, Ordering::SeqCst);
+    // A takeover held back by the peek may come back now that it is gone.
+    if was && !open {
+        crate::islands::panel_closed(&app);
+    }
 }
 
 /// Puts the window up for a toast; false when it may not have it. A run hands
