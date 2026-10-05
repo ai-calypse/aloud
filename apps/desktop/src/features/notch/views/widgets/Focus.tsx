@@ -351,7 +351,7 @@ export function NotesBoard({
                       </span>
                       <span className="mt-0.5 block truncate text-notch-w-title leading-tight text-widget-ink-2">
                         {noteWhen(note.date, now)}
-                        {noteSnippet(note.content) && `  ${noteSnippet(note.content)}`}
+                        {noteSnippet(note.content) && ` · ${noteSnippet(note.content)}`}
                       </span>
                     </button>
                   </li>

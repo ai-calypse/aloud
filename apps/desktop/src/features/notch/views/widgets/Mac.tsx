@@ -14,7 +14,6 @@ import {
   ThermometerIcon,
 } from "lucide-react";
 import { NOTCH_FOCUS } from "@/components/ui/button";
-import { Switch } from "@/components/notch/controls";
 import {
   Numeral,
   Ring,
@@ -33,7 +32,7 @@ import {
 import { cn } from "@/lib/utils";
 import { usePoll } from "../../usePoll";
 import { useWatcher } from "../../useWatcher";
-import { Idle, Pill } from "./parts";
+import { Idle, Pill, WidgetSwitch } from "./parts";
 import {
   GRID_SNAPS,
   SNAP_REGION,
@@ -214,7 +213,7 @@ export function PowerBoard({
             <div>
               <div className="flex items-baseline">
                 <Numeral text={p.text} size="l" roll />
-                <span className="text-notch-w-numeral-s font-light text-widget-ink">%</span>
+                <span className="text-notch-w-numeral-s leading-none font-light text-widget-ink">%</span>
               </div>
               <div className="text-notch-w-title leading-snug font-medium text-widget-ink-2">
                 {p.sentence}
@@ -224,7 +223,7 @@ export function PowerBoard({
               <span className="min-w-0 text-notch-w-meta leading-tight font-medium text-widget-ink-2">
                 Alert me at full and below 20%
               </span>
-              <Switch
+              <WidgetSwitch
                 checked={alerts ?? true}
                 disabled={alerts === null}
                 onChange={onAlerts}
@@ -241,15 +240,15 @@ export function PowerBoard({
               value={p.health.value}
               label="Battery capacity"
               valueText={`${p.health.text}% of when it was new`}
-              size={56}
-              stroke={9}
+              size={48}
+              stroke={8}
             >
               <HeartPulseIcon aria-hidden className="size-5 text-widget-ink" strokeWidth={2} />
             </Ring>
             <div>
               <div className="flex items-baseline">
                 <Numeral text={p.health.text} size="l" />
-                <span className="text-notch-w-numeral-s font-light text-widget-ink">%</span>
+                <span className="text-notch-w-numeral-s leading-none font-light text-widget-ink">%</span>
               </div>
               <div className="text-notch-w-title font-medium text-widget-ink-2">Compared with new</div>
             </div>
@@ -322,7 +321,7 @@ export function PrivacyBoard({
         <div className="flex h-full flex-col justify-between p-3.5">
           <div className="flex items-start justify-between gap-2">
             <EyeIcon aria-hidden className="size-6 text-widget-ink-2" strokeWidth={1.6} />
-            <Switch
+            <WidgetSwitch
               checked={watching ?? true}
               disabled={watching === null}
               onChange={onWatching}
@@ -374,7 +373,7 @@ function PrivacyTile({
         <div>
           <div className="text-notch-w-headline leading-tight font-semibold">{word}</div>
           <div className="line-clamp-2 text-notch-w-meta leading-tight font-medium text-widget-ink-2">
-            {title}. {detail}
+            {detail}
           </div>
         </div>
       </div>
@@ -450,11 +449,9 @@ export function WindowsBoard({
             <div className="line-clamp-2 text-notch-w-headline leading-tight font-semibold break-words">
               {front.app ?? "No window"}
             </div>
-            <div className="text-notch-w-meta leading-tight text-widget-ink-2">
-              {front.app ? "Snap it to part of the screen" : "Open a window to snap it"}
-            </div>
-            <p className="m-0 mt-1 min-h-3.5 truncate text-notch-w-meta leading-tight text-widget-acc-ink" aria-live="polite">
-              {said}
+            {/* What just happened replaces the hint: both are one polite line. */}
+            <p className="m-0 line-clamp-2 text-notch-w-meta leading-tight text-widget-ink-2" aria-live="polite">
+              {said || (front.app ? "Snap it to part of the screen" : "Open a window to snap it")}
             </p>
           </div>
         </div>
@@ -516,13 +513,13 @@ function SnapButton({
       onClick={() => onSnap(id)}
       className={cn(
         NOTCH_FOCUS,
-        "flex min-w-0 flex-col items-center justify-center gap-1.5 rounded-notch-row bg-widget-tile-2 px-1",
+        "flex min-w-0 flex-col items-center justify-start gap-1.5 rounded-notch-row bg-widget-tile-2 px-1 pt-3",
         "transition-[background-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
         "hover:bg-widget-neutral-track active:scale-97 disabled:pointer-events-none disabled:opacity-40",
       )}
     >
       <SnapGlyph id={id} />
-      <span className="max-w-full truncate text-notch-w-over leading-none font-semibold text-widget-ink">
+      <span className="text-center text-notch-w-over leading-tight font-semibold text-widget-ink">
         {label}
       </span>
     </button>

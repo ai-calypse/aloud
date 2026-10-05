@@ -97,3 +97,47 @@ export function Choice({
     </div>
   );
 }
+
+/**
+ * The widgets look's on/off. The calm `Switch` is a raised grey on the notch's
+ * black, which vanishes on a #252525 tile when off; this one is a white track
+ * with a dark knob when on and the neutral track with a white knob when off,
+ * so the state shows in the knob's side as well as its tone.
+ */
+export function WidgetSwitch({
+  checked,
+  onChange,
+  label,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        NOTCH_FOCUS,
+        "relative h-5 w-8.5 shrink-0 rounded-full transition-colors duration-[var(--dur-base)] ease-[var(--ease-out)]",
+        "disabled:opacity-40",
+        checked ? "bg-widget-ink" : "bg-widget-neutral-track",
+      )}
+    >
+      <span
+        className={cn(
+          "absolute top-0.5 left-0.5 size-4 rounded-full",
+          // The overshooting spring the calm switch uses: about a pixel past the stop and back.
+          "transition-transform duration-[var(--spring-pop-dur)] ease-[var(--spring-pop)]",
+          checked ? "translate-x-3.5 bg-widget-on" : "translate-x-0 bg-widget-ink",
+        )}
+      />
+    </button>
+  );
+}
