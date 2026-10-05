@@ -29,6 +29,17 @@ pub enum OverlayStyle {
     Wings,
 }
 
+/// How the open notch panel looks. `Calm` is the monochrome panel; `Widgets`
+/// redraws it as Apple-style widgets (docs/design/notch-personality.html). Only
+/// the look changes: the sections, shortcuts and closed notch are the same.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum NotchStyle {
+    #[default]
+    Calm,
+    Widgets,
+}
+
 /// Which monitor the overlay appears on. `Named` stores the OS name, not an
 /// index: indices are reassigned on unplug, so a saved index changes meaning.
 /// A name that no longer resolves falls back to the primary.
@@ -39,6 +50,18 @@ pub enum OverlayDisplay {
     Active,
     Primary,
     Named(String),
+}
+
+/// Removes `key` from a settings document when it no longer parses as `T`.
+fn drop_if_unparseable<T: serde::de::DeserializeOwned>(raw: &mut serde_json::Value, key: &str) {
+    if raw
+        .get(key)
+        .is_some_and(|value| serde_json::from_value::<T>(value.clone()).is_err())
+    {
+        if let Some(object) = raw.as_object_mut() {
+            object.remove(key);
+        }
+    }
 }
 
 /// Everything the app remembers between launches. One coarse struct rather
@@ -137,6 +160,8 @@ pub struct Settings {
     pub show_menu_bar_icon: bool,
     /// Drop-down pill or menu-bar wings; wings are macOS-only.
     pub overlay_style: OverlayStyle,
+    /// Calm (monochrome) or Widgets (Apple-style tiles) for the open notch.
+    pub notch_style: NotchStyle,
     /// Whether a coding agent's permission request opens the notch by itself.
     /// Off means the request waits quietly — the Agents surface flags it, and
     /// the user opens the notch when they hover. The hook waits either way.
@@ -214,6 +239,7 @@ impl Default for Settings {
             mute_system_audio: false,
             show_menu_bar_icon: true,
             overlay_style: OverlayStyle::DropPill,
+            notch_style: NotchStyle::Calm,
             // On: a blocked agent is usually why the user looks up. The
             // toggle exists for people who find the self-opening notch rude.
             agent_open_on_permission: true,
@@ -300,18 +326,13 @@ impl Settings {
                 hotkeys.entry("rewrite").or_insert(old);
             }
         }
-        // An unrecognised `overlayStyle` is dropped so the field defaults.
-        // Asking serde whether it parses beats a per-dead-value rename list,
-        // which once collided with a live name. The document must not fail over
-        // one stale enum — that would reset the file, and the API keys are in it.
-        if raw
-            .get("overlayStyle")
-            .is_some_and(|style| serde_json::from_value::<OverlayStyle>(style.clone()).is_err())
-        {
-            if let Some(object) = raw.as_object_mut() {
-                object.remove("overlayStyle");
-            }
-        }
+        // An unrecognised `overlayStyle` (or `notchStyle`, from a newer build)
+        // is dropped so the field defaults. Asking serde whether it parses
+        // beats a per-dead-value rename list, which once collided with a live
+        // name. The document must not fail over one stale enum — that would
+        // reset the file, and the API keys are in it.
+        drop_if_unparseable::<OverlayStyle>(&mut raw, "overlayStyle");
+        drop_if_unparseable::<NotchStyle>(&mut raw, "notchStyle");
         serde_json::from_value(raw)
     }
 
@@ -630,6 +651,27 @@ mod rename_tests {
                 .expect("a current style must parse");
             assert_eq!(reloaded.overlay_style, style);
         }
+    }
+
+    /// The widgets look is a choice the user made: it must survive a restart,
+    /// an old file with no `notchStyle` must open Calm, and a value from a
+    /// newer build must cost that one field, not the keys beside it.
+    #[test]
+    fn the_notch_style_defaults_to_calm_and_survives_a_restart() {
+        assert_eq!(Settings::default().notch_style, NotchStyle::Calm);
+        let old = Settings::from_json(r#"{ "groqApiKey": "keep-me" }"#).expect("old file");
+        assert_eq!(old.notch_style, NotchStyle::Calm);
+
+        let saved = serde_json::to_string(&NotchStyle::Widgets).expect("must serialize");
+        assert_eq!(saved, r#""widgets""#);
+        let reloaded = Settings::from_json(&format!(r#"{{ "notchStyle": {saved} }}"#))
+            .expect("settings must parse");
+        assert_eq!(reloaded.notch_style, NotchStyle::Widgets);
+
+        let future = Settings::from_json(r#"{ "notchStyle": "alive", "groqApiKey": "keep-me" }"#)
+            .expect("an unknown style must not fail the document");
+        assert_eq!(future.notch_style, NotchStyle::Calm);
+        assert_eq!(future.groq_api_key, "keep-me");
     }
 
     /// The pill serialized as `"pill"`, the exact string the loader rewrote, so
