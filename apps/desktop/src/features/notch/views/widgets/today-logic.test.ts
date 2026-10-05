@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { Event as CalendarEvent, Reminder } from "@/lib/bindings";
 import {
   dayChart,
+  dayStartOf,
+  eventsOnDay,
   dayLabel,
   GRID_HOURS,
   hourLabel,
@@ -9,8 +11,12 @@ import {
   monthGrid,
   moreLabel,
   moveOf,
+  moveSelection,
   nowLine,
   rangeBar,
+  sameDay,
+  shiftDay,
+  shiftMonth,
   reminderCounts,
   splitAgenda,
   toneFor,
@@ -265,5 +271,48 @@ describe("dayChart", () => {
     const c = dayChart(pts(7, 7, 7), 7, W, H)!;
     expect(c.end[1]).toBe(H / 2);
     expect(c.baseline).toBe(H / 2);
+  });
+});
+
+describe("picking a date", () => {
+  it("steps by calendar days across a clock change", () => {
+    // US clocks went back on 2026-11-01, so that Sunday is 25 hours long.
+    const sat = new Date(2026, 10, 1 - 1).getTime();
+    expect(new Date(shiftDay(sat, 1)).getDate()).toBe(1);
+    expect(new Date(shiftDay(sat, 2)).getHours()).toBe(0);
+    expect(new Date(shiftDay(new Date(2026, 9, 31).getTime(), 1)).getMonth()).toBe(10);
+  });
+
+  it("moves a day with left and right, a week with up and down, and ignores the rest", () => {
+    expect(moveSelection("ArrowRight", DAY)).toBe(new Date(2026, 9, 5).getTime());
+    expect(moveSelection("ArrowLeft", DAY)).toBe(new Date(2026, 9, 3).getTime());
+    expect(moveSelection("ArrowDown", DAY)).toBe(new Date(2026, 9, 11).getTime());
+    expect(moveSelection("ArrowUp", DAY)).toBe(new Date(2026, 9, 4 - 7).getTime());
+    expect(moveSelection("Enter", DAY)).toBeNull();
+  });
+
+  it("goes by whole months and lands on the first", () => {
+    expect(shiftMonth(DAY, 1)).toBe(new Date(2026, 10, 1).getTime());
+    expect(shiftMonth(new Date(2026, 0, 31).getTime(), 1)).toBe(new Date(2026, 1, 1).getTime());
+    expect(shiftMonth(DAY, -10)).toBe(new Date(2025, 11, 1).getTime());
+  });
+
+  it("knows the same day from the next, whatever the hour", () => {
+    expect(sameDay(at(0, 1), at(23, 59))).toBe(true);
+    expect(sameDay(at(23, 59), at(24))).toBe(false);
+    expect(dayStartOf(at(15))).toBe(DAY);
+  });
+
+  // The reported gap: tapping tomorrow must not need a read of Calendar.
+  it("takes a day out of a longer read, all-day first, and keeps what runs across midnight", () => {
+    const tomorrow = DAY + 24 * HOUR;
+    const items = [
+      event("today late", at(22), at(25)),
+      event("lunch", tomorrow + 12 * HOUR, tomorrow + 13 * HOUR),
+      event("holiday", tomorrow, tomorrow + 24 * HOUR, { allDay: true }),
+      event("earlier", at(9), at(10)),
+    ];
+    expect(eventsOnDay(items, tomorrow).map((e) => e.id)).toEqual(["holiday", "today late", "lunch"]);
+    expect(eventsOnDay(items, DAY).map((e) => e.id)).toEqual(["earlier", "today late"]);
   });
 });

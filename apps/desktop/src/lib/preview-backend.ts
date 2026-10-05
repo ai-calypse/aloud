@@ -370,6 +370,18 @@ const EVENTS: CalendarEvent[] = [
   ev("Team lunch", { start: at(1, 13, 30), end: at(1, 14, 30) }, { calendar: "Team" }),
 ];
 
+const dayEvents = (day: number): CalendarEvent[] => {
+  const d = new Date(day).setHours(0, 0, 0, 0);
+  if (new Date(d).getDate() % 3 === 0) return [];
+  const slot = (h: number, m = 0) => d + (h * 60 + m) * MIN;
+  return [
+    ev("Anniversary dinner", { start: d, end: d + 24 * HOUR }, { allDay: true, calendar: "Home" }),
+    ev("Sprint planning", { start: slot(10), end: slot(11, 30) }, { joinUrl: "https://meet.example/sprint" }),
+    ev("Dentist", { start: slot(14), end: slot(15) }, { calendar: "Home", location: "Market St" }),
+    ev("Pottery class", { start: slot(18, 30), end: slot(20) }, { calendar: "Team", location: "Studio 4" }),
+  ];
+};
+
 const REMINDERS: Reminder[] = [
   { id: "r1", title: "Send standup notes", due: T0 - 2 * HOUR, allDay: false, list: "Work" },
   { id: "r2", title: "Review Rigo's draft", due: T0 + HOUR, allDay: false, list: "Work" },
@@ -629,7 +641,12 @@ function handle(cmd: string, a: Record<string, unknown> = {}): unknown {
     case "color_list": return COLORS;
 
     case "calendar_events": return EVENTS;
-    case "reminders_due": return REMINDERS;
+    // `?slowReads=1` makes the real reads take 2s, so a shot can catch the view painting from its cache.
+    case "reminders_cached": return REMINDERS;
+    case "reminders_due":
+      return params.has("slowReads") ? new Promise((done) => setTimeout(() => done(REMINDERS), 2000)) : REMINDERS;
+    // A few days out, two of three have a day's worth of events; the rest are quiet.
+    case "calendar_day": return dayEvents(Number(a.day));
     case "weather":
     case "set_weather_city":
     case "clear_weather_city": return WEATHER;

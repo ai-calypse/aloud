@@ -188,33 +188,64 @@ pub async fn calendar_events(app: AppHandle, refresh: bool) -> Result<Vec<Event>
     Ok(events)
 }
 
-/// Incomplete reminders due by the end of today, overdue ones first.
+/// What the last read saw, from memory or the last run's file: the view paints
+/// this immediately and `reminders_due` corrects it. `None` only before the
+/// first read there has ever been.
+#[tauri::command]
+#[specta::specta]
+pub fn reminders_cached() -> Option<Vec<Reminder>> {
+    aloud_agenda::cache::reminders().get()
+}
+
+/// Incomplete reminders due by the end of today, overdue ones first. EventKit
+/// when granted (this is the call that may raise its one-time prompt), else a
+/// script; either way the result becomes the cache.
 #[tauri::command]
 #[specta::specta]
 pub async fn reminders_due() -> Result<Vec<Reminder>, AgendaError> {
     let read = tauri::async_runtime::spawn_blocking(|| {
-        aloud_agenda::reminders(aloud_agenda::day_start(1))
+        aloud_agenda::reminders(aloud_agenda::day_start(1), true)
     })
     .await
     .map_err(|e| AgendaError::Failed {
         message: e.to_string(),
     })?;
-    if read.is_ok() {
+    if let Ok(items) = &read {
+        aloud_agenda::cache::reminders().put(items.clone());
         // The user has seen Reminders answer, so the nudge tick may ask too.
         crate::nudges::REMINDERS_ALLOWED.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     read
 }
 
-/// Ticks a reminder off. The only thing in Today that writes to the account.
+/// One day's events for the month card's date picker. `day` is any instant on
+/// the day, in unix ms (a number, not a bigint: it is a day, not a count).
 #[tauri::command]
 #[specta::specta]
-pub async fn complete_reminder(id: String) -> Result<(), AgendaError> {
-    tauri::async_runtime::spawn_blocking(move || aloud_agenda::complete_reminder(&id))
+pub async fn calendar_day(day: f64) -> Result<Vec<Event>, AgendaError> {
+    tauri::async_runtime::spawn_blocking(move || aloud_agenda::events_on(day as i64))
         .await
         .map_err(|e| AgendaError::Failed {
             message: e.to_string(),
         })?
+}
+
+/// Ticks a reminder off. The only thing in Today that writes to the account.
+#[tauri::command]
+#[specta::specta]
+pub async fn complete_reminder(id: String) -> Result<(), AgendaError> {
+    let done = {
+        let id = id.clone();
+        tauri::async_runtime::spawn_blocking(move || aloud_agenda::complete_reminder(&id))
+            .await
+            .map_err(|e| AgendaError::Failed {
+                message: e.to_string(),
+            })?
+    };
+    if done.is_ok() {
+        aloud_agenda::cache::reminders().remove(&id);
+    }
+    done
 }
 
 /// Opens an event's video-call link in the browser. Re-checks the host: the

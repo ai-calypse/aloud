@@ -1,3 +1,6 @@
+import { useEffect, useRef, useState } from "react";
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import { NOTCH_FOCUS } from "@/components/ui/button";
 import {
   EventCard,
   Numeral,
@@ -11,15 +14,21 @@ import {
 } from "@/lib/bindings";
 import { timeOfDay, untilText } from "@/lib/today";
 import { cn } from "@/lib/utils";
-import { useCalendar, useNow } from "../../useToday";
+import { useCalendar, useDayEvents, useNow } from "../../useToday";
 import { Aside, AgendaNotice, Notice, Pill, QuietPill } from "./shared";
 import {
+  dayStartOf,
+  eventsOnDay,
   GRID_HOURS,
   hourLabel,
   layoutDay,
   monthGrid,
   moreLabel,
+  moveSelection,
   nowLine,
+  sameDay,
+  shiftDay,
+  shiftMonth,
   splitAgenda,
   toneFor,
   windowStart,
@@ -29,9 +38,14 @@ const HOUR = 3_600_000;
 
 /**
  * Today › Calendar as a widget board: Apple's Calendar family. A large tile
- * (today beside tomorrow on an hour axis), a month with a red dot on today,
+ * (today beside tomorrow on an hour axis), a month whose dates are buttons,
  * and an agenda that carries what the axis cannot: every remaining event with
  * its Join button, and the refresh when there is nothing.
+ *
+ * Picking a date shows that one day in the large tile and the agenda; today
+ * stays the default and is where Escape, or tapping today, returns to. Today
+ * and tomorrow come out of the board's own read; any other date is one read
+ * of Calendar, remembered so going back to it is immediate.
  *
  * Reads `useCalendar`, so the first read still opens
  * Calendar on purpose (the Home board never does).
@@ -39,6 +53,23 @@ const HOUR = 3_600_000;
 export function WidgetCalendar() {
   const { items, error, reload } = useCalendar();
   const now = useNow();
+  // The picked day's local midnight; null is today.
+  const [selected, setSelected] = useState<number | null>(null);
+  const today = dayStartOf(now);
+  const pick = (day: number | null) =>
+    setSelected(day === null || day === today ? null : day);
+  const inHand =
+    selected !== null &&
+    selected >= today &&
+    selected < shiftDay(today, 2) &&
+    items !== null;
+  const read = useDayEvents(selected !== null && !inHand ? selected : null);
+  const day =
+    selected === null
+      ? undefined
+      : inHand
+        ? { items: eventsOnDay(items, selected), error: null }
+        : read;
   return (
     <CalendarBoard
       items={items}
@@ -46,6 +77,9 @@ export function WidgetCalendar() {
       now={now}
       onReload={() => void reload()}
       onJoin={(url) => void commands.openMeetingLink(url)}
+      selected={selected}
+      onSelect={pick}
+      day={day}
     />
   );
 }
@@ -56,6 +90,9 @@ export function CalendarBoard({
   now,
   onReload,
   onJoin,
+  selected = null,
+  onSelect = () => {},
+  day,
 }: {
   /** `null` until the first read lands. */
   items: CalendarEvent[] | null;
@@ -63,7 +100,13 @@ export function CalendarBoard({
   now: number;
   onReload: () => void;
   onJoin: (url: string) => void;
+  /** A picked day's local midnight; `null` is today. */
+  selected?: number | null;
+  onSelect?: (day: number | null) => void;
+  /** The picked day's events, `items: null` while they are being read. */
+  day?: { items: CalendarEvent[] | null; error: AgendaError | null };
 }) {
+  const month = <MonthTile now={now} selected={selected} onSelect={onSelect} />;
   if (!items) {
     return (
       <WidgetBoard label="Calendar">
@@ -80,8 +123,32 @@ export function CalendarBoard({
             The first read opens Calendar and can take a few seconds.
           </Notice>
         )}
-        <MonthTile now={now} />
+        {month}
       </WidgetBoard>
+    );
+  }
+  if (selected !== null && day) {
+    return (
+      <>
+        <WidgetBoard label="Calendar">
+          <PickedDayTile day={selected} events={day.items} now={now} />
+          {month}
+          <PickedAgendaTile
+            day={selected}
+            events={day.items}
+            now={now}
+            onJoin={onJoin}
+          />
+        </WidgetBoard>
+        {day.error && (
+          <Aside>
+            Could not read that day:{" "}
+            {day.error.kind === "failed"
+              ? day.error.message
+              : "access was refused"}
+          </Aside>
+        )}
+      </>
     );
   }
   const { live, today, tomorrow, next } = splitAgenda(items, now);
@@ -89,7 +156,7 @@ export function CalendarBoard({
     <>
       <WidgetBoard label="Calendar">
         <DayTile today={today} tomorrow={tomorrow} now={now} />
-        <MonthTile now={now} />
+        {month}
         <AgendaTile
           today={today}
           tomorrow={tomorrow}
@@ -323,26 +390,139 @@ export function DayTile({
   );
 }
 
-/** Calendar, month: the date as Apple sets it, and the month with a red dot on today. */
-export function MonthTile({ now }: { now: number }) {
-  const date = new Date(now);
-  const month = monthGrid(now);
+/** Calendar, large, for a picked date: that one day on its own hour axis. */
+function PickedDayTile({
+  day,
+  events,
+  now,
+}: {
+  day: number;
+  events: CalendarEvent[] | null;
+  now: number;
+}) {
+  const date = new Date(day);
+  const list = events ?? [];
+  const firstTimed = list.find((e) => !e.allDay);
+  return (
+    <WidgetFrame size="large" label="Calendar">
+      <div className="h-full p-3.5">
+        <DayHeader name={date.toLocaleDateString(undefined, { weekday: "long" })}>
+          <div className="flex items-end gap-2">
+            <Numeral text={String(date.getDate())} size="s" />
+            <div className="min-w-0 flex-1 pb-0.5">
+              <AllDay events={list.filter((e) => e.allDay)} />
+            </div>
+          </div>
+        </DayHeader>
+        <HourGrid
+          events={list}
+          dayStart={day}
+          anchorHour={firstTimed ? new Date(firstTimed.start).getHours() : 9}
+          now={now}
+          showNow={false}
+          empty={events ? "Nothing on this day" : "Reading this day"}
+        />
+      </div>
+    </WidgetFrame>
+  );
+}
+
+/**
+ * Calendar, month: the date as Apple sets it, and the month with a red disc on
+ * today. Each date is a button. The picked one is drawn as an inverted disc,
+ * apart from today's red, arrows move it a day or a week, Escape and today go
+ * back to today, and the chevrons turn the month without picking anything.
+ */
+export function MonthTile({
+  now,
+  selected = null,
+  onSelect = () => {},
+}: {
+  now: number;
+  /** A picked day's local midnight; `null` is today. */
+  selected?: number | null;
+  onSelect?: (day: number | null) => void;
+}) {
+  const today = dayStartOf(now);
+  // The month on show: today's until a chevron or an arrow says otherwise.
+  const [view, setView] = useState<number | null>(null);
+  const anchor = shiftMonth(view ?? selected ?? now, 0);
+  const month = monthGrid(anchor);
+  const shown = new Date(anchor);
+  const cell = (d: number) => new Date(shown.getFullYear(), shown.getMonth(), d).getTime();
+  const current = selected ?? today;
+  const date = new Date(current);
+  const grid = useRef<HTMLTableElement>(null);
+  const moved = useRef(false);
+  // Focus follows an arrow key onto the new date, which may be in another month.
+  useEffect(() => {
+    if (!moved.current) return;
+    moved.current = false;
+    grid.current?.querySelector<HTMLElement>("[data-current]")?.focus();
+  }, [selected, anchor]);
+  // The roving stop: the current date when it is on show, else the 1st.
+  const stop = sameMonth(anchor, current) ? date.getDate() : 1;
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      // Back to today first; only a second Escape is the panel's.
+      if (selected === null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      moved.current = true;
+      onSelect(null);
+      setView(null);
+      return;
+    }
+    const next = moveSelection(e.key, current);
+    if (next === null) return;
+    e.preventDefault();
+    moved.current = true;
+    onSelect(next);
+    setView(shiftMonth(next, 0));
+  };
+
   return (
     <WidgetFrame size="medium" label="Month">
       <div className="flex h-full gap-4 p-3.5">
         <div className="flex w-24 shrink-0 flex-col justify-between">
           <div>
-            <div className="text-notch-w-over font-semibold tracking-wide text-widget-calendar uppercase">
+            <div
+              className={cn(
+                "text-notch-w-over font-semibold tracking-wide uppercase",
+                sameDay(current, today)
+                  ? "text-widget-calendar"
+                  : "text-widget-ink-2",
+              )}
+            >
               {date.toLocaleDateString(undefined, { weekday: "long" })}
             </div>
             <Numeral text={String(date.getDate())} size="l" />
           </div>
-          <div className="text-notch-w-meta leading-tight font-medium text-widget-ink-2">
-            {month.title}
+          <div>
+            <div className="text-notch-w-meta leading-tight font-medium text-widget-ink-2">
+              {month.title}
+            </div>
+            <div className="-ml-1 flex">
+              <MonthStep
+                label="Previous month"
+                onClick={() => setView(shiftMonth(anchor, -1))}
+              >
+                <ChevronLeftIcon aria-hidden className="size-3.5" />
+              </MonthStep>
+              <MonthStep
+                label="Next month"
+                onClick={() => setView(shiftMonth(anchor, 1))}
+              >
+                <ChevronRightIcon aria-hidden className="size-3.5" />
+              </MonthStep>
+            </div>
           </div>
         </div>
         <table
+          ref={grid}
           aria-label={month.title}
+          onKeyDown={onKeyDown}
           className="min-w-0 flex-1 border-collapse text-center text-notch-w-over"
         >
           <thead>
@@ -361,29 +541,80 @@ export function MonthTile({ now }: { now: number }) {
           <tbody>
             {month.weeks.map((week, w) => (
               <tr key={w}>
-                {week.map((day, i) => (
-                  <td key={i} className="h-4 p-0">
-                    {day !== null && (
-                      <span
-                        aria-current={day === month.today ? "date" : undefined}
+                {week.map((day, i) => {
+                  if (day === null) return <td key={i} className="h-4 p-0" />;
+                  const at = cell(day);
+                  const isToday = at === today;
+                  const isPicked = selected !== null && at === selected;
+                  return (
+                    <td key={i} className="h-4 p-0">
+                      <button
+                        type="button"
+                        aria-label={new Date(at).toLocaleDateString(undefined, {
+                          weekday: "long",
+                          month: "long",
+                          day: "numeric",
+                        })}
+                        aria-current={isToday ? "date" : undefined}
+                        aria-pressed={isPicked}
+                        tabIndex={day === stop ? 0 : -1}
+                        data-current={day === stop ? "" : undefined}
+                        onClick={(e) => {
+                          // WebKit leaves a clicked button unfocused, and the arrow keys need to start here.
+                          e.currentTarget.focus();
+                          onSelect(isToday ? null : at);
+                        }}
                         className={cn(
+                          NOTCH_FOCUS,
                           "mx-auto grid size-4 place-items-center rounded-full font-medium tabular-nums",
-                          day === month.today
+                          "transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
+                          isToday
                             ? "bg-widget-calendar text-widget-ink"
-                            : "text-widget-ink",
+                            : isPicked
+                              ? "bg-widget-ink text-widget-on"
+                              : "text-widget-ink hover:bg-widget-tile-2",
                         )}
                       >
                         {day}
-                      </span>
-                    )}
-                  </td>
-                ))}
+                      </button>
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
     </WidgetFrame>
+  );
+}
+
+const sameMonth = (a: number, b: number) =>
+  new Date(a).getFullYear() === new Date(b).getFullYear() &&
+  new Date(a).getMonth() === new Date(b).getMonth();
+
+function MonthStep({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className={cn(
+        NOTCH_FOCUS,
+        "grid size-5 place-items-center rounded-full text-widget-ink-2",
+        "transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-widget-tile-2 hover:text-widget-ink",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -421,49 +652,6 @@ export function AgendaTile({
       </Notice>
     );
   }
-  const group = (title: string, events: CalendarEvent[]) =>
-    events.length > 0 && (
-      <section key={title} aria-label={title}>
-        <div className="mb-1 text-notch-w-over font-semibold tracking-wide text-widget-ink-2 uppercase">
-          {title}
-        </div>
-        <ul className="m-0 grid list-none gap-1.5 p-0">
-          {events.map((e) => {
-            const isNext = e.id === next?.id;
-            const when = e.allDay
-              ? "All day"
-              : `${timeOfDay(e.start)} – ${timeOfDay(e.end)}`;
-            return (
-              <li key={e.id} className="flex items-center gap-2">
-                <EventCard
-                  className="min-w-0 flex-1"
-                  title={e.title}
-                  tone={toneFor(e.calendar)}
-                  time={[
-                    when,
-                    isNext ? untilText(e.start, e.end, now) : null,
-                    e.location ?? e.calendar,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                />
-                {e.joinUrl && (
-                  <Pill
-                    className={cn(
-                      !isNext && "bg-widget-tile-2 text-widget-ink",
-                    )}
-                    aria-label={`Join ${e.title}`}
-                    onClick={() => onJoin(e.joinUrl!)}
-                  >
-                    Join
-                  </Pill>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </section>
-    );
   return (
     <WidgetFrame size="medium" label="Agenda">
       {/* A scroll area has to be a stop of its own for the keyboard. */}
@@ -473,8 +661,109 @@ export function AgendaTile({
         tabIndex={0}
         className="flex h-full flex-col gap-2 overflow-y-auto p-3.5 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-solid focus-visible:outline-notch-focus"
       >
-        {group("Today", today)}
-        {group("Tomorrow", tomorrow)}
+        <AgendaGroup title="Today" events={today} next={next} now={now} onJoin={onJoin} />
+        <AgendaGroup title="Tomorrow" events={tomorrow} next={next} now={now} onJoin={onJoin} />
+      </div>
+    </WidgetFrame>
+  );
+}
+
+/** One day's events as rows: the words, when and where, and Join when there is a call. */
+function AgendaGroup({
+  title,
+  events,
+  next,
+  now,
+  onJoin,
+}: {
+  title: string;
+  events: CalendarEvent[];
+  /** The one whose Join is the inverted button and whose row says how soon. */
+  next?: CalendarEvent;
+  now: number;
+  onJoin: (url: string) => void;
+}) {
+  if (events.length === 0) return null;
+  return (
+    <section aria-label={title}>
+      <div className="mb-1 text-notch-w-over font-semibold tracking-wide text-widget-ink-2 uppercase">
+        {title}
+      </div>
+      <ul className="m-0 grid list-none gap-1.5 p-0">
+        {events.map((e) => {
+          const isNext = e.id === next?.id;
+          const when = e.allDay
+            ? "All day"
+            : `${timeOfDay(e.start)} – ${timeOfDay(e.end)}`;
+          return (
+            <li key={e.id} className="flex items-center gap-2">
+              <EventCard
+                className="min-w-0 flex-1"
+                title={e.title}
+                tone={toneFor(e.calendar)}
+                time={[
+                  when,
+                  isNext ? untilText(e.start, e.end, now) : null,
+                  e.location ?? e.calendar,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              />
+              {e.joinUrl && (
+                <Pill
+                  className={cn(!isNext && "bg-widget-tile-2 text-widget-ink")}
+                  aria-label={`Join ${e.title}`}
+                  onClick={() => onJoin(e.joinUrl!)}
+                >
+                  Join
+                </Pill>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/** Calendar, agenda, for a picked date: that day's events, or a sentence. */
+function PickedAgendaTile({
+  day,
+  events,
+  now,
+  onJoin,
+}: {
+  day: number;
+  events: CalendarEvent[] | null;
+  now: number;
+  onJoin: (url: string) => void;
+}) {
+  const title = new Date(day).toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
+  if (!events || events.length === 0) {
+    return (
+      <Notice
+        label="Agenda"
+        title={events ? `Nothing on ${title}` : `Reading ${title}`}
+      >
+        {events
+          ? "Events from the calendars you can edit show up here. Holiday and subscribed calendars are left out."
+          : "A date you have not looked at yet is read from Calendar, which takes a moment."}
+      </Notice>
+    );
+  }
+  return (
+    <WidgetFrame size="medium" label="Agenda">
+      <div
+        role="region"
+        aria-label="Events on the picked date"
+        tabIndex={0}
+        className="flex h-full flex-col gap-2 overflow-y-auto p-3.5 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-solid focus-visible:outline-notch-focus"
+      >
+        <AgendaGroup title={title} events={events} now={now} onJoin={onJoin} />
       </div>
     </WidgetFrame>
   );
