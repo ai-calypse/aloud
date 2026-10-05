@@ -389,9 +389,12 @@ short version:
   event", so `Consume::Yes` and capture's swallow-all were always no-ops.
   `crates/hotkey/src/macos.rs` now builds the tap on raw `CGEventTapCreate`
   (also needed because `CGEventType` has no NX_SYSDEFINED, type 14), where
-  NULL really swallows — but only the volume keys use it. Honouring the
+  NULL really swallows — but only the volume and brightness keys use it, and
+  only with "Replace the macOS volume and brightness HUDs" on. Honouring the
   matcher's verdict changes every binding at once; do it per binding, on
-  hardware.
+  hardware. Brightness is decoded from NX_SYSDEFINED (key types 2/3) and from
+  plain key-downs 144/145; which one a given keyboard sends is unverified, so
+  both are handled (`aux::brightness_keycode`).
 
 ## Verifying
 

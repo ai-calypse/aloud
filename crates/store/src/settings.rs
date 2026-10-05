@@ -49,7 +49,7 @@ pub struct NotchEvents {
     pub quiet: bool,
     /// Hold ordinary system events while a macOS Focus is on.
     pub focus_aware: bool,
-    /// Volume, mic mute, Caps Lock: whispers for a key you pressed.
+    /// Volume, brightness, mic mute, Caps Lock: whispers for a key you pressed.
     pub huds: bool,
     /// Battery, charger and Low Power Mode.
     pub power: bool,
@@ -57,10 +57,14 @@ pub struct NotchEvents {
     pub connectivity: bool,
     /// What happened in another app: a screenshot, a finished download.
     pub banners: bool,
-    /// Eat the volume keys and draw the level in the notch instead of macOS's
-    /// HUD. Off: the keys are only watched and macOS draws its own. Needs
-    /// `huds` on, or the keys would move the volume with nothing to show it.
-    pub replace_volume_hud: bool,
+    /// Eat the volume and brightness keys and draw the level in the notch
+    /// instead of macOS's HUDs. Off: the keys are only watched and macOS draws
+    /// its own. Needs `huds` on, or the keys would move the level with nothing
+    /// to show it. Was `replaceVolumeHud` (volume only) before brightness
+    /// joined it; `from_json` carries a saved choice over. (Not a serde alias:
+    /// that makes specta emit split Serialize/Deserialize types for the whole
+    /// of `Settings`.)
+    pub replace_system_huds: bool,
 }
 
 impl Default for NotchEvents {
@@ -72,7 +76,7 @@ impl Default for NotchEvents {
             power: true,
             connectivity: true,
             banners: true,
-            replace_volume_hud: false,
+            replace_system_huds: false,
         }
     }
 }
@@ -359,11 +363,18 @@ impl Settings {
     ///
     /// `hotkeys.command` became `hotkeys.rewrite`; without this the field
     /// deserializes to None and the user's hotkey stops working silently.
+    /// `notchEvents.replaceVolumeHud` became `replaceSystemHuds`, or a user who
+    /// switched the volume HUD replacement on would find it off.
     pub(crate) fn from_json(text: &str) -> serde_json::Result<Self> {
         let mut raw: serde_json::Value = serde_json::from_str(text)?;
         if let Some(hotkeys) = raw.get_mut("hotkeys").and_then(|h| h.as_object_mut()) {
             if let Some(old) = hotkeys.remove("command") {
                 hotkeys.entry("rewrite").or_insert(old);
+            }
+        }
+        if let Some(events) = raw.get_mut("notchEvents").and_then(|e| e.as_object_mut()) {
+            if let Some(old) = events.remove("replaceVolumeHud") {
+                events.entry("replaceSystemHuds").or_insert(old);
             }
         }
         // An unrecognised `overlayStyle` (or `notchStyle`, from a newer build)
@@ -634,6 +645,24 @@ mod tests {
             serde_json::from_str(r#"{"groqApiKey":"gsk_x","unknownField":42}"#).unwrap();
         assert_eq!(parsed.groq_api_key, "gsk_x");
         assert!(parsed.play_sounds, "missing field falls back to default");
+    }
+
+    /// The failure this guards: renaming the field silently turning the HUD
+    /// replacement back off for everyone who had enabled it for volume.
+    #[test]
+    fn a_saved_replace_volume_hud_carries_over_to_replace_system_huds() {
+        let parsed = Settings::from_json(r#"{"notchEvents":{"replaceVolumeHud":true}}"#).unwrap();
+        assert!(parsed.notch_events.replace_system_huds);
+        let parsed = Settings::from_json(r#"{"notchEvents":{"replaceSystemHuds":true}}"#).unwrap();
+        assert!(parsed.notch_events.replace_system_huds);
+        // The new key wins when both are present (a build that wrote the new
+        // one, then an older one that wrote the old).
+        let parsed = Settings::from_json(
+            r#"{"notchEvents":{"replaceVolumeHud":true,"replaceSystemHuds":false}}"#,
+        )
+        .unwrap();
+        assert!(!parsed.notch_events.replace_system_huds);
+        assert!(!Settings::default().notch_events.replace_system_huds);
     }
 
     #[test]

@@ -205,8 +205,8 @@ unsafe impl objc2::Encode for EventArg {
         objc2::Encoding::Pointer(&objc2::Encoding::Struct("__CGEvent", &[]));
 }
 
-/// Reads the volume key out of an NX_SYSDEFINED event, or None for any other
-/// system-defined event.
+/// Reads the volume or brightness key out of an NX_SYSDEFINED event, or None
+/// for any other system-defined event.
 fn read_system_key(event: &CGEvent) -> Option<aux::SystemKey> {
     use objc2::runtime::AnyObject;
     use objc2::{class, msg_send};
@@ -263,6 +263,15 @@ impl Tap {
             return false;
         }
 
+        // Brightness as a plain key: never the dictation handler's business,
+        // swallowed or not, so it is answered before the matcher sees it.
+        if matches!(kind, KIND_KEY_DOWN | KIND_KEY_UP) {
+            let code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+            if let Some(key) = aux::brightness_keycode(code) {
+                return Self::brightness(key, kind == KIND_KEY_DOWN, event);
+            }
+        }
+
         let event_type = match kind {
             KIND_KEY_DOWN => CGEventType::KeyDown,
             KIND_KEY_UP => CGEventType::KeyUp,
@@ -298,7 +307,7 @@ impl Tap {
         false
     }
 
-    /// A volume key. Never reaches the dictation handler.
+    /// A volume or brightness key. Never reaches the dictation handler.
     fn system_defined(&self, event: &CGEvent) -> bool {
         let Some(sys) = read_system_key(event) else {
             return false;
@@ -306,12 +315,35 @@ impl Tap {
         let flags = event.get_flags();
         let option = flags.contains(CGEventFlags::CGEventFlagAlternate);
         let shift = flags.contains(CGEventFlags::CGEventFlagShift);
+        let key = match sys.key {
+            aux::HudKey::Brightness(key) => return Self::brightness(key, sys.down, event),
+            aux::HudKey::Volume(key) => key,
+        };
         let swallow = aux::swallows_volume(option && !shift);
         // The key-up is eaten too, or the focused app sees half a press; only
         // the down is an event.
         if sys.down {
             aux::emit(aux::AuxEvent::Volume {
-                key: sys.key,
+                key,
+                fine: option && shift,
+                swallowed: swallow,
+            });
+        }
+        swallow
+    }
+
+    /// A brightness key, from either of its two wire forms. Control is left to
+    /// macOS as well: it aims the key at an external display.
+    fn brightness(key: aux::BrightnessKey, down: bool, event: &CGEvent) -> bool {
+        let flags = event.get_flags();
+        let option = flags.contains(CGEventFlags::CGEventFlagAlternate);
+        let shift = flags.contains(CGEventFlags::CGEventFlagShift);
+        let control = flags.contains(CGEventFlags::CGEventFlagControl);
+        let swallow =
+            aux::swallows_brightness((option && !shift) || control, aux::brightness_controllable);
+        if down {
+            aux::emit(aux::AuxEvent::Brightness {
+                key,
                 fine: option && shift,
                 swallowed: swallow,
             });
