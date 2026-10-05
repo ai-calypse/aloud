@@ -170,7 +170,7 @@ svg { display: block; }
 .hud-top { position: absolute; inset: 0 18px auto; height: 32px; display: flex; align-items: center; justify-content: space-between; }
 .hud-top > span { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: 12.5px; }
 .hud-top .ic { font-size: 15px; color: var(--acc); }
-.hud-cap { position: absolute; left: 18px; right: 18px; bottom: 7px; --h: 5px; }
+.face--hud .hud-cap { position: absolute; left: 18px; right: 18px; bottom: 7px; --h: 5px; }
 
 /* Alert chip: drops from the notch, then goes. Closing is slower than opening. */
 .drop { position: absolute; top: calc(100% + 8px); left: 50%; width: 330px; margin-left: -165px; z-index: -1; display: flex; align-items: center; gap: 11px; padding: 9px 10px 9px 12px; border-radius: 22px; background: #000; box-shadow: 0 0 0 1px #1d1d1f, 0 16px 34px rgb(0 0 0 / 0.5); opacity: 0; transform: translateY(-46px) scale(0.72); transform-origin: 50% 0; pointer-events: none; transition: transform 560ms var(--ease-in), opacity 260ms var(--ease-in) 120ms; --acc: var(--c-caution); }
@@ -426,6 +426,198 @@ svg { display: block; }
 .notes code { font: 12px "Geist Mono", monospace; color: var(--ink); background: var(--field); padding: 1px 5px; border-radius: 5px; }
 .hint { color: var(--ink-3); font-size: 12px; }
 
+
+/* =============================================================================
+   Widgets look: the Apple widget library from the CarPlay Figma file, drawn at
+   native sizes (small 158, medium 338x158, large 338x354) and scaled together
+   by --wz so a 4-column board fills the 780px panel. SF, not Geist.
+   ========================================================================== */
+:root { --sf: -apple-system, "SF Pro Text", "SF Pro Display", system-ui, sans-serif; --sfr: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif; }
+[data-mode="widgets"] .island, [data-mode="widgets"] .num { font-family: var(--sf); }
+[data-mode="widgets"] .foot { border-top-color: transparent; }
+.board { --wz: 1.04; --wu: calc(158px * var(--wz)); --wg: calc(22px * var(--wz)); display: grid; grid-template-columns: repeat(4, var(--wu)); grid-auto-rows: 185px; gap: 18px var(--wg); justify-content: center; grid-auto-flow: dense; font-family: var(--sf); }
+.wc { display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.wc--M { grid-column: span 2; } .wc--L { grid-column: span 2; grid-row: span 2; }
+.wl { font: 500 12px/1 var(--sf); color: #ebebf5; margin-top: 6px; white-space: nowrap; }
+.w { zoom: var(--wz); position: relative; flex: none; width: 158px; height: 158px; border-radius: 22px; overflow: hidden; background: #1c1c1e; color: #fff; font-family: var(--sf); translate: 0 0; transition: translate var(--dur-fast) var(--ease-out); }
+.w:hover { translate: 0 -1px; }
+.w--M { width: 338px; } .w--L { width: 338px; height: 354px; }
+.w .num { font-weight: inherit; letter-spacing: inherit; }
+.w small { font-size: 0.66em; font-weight: 600; letter-spacing: 0.01em; }
+.w svg { overflow: visible; }
+.w button { color: inherit; }
+.wcap { font: 600 11px/1.2 var(--sf); letter-spacing: 0.02em; text-transform: uppercase; }
+.wsec { color: #8e8d93; }
+.wdiv { height: 1px; background: #323234; }
+
+/* Calendar */
+.cw { display: flex; gap: 14px; padding: 15px; height: 100%; }
+.cw-c { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+.cw-dow { font: 600 11px/1.2 var(--sf); color: #ff4539; letter-spacing: 0.02em; }
+.cw-d { font: 300 32px/1 var(--sf); margin: 1px 0 7px; letter-spacing: -0.01em; }
+.cev { display: grid; grid-template-columns: 3px 1fr; gap: 6px; padding: 4px 6px 4px 4px; border-radius: 5px; background: var(--evbg); margin-bottom: 5px; min-width: 0; }
+.cev::before { content: ""; border-radius: 2px; background: var(--evb); }
+.cev > div { min-width: 0; }
+.cev b { display: block; font: 600 13px/1.25 var(--sf); color: var(--evt); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cev span { display: block; font: 500 12px/1.2 var(--sf); color: var(--evs); white-space: nowrap; }
+.cev small { font-size: 9px; }
+.ev--r { --evbg: #4a1620; --evb: #ff375f; --evt: #ff7a8e; --evs: #d9566b; }
+.ev--b { --evbg: #10304f; --evb: #0a84ff; --evt: #6cb8ff; --evs: #4d90d3; }
+.cw-more { display: flex; align-items: center; gap: 6px; font: 500 12px/1 var(--sf); color: #8e8d93; margin-top: auto; }
+.cw-more i { display: inline-flex; gap: 2px; } .cw-more i b { width: 3px; height: 13px; border-radius: 1.5px; }
+.cw-bd { display: flex; align-items: center; gap: 6px; font: 600 13px/1.2 var(--sf); padding: 3px 4px 3px 4px; margin-bottom: 5px; border-radius: 5px; background: #272a36; color: #cfd6ee; }
+.cw-bd::before { content: ""; width: 3px; align-self: stretch; border-radius: 2px; background: #7f8bd0; }
+.cw-bd svg { width: 13px; height: 13px; fill: none; stroke: #9aa6e6; stroke-width: 2; }
+.cw-tl { position: relative; flex: 1; margin-top: 2px; }
+.cw-tl > i { position: absolute; left: 0; right: 0; height: 1px; background: #323234; }
+.cw-tl > u { position: absolute; left: 0; width: 12px; text-decoration: none; font: 500 10px/1 var(--sf); color: #8e8d93; transform: translateY(-5px); }
+.cw-tl .cev { position: absolute; left: 18px; right: 0; margin: 0; }
+.cw-now { position: absolute; left: 14px; right: 0; height: 1px; background: #ff4539; z-index: 2; } .cw-now::before { content: ""; position: absolute; left: -3px; top: -2.5px; width: 6px; height: 6px; border-radius: 50%; background: #ff4539; }
+
+/* Batteries */
+.w--bat { background: #252525; }
+.bt-ring { position: absolute; left: 15px; top: 15px; }
+.bt-ring svg.ring { --track: #4a4a4d; }
+.bt-ic { position: absolute; inset: 0; display: grid; place-items: center; }
+.bt-ic svg { width: 26px; height: 26px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.bt-n { position: absolute; left: 14px; bottom: 11px; font: 300 40px/1 var(--sf); letter-spacing: -0.02em; }
+.bt-n em { font-style: normal; font-size: 26px; }
+.bt-row { display: flex; align-items: center; gap: 12px; height: 54px; margin: 0 16px; border-bottom: 1px solid rgb(255 255 255 / 0.08); font: 400 15px/1 var(--sf); }
+.bt-row svg { width: 18px; height: 18px; fill: none; stroke: #c7c7cc; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.bt-row span { flex: 1; } .bt-row b { font: 400 12px/1 var(--sf); color: #c7c7cc; }
+.bt-cap { position: relative; width: 24px; height: 11px; border-radius: 3.5px; box-shadow: inset 0 0 0 1.2px rgb(255 255 255 / 0.4); }
+.bt-cap i { position: absolute; left: 2px; top: 2px; bottom: 2px; width: calc(var(--p) * 20px); border-radius: 1.5px; background: var(--acc, #34c85a); transition: width 400ms var(--ease-out); }
+.bt-cap::after { content: ""; position: absolute; right: -3px; top: 3.5px; width: 1.5px; height: 4px; border-radius: 0 1px 1px 0; background: rgb(255 255 255 / 0.4); }
+
+/* Fitness rings */
+.w--fit { background: #0c0c0c; }
+.ft-r { position: absolute; left: 15px; top: 15px; width: 52px; height: 52px; }
+.ft-r svg.ring { position: absolute; }
+.ft-l { position: absolute; left: 15px; bottom: 13px; font: 500 19.5px/25px var(--sfr); letter-spacing: -0.01em; white-space: nowrap; }
+.ft-l small { font-size: 13px; font-weight: 500; }
+.w--M .ft-l { bottom: 13px; }
+.ft-ch { position: absolute; left: 170px; right: 15px; top: 15px; display: grid; gap: 6px; }
+.ft-ch p { margin: 0; font: 600 9px/1 var(--sf); color: #8e8d93; letter-spacing: 0.04em; }
+.ft-ch div { display: flex; align-items: flex-end; gap: 2px; height: 26px; margin-top: 3px; border-bottom: 1px solid #2c2c2e; }
+.ft-ch div i { flex: 1; border-radius: 1px; min-width: 2px; }
+
+/* Music and Podcasts */
+.w--mus { background: linear-gradient(150deg, #ff5c72 0%, #ff2d55 100%); }
+.mu-art { position: absolute; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgb(0 0 0 / 0.25); }
+.mu-art svg { width: 100%; height: 100%; }
+.mu-note { position: absolute; right: 15px; top: 14px; width: 22px; height: 22px; }
+.mu-cap { position: absolute; font: 600 11px/1 var(--sf); letter-spacing: 0.03em; color: rgb(255 255 255 / 0.7); }
+.mu-t { position: absolute; font: 600 17px/1.2 var(--sf); letter-spacing: -0.01em; }
+.mu-s { position: absolute; font: 400 15px/1.2 var(--sf); color: rgb(255 255 255 / 0.82); }
+.pill { position: absolute; height: 30px; padding: 0 14px 0 12px; border-radius: 15px; display: flex; align-items: center; gap: 6px; background: rgb(255 255 255 / 0.28); font: 600 14px/1 var(--sf); }
+.pill svg { width: 12px; height: 12px; }
+.mu-low { position: absolute; left: 0; right: 0; bottom: 0; top: 168px; background: rgb(255 40 70 / 0.35); padding: 12px 16px 0; }
+.mu-low p { margin: 0 0 8px; font: 600 11px/1 var(--sf); letter-spacing: 0.03em; color: rgb(255 255 255 / 0.72); }
+.mu-row { display: flex; align-items: center; gap: 12px; height: 56px; }
+.mu-row .mu-art { position: relative; width: 48px; height: 48px; border-radius: 6px; flex: none; }
+.mu-row div { flex: 1; min-width: 0; font: 600 16px/1.25 var(--sf); } .mu-row div span { display: block; font-weight: 400; color: rgb(255 255 255 / 0.75); font-size: 15px; }
+.mu-row i { width: 28px; height: 28px; border-radius: 50%; background: rgb(255 255 255 / 0.25); display: grid; place-items: center; flex: none; } .mu-row i svg { width: 11px; height: 11px; }
+.w--pod { background: linear-gradient(150deg, #c447ff 0%, #8f2fe0 100%); }
+
+/* Reminders */
+.rmw { padding: 13px 14px; height: 100%; display: flex; flex-direction: column; }
+.rw-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.rw-h b { font: 600 13px var(--sf); color: #ff4539; } .rw-h em { font: 700 22px/1 var(--sf); font-style: normal; }
+.rw-i { display: flex; align-items: center; gap: 9px; height: 38px; border-bottom: 1px solid #323234; font: 400 13px var(--sf); min-width: 0; }
+.rw-i:last-child { border: 0; }
+.rw-i i { width: 21px; height: 21px; border-radius: 50%; border: 2px solid #464648; flex: none; }
+.rw-i span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Weather */
+.w--wx { background: linear-gradient(180deg, #0d4a95 0%, #2a76c4 55%, #5a9edf 100%); }
+.wx-loc { position: absolute; left: 15px; top: 13px; font: 500 15px/1.2 var(--sf); display: flex; gap: 4px; align-items: center; }
+.wx-loc svg { width: 10px; height: 10px; fill: #fff; }
+.wx-t { position: absolute; left: 14px; top: 29px; font: 300 46px/1.1 var(--sf); letter-spacing: -0.02em; }
+.wx-r { position: absolute; right: 15px; top: 16px; text-align: right; font: 500 13px/1.35 var(--sf); }
+.wx-sun { width: 18px; height: 18px; margin: 0 0 3px auto; display: block; }
+.wx-st { position: absolute; left: 15px; bottom: 12px; font: 500 13px/1.35 var(--sf); }
+.wx-st svg { width: 18px; height: 18px; display: block; margin-bottom: 4px; }
+.wx-hr { position: absolute; left: 15px; right: 15px; top: 84px; border-top: 1px solid rgb(255 255 255 / 0.3); display: flex; justify-content: space-between; padding-top: 9px; text-align: center; font: 500 11px/1 var(--sf); }
+.wx-hr div { display: grid; gap: 6px; justify-items: center; } .wx-hr b { font: 600 13px var(--sf); } .wx-hr svg { width: 17px; height: 17px; }
+
+/* Stocks */
+.w--stk { background: #151517; }
+.sk-t { position: absolute; left: 15px; top: 13px; font: 700 13px/1.3 var(--sf); } .sk-t span { display: block; font-weight: 400; color: #8e8d93; margin-top: 2px; }
+.sk-c { position: absolute; right: 14px; top: 14px; text-align: right; font: 500 12px/1.5 var(--sf); color: #34c85a; }
+.sk-p { position: absolute; left: 14px; bottom: 11px; font: 300 36px/1 var(--sf); letter-spacing: -0.02em; }
+.sk-g { position: absolute; left: 0; right: 0; top: 56px; }
+
+/* Screen Time (agents usage) */
+.st-h { display: flex; align-items: center; gap: 8px; padding: 14px 14px 0; font: 300 24px/1 var(--sf); letter-spacing: -0.01em; }
+.st-h i { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(160deg, #7cc4ff, #3a7bd5); display: grid; place-items: center; } .st-h i svg { width: 14px; height: 14px; fill: none; stroke: #fff; stroke-width: 2; }
+.st-ch { position: relative; margin: 8px 12px 0 14px; }
+.st-lg { display: grid; grid-template-columns: repeat(3, auto); justify-content: space-between; padding: 0 14px; margin-top: 8px; font: 400 15px/1.3 var(--sf); }
+.st-lg b { display: block; font-weight: 500; font-size: 13px; }
+.st-app { display: flex; align-items: center; gap: 10px; font: 400 14px/1.25 var(--sf); min-width: 0; }
+.st-app i { width: 34px; height: 34px; border-radius: 8px; flex: none; display: grid; place-items: center; font: 700 13px var(--sf); font-style: normal; color: #fff; }
+.st-app span { display: block; color: #8e8d93; font-size: 12px; }
+
+/* Notes */
+.nt-h { height: 50px; background: linear-gradient(180deg, #ffd60a, #f5b800); display: flex; align-items: center; gap: 12px; padding: 0 16px; font: 600 18px var(--sf); }
+.nt-h svg { width: 22px; height: 22px; fill: #fff; }
+.nt-r { display: flex; align-items: center; gap: 10px; height: 50px; margin: 0 0 0 16px; padding-right: 16px; border-bottom: 1px solid #323234; }
+.nt-r:last-child { border: 0; } .nt-r div { flex: 1; min-width: 0; font: 400 15px/1.25 var(--sf); }
+.nt-r div span { display: block; font-size: 13px; color: #8e8d93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nt-r div span b { font-weight: 400; color: #8e8d93; margin-right: 8px; }
+.nt-r u { width: 32px; height: 32px; border-radius: 5px; flex: none; }
+
+/* Shortcuts */
+.sc { position: relative; border-radius: 22px; padding: 12px; color: #fff; display: flex; flex-direction: column; justify-content: space-between; }
+.sc svg { width: 26px; height: 26px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.sc b { font: 600 14px/1.25 var(--sf); }
+.w--sc { background: none; }
+.w--sc .sc { height: 100%; }
+.sc-g { position: absolute; inset: 0; padding: 9px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.sc-g .sc { border-radius: 14px; padding: 9px 10px; min-height: 0; }
+.sc-g .sc svg { width: 20px; height: 20px; } .sc-g .sc b { font-size: 13px; }
+.sc--red { background: linear-gradient(135deg, #f0555f, #e9404e); } .sc--coral { background: linear-gradient(135deg, #f7785f, #f2605a); }
+.sc--orange { background: linear-gradient(135deg, #f7ab43, #f19632); } .sc--yellow { background: linear-gradient(135deg, #ecc400, #dcb700); }
+.sc--green { background: linear-gradient(135deg, #34c85a, #2bb552); } .sc--teal { background: linear-gradient(135deg, #00cbc4, #00b8b8); }
+.sc--blue { background: linear-gradient(135deg, #1fb5f5, #0d9ee8); } .sc--purple { background: linear-gradient(135deg, #a15cf0, #8a45e0); }
+
+/* Siri Suggestions */
+.w--siri { background: #2a2a2c; }
+.sr { display: flex; align-items: center; gap: 12px; height: 79px; padding: 0 16px; border-bottom: 1px solid #3a3a3c; } .sr:last-child { border: 0; }
+.sr i { width: 40px; height: 40px; border-radius: 9px; flex: none; display: grid; place-items: center; font-style: normal; } .sr i svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.sr b { display: block; font: 600 15px/1.3 var(--sf); } .sr span { font: 400 12px var(--sf); color: #8e8d93; }
+
+/* Files */
+.w--files { background: #2a2a2c; }
+.fl-g { position: absolute; inset: 8px; display: grid; gap: 6px; }
+.fl-g > div { border-radius: 14px; background: rgb(255 255 255 / 0.05); padding: 8px; display: grid; justify-items: center; align-content: center; gap: 4px; font: 400 11px/1.2 var(--sf); color: #c7c7cc; min-width: 0; }
+.fl-g > div span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.fl-th { width: 46px; height: 46px; border-radius: 6px; background: #f2f2f2; position: relative; overflow: hidden; }
+.fl-th::before { content: ""; position: absolute; left: 9px; right: 9px; top: 12px; height: 2px; background: #bbb; box-shadow: 0 5px #bbb, 0 10px #bbb, 0 15px #bbb, 0 20px #bbb; }
+
+/* Sleep (privacy) */
+.w--slp { background: #060606; }
+.sl-t { position: absolute; left: 14px; top: 13px; font: 600 15px/1 var(--sf); color: #63e6e1; display: flex; gap: 6px; align-items: center; } .sl-t svg { width: 17px; height: 17px; fill: none; stroke: #63e6e1; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sl-b { position: absolute; left: 16px; right: 16px; top: 42px; height: 54px; display: flex; align-items: flex-end; justify-content: space-between; }
+.sl-b i { width: 9px; border-radius: 5px; background: #3a3a3c; } .sl-b i:last-child { background: #63e6e1; }
+.sl-c { position: absolute; left: 15px; bottom: 36px; font: 600 11px var(--sf); color: #8e8d93; letter-spacing: 0.03em; }
+.sl-n { position: absolute; left: 14px; bottom: 11px; font: 400 22px/1 var(--sf); } .sl-n small { font-size: 15px; font-weight: 500; color: #c7c7cc; }
+
+/* Clock */
+.w--clk { background: #1c1c1e; display: grid; place-items: center; }
+.w--clk svg { width: 128px; height: 128px; }
+.hand-s { transform-origin: 64px 64px; animation: sweep 60s linear infinite; }
+@keyframes sweep { to { rotate: 360deg; } }
+
+/* App Store */
+.w--app { background: linear-gradient(165deg, #1d92fa 0%, #0b66f0 100%); }
+.ap-g { position: absolute; left: 14px; top: 14px; display: grid; grid-template-columns: repeat(2, 26px); gap: 6px; }
+.ap-g i { width: 26px; height: 26px; border-radius: 7px; display: block; }
+.ap-t { position: absolute; left: 14px; bottom: 13px; font: 600 14px/1.3 var(--sf); } .ap-t span { display: block; font: 600 10px/1 var(--sf); letter-spacing: 0.04em; color: #bfe0ff; margin-bottom: 5px; }
+.ap-l { position: absolute; right: 14px; top: 14px; width: 24px; height: 24px; opacity: 0.9; }
+
+.wph { display: grid; place-content: center; height: 344px; text-align: center; color: var(--ink-2); gap: 6px; }
+@media (prefers-reduced-motion: reduce) { .hand-s { animation: none; } .bt-cap i { transition-duration: 1ms; } }
+
 @media (prefers-reduced-motion: reduce) {
   /* Travel collapses to a crossfade; loops stop; numerals and rings jump. */
   .dg > i, .ring.ln .ar, .cap > i, .cap--v > i, .ind, .tile, .ib, .go, .qa-ic { transition-duration: 1ms !important; }
@@ -443,7 +635,7 @@ svg { display: block; }
 <div class="top">
   <div class="row">
     <div class="brand"><b>Notch personality</b><span>Part 1 · foundation + Home · design/notch-personality</span></div>
-    <div class="grp"><label>Style</label><div class="seg2" data-group="mode" role="group" aria-label="Style"><button data-v="calm">Calm</button><button data-v="alive">Alive</button></div></div>
+    <div class="grp"><label>Style</label><div class="seg2" data-group="mode" role="group" aria-label="Style"><button data-v="calm">Calm</button><button data-v="alive">Alive</button><button data-v="widgets">Widgets</button></div></div>
     <div class="grp"><label>Accent</label><div class="seg2" data-group="accent" role="group" aria-label="Accent"><button data-v="section">By section</button><button data-v="content">By content</button></div></div>
   </div>
   <div class="row">
@@ -464,8 +656,8 @@ svg { display: block; }
   <div class="island" id="island" data-state="closed">
     <div class="face face--live" aria-hidden="true"><div class="side" id="sideL"></div><div class="side" id="sideR"></div></div>
     <div class="face face--hud" aria-hidden="true">
-      <div class="hud-top"><span id="hudLbl"></span><span><span class="num n-sm" id="hudNum" data-noroll></span></span></div>
-      <div class="cap hud-cap" id="hudCap"><i></i></div>
+      <div class="hud-top"><span id="hudLbl"></span><span><span class="num n-sm" id="hudNum" data-num="hudNum" data-noroll></span></span></div>
+      <div class="cap hud-cap" id="hudCap" data-cap="hud"><i></i></div>
     </div>
     <div class="face face--open" id="panel">
       <div class="head">
@@ -503,6 +695,11 @@ svg { display: block; }
       <li><b>Motion cost:</b> five rings can be live at once (tile, pill, drop chip). Rings are one SVG circle; the drain is a 1s CSS transition and springs run only on a jump, so the idle cost is the digit roller and bars. Cap at four rolling numerals.</li>
       <li><b>780px:</b> the 8x3 grid leaves 85px 1x1 tiles; a 20pt numeral is the most they hold. Anything denser stays in its section.</li>
       <li><b>Packing:</b> the ranker is brute-force over size options; with more tiles it needs a real solver, or fixed layouts per count.</li>
+    </ul></div>
+    <div><h3>Widgets mode: cost, and my take</h3><ul>
+      <li><b>Cost:</b> about 20 fixed-size components (Calendar, Batteries, Fitness, Music, Weather and so on), each a hand-built layout at 158 / 338 x 158 / 338 x 354pt, scaled together by one zoom. That is roughly 2 to 3 days of React plus the live bindings, against half a day for the flexible Tile. Type is SF (<code>-apple-system</code>, <code>ui-rounded</code> for the Fitness lines), so Widgets mode loses Geist and is macOS-only; Windows needs a fallback.</li>
+      <li><b>Fixed vs flexible:</b> widgets cannot be ranked or resized, so the live-first packing is gone: a board is a fixed grid (4 x 2 on Home; a Large plus Medium plus two Small elsewhere). The panel also has to grow from 486 to 520px to fit a 354pt Large and its label. Quick actions have no widget, so they move to Shortcuts.</li>
+      <li><b>Take:</b> the replicas are the most recognisable look here and make a good Settings option, but they do not belong as the default notch. They spend most of their area on chrome (labels, art, empty rows), carry Apple trade dress, and answer "what do I want to browse" where a notch answers "what is live". Use them for the sections that are browsed (Today, Media, Launch), keep Alive tiles for Home.</li>
     </ul></div>
     <div><h3>What I would not do</h3><ul>
       <li><b>Source:</b> CarPlay Design System (Figma community file <code>kLPrZ1jNJLJzH6ZpqQY7rz</code>), indexed in <code>docs/design/figma-carplay-index.md</code>: tiles #1C1C1E and #252525, Light numerals at 32 to 45pt, the ring-over-same-hue-track pattern, and the gauge rule (deepest shade for the tile, lightest tint for ring and numerals), which is what a live tile does here.</li>
@@ -660,6 +857,7 @@ function paint() {
   $$("[data-num]").forEach((el) => V.num[el.dataset.num] && setNum(el, V.num[el.dataset.num]()));
   $$("[data-ring]").forEach((el) => { const k = el.dataset.ring, f = V.ring[k] ? V.ring[k]() : parseFloat(k); setRing(el, f); });
   $$("[data-cap]").forEach((el) => { const f = V.cap[el.dataset.cap] ? V.cap[el.dataset.cap]() : parseFloat(el.dataset.cap); el.style.setProperty("--p", f); });
+  $$("[data-capw]").forEach((el) => el.style.setProperty("--p", S.batt / 100));
   $$("[data-seg]").forEach((el) => setSeg(el, el.dataset.seg === "sessions" ? 2 : el.dataset.seg === "usage" ? 6 : +el.dataset.seg));
   const bs = battState();
   $$("[data-bstate]").forEach((el) => (el.dataset.state = bs));
@@ -690,7 +888,7 @@ const TILES = [
     <div class="xL">
       <div class="m-top"><div class="art">${ART}</div>
         <div class="m-meta"><div class="lbl">${I.vol} Now playing</div><div class="m-title cut">Night Drive</div><div class="sub cut">Halcyon · Moon Atlas</div><div style="margin-top:4px">${barsHTML(5, 18)}</div></div></div>
-      <div class="m-prog"><span class="num" data-num="trackPos">1:42</span>${capHTML("track", "", true)}<span class="num" data-num="trackLeft">-2:00</span></div>
+      <div class="m-prog"><span class="num" data-num="trackPos" data-noroll>1:42</span>${capHTML("track", "", true)}<span class="num" data-num="trackLeft" data-noroll>-2:00</span></div>
       <div class="m-ctl"><button class="ib" aria-label="Previous">${I.prev}</button><button class="ib ib--solid" data-act="play" aria-label="Play or pause"><span class="show-pause">${I.pause}</span><span class="show-play">${I.play}</span></button><button class="ib" aria-label="Next">${I.next}</button></div>
     </div>
     <div class="xS"><div class="m-sm"><div class="art">${ART}</div><div style="min-width:0;display:grid;gap:2px"><div class="m-title cut">Night Drive</div><div class="sub cut">Halcyon</div><div style="margin-top:3px">${barsHTML(4, 12)}</div></div><button class="ib" data-act="play" aria-label="Play or pause"><span class="show-pause">${I.pause}</span><span class="show-play">${I.play}</span></button></div></div>`),
@@ -800,6 +998,98 @@ function layoutHome(first) {
   });
 }
 
+
+/* ============================================================================
+   Widgets look: boards of Apple widget replicas (small 158, medium 338x158,
+   large 338x354). A board is a 4-column grid: S = 1x1, M = 2x1, L = 2x2.
+   Live data (timer, battery, play state) binds through the same data-* hooks.
+   ========================================================================= */
+const WI = (d, extra = "") => `<svg viewBox="0 0 24 24" aria-hidden="true" ${extra}>${d}</svg>`;
+const WIC = {
+  phone: '<rect x="8" y="3.5" width="8" height="17" rx="2"/><path d="M11 17.5h2"/>', laptop: '<rect x="5" y="6" width="14" height="9.5" rx="1.5"/><path d="M3 18.5h18"/>',
+  watch: '<rect x="7.5" y="6.5" width="9" height="11" rx="3"/><path d="M9 6.5l.7-3h4.6l.7 3M9 17.5l.7 3h4.6l.7-3"/>', mouse: '<rect x="7" y="3.5" width="10" height="17" rx="5"/><path d="M12 3.5v6"/>',
+  pods: '<path d="M8.5 4a3 3 0 0 0-3 3v2.5a2 2 0 0 0 2 2V20h2v-8.5a2 2 0 0 0 2-2V7a3 3 0 0 0-3-3zM16 6.5v8M16 14.5v5.5"/>', cse: '<rect x="4" y="8" width="16" height="9" rx="4"/><path d="M4 12h16"/>',
+  gift: '<rect x="4" y="9" width="16" height="11" rx="1.5"/><path d="M12 9v11M3.5 9h17M12 9c-2-4-5-3-4-1 .6 1 2.5 1 4 1zm0 0c2-4 5-3 4-1-.6 1-2.5 1-4 1z"/>',
+  bed: '<path d="M3 18V7M3 14h18v4M21 14v-2.5a2.5 2.5 0 0 0-2.5-2.5H11v5"/><circle cx="7" cy="11" r="1.7"/>', shield: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>',
+  cal: '<rect x="4" y="5" width="16" height="15" rx="3"/><path d="M4 10h16M8.5 3v4M15.5 3v4M12 13v4M10 15h4"/>', clock: '<circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/>',
+  img: '<rect x="4" y="5" width="16" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.5"/><path d="m4.5 17 4.5-4 3 2.5 3-3 4.5 4"/>', page: '<path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M9.5 12h6M9.5 16h4"/>',
+  chat: '<path d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v6a2.5 2.5 0 0 1-2.5 2.5H11l-4 3.5V15a2.5 2.5 0 0 1-2-2.4z"/>', mail: '<rect x="3.5" y="6" width="17" height="12" rx="2.5"/><path d="m4 8 8 5.5L20 8"/>',
+  bolt: '<path d="M13.5 2.5 5 13.2h6.5l-1 8.3L19 10.8h-6.5z"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/>', loc: '<path d="M3 11.5 21 3l-8.5 18-2-7.5z" fill="#fff" stroke="none"/>',
+  note: '<path d="M9 17.5v-11l10-2v11.2" stroke="#fff" fill="none" stroke-width="2.2" stroke-linecap="round"/><circle cx="6.5" cy="17.5" r="2.5" fill="#fff"/><circle cx="16.5" cy="15.7" r="2.5" fill="#fff"/>',
+  pod: '<circle cx="12" cy="11" r="2" fill="#fff"/><path d="M8 15a5.5 5.5 0 1 1 8 0M5.5 18a9 9 0 1 1 13 0M12 13v6" stroke="#fff" fill="none" stroke-width="1.8" stroke-linecap="round"/>', bot: '<rect x="4.5" y="8" width="15" height="11" rx="3.5"/><path d="M12 8V4.5M9.5 13v1.5M14.5 13v1.5"/>',
+};
+const wsun = (cls = "wx-sun") => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="#ffd409"/><path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" stroke="#ffd409" stroke-width="2" stroke-linecap="round"/></svg>`;
+const wcloud = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18.5a4.2 4.2 0 0 1-.4-8.4A5.5 5.5 0 0 1 17 11.2a3.7 3.7 0 0 1 .3 7.3z" fill="#fff"/></svg>`;
+const wart = (c1, c2, c3 = "#fff", glyph = "") => `<svg viewBox="0 0 100 100"><rect width="100" height="100" fill="${c1}"/><circle cx="50" cy="52" r="27" fill="${c2}"/><rect y="62" width="100" height="5" fill="${c1}"/><rect y="72" width="100" height="6" fill="${c1}"/><rect y="82" width="100" height="18" fill="${c3}" opacity=".25"/>${glyph}</svg>`;
+const ART2 = wart("#7a1010", "#ff5b3d"), ART3 = wart("#101c3a", "#46c2ff"), ART4 = wart("#2b1740", "#ffb347"), ART5 = wart("#12332a", "#7be39a");
+const stChart = (w, h, big) => {
+  const bars = [[0, 0, 0], [6, 4, 0], [14, 6, 3], [20, 12, 5], [10, 8, 9], [16, 5, 2], [8, 3, 0], [12, 9, 6], [5, 2, 0], [9, 4, 2], [3, 1, 0], [0, 0, 0]];
+  const bw = (w - 28) / bars.length - 2, y = (m) => (m / 60) * (h - 12);
+  let s = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><g stroke="#3a3a3c" stroke-width="1" stroke-dasharray="3 3"><line x1="0" y1="${h - 12 - y(60)}" x2="${w - 24}" y2="${h - 12 - y(60)}"/><line x1="0" y1="${h - 12 - y(30)}" x2="${w - 24}" y2="${h - 12 - y(30)}"/></g><line x1="0" y1="${h - 12}" x2="${w - 24}" y2="${h - 12}" stroke="#48484a"/>`;
+  bars.forEach((b, i) => { let top = h - 12; ["#0983fe", "#3fc7df", "#fea00a"].forEach((c, k) => { if (!b[k]) return; const hh = y(b[k]); top -= hh; s += `<rect x="${2 + i * (bw + 2)}" y="${top}" width="${bw}" height="${hh}" rx="1" fill="${c}"/>`; }); });
+  s += `<g font-family="-apple-system, system-ui" font-size="9" fill="#8e8d93"><text x="${w - 20}" y="${h - 12 - y(60) + 3}">60m</text><text x="${w - 20}" y="${h - 12 - y(30) + 3}">30m</text><text x="${w - 20}" y="${h - 9}">0m</text><text x="1" y="${h}">6 AM</text><text x="${(w - 24) / 2}" y="${h}">12 PM</text></g></svg>`;
+  return s;
+};
+const fitBars = (col, n, seed) => `<div>${Array.from({ length: n }, (_, i) => `<i style="height:${6 + Math.round(Math.abs(Math.sin(i * seed + seed)) * 18)}px;background:${col}"></i>`).join("")}</div>`;
+const batRing = (sz = 64) => `<div class="bt-ring"><div class="rwrap" style="width:${sz}px;height:${sz}px" data-bstate>${ringHTML("batt", sz, 9)}<div class="bt-ic">${WI(WIC.laptop)}</div></div></div>`;
+const playPill = (style) => `<button class="pill" style="${style}" data-act="play" aria-label="Play or pause"><span class="show-pause">${WI('<rect x="6" y="5" width="4" height="14" rx="1.3" fill="#fff"/><rect x="14" y="5" width="4" height="14" rx="1.3" fill="#fff"/>')}</span><span class="show-play">${WI('<path d="M8 5v14l11-7z" fill="#fff"/>')}</span><span class="show-pause">Pause</span><span class="show-play">Play</span></button>`;
+const eventsL = `<div class="cev ev--g"><div><b>Design sync</b><span>2:30–3:00<small>PM</small></span></div></div><div class="cev ev--y"><div><b>1:1 with Maya</b><span>4:00–4:30<small>PM</small></span></div></div>`;
+const tomorrow = `<div class="cw-dow" style="color:#8e8d93;margin-bottom:8px">TOMORROW</div><div class="cw-bd">${WI(WIC.gift)}Ravi's Birthday</div><div class="cev ev--r"><div><b>Morning Swim</b><span>Home</span><span>9:00–9:45<small>AM</small></span></div></div>`;
+const more = (n, cols) => `<div class="cw-more"><i>${cols.map((c) => `<b style="background:${c}"></b>`).join("")}</i>${n} more events</div>`;
+const trio = (rows) => `<div class="ft-r">${[["#f9104f", "#3a171d", rows[0].f, 52, 9.6], ["#a7fe01", "#1e3719", rows[1].f, 39, 12.8], ["#00fff5", "#163239", rows[2].f, 26, 19.2]].map(([c, t, v, sz, sw]) => ringHTML(v, sz, sw).replace('style="', `style="left:${(52 - sz) / 2}px;top:${(52 - sz) / 2}px;--acc:${c};--track:${t};`)).join("")}</div>`;
+const fitLines = (rows) => `<div class="ft-l">${rows.map((r) => `<div style="color:${r.c}">${r.t}</div>`).join("")}</div>`;
+const FIT = {
+  timer: [{ c: "#f9104f", f: "timer", t: `<span class="num" data-num="timerMin">19</span>/25<small>MIN</small>` }, { c: "#a7fe01", f: 0.5, t: `2/4<small>SETS</small>` }, { c: "#00fff5", f: 0.28, t: `1/4<small>HRS</small>` }],
+  mac: [{ c: "#f9104f", f: 0.41, t: `41/100<small>CPU%</small>` }, { c: "#a7fe01", f: 0.69, t: `11/16<small>MEM GB</small>` }, { c: "#00fff5", f: 0.42, t: `212/512<small>DISK GB</small>` }],
+};
+const WG = {
+  cal: { M: () => ["Calendar", `<div class="cw"><div class="cw-c"><div class="cw-dow">SUNDAY</div><div class="cw-d">4</div>${eventsL}</div><div class="cw-c">${tomorrow}${more(5, ["#ff9f0a", "#ffd60a", "#34c85a", "#0a84ff", "#bf5af2"])}</div></div>`],
+    L: () => ["Calendar", `<div class="cw"><div class="cw-c"><div class="cw-dow">SUNDAY</div><div class="cw-d">4</div><div class="cw-tl">${["1 PM", "2", "3", "4", "5"].map((t, i) => `<i style="top:${i * 46}px"></i><u style="top:${i * 46}px">${i ? t : "1"}</u>`).join("")}<div class="cw-now" style="top:${46 * 1.08}px"></div><div class="cev ev--y" style="top:2px;height:21px"><div><b>Standup</b></div></div><div class="cev ev--g" style="top:70px;height:44px"><div><b>Design sync</b><span>2:30<small>PM</small></span></div></div><div class="cev ev--y" style="top:138px;height:43px"><div><b>1:1 with Maya</b><span>4:00<small>PM</small></span></div></div></div></div>
+      <div class="cw-c">${tomorrow}<div class="cev ev--g" style="flex:1"><div><b>Design Review</b><span>10<small>AM</small></span></div></div><div class="cev ev--b"><div><b>Team Lunch</b></div></div>${more(2, ["#bf5af2", "#34c85a"])}</div></div>`] },
+  bat: { S: () => ["Battery", `<div class="w--bat" style="position:absolute;inset:0">${batRing()}<div class="bt-n"><span class="num" data-num="battN">82</span><em>%</em></div></div>`],
+    L: () => ["Battery", `<div class="w--bat" style="position:absolute;inset:0;padding-top:6px">${[["laptop", "MacBook Pro", 82, 1], ["mouse", "Magic Mouse", 80], ["pods", "AirPods Pro", 60], ["cse", "AirPods Case", 25]].map(([ic, n, p, live]) => `<div class="bt-row"${live ? " data-bstate" : ""}>${WI(WIC[ic])}<span>${n}</span><b>${live ? `<span class="num" data-num="batt" style="display:inline-flex"></span>` : p + "%"}</b><div class="bt-cap" style="--p:${live ? 0.82 : p / 100}"${live ? ' data-capw="batt"' : ""}><i></i></div></div>`).join("")}${'<div class="bt-row"></div>'.repeat(2)}</div>`] },
+  fit: { S: (v = "timer") => [v === "mac" ? "Stats" : "Focus", `<div class="w--fit" style="position:absolute;inset:0">${trio(FIT[v])}${fitLines(FIT[v])}</div>`],
+    M: (v = "timer") => [v === "mac" ? "Stats" : "Focus", `<div class="w--fit" style="position:absolute;inset:0">${trio(FIT[v])}${fitLines(FIT[v])}<div class="ft-ch"><div style="display:block"><p>${v === "mac" ? "CPU" : "TIMER"}</p>${fitBars("#f9104f", 30, 1.7)}</div><div><p>${v === "mac" ? "MEMORY" : "SETS"}</p>${fitBars("#a7fe01", 30, 2.3)}</div><div><p>${v === "mac" ? "DISK" : "TODAY"}</p>${fitBars("#00fff5", 30, 0.9)}</div></div></div>`] },
+  music: { M: () => ["Music", `<div class="w--mus" style="position:absolute;inset:0"><div class="mu-art" style="left:15px;top:15px;width:128px;height:128px">${ART}</div><svg class="mu-note" viewBox="0 0 24 24">${WIC.note}</svg><div class="mu-cap" style="left:162px;top:57px">NOW PLAYING</div><div class="mu-t" style="left:162px;top:74px;right:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Night Drive</div><div class="mu-s" style="left:162px;top:96px">Halcyon</div>${playPill("left:162px;top:117px")}</div>`],
+    L: () => ["Music", `<div class="w--mus" style="position:absolute;inset:0"><div class="mu-art" style="left:15px;top:15px;width:128px;height:128px">${ART}</div><svg class="mu-note" viewBox="0 0 24 24">${WIC.note}</svg><div class="mu-cap" style="left:162px;top:57px">NOW PLAYING</div><div class="mu-t" style="left:162px;top:74px">Night Drive</div><div class="mu-s" style="left:162px;top:96px">Halcyon</div>${playPill("left:162px;top:117px")}<div class="mu-low"><p>RECENTLY PLAYED</p>${[[ART2, "Dawn FM", "The Weeknd"], [ART3, "IGOR", "Tyler, The Creator"], [ART4, "Modal Soul", "Nujabes"]].map(([a, t, s]) => `<div class="mu-row"><div class="mu-art">${a}</div><div>${t}<span>${s}</span></div><i>${WI('<path d="M8 5v14l11-7z" fill="#fff"/>')}</i></div>`).join("")}</div></div>`] },
+  pod: { M: () => ["Podcasts", `<div class="w--pod" style="position:absolute;inset:0;padding:14px 16px"><div style="font:600 19px var(--sf)">Up Next</div><svg class="mu-note" viewBox="0 0 24 24" style="right:16px;top:14px">${WIC.pod}</svg>${[[ART5, "Standup, but async", "Resume · 48m left"], [ART2, "Why agents need receipts", "1d ago · 1h 54m"]].map(([a, t, s], i) => `<div class="mu-row" style="height:48px;margin-top:${i ? 0 : 8}px"><div class="mu-art" style="width:40px;height:40px">${a}</div><div style="font-size:15px">${t}<span style="font-size:12px;color:rgb(255 255 255/.7)">${s}</span></div><i>${WI('<path d="M8 5v14l11-7z" fill="#fff"/>')}</i></div>`).join("")}</div>`] },
+  rem: { S: (v) => [v === "agents" ? "Approvals" : "Reminders", `<div class="rmw"><div class="rw-h"><b>${v === "agents" ? "Approvals" : "Reminders"}</b><em>${v === "agents" ? 2 : 17}</em></div>${(v === "agents" ? ["Claude: cargo test", "Codex: git push", "Voice: send email"] : ["Send standup update", "Review Rigo's PR", "Book club prep"]).map((t) => `<div class="rw-i"><i></i><span>${t}</span></div>`).join("")}</div>`] },
+  wx: { S: () => ["Weather", `<div class="w--wx" style="position:absolute;inset:0"><div class="wx-loc">Oakland ${WI(WIC.loc)}</div><div class="wx-t">21°</div><div class="wx-st">${wsun("")}Partly Cloudy<br>H:24° L:15°</div></div>`],
+    M: () => ["Weather", `<div class="w--wx" style="position:absolute;inset:0"><div class="wx-loc">Oakland ${WI(WIC.loc)}</div><div class="wx-t">21°</div><div class="wx-r">${wsun()}Partly Cloudy<br>H:24° L:15°</div><div class="wx-hr">${[["2PM", 0, 21], ["3PM", 0, 22], ["4PM", 1, 23], ["5PM", 1, 22], ["6PM", 1, 19], ["7PM", 1, 17]].map(([t, c, d]) => `<div>${t}${c ? wcloud : wsun("").replace("<svg ", '<svg style="width:17px;height:17px" ')}<b>${d}°</b></div>`).join("")}</div></div>`] },
+  stk: { S: () => ["Stocks", `<div class="w--stk" style="position:absolute;inset:0"><div class="sk-t">▲ AAPL<span>Apple Inc.</span></div><div class="sk-c">+2.82<br>+0.85%</div><svg class="sk-g" width="158" height="62" viewBox="0 0 158 62" aria-hidden="true"><defs><linearGradient id="skg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#34c85a" stop-opacity=".45"/><stop offset="1" stop-color="#34c85a" stop-opacity="0"/></linearGradient></defs><path d="M0 10 L5 38 L9 30 L16 33 L24 31 L32 28 L42 30 L52 26 L62 28 L72 24 L84 27 L94 22 L106 20 L118 17 L128 22 L140 18 L158 21 V62 H0Z" fill="url(#skg)"/><path d="M0 10 L5 38 L9 30 L16 33 L24 31 L32 28 L42 30 L52 26 L62 28 L72 24 L84 27 L94 22 L106 20 L118 17 L128 22 L140 18 L158 21" fill="none" stroke="#34c85a" stroke-width="1.6"/></svg><div class="sk-p">180.95</div></div>`] },
+  st: { S: () => ["Agents", `<div class="st-h"><i>${WI(WIC.bot)}</i>2h 43m</div><div class="st-ch" style="margin-top:6px">${stChart(132, 82)}</div>`],
+    L: () => ["Agents", `<div class="st-h" style="font-size:34px;padding-top:16px"><i style="width:30px;height:30px">${WI(WIC.bot)}</i>2h 43m</div><div class="st-ch" style="margin:10px 16px 0">${stChart(306, 118)}</div><div class="st-lg"><div style="color:#0983fe"><b>Claude</b>1h 6m</div><div style="color:#3fc7df"><b>Codex</b>31m</div><div style="color:#fea00a"><b>Voice</b>23m</div></div><div class="wdiv" style="margin:12px 16px 4px"></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 12px;padding:10px 16px">${[["#0983fe", "C", "Claude Code", "58m"], ["#3fc7df", "X", "Codex", "31m"], ["#fea00a", "V", "Voice", "23m"], ["#8e8e93", "⌘", "Cursor", "9m"]].map(([c, l, n, t]) => `<div class="st-app"><i style="background:${c}">${l}</i><div>${n}<span>${t}</span></div></div>`).join("")}</div>`] },
+  notes: { L: () => ["Notes", `<div class="nt-h">${WI('<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4l2 2h7A2.5 2.5 0 0 1 21 9.5v8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" fill="#fff"/>')}Notes</div>${[["Call prep: Maya", "8:12 AM", "Open with the usage numbers…", 1], ["Grocery list", "Yesterday", "Oats, coffee, lemons, eggs…", 1], ["How to write a clear update", "6/4/23", "A short update is a kind one…"], ["Notch ideas", "6/2/23", "Widgets are an option, not the default…"], ["Agents: approval copy", "5/31/23", "Say what will run, not who asked…"], ["Research findings", "5/31/23", "Users want a glance, then nothing…"]].map(([t, d, s, th]) => `<div class="nt-r"><div>${t}<span><b>${d}</b>${s}</span></div>${th ? `<u style="background:linear-gradient(135deg,#ff9a5a,#e85d75)"></u>` : ""}</div>`).join("")}`] },
+  sc: { S: (v) => { const [c, i, t] = { shelf: ["blue", "page", "AirDrop to Maya"], media: ["coral", "mic", "Switch Output"], agents: ["purple", "bot", "Ask Claude"] }[v] || ["red", "cal", "Start Focus 25"]; return ["Shortcuts", `<div class="sc sc--${c}" style="position:absolute;inset:0">${WI(WIC[i])}<b>${t}</b></div>`]; },
+    L: () => ["Shortcuts", `<div class="sc-g">${[["red", "clock", "Start Focus 25"], ["coral", "mic", "Dictate to Note"], ["orange", "img", "Summarize Clipboard"], ["yellow", "page", "New Note with Date"], ["green", "chat", "Send Standup"], ["teal", "mail", "Email Running Late"], ["blue", "bolt", "Open PR Queue"], ["purple", "mic", "Mute Mic"]].map(([c, i, t]) => `<div class="sc sc--${c}">${WI(WIC[i])}<b>${t}</b></div>`).join("")}</div>`] },
+  siri: { M: (v) => ["Siri Suggestions", `<div class="w--siri" style="position:absolute;inset:0">${(v === "shelf" ? [["#0a84ff", "page", "AirDrop report-q3.pdf", "Shelf"], ["#34c85a", "img", "Convert 3 screenshots", "Shelf"]] : v === "launch" ? [["#7d7aff", "bot", "Open Claude Code", "Agents"], ["#ff9f0a", "note", "New note with date", "Notes"]] : [["#7d7aff", "bot", "Review Claude's request", "Agents"], ["#ff4539", "clock", "Start the standup timer", "Focus"]]).map(([c, i, t, s]) => `<div class="sr"><i style="background:${c}">${WI(WIC[i] || WIC.page)}</i><div><b>${t}</b><span>${s}</span></div></div>`).join("")}</div>`] },
+  files: { S: () => ["Files", `<div class="w--files" style="position:absolute;inset:0"><div class="fl-g" style="grid-template-columns:1fr 1fr">${[["report-q3.pdf", ""], ["demo.mov", "background:linear-gradient(135deg,#4a6cf7,#9b5de5)"], ["icons.zip", "background:linear-gradient(135deg,#ffb347,#ff6b6b)"], ["mock.png", "background:linear-gradient(135deg,#34c85a,#00cbc4)"]].map(([n, st]) => `<div style="padding:5px;gap:2px"><div class="fl-th" style="width:30px;height:30px;${st}"></div><span>${n}</span></div>`).join("")}</div></div>`],
+    L: () => ["Files", `<div class="w--files" style="position:absolute;inset:0"><div class="fl-g" style="grid-template-columns:repeat(3,1fr);grid-auto-rows:1fr;inset:0;gap:0;padding:10px 6px">${[["report-q3.pdf", ""], ["demo.mov", "background:linear-gradient(135deg,#4a6cf7,#9b5de5)"], ["icons.zip", "background:linear-gradient(135deg,#ffb347,#ff6b6b)"], ["mock.png", "background:linear-gradient(135deg,#34c85a,#00cbc4)"], ["notes.md", ""], ["Screen 4.png", "background:linear-gradient(135deg,#f093fb,#f5576c)"], ["invoice.pdf", ""], ["audio.m4a", "background:linear-gradient(135deg,#43e97b,#38f9d7)"], ["deck.key", "background:linear-gradient(135deg,#fa709a,#fee140)"]].map(([n, st]) => `<div style="background:none"><div class="fl-th" style="width:50px;height:50px;${st}"></div><span>${n}</span></div>`).join("")}</div></div>`] },
+  slp: { S: () => ["Privacy", `<div class="w--slp" style="position:absolute;inset:0"><div class="sl-t">${WI(WIC.shield)}Privacy</div><div class="sl-b">${[22, 34, 18, 44, 30, 50, 38].map((h) => `<i style="height:${h}px"></i>`).join("")}</div><div class="sl-c">MIC IN USE</div><div class="sl-n">14<small>min</small> <small>Zoom</small></div></div>`] },
+  clk: { S: () => ["Clock", `<div class="w--clk" style="position:absolute;inset:0"><svg viewBox="0 0 128 128" aria-hidden="true"><circle cx="64" cy="64" r="62" fill="#fff"/>${Array.from({ length: 60 }, (_, i) => `<line x1="64" y1="5" x2="64" y2="${i % 5 ? 8 : 11}" stroke="#222" stroke-width="${i % 5 ? 1 : 1.8}" transform="rotate(${i * 6} 64 64)"/>`).join("")}${[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((n, i) => `<text x="${64 + 45 * Math.sin(i * Math.PI / 6)}" y="${64 - 45 * Math.cos(i * Math.PI / 6) + 5}" text-anchor="middle" font-family="-apple-system, system-ui" font-size="14" font-weight="500" fill="#111">${n}</text>`).join("")}<line x1="64" y1="64" x2="64" y2="34" stroke="#111" stroke-width="4" stroke-linecap="round" transform="rotate(62.5 64 64)"/><line x1="64" y1="64" x2="64" y2="20" stroke="#111" stroke-width="3" stroke-linecap="round" transform="rotate(30 64 64)"/><g class="hand-s"><line x1="64" y1="74" x2="64" y2="14" stroke="#ff9500" stroke-width="1.6"/></g><circle cx="64" cy="64" r="3.2" fill="#ff9500"/></svg></div>`] },
+  app: { S: (v) => [v === "launch" ? "Apps" : "App Store", `<div class="w--app" style="position:absolute;inset:0"><div class="ap-g"><i style="background:#ff3b30"></i><i style="background:#ffd60a"></i><i style="background:#111"></i><i style="background:rgb(255 255 255/.25)"></i></div><svg class="ap-l" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M12 4 6 16M12 4l6 12M5 14h14"/></svg><div class="ap-t"><span>YOUR APPS</span>Recent<br>& Pinned</div></div>`] },
+};
+const BOARDS = [
+  [["music", "M"], ["wx", "S"], ["st", "S"], ["cal", "M"], ["fit", "S"], ["bat", "S"]],
+  [["st", "L"], ["siri", "M"], ["rem", "S", "agents"], ["sc", "S", "agents"]],
+  [["music", "L"], ["pod", "M"], ["bat", "S"], ["sc", "S", "media"]],
+  [["notes", "L"], ["fit", "M"], ["fit", "S"], ["sc", "S"]],
+  [["files", "L"], ["siri", "M", "shelf"], ["files", "S"], ["sc", "S", "shelf"]],
+  null,
+  [["cal", "L"], ["wx", "M"], ["rem", "S"], ["stk", "S"]],
+  [["bat", "L"], ["fit", "M", "mac"], ["slp", "S"], ["clk", "S"]],
+  [["sc", "L"], ["siri", "M", "launch"], ["app", "S", "launch"], ["sc", "S"]],
+];
+const boards = [];
+function boardFor(i) {
+  if (boards[i]) return boards[i];
+  const d = document.createElement("div");
+  if (!BOARDS[i]) { d.className = "wph"; d.innerHTML = `<b style="font:600 30px var(--sf);color:var(--ink);letter-spacing:-0.03em">Clipboard</b><span>No Apple widget fits a clip history. Part 2 designs it as a Notes-style list.</span>`; return (boards[i] = d); }
+  d.className = "board";
+  d.innerHTML = BOARDS[i].map(([k, sz, v]) => { const [label, inner] = WG[k][sz](v); return `<div class="wc wc--${sz}"><div class="w w--${sz}">${inner}</div><div class="wl">${label}</div></div>`; }).join("");
+  return (boards[i] = d);
+}
+
 /* ============================================================================
    Sections strip. Home is designed; the other eight are Part 2 placeholders.
    ========================================================================= */
@@ -835,29 +1125,32 @@ function placeInd(jump) {
 }
 let view = null;
 function viewFor(i) {
+  if (S.mode === "widgets") return boardFor(i);
   if (i === 0) return home;
   const s = SECS[i], v = document.createElement("div");
   v.className = "ph-wrap"; v.style.setProperty("--ph", `var(--c-${s[1]})`);
   v.innerHTML = `<article class="tile" style="--acc:var(--c-${s[1]});grid-column:span 4;height:200px"><div class="in"><div><div class="lbl">Part 2</div><h2 style="margin:8px 0 0;font-size:40px;font-weight:600;letter-spacing:-0.045em;line-height:1;color:var(--acc)">${s[0]}</h2><div class="sub" style="margin-top:6px">${s[2]}</div><div class="chips">${s[3].map((x) => `<span class="chip">${x}</span>`).join("")}</div></div></div></article><div class="tile d"><div>Designed in part 2<br><span class="dim">${s[3].length} subsections, accent <b style="color:var(--acc-ink)">${s[1]}</b></span></div></div>`;
   return v;
 }
-function goSec(i, { jump = false } = {}) {
-  i = (i + SECS.length) % SECS.length; const dir = Math.sign(i - S.sec) || 1, same = i === S.sec && view;
+function goSec(i, { jump = false, force = false } = {}) {
+  i = (i + SECS.length) % SECS.length; const dir = Math.sign(i - S.sec) || 1, same = i === S.sec && view && !force;
   S.sec = i;
   $$(".tab", tabsEl).forEach((t, j) => t.setAttribute("aria-selected", j === i));
   setIndColor(); requestAnimationFrame(() => placeInd(jump));
-  $("#foot").textContent = i === 0 ? "Home · ranked by what is live, biggest first" : `${SECS[i][0]} · ${SECS[i][2]}`;
+  $("#foot").textContent = S.mode === "widgets" ? `${SECS[i][0]} · Apple widgets at native sizes: 158, 338 x 158, 338 x 354 pt` : i === 0 ? "Home · ranked by what is live, biggest first" : `${SECS[i][0]} · ${SECS[i][2]}`;
   if (same) return;
-  const old = view, nv = viewFor(i); view = nv;
+  const old = view === viewFor(i) ? null : view, nv = viewFor(i); view = nv;
+  if (!old && view) content.querySelectorAll(".view").forEach((n) => n !== nv && n.remove());
   nv.classList.add("view"); content.append(nv);
-  if (nv === home) { layoutHome(true); enterHome(); }
+  if (nv === home) layoutHome(true);
+  enter(nv);
   const anim = !reduce.matches && !jump && old;
   nv.animate(anim ? [{ opacity: 0, transform: `translateX(${dir * 14}px)` }, { opacity: 1, transform: "none" }] : [{ opacity: 0 }, { opacity: 1 }], { duration: reduce.matches ? 160 : 300, easing: "cubic-bezier(0.22,0.61,0.36,1)", fill: "both" });
   if (old) old.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 140, fill: "forwards" }).finished.then(() => old.remove(), () => old.remove());
 }
-function enterHome() {
-  $$("[data-ring]", home).forEach((r, k) => { ringFromZero(r); setTimeout(() => setRing(r, V.ring[r.dataset.ring]?.() ?? parseFloat(r.dataset.ring)), reduce.matches ? 0 : 40 + k * 35); });
-  $$("[data-num]", home).forEach((n) => { n._v = undefined; });
+function enter(v) {
+  $$("[data-ring]", v).forEach((r, k) => { ringFromZero(r); setTimeout(() => setRing(r, V.ring[r.dataset.ring]?.() ?? parseFloat(r.dataset.ring)), reduce.matches ? 0 : 40 + k * 35); });
+  $$("[data-num]", v).forEach((n) => { n._v = undefined; });
   paint();
 }
 
@@ -893,7 +1186,7 @@ function renderPill() {
 }
 function pillWidth() { return clamp(200 + 2 * Math.max($("#sideL").scrollWidth, $("#sideR").scrollWidth) + 32, 236, 520); }
 
-const GEO = { closed: () => [200, 32, 10], live: () => [pillWidth(), 32, 12], hud: () => [340, 46, 18], open: () => [openW(), 486, 24] };
+const GEO = { closed: () => [200, 32, 10], live: () => [pillWidth(), 32, 12], hud: () => [340, 46, 18], open: () => [openW(), S.mode === "widgets" ? 520 : 486, 24] };
 let dropT = 0;
 function setIsland(state) {
   if (state === "alert") { S.island = liveList().length ? "live" : "closed"; applyIsland(); fireDrop("agent"); return; }
@@ -942,7 +1235,7 @@ function setBatt(v, { fromSlider = false } = {}) {
   $$("[data-b]").forEach((b) => b.removeAttribute("aria-pressed"));
   if (!S.live.charge && S.island !== "open") {
     if (prev > 20 && S.batt <= 20 && S.batt >= 10) fireDrop("b20");
-    else if (prev >= 10 && S.batt < 10) fireDrop("b9");
+    else if (prev >= 10 && S.batt < 10) { if (S.island === "closed") S.island = "live"; fireDrop("b9"); }
   }
   if (S.island === "live") { renderPill(); geoTo(GEO.live()); }
   paint(); layoutHome(); setIndColor();
@@ -965,6 +1258,12 @@ $$("[data-group=mode] button, [data-group=accent] button").forEach((b) => b.addE
   const g = b.parentElement.dataset.group; S[g] = b.dataset.v; $("#app").dataset[g] = b.dataset.v;
   $$("button", b.parentElement).forEach((x) => x.setAttribute("aria-pressed", x === b));
   setIndColor(); placeInd(true);
+  if (g === "mode") {
+    // Widgets carry their own colour, so the accent switch has nothing to do there.
+    $("[data-group=accent]").style.opacity = S.mode === "widgets" ? 0.4 : ""; $("[data-group=accent]").title = S.mode === "widgets" ? "Widgets carry their own colour" : "";
+    if (S.island === "open") geoTo(GEO.open());
+    goSec(S.sec, { force: true, jump: S.island !== "open" });
+  }
 }));
 $$('[data-group=island] button').forEach((b) => b.addEventListener("click", () => {
   if (b.dataset.v === "hud" && S.island === "hud") { S.hud = S.hud === "vol" ? "bri" : "vol"; paintHud(); return; }
