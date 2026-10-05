@@ -94,6 +94,7 @@ export function initAnalytics() {
         page_path: location.pathname,
       });
   });
+  watchScroll();
 }
 
 export function setConsent(v: "granted" | "denied") {
@@ -104,12 +105,44 @@ export function setConsent(v: "granted" | "denied") {
   if (v === "granted") loadClarity();
 }
 
-export const pageView = (path: string) =>
+// GA4's own `scroll` event fires once, at 90%. These quarter marks show where people stop.
+// Pages that fit on one screen report nothing, so the waitlist form is not "100% read".
+const MARKS = [25, 50, 75, 100];
+let reached = new Set<number>();
+function watchScroll() {
+  let queued = false;
+  const check = () => {
+    queued = false;
+    const el = document.documentElement;
+    if (el.scrollHeight < innerHeight * 1.2) return;
+    const pct = ((scrollY + innerHeight) / el.scrollHeight) * 100;
+    for (const m of MARKS)
+      if (pct >= m - 1 && !reached.has(m)) {
+        reached.add(m);
+        track("scroll_depth", { percent: m, page_path: location.pathname });
+      }
+  };
+  addEventListener(
+    "scroll",
+    () => {
+      if (!queued) {
+        queued = true;
+        requestAnimationFrame(check);
+      }
+    },
+    { passive: true },
+  );
+}
+
+export const pageView = (path: string) => {
+  reached = new Set();
   window.gtag?.("event", "page_view", {
     page_path: path,
     page_title: document.title,
     page_location: location.href,
   });
+};
+
 export function track(name: string, params?: Record<string, unknown>) {
   window.gtag?.("event", name, params);
   (window as unknown as { clarity?: ClarityFn }).clarity?.("event", name);
