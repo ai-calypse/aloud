@@ -15,6 +15,7 @@ use aloud_islands::Island;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+pub mod events;
 pub mod focus_mode;
 pub mod power;
 pub mod privacy;
