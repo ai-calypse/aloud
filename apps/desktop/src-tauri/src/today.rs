@@ -192,11 +192,18 @@ pub async fn calendar_events(app: AppHandle, refresh: bool) -> Result<Vec<Event>
 #[tauri::command]
 #[specta::specta]
 pub async fn reminders_due() -> Result<Vec<Reminder>, AgendaError> {
-    tauri::async_runtime::spawn_blocking(|| aloud_agenda::reminders(aloud_agenda::day_start(1)))
-        .await
-        .map_err(|e| AgendaError::Failed {
-            message: e.to_string(),
-        })?
+    let read = tauri::async_runtime::spawn_blocking(|| {
+        aloud_agenda::reminders(aloud_agenda::day_start(1))
+    })
+    .await
+    .map_err(|e| AgendaError::Failed {
+        message: e.to_string(),
+    })?;
+    if read.is_ok() {
+        // The user has seen Reminders answer, so the nudge tick may ask too.
+        crate::nudges::REMINDERS_ALLOWED.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    read
 }
 
 /// Ticks a reminder off. The only thing in Today that writes to the account.
@@ -229,6 +236,7 @@ pub fn open_meeting_link(app: AppHandle, url: String) -> Result<(), String> {
 pub fn init(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        let mut ticks = 0u32;
         loop {
             let due = agenda().as_ref().is_none_or(|a| {
                 a.day != aloud_agenda::day_start(0) || a.at.elapsed() >= CALENDAR_TTL
@@ -246,6 +254,15 @@ pub fn init(app: &AppHandle) {
                 }
             }
             sync_island(&app);
+            let events = agenda()
+                .as_ref()
+                .map(|a| a.events.clone())
+                .unwrap_or_default();
+            crate::nudges::calendar_tick(&app, &events, now_ms());
+            ticks += 1;
+            if ticks % 2 == 0 {
+                crate::nudges::reminders_tick(&app, now_ms()).await;
+            }
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
     });

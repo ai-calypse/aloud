@@ -10,7 +10,7 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
-use aloud_notify::{watch, State};
+use aloud_notify::{watch, MirrorState};
 
 fn main() {
     let seconds: u64 = std::env::args()
@@ -22,7 +22,7 @@ fn main() {
     let _watch = watch(
         move |state| {
             let _ = states.send(format!("state: {state}"));
-            if !matches!(state, State::Watching) {
+            if !matches!(state, MirrorState::Watching) {
                 let _ = states.send(String::new());
             }
         },

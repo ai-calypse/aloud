@@ -60,6 +60,7 @@ dependencies = [
  "aloud-meeting",
  "aloud-native",
  "aloud-notes",
+ "aloud-notify",
  "aloud-paste",
  "aloud-permissions",
  "aloud-quota",

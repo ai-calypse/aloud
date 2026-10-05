@@ -15,6 +15,7 @@ mod mac;
 // notch-mac: wiring ends
 mod meeting;
 mod notch;
+mod nudges;
 mod overlay;
 mod pipeline;
 mod quota;
@@ -155,6 +156,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::close_browse,
             islands::islands,
             islands::dismiss_island,
+            nudges::nudge_state,
+            nudges::nudge_recheck,
+            nudges::nudge_open_access_settings,
+            nudges::nudge_open,
             // notch-today-focus: commands begin
             focus::focus_state,
             focus::focus_start,
@@ -284,6 +289,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::NotchOpen,
             islands::IslandChanged,
             islands::IslandsWaiting,
+            nudges::NudgeStateChanged,
             shelf::ShelfChanged,
             // notch-today-focus: events begin
             focus::FocusSnapshot,
@@ -411,6 +417,11 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             // notch-today-focus: setup begin
             focus::init(app.handle());
             today::init(app.handle());
+            let state = app.state::<AppState>();
+            let events = state.settings.lock().ok().map(|s| s.notch_events.clone());
+            if let Some(events) = events {
+                nudges::apply(app.handle(), &events);
+            }
             // notch-today-focus: setup end
 
             tray::init(app)?;

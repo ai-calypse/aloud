@@ -13,7 +13,7 @@
 //! never written.
 //!
 //! ponytail: the schema is Apple's and undocumented. It is checked on open and
-//! anything unrecognised is [`State::Unsupported`] rather than a guess; a macOS
+//! anything unrecognised is [`MirrorState::Unsupported`] rather than a guess; a macOS
 //! that renames a column ends the mirror, never the app. The upgrade path, if
 //! that ever matters, is a signed helper with the user-notifications
 //! entitlement — which Apple grants to no third party for other apps' alerts.
@@ -24,9 +24,7 @@ use std::fmt;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
-use aloud_islands::{
-    Island, IslandAction, IslandKind, IslandPriority, IslandSource, IslandTier,
-};
+use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority, IslandSource, IslandTier};
 use serde::{Deserialize, Serialize};
 
 pub use db::Notification;
@@ -34,7 +32,7 @@ pub use db::Notification;
 /// Where the watcher stands, for Settings to say in words.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-pub enum State {
+pub enum MirrorState {
     /// Off, or not started yet.
     Off,
     Watching,
@@ -42,17 +40,10 @@ pub enum State {
     /// Disk Access is the one fix.
     NeedsAccess,
     /// Readable but not what this build knows how to read.
-    Unsupported { detail: String },
+    Unsupported {
+        detail: String,
+    },
 }
-
-/// The apps mirrored once the user turns the mirror on, until they choose.
-pub const DEFAULT_ALLOW: [&str; 5] = [
-    "com.apple.MobileSMS",
-    "com.apple.mail",
-    "com.apple.FaceTime",
-    "com.tinyspeck.slackmacgap",
-    "com.apple.iCal",
-];
 
 /// How a notification is drawn, by who sent it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +78,9 @@ pub fn kind(bundle: &str, n: &Notification) -> Kind {
         // A FaceTime banner is a ring until it says otherwise. The words are
         // English-only, so another language's "missed" stays a card until
         // dismissed; the × is always there.
-        "com.apple.FaceTime" | "com.apple.TelephonyUtilities" if !n.mentions("missed") => Kind::Call,
+        "com.apple.FaceTime" | "com.apple.TelephonyUtilities" if !n.mentions("missed") => {
+            Kind::Call
+        }
         "com.apple.MobileSMS" | "com.tinyspeck.slackmacgap" => Kind::Message,
         "com.apple.sharingd" => Kind::AirDrop,
         _ => Kind::Generic,
@@ -114,7 +107,11 @@ pub fn island(n: &Notification, app_name: &str, icon: Option<String>) -> Island 
                 .join(" · "),
         ),
     };
-    let title = if n.title.is_empty() { app_name } else { &n.title };
+    let title = if n.title.is_empty() {
+        app_name
+    } else {
+        &n.title
+    };
     let (tier, priority) = match kind {
         Kind::Call => (IslandTier::Card, IslandPriority::Urgent),
         Kind::AirDrop => (IslandTier::Peek, IslandPriority::High),
@@ -169,7 +166,7 @@ pub struct Watch {
 /// log, then the thread ends — no retry loop); `on_new` gets each new
 /// notification, newest last.
 pub fn watch(
-    on_state: impl Fn(&State) + Send + 'static,
+    on_state: impl Fn(&MirrorState) + Send + 'static,
     on_new: impl Fn(Notification) + Send + 'static,
 ) -> Watch {
     let (stop, stopped) = mpsc::channel();
@@ -182,7 +179,11 @@ pub fn watch(
     Watch { _stop: stop }
 }
 
-fn run(stopped: &mpsc::Receiver<()>, on_state: &dyn Fn(&State), on_new: &dyn Fn(Notification)) {
+fn run(
+    stopped: &mpsc::Receiver<()>,
+    on_state: &dyn Fn(&MirrorState),
+    on_new: &dyn Fn(Notification),
+) {
     let mut reader = match db::Reader::open() {
         Ok(reader) => reader,
         Err(state) => {
@@ -192,7 +193,7 @@ fn run(stopped: &mpsc::Receiver<()>, on_state: &dyn Fn(&State), on_new: &dyn Fn(
         }
     };
     tracing::info!("notification mirror watching");
-    on_state(&State::Watching);
+    on_state(&MirrorState::Watching);
     let mut failures = 0;
     loop {
         // The wait is also the stop signal: the sender dropping ends it.
@@ -220,13 +221,13 @@ fn run(stopped: &mpsc::Receiver<()>, on_state: &dyn Fn(&State), on_new: &dyn Fn(
     }
 }
 
-impl fmt::Display for State {
+impl fmt::Display for MirrorState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            State::Off => f.write_str("off"),
-            State::Watching => f.write_str("watching"),
-            State::NeedsAccess => f.write_str("needs Full Disk Access"),
-            State::Unsupported { detail } => write!(f, "unsupported: {detail}"),
+            MirrorState::Off => f.write_str("off"),
+            MirrorState::Watching => f.write_str("watching"),
+            MirrorState::NeedsAccess => f.write_str("needs Full Disk Access"),
+            MirrorState::Unsupported { detail } => write!(f, "unsupported: {detail}"),
         }
     }
 }
@@ -247,17 +248,29 @@ mod tests {
 
     #[test]
     fn a_ringing_facetime_banner_is_an_urgent_card_with_only_an_honest_button() {
-        let island = island(&note("com.apple.FaceTime", "Maya Chen", "", "FaceTime Video"), "FaceTime", None);
+        let island = island(
+            &note("com.apple.FaceTime", "Maya Chen", "", "FaceTime Video"),
+            "FaceTime",
+            None,
+        );
         assert_eq!(island.tier, Some(IslandTier::Card));
         assert_eq!(island.priority, IslandPriority::Urgent);
         assert_eq!(island.id, "nudge:com.apple.FaceTime:7");
         let labels: Vec<_> = island.actions.iter().map(|a| a.label.as_str()).collect();
-        assert_eq!(labels, ["Open"], "no Accept or Decline: Aloud cannot answer");
+        assert_eq!(
+            labels,
+            ["Open"],
+            "no Accept or Decline: Aloud cannot answer"
+        );
     }
 
     #[test]
     fn a_missed_call_is_news_not_a_sticky_card() {
-        let island = island(&note("com.apple.FaceTime", "Maya Chen", "", "Missed call"), "FaceTime", None);
+        let island = island(
+            &note("com.apple.FaceTime", "Maya Chen", "", "Missed call"),
+            "FaceTime",
+            None,
+        );
         assert_eq!(island.tier, Some(IslandTier::Peek));
         assert_eq!(island.priority, IslandPriority::Normal);
     }
@@ -265,7 +278,12 @@ mod tests {
     #[test]
     fn slack_hangs_the_channel_on_the_app_name_and_the_message_is_the_line() {
         let island = island(
-            &note("com.tinyspeck.slackmacgap", "Priya", "#design", "Mockups are in the doc"),
+            &note(
+                "com.tinyspeck.slackmacgap",
+                "Priya",
+                "#design",
+                "Mockups are in the doc",
+            ),
             "Slack",
             None,
         );
@@ -275,16 +293,36 @@ mod tests {
 
     #[test]
     fn mail_keeps_the_subject_and_the_preview_on_one_line() {
-        let island = island(&note("com.apple.mail", "Linear", "Weekly digest", "12 issues closed"), "Mail", None);
+        let island = island(
+            &note(
+                "com.apple.mail",
+                "Linear",
+                "Weekly digest",
+                "12 issues closed",
+            ),
+            "Mail",
+            None,
+        );
         assert_eq!(island.title, "Linear");
-        assert_eq!(island.body.as_deref(), Some("Weekly digest · 12 issues closed"));
+        assert_eq!(
+            island.body.as_deref(),
+            Some("Weekly digest · 12 issues closed")
+        );
     }
 
     #[test]
     fn airdrop_outranks_a_message_and_a_long_body_is_cut() {
-        let airdrop = island(&note("com.apple.sharingd", "Maya", "", "IMG_2041.heic"), "AirDrop", None);
+        let airdrop = island(
+            &note("com.apple.sharingd", "Maya", "", "IMG_2041.heic"),
+            "AirDrop",
+            None,
+        );
         assert_eq!(airdrop.priority, IslandPriority::High);
-        let long = island(&note("com.apple.mail", "A", "", &"x".repeat(1000)), "Mail", None);
+        let long = island(
+            &note("com.apple.mail", "A", "", &"x".repeat(1000)),
+            "Mail",
+            None,
+        );
         assert!(long.body.unwrap().chars().count() <= 241);
     }
 
@@ -292,7 +330,10 @@ mod tests {
     fn a_notification_never_prints_its_text() {
         let n = note("com.apple.MobileSMS", "Maya", "", "my password is hunter2");
         let shown = format!("{n:?}");
-        assert!(!shown.contains("hunter2") && !shown.contains("Maya"), "{shown}");
+        assert!(
+            !shown.contains("hunter2") && !shown.contains("Maya"),
+            "{shown}"
+        );
         assert!(shown.contains("com.apple.MobileSMS"));
     }
 }

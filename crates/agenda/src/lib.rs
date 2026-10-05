@@ -375,6 +375,100 @@ pub fn day_start(days: i64) -> i64 {
     day.and_hms_opt(0, 0, 0).and_then(ms).unwrap_or(0)
 }
 
+// ---- nudges: an event about to start, a reminder that has come due ----------
+
+/// How far ahead of an event the notch speaks up.
+const SOON_MS: i64 = 10 * 60_000;
+/// How long past its time a reminder still counts as "due now" rather than
+/// overdue: a reminder read late (the Mac was asleep) is not news an hour on.
+const DUE_FOR_MS: i64 = 15 * 60_000;
+
+/// Timed events that start within ten minutes and have not started. Whether
+/// one was already announced is the caller's, by [`soon_island`]'s id.
+pub fn soon(events: &[Event], now: i64) -> Vec<&Event> {
+    events
+        .iter()
+        .filter(|e| !e.all_day && e.start > now && e.start - now <= SOON_MS)
+        .collect()
+}
+
+/// "Standup in 10 minutes", "10:30 · Zoom": a High peek, with Join when the
+/// event has a call link. One id per occurrence, so the notch hears it once.
+pub fn soon_island(event: &Event, now: i64) -> Island {
+    let mins = ((event.start - now + 59_999) / 60_000).max(1);
+    let time = DateTime::from_timestamp_millis(event.start)
+        .map(|t| t.with_timezone(&Local).format("%-I:%M %p").to_string())
+        .unwrap_or_default();
+    // A location that is only the call link would repeat the Join button.
+    let place = event
+        .location
+        .as_deref()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.contains("://"));
+    let body = [Some(time.as_str()).filter(|t| !t.is_empty()), place]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+    Island {
+        id: format!("cal:soon:{}", event.id),
+        kind: IslandKind::Alert,
+        priority: IslandPriority::High,
+        icon: Some("calendar".into()),
+        title: format!(
+            "{} in {mins} minute{}",
+            event.title,
+            if mins == 1 { "" } else { "s" }
+        ),
+        detail: Some("Calendar".into()),
+        body: Some(body).filter(|b| !b.is_empty()),
+        short: Some(format!("{mins} min")),
+        actions: event
+            .join_url
+            .iter()
+            .map(|url| IslandAction::new("Join", "calendar.join").arg("url", url))
+            .collect(),
+        tier: Some(aloud_islands::IslandTier::Peek),
+        source: aloud_islands::IslandSource::Banners,
+        ..Island::default()
+    }
+}
+
+/// Reminders with a time that has just passed. All-day ones have no moment to
+/// come due at.
+pub fn due(reminders: &[Reminder], now: i64) -> Vec<&Reminder> {
+    reminders
+        .iter()
+        .filter(|r| !r.all_day && r.due <= now && now - r.due <= DUE_FOR_MS)
+        .collect()
+}
+
+/// A Normal peek: the reminder's words and the list it is in.
+pub fn due_island(reminder: &Reminder) -> Island {
+    let time = DateTime::from_timestamp_millis(reminder.due)
+        .map(|t| t.with_timezone(&Local).format("%-I:%M %p").to_string())
+        .unwrap_or_default();
+    let body = if reminder.list.is_empty() {
+        format!("Due {time}")
+    } else {
+        format!("Due {time} · {}", reminder.list)
+    };
+    Island {
+        id: format!("rem:due:{}", reminder.id),
+        kind: IslandKind::Alert,
+        priority: IslandPriority::Normal,
+        icon: Some("calendar".into()),
+        title: reminder.title.clone(),
+        detail: Some("Reminders".into()),
+        body: Some(body),
+        short: Some("Reminder".into()),
+        actions: vec![IslandAction::new("Open", "nudge.open").arg("bundle", "com.apple.reminders")],
+        tier: Some(aloud_islands::IslandTier::Peek),
+        source: aloud_islands::IslandSource::Banners,
+        ..Island::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,5 +689,70 @@ mod tests {
     fn completing_refuses_anything_that_is_not_a_reminder_id() {
         assert!(complete_reminder("'; do shell script").is_err());
         assert!(complete_reminder("").is_err());
+    }
+
+    fn timed(id: &str, start: &str, all_day: bool) -> Event {
+        Event {
+            id: id.into(),
+            title: id.into(),
+            start: at(start),
+            end: at(start) + 3_600_000,
+            all_day,
+            location: None,
+            join_url: None,
+            calendar: "Work".into(),
+        }
+    }
+
+    #[test]
+    fn an_event_is_soon_only_inside_the_ten_minutes_before_it_starts() {
+        let now = at("2026-10-04 10:20");
+        let events = [
+            timed("in5", "2026-10-04 10:25", false),
+            timed("in10", "2026-10-04 10:30", false),
+            timed("in11", "2026-10-04 10:31", false),
+            timed("started", "2026-10-04 10:15", false),
+            timed("allday", "2026-10-04 10:25", true),
+        ];
+        let ids: Vec<_> = soon(&events, now).iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, ["in5", "in10"]);
+    }
+
+    #[test]
+    fn the_soon_peek_has_a_stable_id_and_join_only_with_a_call_link() {
+        let now = at("2026-10-04 10:20");
+        let mut e = timed("standup", "2026-10-04 10:30", false);
+        assert!(soon_island(&e, now).actions.is_empty());
+        e.join_url = Some("https://zoom.us/j/1".into());
+        e.location = Some("https://zoom.us/j/1".into());
+        let island = soon_island(&e, now);
+        assert_eq!(island.id, "cal:soon:standup");
+        assert_eq!(island.title, "standup in 10 minutes");
+        assert_eq!(island.actions[0].label, "Join");
+        assert!(
+            !island.body.unwrap().contains("zoom"),
+            "the link is the button, not the line"
+        );
+    }
+
+    #[test]
+    fn a_reminder_is_due_for_fifteen_minutes_not_all_day_and_not_all_week() {
+        let now = at("2026-10-04 15:05");
+        let r = |id: &str, due: &str, all_day| Reminder {
+            id: id.into(),
+            title: id.into(),
+            due: at(due),
+            all_day,
+            list: "Personal".into(),
+        };
+        let reminders = [
+            r("just", "2026-10-04 15:00", false),
+            r("stale", "2026-10-04 14:00", false),
+            r("later", "2026-10-04 16:00", false),
+            r("day", "2026-10-04 00:00", true),
+        ];
+        let ids: Vec<_> = due(&reminders, now).iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, ["just"]);
+        assert_eq!(due_island(&reminders[0]).id, "rem:due:just");
     }
 }

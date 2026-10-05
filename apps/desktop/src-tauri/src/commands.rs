@@ -40,6 +40,7 @@ pub fn update_settings(
 
     crate::tray::set_visible(&app, settings.show_menu_bar_icon);
     crate::keys::apply_settings(&settings.notch_events);
+    crate::nudges::apply(&app, &settings.notch_events);
 
     let mut current = state
         .settings
