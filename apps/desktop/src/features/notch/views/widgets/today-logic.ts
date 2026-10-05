@@ -1,4 +1,4 @@
-import type { Event as CalendarEvent, Reminder } from "@/lib/bindings";
+import type { Event as CalendarEvent, Reminder, SeriesPoint } from "@/lib/bindings";
 import type { EventTone } from "@/components/notch/widgets";
 import { nextEvent, overdue } from "@/lib/today";
 
@@ -222,4 +222,52 @@ export function weekRange(days: { high: number | null; low: number | null }[]): 
 export function moveOf(changePct: number | null): "up" | "down" | "flat" | null {
   if (changePct === null) return null;
   return changePct > 0.05 ? "up" : changePct < -0.05 ? "down" : "flat";
+}
+
+export type DayChart = {
+  /** The line, as an SVG path. */
+  line: string;
+  /** Yesterday's close as a height in the box, or null when the feed gave none. */
+  baseline: number | null;
+  /** The last bar: where the line ends and the dot goes. */
+  end: [number, number];
+  /** Which side of yesterday's close the day ended on. */
+  move: "up" | "down" | "flat";
+};
+
+/**
+ * A day's line in a `width` x `height` box. The y range always includes
+ * yesterday's close, so the baseline is on the chart and the line's distance
+ * from it is true to scale (a flat day hugs it, a big day crosses the box).
+ * `x` is the backend's fraction of the session, so a day still in progress
+ * stops short of the right edge instead of stretching to fill it.
+ *
+ * Null when there is no line to draw: a point is a dot, and Rust's NaN
+ * arrives as null, which is dropped rather than drawn as zero.
+ */
+export function dayChart(
+  series: SeriesPoint[],
+  previousClose: number | null,
+  width: number,
+  height: number,
+  pad = 3,
+): DayChart | null {
+  const pts = series.filter(
+    (p): p is { x: number; y: number } => Number.isFinite(p.x) && Number.isFinite(p.y),
+  );
+  if (pts.length < 2) return null;
+  const base = previousClose !== null && Number.isFinite(previousClose) ? previousClose : null;
+  const ys = base === null ? pts.map((p) => p.y) : [...pts.map((p) => p.y), base];
+  const min = Math.min(...ys);
+  const span = Math.max(...ys) - min;
+  const x = (v: number) => pad + Math.min(1, Math.max(0, v)) * (width - 2 * pad);
+  const y = (v: number) => (span === 0 ? height / 2 : height - pad - ((v - min) / span) * (height - 2 * pad));
+  const last = pts[pts.length - 1];
+  const ref = base ?? pts[0].y;
+  return {
+    line: pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.x).toFixed(1)} ${y(p.y).toFixed(1)}`).join(" "),
+    baseline: base === null ? null : y(base),
+    end: [x(last.x), y(last.y)],
+    move: moveOf(ref === 0 ? null : ((last.y - ref) / ref) * 100) ?? "flat",
+  };
 }

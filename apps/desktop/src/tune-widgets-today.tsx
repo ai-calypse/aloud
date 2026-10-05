@@ -3,6 +3,7 @@ import type { AgendaError, Event as CalendarEvent, Reminder, Ticker, Weather } f
 import { CalendarBoard } from "./features/notch/views/widgets/Calendar";
 import { RemindersBoard } from "./features/notch/views/widgets/Reminders";
 import { StocksBoard } from "./features/notch/views/widgets/Stocks";
+import { sessionFixture } from "./lib/session-fixture";
 import { WeatherBoard } from "./features/notch/views/widgets/Weather";
 
 /**
@@ -77,11 +78,22 @@ const WEATHER: Weather = {
   ],
 };
 
+const SKY_FIXTURES: Pick<Weather, "sky" | "summary" | "isDay">[] = [
+  { sky: "clear", summary: "Clear", isDay: false },
+  { sky: "cloudy", summary: "Overcast", isDay: true },
+  { sky: "rain", summary: "Rain", isDay: true },
+  { sky: "rain", summary: "Rain", isDay: false },
+  { sky: "storm", summary: "Thunderstorm", isDay: true },
+  { sky: "snow", summary: "Snow", isDay: true },
+  { sky: "fog", summary: "Fog", isDay: true },
+];
+
 const TICKERS: Ticker[] = [
-  { symbol: "AAPL", name: "Apple Inc.", price: 232.14, changePct: 0.85, state: "open", delayed: false, error: null, currency: "USD" },
-  { symbol: "^GSPC", name: "S&P 500", price: 5712.69, changePct: -1.2, state: "closed", delayed: false, error: null, currency: "USD" },
-  { symbol: "BTC-USD", name: "Bitcoin USD", price: 85809.2, changePct: 0.02, state: "open", delayed: true, error: null, currency: "USD" },
-  { symbol: "NOPE", name: "", price: null, changePct: null, state: null, delayed: false, error: "No quote for this symbol", currency: null },
+  { symbol: "AAPL", name: "Apple Inc.", price: 232.14, changePct: 0.85, state: "open", delayed: false, error: null, currency: "USD", previousClose: 230.18, series: sessionFixture(3, 229.4, 232.14, 0.62) },
+  { symbol: "^GSPC", name: "S&P 500", price: 5712.69, changePct: -1.2, state: "closed", delayed: false, error: null, currency: "USD", previousClose: 5782.1, series: sessionFixture(11, 5790, 5712.69) },
+  { symbol: "BTC-USD", name: "Bitcoin USD", price: 85809.2, changePct: 0.02, state: "open", delayed: true, error: null, currency: "USD", previousClose: 85792, series: sessionFixture(5, 85500, 85809.2, 0.5) },
+  { symbol: "TSLA", name: "Tesla, Inc.", price: 251.3, changePct: -0.4, state: "closed", delayed: false, error: null, currency: "USD", previousClose: 252.3, series: [] },
+  { symbol: "NOPE", name: "", price: null, changePct: null, state: null, delayed: false, error: "No quote for this symbol", currency: null, previousClose: null, series: [] },
 ];
 
 const NOT_PERMITTED: AgendaError = { kind: "notPermitted", app: "Calendar" };
@@ -128,13 +140,20 @@ export function TodayWidgetGallery() {
       <Block name="Today · Weather" note="fixtures: five days, partly cloudy">
         <WeatherBoard data={WEATHER} error={null} loading={false} onRefresh={noop} onCity={async () => {}} onLocate={noop} />
       </Block>
+      <Block name="Today · Weather, skies" note="night, overcast, rain, a rainy night, storm, snow and fog: the card follows the condition and the light">
+        <div className="grid gap-6">
+          {SKY_FIXTURES.map((sky) => (
+            <WeatherBoard key={sky.summary + sky.isDay} data={{ ...WEATHER, ...sky }} error={null} loading={false} onRefresh={noop} onCity={async () => {}} onLocate={noop} />
+          ))}
+        </div>
+      </Block>
       <Block name="Today · Weather, states" note="no data yet, and a refresh that failed over stale data">
         <div className="grid gap-6">
           <WeatherBoard data={null} error="Weather needs the Aloud app." loading={false} onRefresh={noop} onCity={async () => {}} onLocate={noop} />
           <WeatherBoard data={{ ...WEATHER, sky: "clear", summary: "Clear", isDay: false }} error="Could not reach Open-Meteo" loading={false} onRefresh={noop} onCity={async () => {}} onLocate={noop} />
         </div>
       </Block>
-      <Block name="Today · Stocks" note="fixtures: up, down, a delayed pair and a symbol with no quote">
+      <Block name="Today · Stocks" note="fixtures: up mid-session, down on a closed day, a delayed pair, a quote with no chart and a symbol with no quote">
         <StocksBoard tickers={TICKERS} error={null} onAdd={async () => {}} onRemove={noop} />
       </Block>
       <Block name="Today · Stocks, states" note="nothing followed, and a refused symbol">
