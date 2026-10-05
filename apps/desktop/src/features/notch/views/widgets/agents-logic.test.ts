@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentSession } from "@/lib/bindings";
 import type { Run, Step } from "@/lib/agent-steps";
-import { runSummary, sessionLabel, sessionState, stepRole, usageWarning } from "./agents-logic";
+import { plainSummary, runSummary, savedDuration, savedShare, sessionLabel, sessionState, stepRole, usageWarning } from "./agents-logic";
 
 const session = (over: Partial<AgentSession> = {}) =>
   ({ id: "a", agent: "claude", title: "", prompt: null, cwd: null, tool: null, busy: false, ...over }) as AgentSession;
@@ -73,5 +73,57 @@ describe("stepRole", () => {
     expect(stepRole(step(), true)).toBe("orange");
     expect(stepRole(step({ confirmed: false, result: { success: false } as Step["result"] }), false)).toBeUndefined();
     expect(stepRole(step({ result: { success: true } as Step["result"] }), false)).toBeUndefined();
+  });
+});
+
+describe("savedDuration", () => {
+  it("says whole minutes, and hours bare when exact", () => {
+    expect(savedDuration(8_040)).toBe("2 h 14 m");
+    expect(savedDuration(7_200)).toBe("2 h");
+    expect(savedDuration(2_160)).toBe("36 m");
+    expect(savedDuration(10)).toBe("<1 m");
+    expect(savedDuration(0)).toBe("0 m");
+  });
+
+  /** Guards: a NaN from Rust (specta exports f64 as `number | null`) printing "NaN m". */
+  it("reads a missing or non-finite total as nothing", () => {
+    expect(savedDuration(null)).toBe("0 m");
+    expect(savedDuration(Number.NaN)).toBe("0 m");
+  });
+
+  it("draws an empty total as no share rather than dividing by it", () => {
+    expect(savedShare(0, 0)).toBe(0);
+    expect(savedShare(null, null)).toBe(0);
+    expect(savedShare(36, 144)).toBe(0.25);
+  });
+});
+
+describe("plainSummary", () => {
+  const reply = [
+    "## What was wrong",
+    "",
+    "The README embeds `docs/demo.gif`, a **9.4 MB** capture. See [the issue](https://x.test/1).",
+    "",
+    "- Re-recorded the flow",
+    "```sh",
+    "ffmpeg -i in out",
+    "```",
+  ].join("\n");
+
+  /** Guards: the activity tile printing a reply's markdown source, or a fenced command, as its summary. */
+  it("keeps the prose and drops headings, fences and markup", () => {
+    expect(plainSummary(reply, 400)).toBe(
+      "The README embeds docs/demo.gif, a 9.4 MB capture. See the issue. Re-recorded the flow",
+    );
+  });
+
+  it("cuts on a word and says it was cut", () => {
+    const out = plainSummary("alpha beta gamma delta epsilon zeta", 20);
+    expect(out).toBe("alpha beta gamma…");
+    expect(plainSummary("short.", 20)).toBe("short.");
+  });
+
+  it("is empty for a reply that is only headings and code", () => {
+    expect(plainSummary("# Title\n```\ncode\n```")).toBe("");
   });
 });

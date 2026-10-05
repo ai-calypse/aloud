@@ -14,7 +14,7 @@ import { clock, timerTitle, timerValueMs } from "@/lib/focus";
 import { truncate } from "@/lib/format";
 import { degrees } from "@/lib/today";
 import { describeBinding } from "@/features/settings/binding-label";
-import { shownWindows, percent } from "@/features/overlay/QuotaDashboard";
+import { shownWindows, percent } from "@/features/overlay/usage-logic";
 import { formatTime } from "../media";
 import { runSummary, sessionState, usageWarning } from "./widgets/agents-logic";
 import { agentsWidget, calendarWidget, timerWidget } from "./widget-home";
@@ -287,7 +287,7 @@ export function calmUsage(
 ): { percent: number; word: string | null; state: CalmState | undefined } | null {
   const windows = shownWindows(quota);
   if (windows.length === 0) return null;
-  const pct = Math.round(Math.max(...windows.map(([, w]) => percent(w))));
+  const pct = Math.round(Math.max(...windows.map((w) => percent(w.window))));
   const word = usageWarning(pct);
   return { percent: pct, word, state: pct >= 90 ? "alert" : pct >= 70 ? "caution" : undefined };
 }

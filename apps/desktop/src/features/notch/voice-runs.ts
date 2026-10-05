@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { commands, type Entry } from "@/lib/bindings";
+import { commands, type Entry, type TimeSavedView } from "@/lib/bindings";
 import type { Run } from "@/lib/agent-steps";
 import { timeAgo, truncate } from "@/lib/format";
 import { or } from "@/lib/result";
@@ -131,4 +131,21 @@ export function voiceStats(entries: Entry[], now = Date.now()): { today: number;
     today: entries.filter((e) => e.createdAt >= since).length,
     failed: entries.filter((e) => e.kind === "command" && !e.success).length,
   };
+}
+
+/**
+ * Time saved by dictating and by commands, read when the view mounts and again
+ * whenever the list of runs changes (a new run is a new row to count).
+ */
+export function useTimeSaved(runs: unknown): TimeSavedView | null {
+  const [saved, setSaved] = useState<TimeSavedView | null>(null);
+  useEffect(() => {
+    // `invoke` throws synchronously in the browser preview with no Tauri.
+    try {
+      void or(commands.getTimeSaved(), null, "reading time saved").then(setSaved);
+    } catch {
+      /* browser preview */
+    }
+  }, [runs]);
+  return saved;
 }

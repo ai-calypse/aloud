@@ -17,10 +17,11 @@ import {
   type AgentTranscript,
   type ApprovalReply,
   type Entry,
+  type TimeSavedView,
 } from "@/lib/bindings";
 import { groupSteps, pendingStep, stepStatus, withDecision, type Run, type Step } from "@/lib/agent-steps";
 import { agentHue, agentStage, stageSeed, type AgentStage } from "@/lib/agent-stage";
-import { formatCost, tokenSummary } from "@/lib/format";
+import { abbreviateCount, formatCost, tokenSummary } from "@/lib/format";
 import { labelFor, rowLabel, text } from "@/lib/tool-views";
 import { cn } from "@/lib/utils";
 import { MessageResponse } from "@/components/ai-elements/message";
@@ -38,9 +39,12 @@ import { AskGate, ConfirmGate, FinderGrid, ShowButton, UndoButton } from "@/feat
 import { AGENT_NAME, AgentAvatar, rowName, rowTag, type PeekFn } from "@/features/overlay/agentIdentity";
 import { PermissionCard, baseName } from "@/features/overlay/PermissionCards";
 import { useNotch } from "../../context";
-import { justFinished, liveRun, voiceRow, voiceStats, type VoiceRow } from "../../voice-runs";
+import { justFinished, liveRun, useTimeSaved, voiceRow, voiceStats, type VoiceRow } from "../../voice-runs";
 import {
+  plainSummary,
   runSummary,
+  savedDuration,
+  savedShare,
   sessionLabel,
   sessionState,
   stepRole,
@@ -63,10 +67,12 @@ const wordClass = (role: WidgetRole | undefined) => (role ? "text-widget-acc-ink
  */
 export function WidgetVoice() {
   const { agent, setAgent, runs, removeRun, bodyRef } = useNotch();
+  const saved = useTimeSaved(runs);
   return (
     <VoiceBoards
       run={agent}
       runs={runs}
+      saved={saved}
       bodyRef={bodyRef}
       onDecide={(confirmed) =>
         setAgent((r) => r && { ...r, steps: withDecision(r.steps, confirmed) })
@@ -83,9 +89,12 @@ export function VoiceBoards({
   onDecide,
   onDelete,
   now,
+  saved,
 }: {
   run: Run | null;
   runs: Entry[];
+  /** Time saved, today and all time; the tile is left out until it has been read. */
+  saved?: TimeSavedView | null;
   bodyRef: RefObject<HTMLDivElement | null>;
   onDecide: (confirmed: boolean) => void;
   onDelete: (id: number) => void;
@@ -150,9 +159,69 @@ export function VoiceBoards({
               </div>
             </div>
           </WidgetFrame>
+          {saved && <TimeSavedTile saved={saved} />}
         </WidgetBoard>
       )}
     </>
+  );
+}
+
+/**
+ * What Aloud has given back: dictating instead of typing, and commands instead
+ * of doing the task by hand, as one total with its two parts. Both are
+ * estimates (`aloud_store::stats` states the typing speed and the minutes an
+ * action is assumed to save), so the tile says "about".
+ */
+function TimeSavedTile({ saved }: { saved: TimeSavedView }) {
+  const { allTime, today } = saved;
+  return (
+    <WidgetFrame size="medium" label="Time saved" accent="blue">
+      <div className="flex h-full flex-col justify-between p-3.5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <Numeral text={savedDuration(allTime.totalSeconds)} size="s" className="text-widget-acc-ink" />
+            <div className="mt-1 text-notch-w-title font-medium text-widget-ink-2">saved in all, about</div>
+          </div>
+          <div className="text-right">
+            <div className="text-notch-w-headline leading-tight font-semibold tabular-nums">
+              {savedDuration(today.totalSeconds)}
+            </div>
+            <div className="text-notch-w-meta font-medium text-widget-ink-2">today</div>
+          </div>
+        </div>
+        <div>
+          <div
+            role="img"
+            aria-label={`${savedDuration(allTime.dictationSeconds)} from dictating, ${savedDuration(allTime.actionSeconds)} from actions`}
+            className="mb-2 flex h-1.5 w-full gap-0.5 overflow-hidden rounded-full"
+          >
+            {(
+              [
+                ["blue", allTime.dictationSeconds],
+                ["agent", allTime.actionSeconds],
+              ] as const
+            ).map(([role, part]) => (
+              <span
+                key={role}
+                data-w-role={role}
+                className="rounded-full bg-widget-acc"
+                style={{ flexGrow: savedShare(part, allTime.totalSeconds), display: part ? undefined : "none" }}
+              />
+            ))}
+          </div>
+          <div className="flex justify-between gap-3 text-notch-w-meta font-medium">
+            <span className="flex items-center gap-1.5">
+              <MicIcon data-w-role="blue" aria-hidden className="size-3.5 text-widget-acc-ink" strokeWidth={2} />
+              {savedDuration(allTime.dictationSeconds)} dictating
+            </span>
+            <span className="flex items-center gap-1.5">
+              <BotIcon data-w-role="agent" aria-hidden className="size-3.5 text-widget-acc-ink" strokeWidth={2} />
+              {savedDuration(allTime.actionSeconds)} · {allTime.actions} {allTime.actions === 1 ? "action" : "actions"}
+            </span>
+          </div>
+        </div>
+      </div>
+    </WidgetFrame>
   );
 }
 
@@ -558,15 +627,17 @@ export function CodingDetail({
   const live = useTranscript(session.id, transcript === undefined);
   const data = transcript === undefined ? live.transcript : transcript;
   const error = transcript === undefined ? live.transcriptError : (transcriptError ?? null);
+  // Two figures a glance can use; the full breakdown (with cache reads) is the tooltip.
   const usage =
     data && data.entries.length > 0
       ? [
           data.costUsd != null && data.costUsd > 0 ? formatCost(data.costUsd) : null,
-          tokenSummary(data.inputTokens, data.cacheReadTokens, data.outputTokens),
+          `${abbreviateCount(data.inputTokens + data.outputTokens)} tokens`,
         ]
           .filter(Boolean)
           .join(" · ")
       : null;
+  const usageDetail = data ? tokenSummary(data.inputTokens, data.cacheReadTokens, data.outputTokens) : undefined;
   const folder = session.cwd ? baseName(session.cwd) : null;
 
   return (
@@ -585,37 +656,61 @@ export function CodingDetail({
           onPeek={onPeek}
           extra={
             (folder || usage) && (
-              <span className="line-clamp-2 text-notch-w-meta leading-snug text-widget-ink-2" title={session.cwd ?? undefined}>
+              <span
+                className="line-clamp-2 text-notch-w-meta leading-snug text-widget-ink-2"
+                title={[session.cwd, usageDetail].filter(Boolean).join("\n") || undefined}
+              >
                 {[folder, usage].filter(Boolean).join(" · ")}
               </span>
             )
           }
         />
-        {session.subagents.length > 0 && (
-          <WidgetFrame size="medium" label={`Subagents (${session.subagents.length})`}>
-            <ul className="m-0 h-full list-none overflow-y-auto overscroll-contain p-3.5">
-              {session.subagents.map((sub, i) => (
-                <li
-                  key={i}
-                  className="flex items-center gap-2 border-b border-widget-sep py-1.5 text-notch-w-title first:pt-0 last:border-b-0"
-                >
-                  <span className="min-w-0 flex-1 truncate font-medium">{sub.label}</span>
-                  {sub.tool && <span className="truncate text-notch-w-meta text-widget-ink-2">{sub.tool}</span>}
-                  <span className="shrink-0 text-notch-w-meta font-medium text-widget-ink-2">
-                    {sub.busy ? "Running" : "Done"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </WidgetFrame>
-        )}
+        {session.subagents.length > 0 && <SubagentTile subagents={session.subagents} />}
       </WidgetBoard>
     </>
   );
 }
 
-/** Claude's latest message and the last few tool calls: one glance's worth, not an archive. */
+/** Each subagent as a line: whether it is working, what it is, and what it is doing now. */
+function SubagentTile({ subagents }: { subagents: AgentSession["subagents"] }) {
+  const running = subagents.filter((sub) => sub.busy).length;
+  return (
+    <WidgetFrame size="medium" label={running > 0 ? `Subagents · ${running} running` : `Subagents · ${subagents.length} done`}>
+      <ul className="m-0 h-full list-none overflow-y-auto overscroll-contain p-3.5 py-2.5">
+        {subagents.map((sub, i) => (
+          <li key={i} className="flex items-center gap-2.5 border-b border-widget-sep py-1.5 last:border-b-0">
+            {sub.busy ? (
+              <LoaderCircleIcon data-w-role="agent" className="size-4 shrink-0 animate-spin text-widget-acc-ink" aria-hidden />
+            ) : (
+              <CheckIcon className="size-4 shrink-0 text-widget-ink-2" aria-hidden />
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-notch-w-title font-medium">{sub.label}</span>
+              <span className="block truncate text-notch-w-meta text-widget-ink-2">
+                {[sub.model, sub.busy ? sub.tool : null].filter(Boolean).join(" · ")}
+              </span>
+            </span>
+            <span
+              data-w-role={sub.busy ? "agent" : undefined}
+              className={cn("shrink-0 text-notch-w-meta font-medium", wordClass(sub.busy ? "agent" : undefined))}
+            >
+              {sub.busy ? "Running" : "Done"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </WidgetFrame>
+  );
+}
+
+/**
+ * What the agent just did, as a glance: the opening of its latest message, the
+ * count of tool calls it made, and the last few of them. A reply is often a
+ * page of markdown, which in a tile is a wall, so the whole of it is behind
+ * "Read all" rather than the default.
+ */
 function ActivityTile({ data, error }: { data: AgentTranscript | null; error: string | null }) {
+  const [full, setFull] = useState(false);
   let body: React.ReactNode;
   if (error) body = <p className="m-0 text-widget-ink-2">{error}</p>;
   else if (!data) body = <p className="m-0 text-widget-ink-2">Reading…</p>;
@@ -628,13 +723,43 @@ function ActivityTile({ data, error }: { data: AgentTranscript | null; error: st
         break;
       }
     }
+    const calls = data.entries.filter((e) => e.kind === "toolUse");
+    const failed = calls.filter((e) => e.isError).length;
     const ticks = toolTicks(data.entries);
-    body = (
+    const summary = latest ? plainSummary(latest) : "";
+    // Whether there is more than the summary shows: a longer text, or structure it dropped.
+    const more = latest !== null && summary !== latest.trim();
+    body = full && latest ? (
       <>
-        {/* `size-auto`: the response is `size-full` by default and would push the ticks below the tile. */}
-        {latest && <MessageResponse className="size-auto">{latest}</MessageResponse>}
+        {/* `size-auto`: the response is `size-full` by default and would push the button below the tile. */}
+        <MessageResponse className="size-auto">{latest}</MessageResponse>
+        <Pill quiet className="mt-2" onClick={() => setFull(false)}>
+          Show summary
+        </Pill>
+      </>
+    ) : (
+      <>
+        {summary && (
+          <p className="m-0 line-clamp-4 text-notch-w-body leading-snug text-pretty select-text">{summary}</p>
+        )}
+        {more && (
+          <Pill quiet className="mt-2" onClick={() => setFull(true)}>
+            Read all
+          </Pill>
+        )}
+        {calls.length > 0 && (
+          <p className="m-0 mt-3 mb-1 text-notch-w-meta font-medium text-widget-ink-2">
+            {calls.length} tool {calls.length === 1 ? "call" : "calls"}
+            {failed > 0 && (
+              <span data-w-role="move" className="text-widget-acc-ink">
+                {" · "}
+                {failed} failed
+              </span>
+            )}
+          </p>
+        )}
         {ticks.length > 0 && (
-          <ul className="m-0 mt-2 list-none p-0" aria-label="Recent tool calls">
+          <ul className="m-0 list-none p-0" aria-label="Recent tool calls">
             {ticks.map((tick, i) => (
               <li
                 key={i}

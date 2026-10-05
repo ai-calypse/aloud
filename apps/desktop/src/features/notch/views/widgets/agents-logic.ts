@@ -14,6 +14,22 @@ export function usageWarning(pct: number): string | null {
   return pct >= 90 ? "Nearly full" : pct >= 70 ? "Getting full" : null;
 }
 
+/** "2 h 14 m", "36 m", "<1 m": time saved at the grain a glance wants. Whole minutes, hours left bare when exact. */
+export function savedDuration(seconds: number | null | undefined): string {
+  const value = Number.isFinite(seconds) ? (seconds as number) : 0;
+  if (value <= 0) return "0 m";
+  if (value < 30) return "<1 m";
+  const minutes = Math.round(value / 60);
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h === 0 ? `${m} m` : m === 0 ? `${h} h` : `${h} h ${m} m`;
+}
+
+/** The share of a total that one part is, 0…1, with an empty total drawing as none. */
+export function savedShare(part: number | null | undefined, total: number | null | undefined): number {
+  return total && part && total > 0 ? Math.min(1, Math.max(0, part / total)) : 0;
+}
+
 /** One coding session as a tile says it: a word for its state, then what it is doing. */
 export function sessionState(
   session: AgentSession,
@@ -62,4 +78,32 @@ export function stepRole(step: Step, pending: boolean): WidgetRole | undefined {
   if (step.confirmed === false) return undefined;
   if (step.result) return step.result.success ? undefined : "move";
   return pending ? "orange" : undefined;
+}
+
+/**
+ * A long markdown reply as the sentence or two it opens with, for a tile that
+ * is one glance wide. Headings, fences, list markers and emphasis are dropped:
+ * what is left is prose, cut on a word and ended with an ellipsis.
+ */
+export function plainSummary(markdown: string, max = 200): string {
+  let fenced = false;
+  const prose: string[] = [];
+  for (const raw of markdown.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("```")) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced || line === "" || line.startsWith("#")) continue;
+    prose.push(
+      line
+        .replace(/^([-*+]|\d+\.)\s+/, "")
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .replace(/[*_`]/g, ""),
+    );
+  }
+  const flat = prose.join(" ").replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  const cut = flat.slice(0, max);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), max / 2)).replace(/[\s,.;:]+$/, "")}…`;
 }

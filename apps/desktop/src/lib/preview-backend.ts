@@ -5,6 +5,7 @@ import type {
   ClipboardEntry,
   Event as CalendarEvent,
   FocusSnapshot,
+  AgentTranscript,
   FocusStats,
   InstalledApp,
   Island,
@@ -16,6 +17,7 @@ import type {
   PickedColor,
   PrivacyUse,
   Quota,
+  QuotaSample,
   Reading,
   Reminder,
   ScreenShot,
@@ -27,6 +29,7 @@ import type {
   SoundState,
   StatsView,
   SystemStats,
+  TimeSavedView,
   Ticker,
   Weather,
 } from "./bindings";
@@ -409,11 +412,107 @@ const FILES: LaunchFile[] = [
 
 // ── agents ───────────────────────────────────────────────────────────────
 
+/**
+ * A week of Usage readings, taken in bursts like a person opening the view now
+ * and then: the 5-hour window climbs and resets, the week climbs and resets.
+ * The newest reading lands on the headline numbers (62% with 2 h 14 m to go).
+ */
+const QUOTA_HISTORY: QuotaSample[] = (() => {
+  const FIVE_END = T0 + 2 * HOUR + 14 * MIN; // when the current 5-hour window resets
+  const WEEK_END = T0 + 3 * 86_400_000;
+  const amp = (k: number) => 0.45 + ((k * 37) % 11) / 20; // each 5-hour window peaks differently
+  const windowK = (t: number) => Math.ceil((FIVE_END - t) / (5 * HOUR)) - 1; // windows back from the current one
+  const five = (t: number) => {
+    const k = windowK(t);
+    const frac = 1 - (FIVE_END - k * 5 * HOUR - t) / (5 * HOUR);
+    return Math.min(97, 100 * Math.pow(frac, 0.8) * (k === 0 ? 1 : amp(k)));
+  };
+  const week = (t: number) => {
+    const into = (t - (WEEK_END - 7 * 86_400_000)) / (7 * 86_400_000);
+    return into >= 0 ? 38 * Math.pow(into / (4 / 7), 1.2) : 71 * Math.pow(1 + into, 1.2);
+  };
+  const bursts: [number, number][] = [
+    [0, 0.9], [3, 3.7], [7, 8.5], [13, 14.2], [20, 21], [27, 29], [34, 35], [50, 52],
+    [58, 59.5], [75, 77], [98, 100], [120, 123], [150, 151],
+  ];
+  const out: QuotaSample[] = [];
+  for (const [from, to] of bursts) {
+    for (let h = to; h >= from; h -= 5 / 60) {
+      const t = T0 - h * HOUR;
+      out.push({
+        at: Math.floor(t / 1000),
+        fiveHour: Math.round(five(t)),
+        fiveHourResetsAt: Math.floor((FIVE_END - windowK(t) * 5 * HOUR) / 1000),
+        sevenDay: Math.round(week(t)),
+        sevenDayResetsAt: Math.floor((t >= WEEK_END - 7 * 86_400_000 ? WEEK_END : WEEK_END - 7 * 86_400_000) / 1000),
+      });
+    }
+  }
+  return out.sort((a, b) => a.at - b.at); // oldest first, as Rust sends it
+})();
+
+const DAY_MS = 86_400_000;
 const QUOTA: Quota = {
   fiveHour: { percent: 62, resetsAt: new Date(T0 + 2 * HOUR + 14 * MIN).toISOString() },
-  sevenDay: { percent: 38, resetsAt: new Date(T0 + 3 * 86_400_000).toISOString() },
-  sevenDayOpus: { percent: 21, resetsAt: new Date(T0 + 3 * 86_400_000).toISOString() },
-  extraUsagePercent: 4,
+  sevenDay: { percent: 38, resetsAt: new Date(T0 + 3 * DAY_MS).toISOString() },
+  sevenDayOpus: { percent: 21, resetsAt: new Date(T0 + 3 * DAY_MS).toISOString() },
+  sevenDaySonnet: { percent: 12, resetsAt: new Date(T0 + 3 * DAY_MS).toISOString() },
+  sevenDayOauthApps: { percent: 4, resetsAt: new Date(T0 + 3 * DAY_MS).toISOString() },
+  sevenDayCowork: { percent: 7, resetsAt: new Date(T0 + 3 * DAY_MS).toISOString() },
+  sevenDayOmelette: { percent: 2, resetsAt: new Date(T0 + 3 * DAY_MS).toISOString() },
+  extraUsagePercent: 9.58,
+  extra: { enabled: true, monthlyLimit: 5000, usedCredits: 479, currency: "USD", utilization: 9.58 },
+  history: QUOTA_HISTORY,
+};
+
+/** Dictation 1 h 43 m + 24 actions at the assumed 90 s: the Voice board's time-saved tile. */
+const TIME_SAVED: TimeSavedView = {
+  allTime: { totalSeconds: 8_360, dictationSeconds: 6_200, actionSeconds: 2_160, actions: 24 },
+  today: { totalSeconds: 1_120, dictationSeconds: 850, actionSeconds: 270, actions: 3 },
+};
+
+/** What a coding agent's transcript looks like after a long turn: one long reply and a burst of tool calls. */
+const TRANSCRIPT: AgentTranscript = {
+  entries: [
+    { kind: "user", tool: null, text: "yo no, the gif in the readme sucks. please fix", result: null, isError: false },
+    { kind: "toolUse", tool: "Read", text: "Reading README.md", result: "1 | # Aloud\n2 | ![demo](docs/demo.gif)", isError: false },
+    { kind: "toolUse", tool: "Read", text: "Reading docs/demo.gif", result: "binary, 9.4 MB", isError: false },
+    { kind: "toolUse", tool: "Read", text: "Reading website/index.html", result: "…", isError: false },
+    { kind: "toolUse", tool: "Grep", text: "Searching demo.gif", result: "3 matches", isError: false },
+    { kind: "toolUse", tool: "Bash", text: "Running ffmpeg -i demo.mov -vf scale=720 demo.webp", result: "ffmpeg: command not found", isError: true },
+    { kind: "toolUse", tool: "Bash", text: "Running brew install ffmpeg", result: "done", isError: false },
+    { kind: "toolUse", tool: "Edit", text: "Editing README.md", result: "ok", isError: false },
+    {
+      kind: "assistant",
+      tool: null,
+      text: [
+        "## What was wrong",
+        "",
+        "The README embeds `docs/demo.gif`, a **9.4 MB** screen capture at 1440p that GitHub downsamples to 830 px wide, so the text in it is a smear and it takes seconds to load on a phone.",
+        "",
+        "## What I changed",
+        "",
+        "- Re-recorded the dictation flow at 720p, 12 fps, with the notch open for the whole clip",
+        "- Encoded it as an animated WebP (410 KB) with a PNG poster for anything that cannot play it",
+        "- Pointed the README at the new file and kept the GIF as a fallback inside a `<picture>` element",
+        "- Added `scripts/demo.sh` so the clip can be regenerated from `docs/demo.mov` instead of by hand",
+        "",
+        "```sh",
+        "ffmpeg -i docs/demo.mov -vf scale=720:-1,fps=12 -loop 0 docs/demo.webp",
+        "```",
+        "",
+        "## Still open",
+        "",
+        "The Windows capture is missing, so the second half of the demo shows macOS only. I left a TODO in the README rather than faking one. Next I am running the workspace tests to make sure the docs build still passes.",
+      ].join("\n"),
+      result: null,
+      isError: false,
+    },
+  ],
+  inputTokens: 184_000,
+  outputTokens: 9_200,
+  cacheReadTokens: 1_240_000,
+  costUsd: 2.34,
 };
 
 const REPOS = [
@@ -500,6 +599,8 @@ function handle(cmd: string, a: Record<string, unknown> = {}): unknown {
     case "launcher_files": return FILES.filter((f) => has(f.name, a.query));
 
     case "agent_quota": return QUOTA;
+    case "get_time_saved": return TIME_SAVED;
+    case "read_agent_transcript": return TRANSCRIPT;
     case "agent_hook_status": return { installed: ["claude", "codex"], conflict: null };
     case "list_local_repos": return REPOS;
     case "list_repo_branches": return ["main", "feat/notch-overhaul", "feat/website"];
