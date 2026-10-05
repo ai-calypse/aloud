@@ -26,7 +26,7 @@ import {
 } from "./shelf-data";
 
 /** The lead's phrasing of `formatAgo`: "Just now", "2m ago". */
-function ago(secs: number): string {
+export function ago(secs: number): string {
   const t = formatAgo(secs);
   return t === "now" ? "Just now" : `${t} ago`;
 }
@@ -37,7 +37,7 @@ function ago(secs: number): string {
  * dropped into Slack, Mail or Finder. The mouseup disarms it, so a plain
  * click never turns into a drag later.
  */
-function dragOut(path: string) {
+export function dragOut(path: string) {
   return {
     onMouseDown: () => void commands.armFileDrag(path),
     onMouseUp: () => void commands.disarmFileDrag(),
@@ -137,7 +137,7 @@ function TurnOn({
   );
 }
 
-const FORMATS: { id: ShelfImageFormat; label: string }[] = [
+export const FORMATS: { id: ShelfImageFormat; label: string }[] = [
   { id: "png", label: "PNG" },
   { id: "jpeg", label: "JPEG" },
   { id: "heic", label: "HEIC" },

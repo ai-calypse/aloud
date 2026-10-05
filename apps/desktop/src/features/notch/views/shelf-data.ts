@@ -88,7 +88,7 @@ export function useShelfPrefs() {
   return { prefs, set };
 }
 
-const thumbs = new Map<string, Promise<string | null>>();
+export const thumbs = new Map<string, Promise<string | null>>();
 
 /**
  * A picture's `data:` thumbnail, from Rust. Cached by path for the session:

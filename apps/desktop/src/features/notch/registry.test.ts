@@ -27,4 +27,19 @@ describe("registry widget views", () => {
       }
     }
   });
+
+  // viewFor falls back to the calm view, and readySections drops a subsection
+  // with none: a widget view without one would vanish from the panel.
+  it("only registers a widget view beside a calm view", () => {
+    for (const section of SECTIONS) {
+      for (const sub of section.subsections) {
+        if (sub.widgetView) expect(sub.view, `${section.id}/${sub.id}`).toBeDefined();
+      }
+    }
+  });
+
+  it("draws every Shelf subsection as widgets", () => {
+    const shelf = READY.find((s) => s.id === "shelf");
+    for (const sub of shelf?.subsections ?? []) expect(sub.widgetView, `shelf/${sub.id}`).toBeDefined();
+  });
 });
