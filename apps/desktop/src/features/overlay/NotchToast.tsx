@@ -1,74 +1,139 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { XIcon } from "lucide-react";
 import type { Island, IslandAction } from "@/lib/bindings";
-import { AppIcon } from "@/components/preview/kit";
+import { AppIcon as GlyphIcon } from "@/components/notch/app-icon";
+import { Whisper } from "@/features/notch/IslandPill";
+import {
+  capsuleText,
+  dwellMs,
+  isCapsule,
+  islandTone,
+  opensOnHover,
+  takeoverTier,
+} from "@/features/notch/islands";
+import { useDwell } from "./useDwell";
 
-/** How long an alert stays when nobody is looking at it. */
-const TOAST_MS = 4000;
+/** What the toast is drawn as: see `toastForm`. */
+export type ToastForm = "capsule" | "peek" | "card";
 
 /**
- * Calls `done` once `ms` have passed without `held`. Holding pauses the clock
- * rather than restarting it, so a glance does not buy a whole new four seconds.
+ * The size a takeover is drawn at. A peek or card the gate shrank (the user is
+ * typing) is a side capsule until the pointer opens it into what it really is.
  */
-function useDwell(ms: number, held: boolean, done: () => void) {
-  const left = useRef(ms);
-  const latest = useRef(done);
-  latest.current = done;
-  useEffect(() => {
-    if (held) return;
-    const started = performance.now();
-    const timer = setTimeout(() => latest.current(), Math.max(0, left.current));
-    return () => {
-      clearTimeout(timer);
-      left.current -= performance.now() - started;
-    };
-  }, [held]);
+export function toastForm(island: Island, hovering: boolean): ToastForm {
+  if (isCapsule(island) && !(hovering && opensOnHover(island))) return "capsule";
+  return takeoverTier(island) === "card" ? "card" : "peek";
 }
 
 /**
- * An alert island, hanging from the notch: the app it happened in, what was
- * done, and at most one thing to do about it — the chip a run of writes that
- * all worked ends on, and the one way any later alert is drawn. It is the
- * notch panel's own content, so it grows out of the cutout — or the run's
- * panel shrinks into it — on the panel's spring, and leaves the same way
- * (`onLeave` plays the collapse before anything unmounts).
+ * A takeover that is bigger than a whisper, hanging from the notch. It is the
+ * notch panel's own content, so it grows out of the cutout — or the run's panel
+ * shrinks into it — on the panel's spring, and leaves the same way (`onLeave`
+ * plays the collapse before anything unmounts).
+ *
+ * Three sizes, by what it costs to miss: a side capsule (shrunk, because you
+ * are typing), a peek (one extra row, 4 s, opens on hover) and a card (sticky,
+ * buttons — a call, a battery about to die, an action that failed).
  */
 export function NotchToast({
   island,
   hovering,
   onLeave,
   onAction,
+  side,
+  waiting = 0,
 }: {
   island: Island;
-  /** The pointer is over the notch; the alert waits while it is. */
+  /** The pointer is over the notch; the takeover waits while it is. */
   hovering: boolean;
   onLeave: () => void;
   /** Runs a button through the action registry; true when it did. */
   onAction: (action: IslandAction) => Promise<boolean>;
+  /**
+   * A whisper riding this takeover: it takes a peek's top row and an echo
+   * under a card, and the takeover itself stays put.
+   */
+  side?: Island | null;
+  /** Takeovers waiting their turn: "+N". */
+  waiting?: number;
 }) {
   // The action that did not work, so its button can say so and stay.
   const [failed, setFailed] = useState<string | null>(null);
-  useDwell(TOAST_MS, hovering, onLeave);
+  useDwell(dwellMs(island), hovering, onLeave);
+  const form = toastForm(island, hovering);
+  const tone = islandTone(island);
+
+  const run = (action: IslandAction) =>
+    void onAction(action).then((done) => (done ? onLeave() : setFailed(action.action)));
+  const button = (action: IslandAction) => (
+    <button
+      key={action.action}
+      className="app-pill"
+      disabled={failed === action.action}
+      onClick={() => run(action)}
+    >
+      {failed === action.action ? `Couldn't ${action.label.toLowerCase()}` : action.label}
+    </button>
+  );
+
+  if (form === "capsule") {
+    return <Whisper island={{ ...island, short: island.short ?? capsuleText(island) }} waiting={waiting} />;
+  }
+
+  if (form === "peek") {
+    const [first] = island.actions;
+    return (
+      <div className="peek" data-open={hovering || undefined} data-tone={tone} role="status">
+        {/* The top row is the notch's own: the app on one side of the camera,
+            what to do about it on the other. A whisper takes it over. */}
+        <div className="peek__top">
+          {side ? (
+            <Whisper island={side} waiting={waiting} />
+          ) : (
+            <>
+              <div className="peek__side">
+                <GlyphIcon icon={island.icon} label={island.detail ?? island.title} size="sm" />
+                <span className="peek__app">{island.detail ?? "Aloud"}</span>
+              </div>
+              <span className="island-pill__camera" aria-hidden />
+              <div className="peek__side peek__side--end">
+                {waiting > 0 && <span className="island-pill__more">+{waiting}</span>}
+                {!hovering && first && button(first)}
+                <button className="toast__close" aria-label="Dismiss" onClick={onLeave}>
+                  <XIcon size={9} strokeWidth={3} />
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+        <p className="peek__line">
+          <b>{island.title}</b>
+        </p>
+        {hovering && island.actions.length > 0 && (
+          <div className="peek__actions">{island.actions.map(button)}</div>
+        )}
+      </div>
+    );
+  }
 
   return (
-    <div className="toast" role="status">
+    <div className="toast" data-tier="card" data-tone={tone} role="status">
       <button className="toast__close" aria-label="Dismiss" onClick={onLeave}>
         <XIcon size={9} strokeWidth={3} />
       </button>
-      <AppIcon app={island.detail ?? island.title} icon={island.icon} />
-      <p className="toast__text">{island.title}</p>
-      {island.actions.map((action) => (
-        <button
-          key={action.action}
-          className="app-pill"
-          disabled={failed === action.action}
-          onClick={() =>
-            void onAction(action).then((done) => (done ? onLeave() : setFailed(action.action)))
-          }
-        >
-          {failed === action.action ? `Couldn't ${action.label.toLowerCase()}` : action.label}
-        </button>
-      ))}
+      <GlyphIcon icon={island.icon} label={island.detail ?? island.title} size="lg" />
+      <p className="toast__text">
+        {island.title}
+        {island.detail && <span className="toast__detail">{island.detail}</span>}
+      </p>
+      {island.actions.map(button)}
+      {/* A key press while a card is up: a small capsule under it, which never
+          replaces the card. */}
+      {side && (
+        <div className="toast__echo">
+          <Whisper island={side} />
+        </div>
+      )}
     </div>
   );
 }

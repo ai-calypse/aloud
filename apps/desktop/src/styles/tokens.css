@@ -362,3 +362,14 @@
 
   /* The overlay needs nothing here — both its surfaces are already opaque. */
 }
+
+/* --- Notch events (feat/notch-events): takeover geometry -----------------
+ * Whisper, peek and card sizes from docs/design/notch-events.html. The colours
+ * of a takeover are the semantic ones above (danger, ok, warn); only sizes are
+ * new. */
+:root {
+  --notch-peek-w: 520px; /* a peek's width, whatever the cutout */
+  --notch-peek-line: 22px; /* the one extra row a peek adds under the notch */
+  --notch-level-w: 40px; /* a whisper's level bar */
+  --notch-level-h: 5px;
+}

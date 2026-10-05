@@ -698,3 +698,136 @@ const LIVE_PREVIEWS: Island[] = [
     dismissible: false,
   },
 ];
+
+/**
+ * The takeovers, one per size and shape, as Rust's gate would hand them to the
+ * webview (tier resolved, dwell set). Fixtures for the tuner and the browser
+ * preview: no Rust here, so nothing ranks them or holds one back.
+ */
+export const TAKEOVER_PREVIEWS = {
+  /** A key press: a bar and its number, updated in place. */
+  volume: {
+    id: "hud:volume",
+    kind: "alert",
+    priority: "normal",
+    icon: "volume",
+    title: "Volume",
+    detail: null,
+    actions: [],
+    expires: null,
+    dismissible: false,
+    tier: "whisper",
+    level: 62,
+    dwellMs: 1800,
+    source: "hud",
+  },
+  /** A write that landed; Undo is one hover away. */
+  sent: {
+    id: "toast:sent",
+    kind: "alert",
+    priority: "normal",
+    icon: "done",
+    title: "Sent the email to David",
+    detail: "Gmail",
+    actions: [{ label: "Undo", action: "files.undoTidy", args: { folder: "Downloads" } }],
+    expires: null,
+    dismissible: false,
+    tier: "whisper",
+    short: "Sent",
+    dwellMs: 1800,
+  },
+  /** Battery at 20%: a red number, the Power pane on hover. */
+  batteryLow: {
+    id: "mac:battery-low",
+    kind: "alert",
+    priority: "normal",
+    icon: "battery",
+    title: "Battery low",
+    detail: "20%",
+    actions: [{ label: "Show", action: "mac.power", args: {} }],
+    expires: null,
+    dismissible: false,
+    tier: "whisper",
+    short: "20%",
+    dwellMs: 1800,
+    source: "power",
+  },
+  /** A screenshot: a peek, one extra row. */
+  shot: {
+    id: "shot:/Users/me/Desktop/Screenshot.png",
+    kind: "alert",
+    priority: "normal",
+    icon: "image",
+    title: "Screenshot saved",
+    detail: "Screenshots",
+    actions: [
+      { label: "Copy", action: "shelf.copyShot", args: { path: "/Users/me/Desktop/Screenshot.png" } },
+      { label: "Show", action: "shelf.reveal", args: { path: "/Users/me/Desktop/Screenshot.png" } },
+    ],
+    expires: null,
+    dismissible: false,
+    tier: "peek",
+    dwellMs: 4000,
+    source: "banners",
+  },
+  /** A focus phase ending: high, so it cuts in on a whisper. */
+  timer: {
+    id: "timer:done",
+    kind: "alert",
+    priority: "high",
+    icon: "timer",
+    title: "Focus done",
+    detail: "Focus",
+    actions: [{ label: "Start", action: "focus.resume", args: {} }],
+    expires: null,
+    dismissible: false,
+    tier: "peek",
+    dwellMs: 4000,
+  },
+  /** The same peek, shrunk to a capsule because the user is typing. */
+  timerTyping: {
+    id: "timer:done",
+    kind: "alert",
+    priority: "high",
+    icon: "timer",
+    title: "Focus done",
+    detail: "Focus",
+    actions: [{ label: "Start", action: "focus.resume", args: {} }],
+    expires: null,
+    dismissible: false,
+    tier: "peek",
+    shrunk: true,
+    short: "Focus done",
+    dwellMs: 4000,
+  },
+  /** Battery under 10%: a card, sticky, with the way to act. */
+  batteryCritical: {
+    id: "mac:battery",
+    kind: "alert",
+    priority: "urgent",
+    icon: "battery",
+    title: "Battery low",
+    detail: "9% — plug in now",
+    actions: [{ label: "Power", action: "mac.power", args: {} }],
+    expires: null,
+    dismissible: true,
+    tier: "card",
+    short: "9%",
+    source: "power",
+  },
+  /** A critical action that failed: a card with a way to retry. */
+  failed: {
+    id: "toast:failed",
+    kind: "alert",
+    priority: "high",
+    icon: "alert",
+    title: "Couldn't send to #design",
+    detail: "Slack rejected the token",
+    actions: [{ label: "Retry", action: "agents.open", args: {} }],
+    expires: null,
+    dismissible: false,
+    tier: "card",
+  },
+} satisfies Record<string, Island>;
+
+export type TakeoverPreview = keyof typeof TAKEOVER_PREVIEWS;

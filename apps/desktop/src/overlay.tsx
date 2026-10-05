@@ -32,14 +32,15 @@ import { truncate } from "./lib/format";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
 import { CatSettingsProvider } from "./lib/cat-settings";
 import { listen } from "@tauri-apps/api/event";
-import { NotchToast } from "./features/overlay/NotchToast";
+import { NotchToast, toastForm } from "./features/overlay/NotchToast";
+import { useDwell } from "./features/overlay/useDwell";
 import { ListeningCat, CatPeek, NotchAgents } from "./features/overlay/NotchAgents";
 import { type Tab, FIRST_TABS, MAX_TABS } from "./features/overlay/TabStrip";
 import { NotchShell } from "./features/notch/NotchShell";
 import { IslandPill } from "./features/notch/IslandPill";
 import { runAction } from "./features/notch/actions";
 import { NotchProvider } from "./features/notch/context";
-import { applyIsland } from "./features/notch/islands";
+import { applyIsland, dwellMs, opensOnHover, takeoverTier } from "./features/notch/islands";
 import { loadNav, saveNav, type Nav, type SectionId } from "./features/notch/sections";
 import {
   PARTIAL_PREVIEW,
@@ -49,6 +50,7 @@ import {
   CONTACT_PREVIEW,
   FINDER_PREVIEWS,
   livePreviews,
+  TAKEOVER_PREVIEWS,
   TOAST_PREVIEWS,
   withIcon,
 } from "./features/overlay/previews";
@@ -61,6 +63,7 @@ import "@fontsource-variable/geist-mono";
 import "./index.css";
 import "./styles/overlay.css";
 import "./styles/notch.css";
+import "./styles/events.css";
 
 const LABEL: Record<Phase, string> = {
   idle: "",
@@ -127,6 +130,18 @@ function Overlay() {
   const toastKey = useRef(0);
   const toastRef = useRef(toast);
   toastRef.current = toast;
+  // A whisper alongside: a glyph and one thing beside the camera at rest, the
+  // top row of a peek, an echo under a card. Not a panel and not a toast: it
+  // claims no window (Rust leaves the resting one alone) and its own clock
+  // takes it away. Keyed so a fresh whisper restarts its clock; the same id
+  // updating in place keeps its key, which is how a volume bar moves instead
+  // of remounting.
+  const [whisper, setWhisper] = useState<{ value: Island; key: number } | null>(null);
+  const whisperKey = useRef(0);
+  const whisperRef = useRef(whisper);
+  whisperRef.current = whisper;
+  // How many takeovers wait for their turn (Rust's line): "+N".
+  const [waiting, setWaiting] = useState(0);
   // The notch opened by clicking it rather than by speaking. Its own state
   // because it belongs to no dictation and must survive `run` changing.
   const [browsing, setBrowsing] = useState(false);
@@ -396,6 +411,23 @@ function Overlay() {
   useEffect(refreshCatSettings, [refreshCatSettings]);
 
   // Agents, hover and permission requests, all independent of any dictation.
+  // An alert island arriving: a whisper takes its side slot and touches nothing
+  // else; anything bigger is the toast, and replaces whatever panel was up (Rust
+  // only sends one where no panel is being read — `overlay::show_toast`). Also
+  // what the tuner's fixtures go through, so the preview is the real routing.
+  const takeOver = useCallback((value: Island) => {
+    if (takeoverTier(value) === "whisper" && !value.shrunk) {
+      const same = whisperRef.current?.value.id === value.id;
+      setWhisper((now) => ({ value, key: same && now ? now.key : ++whisperKey.current }));
+      return;
+    }
+    setToast({ value, key: ++toastKey.current });
+    setAgent(null);
+    setBrowsing(false);
+    setSelected(null);
+    setDismissing(false);
+  }, []);
+
   useEffect(() => {
     const sessionsOff = events.agentSessions.listen((e) => setSessions(e.payload));
     const hoverOff = events.notchHover.listen((e) => setHovering(e.payload.over));
@@ -426,18 +458,18 @@ function Overlay() {
       setIslands((list) => applyIsland(list, payload));
       const { change } = payload;
       if (change.op !== "remove" && change.value.kind === "alert") {
-        setToast({ value: change.value, key: ++toastKey.current });
-        setAgent(null);
-        setBrowsing(false);
-        setSelected(null);
-        setDismissing(false);
+        takeOver(change.value);
       }
       // Taken down from Rust's side (its backstop): leave the way the
       // clock would.
       if (change.op === "remove" && toastRef.current?.value.id === change.value) {
         setDismissing(true);
       }
+      if (change.op === "remove" && whisperRef.current?.value.id === change.value) {
+        setWhisper(null);
+      }
     });
+    const waitingOff = events.islandsWaiting.listen(({ payload }) => setWaiting(payload.count));
     // The event carries changes only; islands pushed before this window
     // listened arrive with the snapshot.
     try {
@@ -451,8 +483,9 @@ function Overlay() {
       void permOff.then((off) => off());
       void resolvedOff.then((off) => off());
       void islandOff.then((off) => off());
+      void waitingOff.then((off) => off());
     };
-  }, []);
+  }, [takeOver]);
 
   // Answer, then drop it locally — the resolved event will also drop it, and
   // whichever lands first wins. Removing it here keeps the next card from
@@ -541,15 +574,47 @@ function Overlay() {
   // `agents` island), and whatever features push later. Hovering grows the
   // notch into the agents' dealt row, as it always has.
   const live = islands.filter((island) => island.kind === "live");
-  const liveNow = resting && live.length > 0;
+  // A whisper takes the resting notch for its moment; over a toast it is part
+  // of the toast instead (a peek's top row, an echo under a card), and while a
+  // dictation or a panel has the window it waits, its clock stopped.
+  const whisperNow = resting && toast === null && whisper !== null;
+  // Pointing at a whisper that has a button opens it into a peek.
+  const whisperOpen = whisperNow && hovering && whisper !== null && opensOnHover(whisper.value);
+  // Takeovers waiting their turn show as "+N" even on a bare notch.
+  const liveNow = resting && (live.length > 0 || whisperNow || waiting > 0);
   // Held up a beat after the last one goes, so the pill collapses into the
   // cutout on the panel's spring (`pillLeaving` below) rather than snapping.
   const pillShown = useLinger(liveNow, 600);
   const pillLeaving = pillShown && !liveNow;
-  // What the pill draws while it leaves: the last activities, fading out as
-  // the shape collapses under them, rather than an empty pill doing so.
+  // What the pill draws while it leaves: the last activities or whisper,
+  // fading out as the shape collapses under them, rather than an empty pill
+  // doing so.
   const lastLive = useRef(live);
   if (live.length > 0) lastLive.current = live;
+  const lastWhisper = useRef<Island | null>(null);
+  if (whisperNow && whisper) lastWhisper.current = whisper.value;
+  else if (live.length > 0) lastWhisper.current = null;
+  const pillWhisper = whisperNow && whisper ? whisper.value : liveNow ? null : lastWhisper.current;
+  // The whisper's own clock: stopped while it cannot be seen and while the
+  // pointer is on one that opens, like a toast's. Rust's backstop covers a
+  // webview that never gets to show it.
+  const endWhisper = useCallback(() => {
+    const id = whisperRef.current?.value.id;
+    setWhisper(null);
+    try {
+      if (id) void commands.dismissIsland(id);
+    } catch {
+      /* browser preview: no queue to tell */
+    }
+  }, []);
+  useDwell(
+    whisper ? dwellMs(whisper.value) : null,
+    !(whisperNow || (whisper !== null && toast !== null)) || whisperOpen,
+    endWhisper,
+    whisper?.key,
+  );
+  // What a toast is drawn as: a side capsule, a peek row, or the card.
+  const toastDrawn = toast ? toastForm(toast.value, hovering) : null;
   // Drill into one agent (opens the panel on its detail) or open the whole
   // list — the two things the dealt row can do. Both route through the same
   // open-the-notch state a click does.
@@ -682,6 +747,7 @@ function Overlay() {
         // panel fight over the same strip.
         setAgent(null);
         setToast(null);
+        setWhisper(null);
         setBrowsing(false);
         setSelected(null);
         setPartial("");
@@ -767,6 +833,9 @@ function Overlay() {
         setBrowsing(false);
         setSelected(null);
         setToast(null);
+        setWhisper(null);
+        setWaiting(0);
+        setHovering(false);
         setPartial("");
         setDroppedDown(false);
         setDismissing(false);
@@ -918,6 +987,16 @@ function Overlay() {
         setAgent(null);
         setDismissing(false);
       }
+      if (command.takeover) {
+        // `stay`: the fixture keeps its place for a screenshot, not its dwell.
+        const fixture: Island = { ...TAKEOVER_PREVIEWS[command.takeover] };
+        if (command.level !== undefined) fixture.level = command.level;
+        if (command.stay) fixture.dwellMs = fixture.tier === "card" ? null : 3_600_000;
+        takeOver(fixture);
+        setDismissing(false);
+      }
+      if (command.hover !== undefined) setHovering(command.hover);
+      if (command.waiting !== undefined) setWaiting(command.waiting);
       if (command.islands !== undefined) setIslands(livePreviews(command.islands));
       if (command.notchStyle) setNotchStyle(command.notchStyle);
       if (command.open) {
@@ -940,7 +1019,7 @@ function Overlay() {
       window.removeEventListener(PREVIEW_EVENT, onPreview);
       clearInterval(typing);
     };
-  }, []);
+  }, [takeOver]);
 
   // An agent run. Its own listener: a separate event stream, a shared surface.
   useEffect(() => {
@@ -1210,6 +1289,7 @@ function Overlay() {
                 : phase
         }`}
         data-hover={resting && hovering ? "" : undefined}
+        data-form={toastDrawn ?? undefined}
         ref={panel.surface}
         // Only ever reaches the DOM while the pointer is over the panel — Rust
         // hands the window clicks exactly then (`track_cursor`). A click on the
@@ -1235,8 +1315,14 @@ function Overlay() {
             panelOpen
               ? " drop-pill__body--shell"
               : toast
-                ? " drop-pill__body--toast"
-                : resting && hovering
+                ? toastDrawn === "card"
+                  ? " drop-pill__body--toast"
+                  : toastDrawn === "peek"
+                    ? " drop-pill__body--peek"
+                    : " drop-pill__body--live"
+                : whisperOpen
+                  ? " drop-pill__body--peek"
+                  : resting && hovering
                 ? " drop-pill__body--agents"
                 : resting && pillShown
                   ? " drop-pill__body--live"
@@ -1253,7 +1339,16 @@ function Overlay() {
             // spring in `useNotchPanel`) and deals the agents out into it as
             // a row of bigger cards (`NotchAgents`). This is the "agents
             // animate inside the notch on hover" the notch is for.
-            hovering ? (
+            whisperOpen && whisper ? (
+              <NotchToast
+                key={whisper.key}
+                island={whisper.value}
+                hovering
+                onLeave={endWhisper}
+                onAction={actOnIsland}
+                waiting={waiting}
+              />
+            ) : hovering ? (
               <NotchAgents
                 sessions={sessions}
                 permissions={permissions}
@@ -1268,6 +1363,8 @@ function Overlay() {
                   sessions={sessions}
                   permissions={permissions}
                   leaving={pillLeaving}
+                  whisper={pillWhisper}
+                  waiting={waiting}
                 />
               )
             )
@@ -1312,6 +1409,8 @@ function Overlay() {
               hovering={hovering}
               onLeave={leaveToast}
               onAction={actOnIsland}
+              side={whisper?.value}
+              waiting={waiting}
             />
           ) : (
             <>

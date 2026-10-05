@@ -1,0 +1,183 @@
+/* --- Notch takeovers (features/notch/IslandPill.tsx, overlay/NotchToast.tsx) ---
+ * Size follows the cost of missing it. A whisper is the live pill's own shape,
+ * the notch's height widened either side of the camera; a peek adds one row;
+ * a card is the toast, dropped. Springs and durations are motion.css's: this
+ * file only says what each size looks like. */
+
+/* A whisper's glyph and word take the shared ink, and a tone only where the
+   word alone is not enough (red for critical, green for a write that landed). */
+.island-pill--whisper .island-pill__value {
+  font-weight: 600;
+}
+
+/* On the whisper itself, never inherited: a key press echoed under a red card
+   is not red. */
+.island-pill[data-tone="danger"] .island-pill__value,
+.island-pill[data-tone="danger"] .island-pill__side [role="img"] {
+  color: var(--notch-danger);
+}
+
+.island-pill[data-tone="ok"] .island-pill__side [role="img"] {
+  color: var(--notch-ok);
+}
+
+.island-pill[data-tone="warn"] .island-pill__side [role="img"] {
+  color: var(--notch-warn);
+}
+
+/* The level bar: a track and a fill whose scaleX is a live spring
+   (components/notch/level-bar.tsx). transform only, so a held key costs the
+   compositor and not layout. */
+.level-bar {
+  position: relative;
+  flex: none;
+  width: var(--notch-level-w);
+  height: var(--notch-level-h);
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--notch-track);
+}
+
+.level-bar__fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--notch-ink);
+  transform: scaleX(0);
+  transform-origin: left center;
+  will-change: transform;
+}
+
+/* --- Peek: one extra row under the notch's own ---------------------------
+ * Pulled up into the notch's row like the live pill, so its top row sits beside
+ * the camera and the single extra row is the only height it adds. */
+.drop-pill--toast[data-form="capsule"],
+.drop-pill--toast[data-form="peek"] {
+  --panel-floor: 1;
+}
+
+.drop-pill__body--peek {
+  height: auto;
+  margin-top: calc(-1 * var(--notch-h, 24px));
+  padding: 0;
+  gap: 0;
+}
+
+.peek {
+  display: grid;
+  grid-template-columns: 1fr;
+  width: var(--notch-peek-w);
+  max-width: 100%;
+  color: var(--notch-ink);
+  font: 600 var(--text-notch-meta) / 1 var(--font-notch);
+  animation: peek-in var(--dur-base) var(--ease-out) 90ms both;
+}
+
+.peek__top {
+  display: grid;
+  grid-template-columns: 1fr var(--notch-w, 200px) 1fr;
+  align-items: center;
+  height: max(var(--notch-h, 24px), 24px);
+}
+
+/* A whisper riding the top row spans all three columns, as it does alone. */
+.peek__top > .island-pill {
+  grid-column: 1 / -1;
+}
+
+.peek__side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 8px 0 12px;
+}
+
+.peek__side--end {
+  justify-content: flex-end;
+  padding: 0 12px 0 8px;
+}
+
+.peek__app {
+  overflow: hidden;
+  color: var(--notch-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peek__line {
+  margin: 0;
+  padding: 0 14px 8px;
+  min-height: var(--notch-peek-line);
+  overflow: hidden;
+  font-weight: 500;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peek__line b {
+  font-weight: 650;
+}
+
+/* Pointing at it opens it: the line may wrap, and every button is there. The
+   panel's height follows (useNotchPanel measures the body). */
+.peek[data-open] .peek__line {
+  white-space: normal;
+}
+
+.peek__actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  padding: 0 12px 10px;
+}
+
+/* A peek's action is small: it is the top row's, not a card's. */
+.peek .app-pill {
+  margin-left: 0;
+  padding-block: 3px;
+  font-size: 11px;
+}
+
+[data-tone="danger"] .peek__line b {
+  color: var(--notch-danger);
+}
+
+/* --- Card: today's sticky toast, with the weight of what it is ------------ */
+.toast[data-tier="card"] {
+  flex-wrap: wrap;
+}
+
+.toast__detail {
+  display: block;
+  color: var(--text2);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.toast[data-tier="card"] .toast__text {
+  white-space: normal;
+}
+
+[data-tone="danger"].toast .toast__text {
+  color: var(--notch-danger);
+}
+
+/* A key press over a card: a small capsule under it, never the card replaced. */
+.toast__echo {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.toast__echo .island-pill {
+  display: flex;
+  gap: 8px;
+  height: auto;
+  animation: peek-in var(--dur-fast) var(--ease-out) both;
+}
+
+.toast__echo .island-pill__camera {
+  display: none;
+}

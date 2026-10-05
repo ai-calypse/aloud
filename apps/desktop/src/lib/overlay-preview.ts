@@ -1,5 +1,6 @@
 import type { CardKind, NotchStyle, OverlayStyle, Phase } from "./bindings";
 import type { SectionId } from "@/features/notch/sections";
+import type { TakeoverPreview } from "@/features/overlay/previews";
 
 /**
  * The contract between the motion tuner (tune.html) and the overlay window.
@@ -44,6 +45,18 @@ export type PreviewCommand = {
    * the collapse into the chip; sent at rest, the chip growing out of the notch.
    */
   toast?: "show" | "undo" | "plain";
+  /**
+   * A takeover fixture (`TAKEOVER_PREVIEWS`), routed exactly as Rust's `island`
+   * event is, so the preview is the real routing. `stay` keeps it up for a
+   * screenshot instead of its dwell; `waiting` is the "+N" Rust's line sends.
+   */
+  takeover?: TakeoverPreview;
+  stay?: boolean;
+  waiting?: number;
+  /** Overrides the fixture's level: how a held volume key moves the bar in place. */
+  level?: number;
+  /** The pointer over the notch, which a peek opens on and a whisper with a button too. */
+  hover?: boolean;
   /**
    * The app icon a `card` or `toast` wears: the tuner runs in a browser, which
    * can read no app's icon, so one is handed in (a `data:` URI) to check the slot.

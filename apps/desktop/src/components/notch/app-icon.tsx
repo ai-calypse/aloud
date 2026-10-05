@@ -1,5 +1,6 @@
 import {
   AppWindowIcon,
+  ArrowBigUpDashIcon,
   ArrowDownToLineIcon,
   BatteryIcon,
   BellIcon,
@@ -12,14 +13,22 @@ import {
   ImageIcon,
   HeadphonesIcon,
   KeyboardIcon,
+  LockIcon,
+  MonitorIcon,
+  MoonIcon,
   MouseIcon,
   CameraIcon,
   MicIcon,
   CalendarIcon,
   CoffeeIcon,
   MusicIcon,
+  SunIcon,
   TimerIcon,
   TouchpadIcon,
+  Volume2Icon,
+  VolumeXIcon,
+  WifiIcon,
+  ZapIcon,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -50,6 +59,16 @@ export const GLYPHS: Record<string, LucideIcon> = {
   music: MusicIcon,
   timer: TimerIcon,
   trackpad: TouchpadIcon,
+  // The system takeovers (notch events): HUDs, power, connectivity, privacy.
+  volume: Volume2Icon,
+  mute: VolumeXIcon,
+  brightness: SunIcon,
+  moon: MoonIcon,
+  caps: ArrowBigUpDashIcon,
+  wifi: WifiIcon,
+  bolt: ZapIcon,
+  display: MonitorIcon,
+  lock: LockIcon,
 };
 
 const SIZE = {

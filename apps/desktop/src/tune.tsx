@@ -29,6 +29,7 @@ import { MacFocusGallery } from "./tune-widgets-mac-focus";
 // --- end Mac + Focus widget fixtures ---
 import { AgentsLaunchGallery } from "./tune-widgets-agents-launch";
 import "./styles/notch.css";
+import "./styles/events.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
 
@@ -410,6 +411,69 @@ function Tuner() {
           <p className="mt-2 mb-0 text-caption text-ink-2">
             A toast sent at rest grows out of the notch; Run → toast plays a
             run's panel collapsing into one. Each leaves after 4s, or on ×.
+          </p>
+        </Section>
+
+        <Section title="Notch events">
+          <div className="grid grid-cols-2 gap-1.5">
+            <Action onClick={() => send({ rest: true, takeover: "volume", stay: true })}>
+              Whisper · volume
+            </Action>
+            <Action onClick={() => send({ takeover: "volume", stay: true, level: 20 + Math.round(Math.random() * 70) })}>
+              Whisper · volume key
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "sent", stay: true })}>
+              Whisper · sent
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "sent", stay: true, hover: true })}>
+              Whisper · sent · hover
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "batteryLow", stay: true })}>
+              Whisper · battery 20%
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "shot", stay: true })}>
+              Peek · screenshot
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "shot", stay: true, hover: true })}>
+              Peek · hover
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "timerTyping", stay: true })}>
+              Peek · typing (capsule)
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "batteryCritical" })}>
+              Card · battery 9%
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "failed" })}>
+              Card · failed
+            </Action>
+            <Action
+              onClick={() => {
+                send({ rest: true, takeover: "shot", stay: true });
+                setTimeout(() => send({ takeover: "batteryLow", stay: true }), 200);
+              }}
+            >
+              Peek + whisper on top
+            </Action>
+            <Action
+              onClick={() => {
+                send({ rest: true, takeover: "batteryCritical" });
+                setTimeout(() => send({ takeover: "volume", stay: true }), 200);
+              }}
+            >
+              Card + key echo
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "shot", stay: true, waiting: 3 })}>
+              Peek · +3 waiting
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "volume", stay: true, waiting: 2 })}>
+              Whisper · +2 waiting
+            </Action>
+            <Action onClick={() => send({ rest: true, waiting: 2 })}>Bare notch · +2</Action>
+          </div>
+          <p className="mt-2 mb-0 text-caption text-ink-2">
+            Each is the real routing (the same path Rust's island event takes),
+            held on screen instead of leaving on its dwell. Whisper · volume key
+            moves the bar in place on its live spring.
           </p>
         </Section>
 

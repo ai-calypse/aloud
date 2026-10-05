@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { Island } from "@/lib/bindings";
-import { applyIsland, islandRole, pillSides, PILL_MAX } from "./islands";
+import {
+  applyIsland,
+  capsuleText,
+  dwellMs,
+  isCapsule,
+  islandRole,
+  islandTone,
+  levelOf,
+  opensOnHover,
+  pillSides,
+  PILL_MAX,
+  takeoverTier,
+} from "./islands";
 
 const island = (id: string, detail = ""): Island => ({
   id,
@@ -80,5 +92,63 @@ describe("islandRole", () => {
   it("leaves an owner with no role, and an urgent island, in the shared ink", () => {
     expect(islandRole(island("toast:3"))).toBeUndefined();
     expect(islandRole({ ...island("battery"), priority: "urgent" })).toBeUndefined();
+  });
+});
+
+describe("takeovers", () => {
+  const alert = (patch: Partial<Island> = {}): Island => ({
+    ...island("toast:1", "Sent"),
+    kind: "alert",
+    ...patch,
+  });
+
+  // Every push made before tiers must keep working: an alert is a peek, a
+  // live island is not a takeover at all.
+  it("maps an island with no tier by its kind", () => {
+    expect(takeoverTier(alert())).toBe("peek");
+    expect(takeoverTier(island("agents"))).toBeNull();
+    expect(takeoverTier(alert({ tier: "whisper" }))).toBe("whisper");
+  });
+
+  it("draws a whisper, or a shrunk peek, as a capsule — never a bigger one", () => {
+    expect(isCapsule(alert({ tier: "whisper" }))).toBe(true);
+    expect(isCapsule(alert({ tier: "peek", shrunk: true }))).toBe(true);
+    expect(isCapsule(alert({ tier: "card" }))).toBe(false);
+    expect(isCapsule(alert())).toBe(false);
+  });
+
+  it("opens a capsule on hover only when there is something behind it", () => {
+    expect(opensOnHover(alert({ tier: "whisper" }))).toBe(false);
+    const undo = { label: "Undo", action: "files.undoTidy", args: {} };
+    expect(opensOnHover(alert({ tier: "whisper", actions: [undo] }))).toBe(true);
+    expect(opensOnHover(alert({ tier: "peek", shrunk: true }))).toBe(true);
+  });
+
+  it("dwells 1.8 s as a whisper, 4 s as a peek, never as a card", () => {
+    expect(dwellMs(alert({ tier: "whisper" }))).toBe(1800);
+    expect(dwellMs(alert())).toBe(4000);
+    expect(dwellMs(alert({ tier: "card" }))).toBeNull();
+    expect(dwellMs(alert({ tier: "whisper", dwellMs: 1500 }))).toBe(1500);
+  });
+
+  // The bar is drawn from this: a volume key repeating past the end must not
+  // push the fill outside its track.
+  it("keeps a level inside the bar", () => {
+    expect(levelOf(alert({ level: 140 }))).toBe(100);
+    expect(levelOf(alert({ level: -3 }))).toBe(0);
+    expect(levelOf(alert())).toBeNull();
+  });
+
+  it("says its one word, else its level, else its title", () => {
+    expect(capsuleText(alert({ short: "20%", level: 20 }))).toBe("20%");
+    expect(capsuleText(alert({ level: 64.4 }))).toBe("64");
+    expect(capsuleText(alert({ title: "Muted" }))).toBe("Muted");
+  });
+
+  it("speaks red for what is critical and green for a write that landed", () => {
+    expect(islandTone(alert({ id: "mac:battery-low" }))).toBe("danger");
+    expect(islandTone(alert({ id: "x", priority: "urgent" }))).toBe("danger");
+    expect(islandTone(alert({ id: "toast:3" }))).toBe("ok");
+    expect(islandTone(alert({ id: "shot:/tmp/a.png" }))).toBeUndefined();
   });
 });

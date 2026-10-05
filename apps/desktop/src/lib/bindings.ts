@@ -1209,7 +1209,7 @@ export type Island = {
 	dismissible?: boolean,
 	/**
 	 *  The size of the takeover. None is what every push made before tiers
-	 *  means: an alert is a [`Tier::Peek`], and a live island is no takeover
+	 *  means: an alert is a [`IslandTier::Peek`], and a live island is no takeover
 	 *  at all — see [`Island::takeover_tier`].
 	 */
 	tier?: IslandTier | null,
@@ -1273,7 +1273,7 @@ export type IslandKind =
  *  Now › Overview while it lasts.
  */
 "live" | 
-/**  Just happened: a takeover, drawn at its [`Tier`]'s size, then gone. */
+/**  Just happened: a takeover, drawn at its [`IslandTier`]'s size, then gone. */
 "alert";
 
 /**  What it costs to miss. Declared in rank order, so `Ord` is the ranking. */
