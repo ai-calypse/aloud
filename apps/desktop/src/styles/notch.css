@@ -202,3 +202,80 @@
 .notch-shell :is(.agents, .agent-detail) {
   font-family: var(--font-notch-mono);
 }
+
+/* --- The Widgets look (components/notch/widgets) -------------------------
+ * Sizes are the one thing a utility cannot say without an arbitrary value, so
+ * they are rules over tokens: small, medium and large as Apple draws them,
+ * scaled together by --notch-w-scale. Colours are the `widget-*` utilities. */
+.notch-widget {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  translate: 0 0;
+  transition: translate var(--dur-fast) var(--ease-out);
+}
+
+.notch-widget[data-size="small"] {
+  width: var(--notch-w-small);
+  height: var(--notch-w-small);
+}
+
+.notch-widget[data-size="medium"] {
+  width: var(--notch-w-medium);
+  height: var(--notch-w-small);
+}
+
+.notch-widget[data-size="large"] {
+  width: var(--notch-w-medium);
+  height: var(--notch-w-large);
+}
+
+/* A board: four small tiles across, each row a tile and the label under it. */
+.notch-board {
+  display: grid;
+  grid-template-columns: repeat(4, var(--notch-w-small));
+  grid-auto-rows: calc(var(--notch-w-small) + 24px);
+  grid-auto-flow: dense;
+  gap: 12px var(--notch-w-gap);
+  justify-content: center;
+}
+
+/* A lift on the whole tile, for the ones that open something. */
+.notch-widget[data-actionable]:hover {
+  translate: 0 -1px;
+}
+
+/* The ring that drains in real time. Its fill is a spring (set from JS) in
+   every other mode. */
+.notch-ring__arc[data-motion="drain"] {
+  transition: stroke-dashoffset var(--dur-drain) linear;
+}
+
+/* --- Islands, in the widgets look ----------------------------------------
+ * Only colour changes (the type already follows --font-notch, which the look
+ * rebinds); the closed notch's geometry and behaviour are the shared ones
+ * above. An island with a role (islandRole) speaks in that
+ * accent's ink, the accent-ink rule that keeps words at AA. */
+[data-notch-style="widgets"] .island-pill__item[data-w-role] .island-pill__detail:not([data-urgent]) {
+  color: var(--w-ink);
+}
+
+/* A rolling numeral: each digit is a window one em tall over a column of ten,
+   so the slide distance is the font's own em at any size. */
+.notch-numeral {
+  display: inline-flex;
+  height: 1em;
+  overflow: hidden;
+}
+
+.notch-numeral__digit {
+  display: inline-block;
+  height: 1em;
+  overflow: hidden;
+}
+
+.notch-numeral__cell {
+  display: block;
+  height: 1em;
+  line-height: 1;
+}

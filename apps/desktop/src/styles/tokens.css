@@ -193,7 +193,155 @@
   --radius-notch-row: 8px; /* a row's hover fill */
   --radius-notch-track: 9px; /* a segmented control's outer track */
   --radius-notch-panel: 24px; /* the panel's bottom corners, fully open */
+
+  /* --- The Widgets look ----------------------------------------------------
+     Apple's widget library, read from the CarPlay Design System Figma file
+     (docs/design/figma-carplay-index.md). Raw values only here: nothing reads
+     them until the overlay root says data-notch-style="widgets", and Calm
+     never does. Components use the `w-*` utilities (index.css), and a
+     widget's accent comes from its role (below), never from a hex. */
+
+  /* Surfaces */
+  --notch-w-tile: #1c1c1e; /* Calendar, Reminders, Notes, Screen Time */
+  --notch-w-tile-2: #252525; /* the "vibrant" tile: Batteries, Files, Clock */
+  --notch-w-tile-deep: #0c0c0c; /* Fitness; Sleep is black */
+  --notch-w-neutral-track: #48484a; /* a bar or ring with no hue of its own */
+  --notch-w-sep: #323234; /* separators, grid lines */
+  --notch-w-radio: #464648; /* an unchecked reminder */
+
+  /* Text. Tertiary #69686d is 3.1:1 on the tile: decoration, never words. */
+  --notch-w-ink: #ffffff;
+  --notch-w-ink-2: #8e8d93; /* 5.2:1 on the tile */
+  --notch-w-ink-3: #69686d;
+  --notch-w-label: #ebebf5; /* the label under a tile */
+  /* Text on a solid accent fill (a play pill, a lit chip) */
+  --notch-w-on: #0b0b0c;
+
+  /* Accent roles, by app. Rings and fills clear 3:1; words in an accent go
+     through the accent-ink rule below, because the Figma reds, blue and purple
+     are 4.2 to 5:1 on the tile. */
+  --notch-w-calendar: #ff4539; /* Calendar and Reminders red: the date */
+  --notch-w-ok: #34c85a; /* Batteries charge, Stocks up */
+  --notch-w-media: #ff4f65; /* Music */
+  --notch-w-media-meta: #fdcde5;
+  --notch-w-podcast: #c340ff;
+  --notch-w-podcast-meta: #feaaff;
+  --notch-w-move: #f9104f; /* Fitness Move: the draining timer */
+  --notch-w-move-track: #3a171d;
+  --notch-w-exercise: #a7fe01;
+  --notch-w-exercise-track: #1e3719;
+  --notch-w-stand: #00fff5;
+  --notch-w-stand-track: #163239;
+  --notch-w-blue: #0983fe; /* Screen Time categories */
+  --notch-w-cyan: #3fc7df;
+  --notch-w-orange: #fea00a;
+  --notch-w-sleep: #63e6e1;
+  --notch-w-sun: #ffd409; /* Weather */
+  --notch-w-info: #0a84ff; /* Maps location blue */
+  --notch-w-agent: #7d7aff; /* not in the file: system indigo, light */
+
+  /* Calendar event cards: fill, title, time, leading bar. Green and yellow are
+     Figma's; red and blue are the prototype's, for the rest of a calendar. */
+  --notch-w-ev-green-bg: #1f4013;
+  --notch-w-ev-green-title: #97e37d;
+  --notch-w-ev-green-time: #7abd62;
+  --notch-w-ev-green-bar: #9ae77e;
+  --notch-w-ev-yellow-bg: #4b3d04;
+  --notch-w-ev-yellow-title: #f5d04b;
+  --notch-w-ev-yellow-time: #c9aa3a;
+  --notch-w-ev-yellow-bar: #ffda50;
+  --notch-w-ev-red-bg: #4a1620;
+  --notch-w-ev-red-title: #ff7a8e;
+  --notch-w-ev-red-time: #d9566b;
+  --notch-w-ev-red-bar: #ff375f;
+  --notch-w-ev-blue-bg: #10304f;
+  --notch-w-ev-blue-title: #6cb8ff;
+  --notch-w-ev-blue-time: #4d90d3;
+  --notch-w-ev-blue-bar: #0a84ff;
+
+  /* The accent-ink rule: words in an accent are the accent mixed this far
+     toward white; an unfilled track is the accent's own hue at this strength
+     over the tile (Figma's Move track #3A171D under #F9104F). */
+  --notch-w-ink-mix: 68%;
+  --notch-w-track-mix: 22%;
+
+  /* The gauge treatment (`live`): one theme hue, the tile its deepest shade,
+     ring and numerals its lightest tint (Figma's dashboards). */
+  --notch-w-live-tile-mix: 22%; /* accent over black: the deepest shade */
+  --notch-w-live-ring-mix: 78%; /* accent toward white: the lightest tint */
+
+  /* Type. SF is the system face, so this look is a Mac one: it costs no font
+     file, and Windows falls through to system-ui. Rounded only where the Figma
+     file says (Fitness lines). */
+  --font-notch-w: -apple-system, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+  --font-notch-w-rounded: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+  --text-notch-w-numeral-s: 32px; /* calendar date: Display Light */
+  --text-notch-w-numeral-m: 40px;
+  --text-notch-w-numeral-l: 46px; /* battery, weather: Display Light/Regular */
+  --text-notch-w-numeral-xl: 56px;
+  --text-notch-w-title: 13px; /* event and row titles: Text Semibold */
+  --text-notch-w-meta: 12px; /* times and labels: Text Medium */
+  --text-notch-w-over: 11px; /* overlines, the label under a tile: Semibold */
+  --tracking-notch-w-numeral: -0.02em; /* Light numerals sit tighter */
+
+  /* Widget sizes, in points, as Apple draws them. One variable scales the lot
+     (a 4-up board in the 780 panel wants 1.04); `zoom` is not used because it
+     rescales layout in WebKit unevenly and breaks measured heights. */
+  --notch-w-scale: 1;
+  --notch-w-small: calc(158px * var(--notch-w-scale));
+  --notch-w-medium: calc(338px * var(--notch-w-scale));
+  --notch-w-large: calc(354px * var(--notch-w-scale));
+  --notch-w-gap: calc(22px * var(--notch-w-scale));
+  --radius-notch-w-tile: 22px;
+  --radius-notch-w-card: 5px; /* an event card; its bar is 3px */
 }
+
+/* The look itself: the panel's chrome speaks SF too. Calm has no rule here, so
+   it cannot move. */
+[data-notch-style="widgets"] {
+  --font-notch: var(--font-notch-w);
+}
+
+/* A widget's accent and everything derived from it. `data-w-role` is set on a
+   frame, a ring or an island item; descendants inherit the three variables.
+   Move, Exercise and Stand carry Figma's explicit track colours; every other
+   role derives its track by the rule above. */
+[data-w-role] {
+  --w-ring: var(--w-acc);
+  --w-ink: color-mix(in srgb, var(--w-acc) var(--notch-w-ink-mix), white);
+  --w-track: color-mix(in srgb, var(--w-acc) var(--notch-w-track-mix), var(--notch-w-tile));
+}
+[data-w-role="calendar"] { --w-acc: var(--notch-w-calendar); }
+[data-w-role="ok"] { --w-acc: var(--notch-w-ok); }
+[data-w-role="media"] { --w-acc: var(--notch-w-media); }
+[data-w-role="podcast"] { --w-acc: var(--notch-w-podcast); }
+[data-w-role="move"] { --w-acc: var(--notch-w-move); --w-track: var(--notch-w-move-track); }
+[data-w-role="exercise"] { --w-acc: var(--notch-w-exercise); --w-track: var(--notch-w-exercise-track); }
+[data-w-role="stand"] { --w-acc: var(--notch-w-stand); --w-track: var(--notch-w-stand-track); }
+[data-w-role="blue"] { --w-acc: var(--notch-w-blue); }
+[data-w-role="cyan"] { --w-acc: var(--notch-w-cyan); }
+[data-w-role="orange"] { --w-acc: var(--notch-w-orange); }
+[data-w-role="sleep"] { --w-acc: var(--notch-w-sleep); }
+[data-w-role="sun"] { --w-acc: var(--notch-w-sun); }
+[data-w-role="info"] { --w-acc: var(--notch-w-info); }
+[data-w-role="agent"] { --w-acc: var(--notch-w-agent); }
+/* Light accents (Exercise, Stand, Sleep, Sun) are already AA as words. */
+[data-w-role="exercise"], [data-w-role="stand"], [data-w-role="sleep"], [data-w-role="sun"] { --w-ink: var(--w-acc); }
+
+/* A frame's `live` gauge treatment: the tile takes the deepest shade, and the
+   ink, ring and track the lightest tint. */
+[data-w-live] {
+  --w-tile: color-mix(in srgb, var(--w-acc) var(--notch-w-live-tile-mix), black);
+  --w-ink: color-mix(in srgb, var(--w-acc) var(--notch-w-live-ring-mix), white);
+  --w-ring: var(--w-ink);
+  --w-track: color-mix(in srgb, var(--w-acc) 35%, var(--w-tile));
+}
+
+/* An event card's four colours, by its calendar colour. */
+[data-w-event="green"] { --w-ev-bg: var(--notch-w-ev-green-bg); --w-ev-title: var(--notch-w-ev-green-title); --w-ev-time: var(--notch-w-ev-green-time); --w-ev-bar: var(--notch-w-ev-green-bar); }
+[data-w-event="yellow"] { --w-ev-bg: var(--notch-w-ev-yellow-bg); --w-ev-title: var(--notch-w-ev-yellow-title); --w-ev-time: var(--notch-w-ev-yellow-time); --w-ev-bar: var(--notch-w-ev-yellow-bar); }
+[data-w-event="red"] { --w-ev-bg: var(--notch-w-ev-red-bg); --w-ev-title: var(--notch-w-ev-red-title); --w-ev-time: var(--notch-w-ev-red-time); --w-ev-bar: var(--notch-w-ev-red-bar); }
+[data-w-event="blue"] { --w-ev-bg: var(--notch-w-ev-blue-bg); --w-ev-title: var(--notch-w-ev-blue-title); --w-ev-time: var(--notch-w-ev-blue-time); --w-ev-bar: var(--notch-w-ev-blue-bar); }
 
 /* macOS Accessibility → "Reduce transparency". Handled in the palette so any
  * surface coloured from a token is covered; blurs drop in overlay.css.

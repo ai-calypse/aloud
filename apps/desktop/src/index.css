@@ -150,4 +150,43 @@
   --radius-notch-row: var(--radius-notch-row);
   --radius-notch-track: var(--radius-notch-track);
   --radius-notch-panel: var(--radius-notch-panel);
+
+  /* The Widgets look (tokens.css, `--notch-w-*`). `widget-` utilities read the
+     per-widget variables a role sets (`data-w-role`), with the neutral value
+     as the fallback, so a frame with no role still draws. */
+  --color-widget-tile: var(--w-tile, var(--notch-w-tile));
+  --color-widget-tile-2: var(--notch-w-tile-2);
+  --color-widget-tile-deep: var(--notch-w-tile-deep);
+  --color-widget-neutral-track: var(--notch-w-neutral-track);
+  --color-widget-sep: var(--notch-w-sep);
+  --color-widget-radio: var(--notch-w-radio);
+  --color-widget-ink: var(--notch-w-ink);
+  --color-widget-ink-2: var(--notch-w-ink-2);
+  --color-widget-ink-3: var(--notch-w-ink-3);
+  --color-widget-label: var(--notch-w-label);
+  --color-widget-on: var(--notch-w-on);
+  --color-widget-calendar: var(--notch-w-calendar);
+  --color-widget-media-meta: var(--notch-w-media-meta);
+  --color-widget-podcast-meta: var(--notch-w-podcast-meta);
+  --color-widget-acc: var(--w-acc, var(--notch-w-ink));
+  --color-widget-acc-ink: var(--w-ink, var(--notch-w-ink));
+  --color-widget-ring: var(--w-ring, var(--w-acc, var(--notch-w-ink)));
+  --color-widget-track: var(--w-track, var(--notch-w-neutral-track));
+  --color-widget-ev-bg: var(--w-ev-bg);
+  --color-widget-ev-title: var(--w-ev-title);
+  --color-widget-ev-time: var(--w-ev-time);
+  --color-widget-ev-bar: var(--w-ev-bar);
+
+  --font-notch-w: var(--font-notch-w);
+  --font-notch-w-rounded: var(--font-notch-w-rounded);
+  --text-notch-w-numeral-s: var(--text-notch-w-numeral-s);
+  --text-notch-w-numeral-m: var(--text-notch-w-numeral-m);
+  --text-notch-w-numeral-l: var(--text-notch-w-numeral-l);
+  --text-notch-w-numeral-xl: var(--text-notch-w-numeral-xl);
+  --text-notch-w-title: var(--text-notch-w-title);
+  --text-notch-w-meta: var(--text-notch-w-meta);
+  --text-notch-w-over: var(--text-notch-w-over);
+  --tracking-notch-w-numeral: var(--tracking-notch-w-numeral);
+  --radius-notch-w-tile: var(--radius-notch-w-tile);
+  --radius-notch-w-card: var(--radius-notch-w-card);
 }

@@ -14,6 +14,10 @@
   --dur-base: 240ms;
   --dur-slow: 400ms;
   --dur-slower: 560ms;
+  /* A ring draining in real time: one tick of the clock it shows. Fixed, not
+     a spring, because nothing redirects it mid-flight and a linear drain reads
+     as time passing rather than as a value settling. */
+  --dur-drain: 1000ms;
 
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-glide: cubic-bezier(0.32, 0.72, 0, 1);
@@ -82,6 +86,7 @@
     --dur-base: 1ms;
     --dur-slow: 1ms;
     --dur-slower: 1ms;
+    --dur-drain: 1ms;
 
     /* The sweep below only reaches animation/transition-duration; a JS-driven
        spring (lib/spring.ts) reads these vars and must be told directly. */
