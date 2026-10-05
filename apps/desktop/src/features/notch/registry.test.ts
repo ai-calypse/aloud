@@ -27,4 +27,24 @@ describe("registry widget views", () => {
       }
     }
   });
+
+  // A widget view is a second drawing of a subsection, never a replacement:
+  // the calm view is what Calm shows and what the look falls back to.
+  it("keeps a calm view behind every widget view", () => {
+    for (const section of SECTIONS) {
+      for (const sub of section.subsections) {
+        if (sub.widgetView) expect(sub.view, `${section.id}/${sub.id}`).toBeDefined();
+      }
+    }
+  });
+
+  it("draws every Media subsection in the widgets look", () => {
+    const media = READY.find((s) => s.id === "media");
+    expect(media?.subsections.map((s) => [s.id, s.widgetView !== undefined])).toEqual([
+      ["playing", true],
+      ["lyrics", true],
+      ["sound", true],
+      ["devices", true],
+    ]);
+  });
 });
