@@ -18,6 +18,7 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "./index.css";
 import { WidgetGallery } from "./tune-widgets";
+import { MediaWidgetGallery } from "./tune-widgets-media"; // fixtures: Media widgets
 import "./styles/notch.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
@@ -669,6 +670,12 @@ function NotchGallery() {
         <Specimen name="Widgets look" note="the Settings › Overlay option: Apple-style tiles; primitives, the Home board, empty and urgent states">
           <WidgetGallery />
         </Specimen>
+
+        {/* --- FIXTURES: Media widgets (tune-widgets-media.tsx). Made-up data, tune page only. --- */}
+        <Specimen name="Widgets look · Media" note="Now Playing, Lyrics, Sound and Devices as widgets, every state; fixtures, never the app">
+          <MediaWidgetGallery />
+        </Specimen>
+        {/* --- end FIXTURES --- */}
 
         <Specimen name="Empty" note="a view with nothing to show teaches what fills it">
           <Empty

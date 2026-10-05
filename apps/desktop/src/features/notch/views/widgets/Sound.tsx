@@ -124,7 +124,7 @@ export function RouteTile({
         <Glyph aria-hidden className="size-6" strokeWidth={1.6} />
         <div className="min-w-0">
           <div className="truncate text-notch-w-headline leading-tight font-semibold">{output.name}</div>
-          <div className="truncate text-notch-w-meta font-medium text-widget-ink-2">{outputLine(output)}</div>
+          <div className="line-clamp-2 text-notch-w-meta leading-tight font-medium text-widget-ink-2">{outputLine(output)}</div>
         </div>
       </div>
     </WidgetFrame>
@@ -152,7 +152,7 @@ function DeviceTile({
       {devices.length === 0 ? (
         <Notice icon={<MicIcon strokeWidth={1.6} />} title={`No ${label.toLowerCase()} devices`} />
       ) : (
-        <div role="radiogroup" aria-label={`${label} devices`} className="flex h-full flex-col overflow-y-auto px-3.5">
+        <div role="radiogroup" aria-label={`${label} devices`} className="flex h-full flex-col overflow-y-auto px-3.5 py-1.5">
           {devices.map((device) => (
             <button
               key={device.id}

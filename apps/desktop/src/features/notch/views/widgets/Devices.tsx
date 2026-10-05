@@ -204,7 +204,7 @@ function RingsTile({ levels: all }: { levels: Level[] }) {
                   <Glyph aria-hidden className="size-5 text-widget-ink" strokeWidth={1.8} />
                 </Ring>
                 <span className="text-notch-w-headline leading-tight font-light tabular-nums">{l.percent}%</span>
-                <span className="w-full truncate text-center text-notch-w-over leading-tight font-medium text-widget-ink-2">
+                <span className="w-full truncate px-0.5 text-center text-notch-w-over leading-tight font-medium text-widget-ink-2">
                   {l.name}
                 </span>
               </li>

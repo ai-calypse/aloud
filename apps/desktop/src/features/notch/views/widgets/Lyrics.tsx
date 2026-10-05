@@ -207,8 +207,8 @@ const TICK_MS = 250;
 
 const TONE: Record<LineTone, string> = {
   current: "text-widget-ink",
-  near: "text-widget-ink/75",
-  far: "text-widget-ink/60",
+  near: "text-widget-ink/65",
+  far: "text-widget-ink/50",
 };
 
 /**

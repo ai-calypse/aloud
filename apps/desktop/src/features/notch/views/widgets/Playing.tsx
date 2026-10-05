@@ -119,11 +119,14 @@ export function PlayingBoard({
   return (
     <WidgetBoard label="Now Playing">
       <PlayingTile now={now} readAt={readAt} art={art} icon={icon} controls={controls} />
-      <RouteTile size="medium" sound={sound} onOpen={onOpenSound} />
-      {browsers.length > 0 && (
-        <WidgetFrame size="medium" label="Browsers">
+      {browsers.length > 0 ? (
+        // The fix is several sentences: it takes the whole right half rather
+        // than a tile that would hide most of it behind a scroll.
+        <WidgetFrame size="large" label="Browsers">
           <BrowserNotice issues={browsers} compact />
         </WidgetFrame>
+      ) : (
+        <RouteTile size="medium" sound={sound} onOpen={onOpenSound} />
       )}
     </WidgetBoard>
   );
@@ -247,8 +250,8 @@ export function PlayingTile({
   const meta = role === "podcast" ? "text-widget-podcast-meta" : "text-widget-media-meta";
   return (
     <WidgetFrame size="large" label={sourceLabel(now)} accent={role} ground="accent">
-      <div className="flex h-full flex-col gap-3 p-3.5">
-        <div className="flex gap-3.5">
+      <div className="flex h-full flex-col">
+        <div className="flex gap-3.5 p-3.5">
           {art ? (
             <img src={art} alt="" draggable={false} className="size-32 shrink-0 rounded-notch-row object-cover" />
           ) : (
@@ -272,17 +275,17 @@ export function PlayingTile({
             <span className="truncate text-notch-w-meta leading-tight text-widget-ink/85">
               {web ? plainHost(now.source.host) : now.album}
             </span>
+            <span className="mt-1.5 flex h-6 w-fit max-w-full items-center gap-1.5 rounded-full bg-widget-ink/15 pr-2.5 pl-1.5 text-notch-w-meta font-semibold">
+              <AppIcon icon={icon} label="" size="sm" />
+              <span className="truncate">
+                {web || now.player === "mediaRemote" ? shortName(now.source.app) : now.source.app}
+              </span>
+            </span>
           </div>
         </div>
 
-        <span className="flex h-6 w-fit max-w-full items-center gap-1.5 rounded-full bg-widget-ink/15 pr-2.5 pl-1.5 text-notch-w-meta font-semibold">
-          <AppIcon icon={icon} label="" size="sm" />
-          <span className="truncate">
-            {web || now.player === "mediaRemote" ? shortName(now.source.app) : now.source.app}
-          </span>
-        </span>
-
-        <div className="mt-auto flex flex-col gap-1.5">
+        {/* The lower band, where Apple's widget lists what was played: the scrubber and the transport. */}
+        <div className="flex flex-1 flex-col justify-center gap-4 bg-widget-tile/30 p-3.5">
           <Scrubber now={now} readAt={readAt} onSeek={controls.seek} />
           <div className="flex items-center justify-center gap-2">
             <Round
