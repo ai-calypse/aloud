@@ -11,16 +11,16 @@ import { shellIntent } from "./keys";
 import { Palette } from "./Palette";
 import type { PaletteEntry } from "./search";
 import { READY, SECTIONS } from "./registry";
-import { resolveNav, sectionForShortcut, stepSubsection, type Nav } from "./sections";
+import {
+  panelWidth,
+  resolveNav,
+  sectionForShortcut,
+  stepSubsection,
+  viewFor,
+  type Nav,
+} from "./sections";
 
 const PANEL_ID = "notch-panel";
-
-/**
- * The body's width. 640 holds up to six labelled section tabs plus ⌘K and
- * close; all nine need the prototype's 780 (measured in Geist at 13px). Fixed
- * per build, from the registry, so it never changes while the app runs.
- */
-const WIDTH = READY.length > 6 ? 780 : 640;
 
 /**
  * The expanded notch panel: section tabs, the open section's subsections with
@@ -34,6 +34,7 @@ const WIDTH = READY.length > 6 ? 780 : 640;
  */
 export function NotchShell({ nav }: { nav: Nav }) {
   const { navigate, close, palette, setPalette, ...data } = useNotch();
+  const width = panelWidth(READY.length, data.style);
   const body = useRef<HTMLDivElement>(null);
   const place = resolveNav(READY, nav);
   // Read by the key handler, which subscribes once rather than per render.
@@ -76,7 +77,7 @@ export function NotchShell({ nav }: { nav: Nav }) {
 
   if (!place) return null;
   const { section, sub } = place;
-  const View = sub.view!;
+  const View = viewFor(sub, data.style)!;
   const status = section.status?.(data) ?? "";
   // One index across every subsection, so Materialize enters from the side
   // the user moved towards whether they changed section or subsection.
@@ -91,7 +92,7 @@ export function NotchShell({ nav }: { nav: Nav }) {
   };
 
   return (
-    <div className="notch-shell flex flex-col font-notch text-notch-ink" style={{ width: WIDTH }}>
+    <div className="notch-shell flex flex-col font-notch text-notch-ink" style={{ width }}>
       <header className="flex items-center gap-1 border-b border-notch-sep px-3.5">
         <SectionTabs
           className="flex-1"

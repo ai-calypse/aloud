@@ -16,6 +16,7 @@ import {
   type ApprovalReply,
   type Island,
   type IslandAction,
+  type NotchStyle,
   type OverlayStyle,
   type Phase,
 } from "./lib/bindings";
@@ -144,6 +145,11 @@ function Overlay() {
   const [catImages, setCatImages] = useState(true);
   const [catImagesDictation, setCatImagesDictation] = useState(true);
   const [catImagesAgents, setCatImagesAgents] = useState(true);
+  // The notch's look. Calm until Settings says otherwise (the default in
+  // `Settings`); `?notchStyle=widgets` shows the other in the browser preview.
+  const [notchStyle, setNotchStyle] = useState<NotchStyle>(
+    new URLSearchParams(location.search).get("notchStyle") === "widgets" ? "widgets" : "calm",
+  );
   // The enlarged cat preview: the stage + session it belongs to (from which the
   // image and caption derive) and the on-screen box to grow it from. Rendered
   // fixed at the root so it escapes the list's scroll clip; a 48px avatar hover
@@ -372,7 +378,7 @@ function Overlay() {
     }
   }, []);
 
-  // Read the cat toggles from Settings. Called on mount and on each style event
+  // Read the cat toggles and the notch look from Settings. Called on mount and on each style event
   // and new dictation; `invoke` throws synchronously in the browser preview
   // (no Tauri), where the defaults stand.
   const refreshCatSettings = useCallback(() => {
@@ -381,6 +387,7 @@ function Overlay() {
         setCatImages(s.catImages ?? true);
         setCatImagesDictation(s.catImagesDictation ?? true);
         setCatImagesAgents(s.catImagesAgents ?? true);
+        setNotchStyle(s.notchStyle ?? "calm");
       });
     } catch {
       /* browser preview: no Tauri, keep the defaults */
@@ -1144,6 +1151,7 @@ function Overlay() {
       className="overlay-root"
       ref={root}
       data-exiting={dismissing || undefined}
+      data-notch-style={notchStyle}
       // Belt-and-suspenders close. The primary popover dismiss is now
       // focus-loss in Rust (`dismiss_on_focus_loss`) — a click outside the
       // panel rect reaches the app behind *and* resigns the overlay's key
@@ -1273,6 +1281,7 @@ function Overlay() {
                 sessions,
                 permissions,
                 islands,
+                style: notchStyle,
                 act: actOnIsland,
                 selected,
                 select: setSelected,

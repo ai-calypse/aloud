@@ -10,6 +10,7 @@ import {
 } from "../../lib/bindings";
 import { or } from "../../lib/result";
 import { HotkeyEditor } from "./HotkeyEditor";
+import { NotchStyleChoice } from "./NotchStyleChoice";
 import { MacroEditor } from "./MacroEditor";
 import { TermListEditor } from "./TermListEditor";
 import { AppRuleEditor } from "./AppRuleEditor";
@@ -600,6 +601,15 @@ export function SettingsView({
           </Group>
 
           <Group title="Overlay">
+            {/* SF is the system face, so the look is a Mac one: Windows has no
+                Apple type to draw it in. */}
+            {IS_MAC && (
+              <NotchStyleChoice
+                value={settings.notchStyle ?? "calm"}
+                onChange={(notchStyle) => update({ notchStyle })}
+              />
+            )}
+
             <Row
               label="Open notch for permissions"
               hint="A coding agent asking to run something opens the notch by itself so the request is not missed. Off: the request waits quietly — hovering the notch shows it, and the agent keeps waiting either way."

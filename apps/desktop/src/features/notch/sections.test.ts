@@ -4,8 +4,11 @@ import {
   readySections,
   resolveNav,
   sectionForShortcut,
+  panelWidth,
   stepSubsection,
+  viewFor,
   type Section,
+  type Subsection,
 } from "./sections";
 
 const View = () => null;
@@ -82,5 +85,43 @@ describe("stepSubsection", () => {
     expect(stepSubsection(agents, "voice", 1)).toBe("coding");
     expect(stepSubsection(agents, "coding", 1)).toBe("voice");
     expect(stepSubsection(agents, "voice", -1)).toBe("coding");
+  });
+});
+
+describe("viewFor", () => {
+  const calm = () => null;
+  const widgets = () => null;
+  const both: Subsection = { id: "x", name: "x", ready: true, view: calm, widgetView: widgets };
+  const calmOnly: Subsection = { id: "y", name: "y", ready: true, view: calm };
+
+  it("prefers the widget view in the widgets look", () => {
+    expect(viewFor(both, "widgets")).toBe(widgets);
+  });
+
+  it("keeps the calm view in the calm look even when a widget view exists", () => {
+    expect(viewFor(both, "calm")).toBe(calm);
+  });
+
+  // The failure guarded: a subsection nobody drew as widgets going blank.
+  it("falls back to the calm view when there is no widget view", () => {
+    expect(viewFor(calmOnly, "widgets")).toBe(calm);
+  });
+
+  it("a widget view alone does not make a subsection ready", () => {
+    const widgetOnly: Section[] = [
+      { ...section("now", []), subsections: [{ id: "z", name: "z", ready: true, widgetView: widgets }] },
+    ];
+    expect(readySections(widgetOnly)).toEqual([]);
+  });
+});
+
+describe("panelWidth", () => {
+  it("keeps the calm widths: 640 up to six sections, 780 beyond", () => {
+    expect(panelWidth(6, "calm")).toBe(640);
+    expect(panelWidth(7, "calm")).toBe(780);
+  });
+
+  it("is 780 in the widgets look however few sections are ready", () => {
+    expect(panelWidth(2, "widgets")).toBe(780);
   });
 });

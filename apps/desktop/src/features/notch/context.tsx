@@ -5,6 +5,7 @@ import type {
   ApprovalReply,
   Island,
   IslandAction,
+  NotchStyle,
 } from "@/lib/bindings";
 import type { Run } from "@/lib/agent-steps";
 import type { PeekFn } from "@/features/overlay/agentIdentity";
@@ -25,6 +26,8 @@ export type NotchData = {
   permissions: AgentPermission[];
   /** The island queue, ranked by Rust. */
   islands: Island[];
+  /** The look chosen in Settings: calm (default) or widgets. */
+  style: NotchStyle;
 };
 
 export type NotchContextValue = NotchData & {
