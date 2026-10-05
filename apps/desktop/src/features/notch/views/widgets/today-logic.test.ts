@@ -1,0 +1,228 @@
+import { describe, expect, it } from "vitest";
+import type { Event as CalendarEvent, Reminder } from "@/lib/bindings";
+import {
+  dayLabel,
+  GRID_HOURS,
+  hourLabel,
+  layoutDay,
+  monthGrid,
+  moreLabel,
+  moveOf,
+  nowLine,
+  rangeBar,
+  reminderCounts,
+  splitAgenda,
+  toneFor,
+  weekRange,
+  windowStart,
+} from "./today-logic";
+
+const HOUR = 3_600_000;
+// 2026-10-04 is a Sunday; local midnight keeps the tests in the machine's own zone.
+const DAY = new Date(2026, 9, 4).getTime();
+const at = (h: number, m = 0) => DAY + h * HOUR + m * 60_000;
+
+const event = (id: string, from: number, to: number, extra: Partial<CalendarEvent> = {}): CalendarEvent => ({
+  id,
+  title: id,
+  start: from,
+  end: to,
+  allDay: false,
+  location: null,
+  joinUrl: null,
+  calendar: "Work",
+  ...extra,
+});
+
+describe("splitAgenda", () => {
+  it("drops what has ended and splits today from tomorrow at local midnight", () => {
+    const items = [
+      event("done", at(8), at(9)),
+      event("now", at(9), at(11)),
+      event("late", at(23), at(24, 30)),
+      event("tomorrow", at(24, 1), at(25)),
+    ];
+    const r = splitAgenda(items, at(10));
+    expect(r.today.map((e) => e.id)).toEqual(["now", "late"]);
+    expect(r.tomorrow.map((e) => e.id)).toEqual(["tomorrow"]);
+    expect(r.next?.id).toBe("now");
+  });
+});
+
+describe("toneFor", () => {
+  it("gives a calendar the same colour every time, from the four a card knows", () => {
+    expect(toneFor("Work")).toBe(toneFor("Work"));
+    expect(["green", "yellow", "blue", "red"]).toContain(toneFor("Home"));
+  });
+});
+
+describe("moreLabel", () => {
+  it("agrees with the count", () => {
+    expect(moreLabel(1)).toBe("1 more event");
+    expect(moreLabel(3)).toBe("3 more events");
+  });
+});
+
+describe("layoutDay", () => {
+  it("places an event by its start and length down the window", () => {
+    const { placed } = layoutDay([event("a", at(10), at(11))], DAY, 9);
+    expect(placed[0].top).toBeCloseTo(1 / GRID_HOURS);
+    expect(placed[0].height).toBeCloseTo(1 / GRID_HOURS);
+  });
+
+  // An event running across the window's top edge is still on screen.
+  it("clips an event that starts before the window and keeps it", () => {
+    const { placed, hidden } = layoutDay([event("a", at(8), at(10))], DAY, 9);
+    expect(hidden).toEqual([]);
+    expect(placed[0].top).toBe(0);
+    expect(placed[0].height).toBeCloseTo(1 / GRID_HOURS);
+  });
+
+  it("hands back what is wholly outside the window, and skips all-day events", () => {
+    const events = [
+      event("early", at(6), at(7)),
+      event("in", at(10), at(11)),
+      event("after", at(17), at(18)),
+      event("day", DAY, DAY + 24 * HOUR, { allDay: true }),
+    ];
+    const { placed, hidden } = layoutDay(events, DAY, 9);
+    expect(placed.map((p) => p.event.id)).toEqual(["in"]);
+    expect(hidden.map((e) => e.id)).toEqual(["early", "after"]);
+  });
+
+  it("puts overlapping events side by side and leaves a later one alone", () => {
+    const { placed } = layoutDay(
+      [event("a", at(9), at(11)), event("b", at(10), at(12)), event("c", at(13), at(14))],
+      DAY,
+      9,
+    );
+    const by = Object.fromEntries(placed.map((p) => [p.event.id, p]));
+    expect([by.a.lane, by.b.lane]).toEqual([0, 1]);
+    expect([by.a.lanes, by.b.lanes]).toEqual([2, 2]);
+    expect([by.c.lane, by.c.lanes]).toEqual([0, 1]);
+  });
+
+  it("reuses a freed lane within one cluster", () => {
+    const { placed } = layoutDay(
+      [event("a", at(9), at(10)), event("b", at(9), at(12)), event("c", at(10, 30), at(11))],
+      DAY,
+      9,
+    );
+    expect(placed.find((p) => p.event.id === "c")?.lane).toBe(0);
+  });
+});
+
+describe("windowStart", () => {
+  it("starts at the anchor when something is in view", () => {
+    expect(windowStart([event("a", at(14), at(15))], DAY, 13)).toBe(13);
+  });
+
+  it("jumps to the first event past the edge rather than opening on empty hours", () => {
+    expect(windowStart([event("a", at(20), at(21))], DAY, 9)).toBe(17);
+  });
+
+  it("never runs the axis off the end of the day", () => {
+    expect(windowStart([], DAY, 22)).toBe(24 - GRID_HOURS);
+  });
+});
+
+describe("nowLine", () => {
+  it("is a fraction inside the window and absent outside it", () => {
+    expect(nowLine(at(12), DAY, 9)).toBeCloseTo(3 / GRID_HOURS);
+    expect(nowLine(at(8), DAY, 9)).toBeNull();
+    expect(nowLine(at(17), DAY, 9)).toBeNull();
+  });
+});
+
+describe("hourLabel", () => {
+  it("drops the meridiem on a 12-hour axis and keeps a 24-hour one whole", () => {
+    expect(hourLabel(9, "en-US")).toBe("9");
+    expect(hourLabel(13, "en-US")).toBe("1");
+    expect(hourLabel(13, "de-DE")).toMatch(/13/);
+  });
+});
+
+describe("monthGrid", () => {
+  it("starts the first on the right weekday for a Sunday or a Monday week", () => {
+    // 1 October 2026 is a Thursday.
+    const sun = monthGrid(DAY, 0, "en-US");
+    expect(sun.weeks[0]).toEqual([null, null, null, null, 1, 2, 3]);
+    expect(sun.weekdays).toEqual(["S", "M", "T", "W", "T", "F", "S"]);
+    const mon = monthGrid(DAY, 1, "en-US");
+    expect(mon.weeks[0]).toEqual([null, null, null, 1, 2, 3, 4]);
+    expect(mon.weekdays[0]).toBe("M");
+  });
+
+  it("holds every day once, in full weeks, and marks today", () => {
+    const m = monthGrid(DAY, 0, "en-US");
+    const days = m.weeks.flat().filter((d): d is number => d !== null);
+    expect(days).toEqual(Array.from({ length: 31 }, (_, i) => i + 1));
+    expect(m.weeks.every((w) => w.length === 7)).toBe(true);
+    expect(m.today).toBe(4);
+    expect(m.title).toBe("October 2026");
+  });
+
+  // February of a non-leap year starting on the week's first day is exactly four weeks.
+  it("does not add a blank week", () => {
+    const feb = monthGrid(new Date(2026, 1, 10).getTime(), 0, "en-US");
+    expect(feb.weeks).toHaveLength(4);
+  });
+});
+
+describe("reminderCounts", () => {
+  const r = (due: number, allDay = false): Reminder => ({ id: String(due), title: "t", due, allDay, list: "L" });
+  it("separates what has slipped from what is due", () => {
+    const now = at(12);
+    expect(reminderCounts([r(at(9)), r(at(15)), r(at(0), true), r(DAY - HOUR, true)], now)).toEqual({
+      total: 4,
+      late: 2,
+      due: 2,
+    });
+  });
+});
+
+describe("dayLabel", () => {
+  it("calls the first day Today and names the rest from the place's own date", () => {
+    expect(dayLabel("2026-10-04", true, "en-US")).toBe("Today");
+    expect(dayLabel("2026-10-05", false, "en-US")).toBe("Mon");
+  });
+});
+
+describe("rangeBar", () => {
+  it("sits a day on the week's own range", () => {
+    expect(rangeBar(10, 20, 0, 40)).toEqual({ left: 0.25, width: 0.25 });
+  });
+
+  it("draws nothing for a missing reading and a full bar for a flat week", () => {
+    expect(rangeBar(null, 20, 0, 40)).toBeNull();
+    expect(rangeBar(10, 10, 10, 10)).toEqual({ left: 0, width: 1 });
+  });
+
+  it("keeps a one-degree day visible and on the track", () => {
+    const b = rangeBar(40, 40, 0, 40)!;
+    expect(b.width).toBeGreaterThan(0);
+    expect(b.left + b.width).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("weekRange", () => {
+  it("takes the coldest low and the hottest high, skipping blanks", () => {
+    expect(
+      weekRange([
+        { low: 5, high: 12 },
+        { low: null, high: null },
+        { low: 2, high: 9 },
+      ]),
+    ).toEqual({ low: 2, high: 12 });
+    expect(weekRange([{ low: null, high: null }])).toBeNull();
+  });
+});
+
+describe("moveOf", () => {
+  it("keeps the calm list's dead zone", () => {
+    expect(moveOf(0.85)).toBe("up");
+    expect(moveOf(-1.2)).toBe("down");
+    expect(moveOf(0.03)).toBe("flat");
+    expect(moveOf(null)).toBeNull();
+  });
+});

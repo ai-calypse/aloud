@@ -22,6 +22,8 @@ import { WidgetGallery } from "./tune-widgets";
 import { ShelfGallery } from "./tune-shelf";
 // --- end Shelf fixtures ---
 import { MediaWidgetGallery } from "./tune-widgets-media"; // fixtures: Media widgets
+// --- Today widgets (w-today): fixtures live in tune-widgets-today.tsx ---
+import { TodayWidgetGallery } from "./tune-widgets-today";
 import "./styles/notch.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
@@ -684,6 +686,11 @@ function NotchGallery() {
           <MediaWidgetGallery />
         </Specimen>
         {/* --- end FIXTURES --- */}
+        {/* --- Today widgets (w-today) --- */}
+        <Specimen name="Widgets look · Today" note="Calendar, Reminders, Weather and Stocks: fixtures, then not-allowed, reading and empty states">
+          <TodayWidgetGallery />
+        </Specimen>
+        {/* --- end Today widgets --- */}
 
         <Specimen name="Empty" note="a view with nothing to show teaches what fills it">
           <Empty
