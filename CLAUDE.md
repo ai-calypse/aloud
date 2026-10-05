@@ -246,6 +246,12 @@ short version:
 - **Sections:** `features/notch/registry.ts` is the whole map, nine sections
   in ⌘ order. A feature is a view plus `ready: true`; anything not ready is
   hidden, never "coming soon". Append sections, never reorder them.
+- **Looks:** `Settings::notch_style` is `Calm` (default, unchanged) or
+  `Widgets` (Apple-style tiles). The overlay root carries
+  `data-notch-style`, `useNotch().style` exposes it, and a registry subsection
+  may add a `widgetView` that `viewFor` prefers in Widgets and falls back from
+  to its calm `view`. Widget tokens are `--notch-w-*`, primitives are in
+  `components/notch/widgets/`; see DESIGN.md › Looks before adding one.
 - **Islands:** live state crosses from Rust as an `Island` pushed through
   `crate::islands::push`; ranking, dedupe and expiry are `crates/islands`'
   and tested there. The write toast is an alert island.

@@ -262,6 +262,46 @@ Island { id, kind: Live | Alert, priority: Low | Normal | High | Urgent,
 
 The palette (`Palette.tsx`) opens in the body, in its flow, so the panel grows to fit on its own spring; the view stays mounted underneath. It searches ready sections, subsections, their features and runnable actions — built from the same registries, so it cannot offer what is not there. Approval cards ignore keys from inside the palette (`fromPalette`): its Enter must never allow the write under it.
 
+### Looks (signature)
+The notch has two looks, chosen in Settings › Overlay (`Settings::notch_style`, `Calm | Widgets`, saved as `notchStyle`). **Calm** is everything above, the default, and is never touched by the second look. **Widgets** redraws the open panel as Apple-style widgets, taken from the CarPlay Design System Figma file (`docs/design/figma-carplay-index.md`; the prototype is `docs/design/notch-personality.html`). Only the open panel's body, its colours and its type change: the sections, shortcuts, closed notch, `pillSides` and island behaviour are shared, and an island only picks up its owner's accent (`islandRole`, `[data-w-role]`).
+
+**How it reaches the webview.** The overlay is its own window, so `overlay.tsx` reads `getSettings()` on mount, on every overlay show and on the Settings window's `settings-changed` event, which is how it lands live with no restart. The overlay root carries `data-notch-style="calm|widgets"`, and `useNotch().style` gives views the same value. A preview without Tauri takes `?notchStyle=widgets`, and the tune page's "Shell · Now · Widgets" button sends the same.
+
+**Registering a widget view.** A subsection gets a second view and nothing else changes:
+
+```ts
+{ id: "overview", name: "Overview", ready: true, view: NowOverview, widgetView: WidgetHome }
+```
+
+`viewFor(sub, style)` (sections.ts) returns `widgetView` only when the look is Widgets and one exists; otherwise the calm `view`, so a section nobody has drawn as widgets is never blank. A `widgetView` alone does not make a subsection ready. `panelWidth(readyCount, style)` keeps the calm 640/780 and is always 780 for Widgets (four 158pt tiles and their gaps are 698pt). Today only Now › Overview has one (`views/WidgetHome.tsx`).
+
+**Tokens.** Raw values are `--notch-w-*` in `tokens.css` (tile `#1C1C1E` and `#252525`, text, the per-app accents, event card colours, the SF type scale, the widget sizes), and nothing reads them until a widget does. `[data-notch-style="widgets"]` rebinds only `--font-notch` to SF. A widget's accent is its **role**: `data-w-role="calendar|ok|media|podcast|move|exercise|stand|blue|cyan|orange|sleep|sun|info|agent"` defines `--w-acc`, `--w-ink`, `--w-track`, `--w-ring` and `--w-fill`. Components use the `widget-*` utilities (`bg-widget-tile`, `text-widget-acc-ink`, `stroke-widget-ring`, `text-notch-w-numeral-l`, `rounded-notch-w-tile`), all registered in `index.css` and in `lib/utils.ts` (the tailwind-merge trap, with a test).
+
+**The accent rule.** Words in an accent use the accent mixed 68% toward white (`--w-ink`); an unfilled track is the accent at 22% over the tile (Figma's Move track); a tile filled with an accent (Music, Weather) is the accent at 76% over black so white words pass AA; light accents (Exercise, Stand, Sleep, Sun) are already AA as words. The `live` treatment on a frame is Figma's gauge rule: one hue, the tile its deepest shade, ring and numerals its lightest tint. Status is never colour alone: every ring is a `meter` with a label and the number or word beside it.
+
+**Primitives** (`components/notch/widgets/`, exported from `index.ts`):
+
+| Primitive | Use |
+|---|---|
+| `WidgetFrame` (`size` small 158 / medium 338x158 / large 338x354, `label`, `accent`, `live`, `ground`, `onActivate`) | the tile and its label; with `onActivate` the label is the one button |
+| `WidgetBoard` | four-column dense grid; medium and large span two |
+| `Ring`, `RingStack` | arc over a same-hue track; `motion="spring"` fills on `lib/spring.ts`, `"drain"` is one tick of CSS (`--dur-drain`), `"none"` jumps |
+| `Capsule` (`thick`, `onChange`), `SegBar` | progress or a slider; scrubbing is a native range input under the drawing |
+| `Numeral` (`size` s/m/l/xl, `roll`) | Light 300 tabular; `roll` turns digits on the spring timing |
+| `EventCard` (`tone` green/yellow/red/blue) | leading bar, title, time |
+| `Spark` | one-stroke sparkline, an `img` with a label |
+
+The arithmetic (ring geometry, stack nesting, numeral formatting, spark path) is `math.ts`, tested apart from React. The tune page's "Widgets look" specimen lays out every primitive, the Home board with data, with every source empty, and in its urgent states.
+
+**Shared on purpose:** the registry and ⌘ numbers, the shell chrome and its springs, the closed notch and islands, every Calm view (the fallback), `useNotch()` data, motion.css and `lib/spring.ts`, the focus ring.
+
+**Cost and risks.**
+- SF is the system face (`-apple-system`, `ui-rounded` for Fitness), loaded from the OS and never bundled; it makes the look macOS-only (Settings hides the choice elsewhere) and Windows would fall through to `system-ui`.
+- Widgets are fixed sizes, so a board is a grid, not a ranking: the live-first packing of Calm is gone, and about twenty widgets means about twenty hand-built layouts.
+- Do not use CSS `zoom` to scale a board. The prototype did; in production one variable, `--notch-w-scale`, multiplies the widget sizes and gaps (type inside is fixed, so keep it near 1).
+- Apple trade dress and mostly chrome (labels, art, empty rows): the look is an option, not the default.
+- Home reads real data only. Calendar is today's date plus the next-event island, never a calendar read, because reading Calendar can launch Calendar.app (`calendar_events`) and the default tab must not do that by opening; Today › Calendar does it on purpose. Weather uses the cached `weather` command that Today uses.
+
 ## 6. Do's and Don'ts
 
 ### Do:
@@ -269,7 +309,7 @@ The palette (`Palette.tsx`) opens in the body, in its flow, so the panel grows t
 - **Do** name every destination: icon plus label in SectionTabs, a word on every status chip ("Named, not memorised").
 - **Do** lead each view with one fact in the 30px Lead, and put everything else on hairline rows.
 - **Do** give each view exactly one `variant="notch"` button — the thing it is for — and make the rest quiet.
-- **Do** use `notch-*` utilities for every colour, radius and size, and register new tokens with tailwind-merge.
+- **Do** use `notch-*` utilities for every colour, radius and size (`widget-*` for the Widgets look), and register new tokens with tailwind-merge.
 - **Do** write an empty state that says what fills the view and offers the one thing to do.
 - **Do** keep numbers that change in Geist Mono with tabular figures.
 - **Do** push live state through the island queue from the crate that owns it; never draw a second strip beside the notch.
