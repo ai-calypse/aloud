@@ -1429,6 +1429,12 @@ export type NotchEvents = {
 	connectivity?: boolean,
 	/**  What happened in another app: a screenshot, a finished download. */
 	banners?: boolean,
+	/**
+	 *  Eat the volume keys and draw the level in the notch instead of macOS's
+	 *  HUD. Off: the keys are only watched and macOS draws its own. Needs
+	 *  `huds` on, or the keys would move the volume with nothing to show it.
+	 */
+	replaceVolumeHud?: boolean,
 };
 
 /**

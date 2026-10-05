@@ -57,6 +57,10 @@ pub struct NotchEvents {
     pub connectivity: bool,
     /// What happened in another app: a screenshot, a finished download.
     pub banners: bool,
+    /// Eat the volume keys and draw the level in the notch instead of macOS's
+    /// HUD. Off: the keys are only watched and macOS draws its own. Needs
+    /// `huds` on, or the keys would move the volume with nothing to show it.
+    pub replace_volume_hud: bool,
 }
 
 impl Default for NotchEvents {
@@ -68,6 +72,7 @@ impl Default for NotchEvents {
             power: true,
             connectivity: true,
             banners: true,
+            replace_volume_hud: false,
         }
     }
 }
