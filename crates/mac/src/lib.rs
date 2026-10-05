@@ -7,7 +7,9 @@
 //! Keyboard backlight, external-display brightness and menu-bar icon hiding
 //! are not here on purpose: each needs private frameworks (CoreBrightness,
 //! IOAVService, the window server's menu-extra layer), which a notarized,
-//! non-sandboxed app can call but Apple can remove in any release.
+//! non-sandboxed app can call but Apple can remove in any release. The one
+//! exception is [`brightness`] for the built-in panel, which loads
+//! `DisplayServices` at run time and does nothing when it is gone.
 
 use std::path::{Path, PathBuf};
 
@@ -15,6 +17,7 @@ use aloud_islands::Island;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+pub mod brightness;
 pub mod events;
 pub mod focus_mode;
 pub mod power;

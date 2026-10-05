@@ -1,18 +1,18 @@
-//! Live check of the keys the notch answers: volume, and Caps Lock.
+//! Live check of the keys the notch answers: volume, brightness, and Caps Lock.
 //!
 //!   cargo run -p aloud-hotkey --example keys -- [seconds] [--replace]
 //!
-//! Prints every volume key press and Caps Lock change the tap reports, for
-//! `seconds` (default 15). Without `--replace` it only watches: macOS handles
-//! the keys and draws its own HUD. With it the tap eats the volume keys, this
-//! moves the output volume one step per press as the app does, and the level
-//! the app would draw is printed. The output volume and mute are restored on
-//! exit. Needs Accessibility. Press the real keys, or drive it with
-//! `--example post_key`.
+//! Prints every volume and brightness key press and Caps Lock change the tap
+//! reports, for `seconds` (default 15). Without `--replace` it only watches:
+//! macOS handles the keys and draws its own HUD. With it the tap eats the
+//! volume and brightness keys, this moves the output volume and the built-in
+//! display's brightness one step per press as the app does, and the level the
+//! app would draw is printed. Both are restored on exit. Needs Accessibility.
+//! Press the real keys, or drive it with `--example post_key`.
 
 #[cfg(target_os = "macos")]
 fn main() -> anyhow::Result<()> {
-    use aloud_hotkey::aux::{self, AuxEvent, VolumeKey};
+    use aloud_hotkey::aux::{self, AuxEvent, BrightnessKey, VolumeKey};
     use aloud_hotkey::model::Config;
     use aloud_media::sound::{self, VolumeAction};
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -30,8 +30,14 @@ fn main() -> anyhow::Result<()> {
 
     let events = aux::events().expect("first caller");
     aux::set_replace_volume(replace);
+    aux::set_replace_brightness(replace);
+    aux::set_brightness_probe(aloud_mac::brightness::controllable);
     let before = sound::output()?;
-    println!("output volume {before:?}; replace={replace}; listening {seconds}s");
+    let bright_before = aloud_mac::brightness::get().ok();
+    println!(
+        "output volume {before:?}; brightness {bright_before:?} (controllable {}); replace={replace}; listening {seconds}s",
+        aloud_mac::brightness::controllable()
+    );
 
     std::thread::spawn(|| {
         let _ = aloud_hotkey::listen(
@@ -53,6 +59,19 @@ fn main() -> anyhow::Result<()> {
             break;
         };
         println!("{event:?}");
+        if let AuxEvent::Brightness {
+            key,
+            fine,
+            swallowed: true,
+        } = event
+        {
+            let was = aloud_mac::brightness::get()?;
+            let now = aloud_mac::brightness::nudge(key == BrightnessKey::Up, fine)?;
+            println!(
+                "  swallowed; moved {was:.4} -> {now:.4}; HUD level {}",
+                aloud_mac::brightness::percent(now)
+            );
+        }
         if let AuxEvent::Volume {
             key,
             fine,
@@ -78,7 +97,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     println!(
-        "downstream tap heard {} system-defined events (0 = swallowed; a press is a down and an up)",
+        "downstream tap heard {} system-defined or key events (0 = swallowed; a press is a down and an up; your own typing counts)",
         downstream.load(Ordering::SeqCst)
     );
     // Volume keys and Caps Lock are not typing: this stays None unless a
@@ -89,6 +108,10 @@ fn main() -> anyhow::Result<()> {
     );
     sound::set_output(before)?;
     println!("restored {:?}", sound::output()?);
+    if let Some(level) = bright_before {
+        aloud_mac::brightness::set(level)?;
+        println!("restored brightness {:.4}", aloud_mac::brightness::get()?);
+    }
     Ok(())
 }
 
@@ -125,8 +148,9 @@ fn probe(count: std::sync::Arc<std::sync::atomic::AtomicU32>) {
         use core_foundation::mach_port::CFMachPort;
         use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
         let user = Arc::as_ptr(&count) as *mut c_void;
-        // Session, tail-append, listen-only, NX_SYSDEFINED only.
-        let port = unsafe { CGEventTapCreate(1, 1, 1, 1 << 14, heard, user) };
+        // Session, tail-append, listen-only: NX_SYSDEFINED and key down/up
+        // (brightness can arrive as keycodes 144/145).
+        let port = unsafe { CGEventTapCreate(1, 1, 1, 1 << 14 | 1 << 10 | 1 << 11, heard, user) };
         assert!(!port.is_null(), "probe tap");
         let port = unsafe { CFMachPort::wrap_under_create_rule(port.cast()) };
         let source = port.create_runloop_source(0).unwrap();

@@ -82,7 +82,7 @@ const EVENT_DEFAULTS: Required<NotchEvents> = {
   power: true,
   connectivity: true,
   banners: true,
-  replaceVolumeHud: false,
+  replaceSystemHuds: false,
 };
 
 const EVENT_ROWS: { key: keyof NotchEvents; label: string; hint: string }[] = [
@@ -99,7 +99,7 @@ const EVENT_ROWS: { key: keyof NotchEvents; label: string; hint: string }[] = [
   {
     key: "huds",
     label: "Key-press whispers",
-    hint: "Volume, mic mute and Caps Lock as a small whisper beside the camera.",
+    hint: "Volume, brightness, mic mute and Caps Lock as a small whisper beside the camera.",
   },
   {
     key: "power",
@@ -117,9 +117,9 @@ const EVENT_ROWS: { key: keyof NotchEvents; label: string; hint: string }[] = [
     hint: "Things that happened elsewhere: a screenshot saved, a download finished.",
   },
   {
-    key: "replaceVolumeHud",
-    label: "Replace the macOS volume HUD",
-    hint: "The volume keys move the level in the notch instead of macOS's square on screen. Needs key-press whispers on; Option alone still opens Sound settings, Option+Shift moves a finer step. An output with no volume (HDMI) keeps macOS's behaviour.",
+    key: "replaceSystemHuds",
+    label: "Replace the macOS volume and brightness HUDs",
+    hint: "The volume and brightness keys move the level in the notch instead of macOS's square on screen. Needs key-press whispers on; Option alone still opens Sound or Displays settings, Option+Shift moves a finer step. An output with no volume (HDMI) or an external main display keeps macOS's behaviour.",
   },
 ];
 
