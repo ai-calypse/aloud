@@ -12,7 +12,12 @@ declare global {
   }
 }
 
-const ID = import.meta.env.VITE_GA_ID as string | undefined;
+// The GA4 measurement id is public (it is in every page's source), so it ships as the default for
+// the live site. It only applies on speakos.app in a production build, so local dev, previews and
+// tests never count as visits. VITE_GA_ID overrides it.
+const LIVE_GA_ID = "G-XGB4T9TPTB";
+const onLiveSite = import.meta.env.PROD && /(^|\.)speakos\.app$/.test(location.hostname);
+const ID = (import.meta.env.VITE_GA_ID as string | undefined) || (onLiveSite ? LIVE_GA_ID : undefined);
 const CLARITY = import.meta.env.VITE_CLARITY_ID as string | undefined;
 const KEY = "consent";
 const dnt =
