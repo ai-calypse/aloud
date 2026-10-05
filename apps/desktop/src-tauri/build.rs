@@ -36,7 +36,27 @@ fn main() {
         chrono::Utc::now().format("%Y-%m-%d")
     );
 
+    stub_missing_resources();
     tauri_build::build()
+}
+
+/// `tauri.conf.json` bundles three resource globs and `tauri_build` fails
+/// when one matches nothing — but `resources/` is gitignored (its `.env`
+/// holds real keys) and the engine and now-playing helper only appear after
+/// their own build scripts run, so a fresh checkout or worktree cannot even
+/// `cargo build`. Debug builds get an empty placeholder per missing folder;
+/// a release build still fails loudly rather than ship without a helper.
+fn stub_missing_resources() {
+    if std::env::var("PROFILE").as_deref() != Ok("debug") {
+        return;
+    }
+    for dir in ["resources", "resources/engine", "resources/mediaremote"] {
+        let dir = std::path::Path::new(dir);
+        if !dir.exists() {
+            std::fs::create_dir_all(dir).expect("create resources placeholder dir");
+            std::fs::write(dir.join("placeholder"), "").expect("write resources placeholder");
+        }
+    }
 }
 
 /// The files whose change means the stamp is stale: `HEAD`, and the ref it

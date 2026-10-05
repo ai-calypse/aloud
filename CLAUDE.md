@@ -358,6 +358,13 @@ short version:
   set its `NSWindow` level to `NSScreenSaverWindowLevel`; a floating-level
   window is clamped below the menu bar. `NSScreen` calls must run on the main
   thread — the notch is measured once in `setup`.
+- **`resources/` is gitignored, but `tauri.conf.json` bundles three globs in
+  it** (`resources/*`, `resources/engine/**`, `resources/mediaremote/**`) and
+  `tauri_build` fails when one matches nothing. `build.rs` drops an empty
+  `placeholder` into each missing folder on debug builds, so a fresh checkout
+  or worktree builds; a release build still fails until `stage-resources.sh`
+  has run. Never copy the real `resources/` into a worktree — its `.env` holds
+  real keys.
 
 ## Verifying
 
