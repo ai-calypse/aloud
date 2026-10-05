@@ -132,7 +132,7 @@ export function ForecastTile({ data }: { data: Weather }) {
         </div>
         <ul
           aria-label="Five-day forecast"
-          className="m-0 mt-3 flex list-none flex-col justify-between border-t border-widget-ink/25 p-0 pt-1.5"
+          className="m-0 mt-3 flex flex-1 list-none flex-col justify-between border-t border-widget-ink/25 p-0 pt-1.5"
         >
           {data.days.map((d, i) => {
             const bar = range

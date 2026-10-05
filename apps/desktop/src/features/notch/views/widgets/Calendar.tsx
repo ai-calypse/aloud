@@ -121,7 +121,7 @@ function DayHeader({
   red?: boolean;
 }) {
   return (
-    <div className="h-14 min-w-0">
+    <div className="h-16 min-w-0">
       <div
         className={cn(
           "text-notch-w-over leading-tight font-semibold tracking-wide uppercase",
@@ -187,7 +187,7 @@ function HourGrid({
 
   return (
     <>
-      <div role="group" aria-label="Hours" className="relative h-60">
+      <div role="group" aria-label="Hours" className="relative h-56">
         {Array.from({ length: GRID_HOURS }, (_, i) => (
           <div
             key={i}
@@ -217,7 +217,7 @@ function HourGrid({
                 title={p.event.title}
                 // A short block has no room for a second line.
                 time={
-                  p.height * GRID_HOURS >= 0.75
+                  p.height * GRID_HOURS >= 1.25
                     ? timeOfDay(p.event.start)
                     : undefined
                 }

@@ -18,6 +18,8 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "./index.css";
 import { WidgetGallery } from "./tune-widgets";
+// --- Today widgets (w-today): fixtures live in tune-widgets-today.tsx ---
+import { TodayWidgetGallery } from "./tune-widgets-today";
 import "./styles/notch.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
@@ -669,6 +671,12 @@ function NotchGallery() {
         <Specimen name="Widgets look" note="the Settings › Overlay option: Apple-style tiles; primitives, the Home board, empty and urgent states">
           <WidgetGallery />
         </Specimen>
+
+        {/* --- Today widgets (w-today) --- */}
+        <Specimen name="Widgets look · Today" note="Calendar, Reminders, Weather and Stocks: fixtures, then not-allowed, reading and empty states">
+          <TodayWidgetGallery />
+        </Specimen>
+        {/* --- end Today widgets --- */}
 
         <Specimen name="Empty" note="a view with nothing to show teaches what fills it">
           <Empty
