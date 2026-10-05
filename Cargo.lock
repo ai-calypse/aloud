@@ -60,6 +60,7 @@ dependencies = [
  "aloud-meeting",
  "aloud-native",
  "aloud-notes",
+ "aloud-notify",
  "aloud-paste",
  "aloud-permissions",
  "aloud-quota",
@@ -363,6 +364,19 @@ dependencies = [
  "specta",
  "specta-typescript",
  "tempfile",
+]
+
+[[package]]
+name = "aloud-notify"
+version = "0.1.0"
+dependencies = [
+ "aloud-islands",
+ "plist",
+ "rusqlite",
+ "serde",
+ "specta",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

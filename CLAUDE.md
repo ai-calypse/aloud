@@ -27,6 +27,7 @@ crates/
   meeting/             meeting transcript assembly, note composition
   native/              Mac app actions (AppleScript/JXA) + the no-model fast path
   notes/               markdown notes + search, app data paths
+  notify/              other apps' notifications: a read-only watcher over Notification Center's DB
   paste/               clipboard snapshot/restore, synthetic paste
   screen/              screen control through Cua Driver: read, click, type
   selection/           reading the focused app and its selected text
@@ -199,6 +200,19 @@ realistic sequence. A producer sets `tier`, `priority`, `source` (which Settings
 switch silences it), `short` (the whisper's word), `level` and `dwell_ms`; the
 gate fills in the rest. `docs/design/notch-events.html` (branch
 `design/notch-events`) is the reference.
+
+**Nudges** are takeovers made of other apps' words: Messages, Mail, Slack, a
+FaceTime call and any allowed app (`aloud-notify`, opt-in, Full Disk Access,
+`notchEvents.appNotifications` + `appNotificationAllow`), plus a calendar event
+ten minutes away and a reminder come due (`aloud_agenda::soon_island` /
+`due_island`, off the Today tick, no database). All go through `takeover` as
+`IslandSource::Banners` with ids `nudge:<bundle>:<row>`, `cal:soon:<id>`,
+`rem:due:<id>`; `features/overlay/Nudge.tsx` draws them in their app's accent.
+Notification text is shown and forgotten: never logged (the type's `Debug`
+prints the app and row only), stored, or sent to a model. The buttons are Open
+and Join only, because Aloud cannot answer a call or reply for you. `cargo run
+-p aloud-notify --example nudges -- 60` prints the watcher's state and each new
+notification's app and title (needs Full Disk Access for the terminal).
 
 ## Frontend architecture
 

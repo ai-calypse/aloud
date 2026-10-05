@@ -208,6 +208,20 @@ export const commands = {
 	 *  registry; this is the half of it the queue has to hear.
 	 */
 	dismissIsland: (id: string) => __TAURI_INVOKE<void>("dismiss_island", { id }),
+	/**  What the Full Disk Access row shows. */
+	nudgeState: () => __TAURI_INVOKE<MirrorState>("nudge_state"),
+	/**
+	 *  Try again, after the user granted access: the watcher stops on a refusal
+	 *  rather than polling for the grant, so this is the way back.
+	 */
+	nudgeRecheck: () => __TAURI_INVOKE<void>("nudge_recheck"),
+	/**  System Settings at Full Disk Access, the one fix for `NeedsAccess`. */
+	nudgeOpenAccessSettings: () => __TAURI_INVOKE<void>("nudge_open_access_settings"),
+	/**
+	 *  The Open button: brings the app that sent a nudge forward. The webview
+	 *  names the bundle, so it is checked to be a bundle id and nothing else.
+	 */
+	nudgeOpen: (bundle: string) => typedError<null, string>(__TAURI_INVOKE("nudge_open", { bundle })),
 	focusState: () => __TAURI_INVOKE<FocusSnapshot>("focus_state"),
 	focusStart: (mode: TimerMode, preset: TimerPreset) => __TAURI_INVOKE<void>("focus_start", { mode, preset }),
 	focusPause: () => __TAURI_INVOKE<void>("focus_pause"),
@@ -548,6 +562,7 @@ export const events = {
 	modelDownload: makeEvent<ModelDownload>("model-download"),
 	notchHover: makeEvent<NotchHover>("notch-hover"),
 	notchOpen: makeEvent<NotchOpen>("notch-open"),
+	nudgeState: makeEvent<NudgeStateChanged>("nudge-state"),
 	overlayDismiss: makeEvent<OverlayDismiss>("overlay-dismiss"),
 	overlayError: makeEvent<OverlayError>("overlay-error"),
 	overlayStyle: makeEvent<OverlayStyleChanged>("overlay-style"),
@@ -1251,6 +1266,11 @@ export type Island = {
 	 *  (the app, for an alert) cannot be.
 	 */
 	short?: string | null,
+	/**
+	 *  A peek or card's second line, after the bold title: what the message
+	 *  says, when the meeting starts. Shown and forgotten, like the rest.
+	 */
+	body?: string | null,
 	source?: IslandSource,
 	/**
 	 *  Set by the gate, never by a producer: a peek or card shown as a side
@@ -1426,6 +1446,18 @@ export type MeetingPhase =
  */
 { phase: "recording"; elapsedSecs: number; words: number } | { phase: "saving" } | { phase: "idle" };
 
+/**  Where the watcher stands, for Settings to say in words. */
+export type MirrorState = 
+/**  Off, or not started yet. */
+{ kind: "off" } | { kind: "watching" } | 
+/**
+ *  The database is there and macOS will not let this app read it: Full
+ *  Disk Access is the one fix.
+ */
+{ kind: "needsAccess" } | 
+/**  Readable but not what this build knows how to read. */
+{ kind: "unsupported"; detail: string };
+
 /**
  *  Model download progress, 0.0–1.0. First use of the local engine fetches
  *  ~150MB; without this the pill sits on "Transcribing…" for minutes and the
@@ -1462,6 +1494,18 @@ export type NotchEvents = {
 	 *  of `Settings`.)
 	 */
 	replaceSystemHuds?: boolean,
+	/**
+	 *  Mirror other apps' notifications in the notch (Messages, a ringing
+	 *  FaceTime call, Slack…) by reading Notification Center's database.
+	 *  Off until chosen: it needs Full Disk Access and reads what other apps
+	 *  say. Distinct from `banners`, which is Aloud's own events.
+	 */
+	appNotifications?: boolean,
+	/**
+	 *  Bundle ids of the apps mirrored when `app_notifications` is on. Empty
+	 *  mirrors nothing.
+	 */
+	appNotificationAllow?: string[],
 };
 
 /**
@@ -1523,6 +1567,11 @@ export type NowPlaying = {
 	 *  track: a page that names its song cleanly, or a music app.
 	 */
 	song: Song | null,
+};
+
+/**  The watcher's state, sent when it changes: Settings says it in words. */
+export type NudgeStateChanged = {
+	state: MirrorState,
 };
 
 /**  Whose words a text field holds. */

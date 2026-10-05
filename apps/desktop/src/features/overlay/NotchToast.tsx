@@ -12,6 +12,7 @@ import {
   opensOnHover,
   takeoverTier,
 } from "@/features/notch/islands";
+import { Nudge, isNudge } from "./Nudge";
 import { useDwell } from "./useDwell";
 
 /** What the toast is drawn as: see `toastForm`. */
@@ -80,6 +81,21 @@ export function NotchToast({
 
   if (form === "capsule") {
     return <Whisper island={{ ...island, short: island.short ?? capsuleText(island) }} waiting={waiting} />;
+  }
+
+  // Another app's notification, an event soon, a reminder due: Nudge.tsx.
+  if (isNudge(island)) {
+    return (
+      <Nudge
+        island={island}
+        form={form}
+        hovering={hovering}
+        side={side}
+        waiting={waiting}
+        onLeave={onLeave}
+        button={button}
+      />
+    );
   }
 
   if (form === "peek") {

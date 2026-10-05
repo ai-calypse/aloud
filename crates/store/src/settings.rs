@@ -54,6 +54,28 @@ pub struct NotchEvents {
     /// that makes specta emit split Serialize/Deserialize types for the whole
     /// of `Settings`.)
     pub replace_system_huds: bool,
+    /// Mirror other apps' notifications in the notch (Messages, a ringing
+    /// FaceTime call, Slack…) by reading Notification Center's database.
+    /// Off until chosen: it needs Full Disk Access and reads what other apps
+    /// say. Distinct from `banners`, which is Aloud's own events.
+    pub app_notifications: bool,
+    /// Bundle ids of the apps mirrored when `app_notifications` is on. Empty
+    /// mirrors nothing.
+    pub app_notification_allow: Vec<String>,
+}
+
+/// The apps mirrored once the user turns app notifications on, until they
+/// choose their own.
+pub fn default_notification_allow() -> Vec<String> {
+    [
+        "com.apple.MobileSMS",
+        "com.apple.mail",
+        "com.apple.FaceTime",
+        "com.tinyspeck.slackmacgap",
+        "com.apple.iCal",
+    ]
+    .map(String::from)
+    .into()
 }
 
 impl Default for NotchEvents {
@@ -66,6 +88,8 @@ impl Default for NotchEvents {
             connectivity: true,
             banners: true,
             replace_system_huds: false,
+            app_notifications: false,
+            app_notification_allow: default_notification_allow(),
         }
     }
 }
@@ -647,6 +671,20 @@ mod tests {
         .unwrap();
         assert!(!parsed.notch_events.replace_system_huds);
         assert!(!Settings::default().notch_events.replace_system_huds);
+    }
+
+    /// The failure this guards: a build that reads Notification Center turning
+    /// the mirror on for people who never asked, by default or on upgrade.
+    #[test]
+    fn mirroring_other_apps_notifications_is_off_until_chosen() {
+        assert!(!Settings::default().notch_events.app_notifications);
+        let old = Settings::from_json(r#"{"notchEvents":{"banners":true}}"#).unwrap();
+        assert!(!old.notch_events.app_notifications);
+        assert!(old
+            .notch_events
+            .app_notification_allow
+            .iter()
+            .any(|a| a == "com.apple.MobileSMS"));
     }
 
     #[test]

@@ -548,6 +548,14 @@ export const ACTIONS: NotchAction[] = [
     run: async (_, { mount }) => (await commands.driveEject(mount)).status === "ok",
   },
   // -- end notch Shelf --
+  // Nudges: the one button a mirrored notification has. Aloud cannot reply,
+  // answer a call or accept an AirDrop for you; it brings the app forward.
+  {
+    id: "nudge.open",
+    title: "Open the app a notification came from",
+    args: ["bundle"],
+    run: async (_, { bundle }) => (await commands.nudgeOpen(bundle)).status === "ok",
+  },
 ];
 
 /**

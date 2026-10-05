@@ -767,6 +767,51 @@ function sysWhisper(
   };
 }
 
+/**
+ * A stand-in for an app's real icon, which Rust reads off disk
+ * (`aloud_selection::app_icon`) and a browser cannot: a rounded tile in the
+ * app's colour with its initial, as a `data:` URI like the real thing.
+ */
+function appTile(color: string, letter: string): string {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" rx="15" fill="${color}"/>` +
+    `<text x="32" y="44" font-family="-apple-system,sans-serif" font-size="34" font-weight="600" text-anchor="middle" fill="#fff">${letter}</text></svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+}
+
+/**
+ * What the nudge builders in Rust send (`aloud_notify::island`,
+ * `aloud_agenda::soon_island`): sender or title in `title`, the app in
+ * `detail`, the line in `body`, and Open or Join as the only buttons, since
+ * Aloud cannot answer a call or reply for you.
+ */
+function nudge(
+  id: string,
+  icon: string,
+  title: string,
+  app: string,
+  body: string,
+  rest: Partial<Island> = {},
+): Island {
+  return {
+    id,
+    kind: "alert",
+    priority: "normal",
+    icon,
+    title,
+    detail: app,
+    body,
+    short: title,
+    actions: [{ label: "Open", action: "nudge.open", args: { bundle: id.split(":")[1] ?? "" } }],
+    expires: null,
+    dismissible: false,
+    tier: "peek",
+    dwellMs: 4000,
+    source: "banners",
+    ...rest,
+  };
+}
+
 export const TAKEOVER_PREVIEWS = {
   /** A key press: a bar and its number, updated in place. */
   volume: {
@@ -900,6 +945,66 @@ export const TAKEOVER_PREVIEWS = {
   lowPower: sysWhisper("power:lowpower", "battery", "Low Power Mode on", "Low Power", "power"),
   wifi: sysWhisper("net:wifi", "wifi", "Wi-Fi connected", "Wi-Fi on", "connectivity"),
   drive: sysWhisper("drive:/Volumes/Backup", "drive", "Backup connected", "Connected", "connectivity"),
+  // Nudges: one per kind, the events design's msg, mail, slack, cal, rem, call,
+  // airdrop and generic.
+  nudgeMsg: nudge(
+    "nudge:com.apple.MobileSMS:41",
+    appTile("#34c85a", "M"),
+    "Maya Chen",
+    "Messages",
+    "Are we still on for 3? I'm bringing the mockups.",
+  ),
+  /** The same message while the user types: a side capsule, opened by pointing. */
+  nudgeMsgTyping: nudge(
+    "nudge:com.apple.MobileSMS:41",
+    appTile("#34c85a", "M"),
+    "Maya Chen",
+    "Messages",
+    "Are we still on for 3? I'm bringing the mockups.",
+    { shrunk: true },
+  ),
+  nudgeMail: nudge(
+    "nudge:com.apple.mail:42",
+    appTile("#0a84ff", "M"),
+    "Linear",
+    "Mail",
+    "Weekly digest · 12 issues closed this week",
+  ),
+  nudgeSlack: nudge(
+    "nudge:com.tinyspeck.slackmacgap:43",
+    appTile("#4a154b", "S"),
+    "Priya",
+    "Slack · #design",
+    "Mockups for the notch are in the doc, can you look?",
+  ),
+  nudgeCal: nudge("cal:soon:standup", appTile("#ff4539", "31"), "Standup in 10 minutes", "Calendar", "10:30 AM · Zoom", {
+    priority: "high",
+    actions: [{ label: "Join", action: "calendar.join", args: { url: "https://zoom.us/j/1" } }],
+  }),
+  nudgeRem: nudge("rem:due:dentist", appTile("#fea00a", "R"), "Call the dentist", "Reminders", "Due 3:00 PM · Personal", {
+    actions: [{ label: "Open", action: "nudge.open", args: { bundle: "com.apple.reminders" } }],
+  }),
+  nudgeAirdrop: nudge(
+    "nudge:com.apple.sharingd:44",
+    appTile("#0a84ff", "A"),
+    "Maya Chen",
+    "AirDrop",
+    "IMG_2041.heic",
+    { priority: "high" },
+  ),
+  nudgeGeneric: nudge(
+    "nudge:com.culturedcode.ThingsMac:45",
+    appTile("#3478f6", "T"),
+    "Review budget",
+    "Things",
+    "Due today at 5:00 PM · Finance",
+  ),
+  /** A ringing call: a card, urgent, with the one thing Aloud can honestly do. */
+  nudgeCall: nudge("nudge:com.apple.FaceTime:46", appTile("#34c85a", "F"), "Maya Chen", "FaceTime", "FaceTime Video · iPhone", {
+    priority: "urgent",
+    tier: "card",
+    dwellMs: null,
+  }),
 } satisfies Record<string, Island>;
 
 export type TakeoverPreview = keyof typeof TAKEOVER_PREVIEWS;

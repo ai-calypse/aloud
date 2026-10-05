@@ -35,6 +35,7 @@ aloud-media = { path = "../../../crates/media" }
 # notch-mac
 aloud-mac = { path = "../../../crates/mac" }
 aloud-notes = { path = "../../../crates/notes" }
+aloud-notify = { path = "../../../crates/notify" }
 aloud-quota = { path = "../../../crates/quota" }
 aloud-sessions = { path = "../../../crates/sessions" }
 aloud-bridge = { path = "../../../crates/bridge" }

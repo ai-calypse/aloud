@@ -20,6 +20,7 @@ import { MeetingsView } from "./MeetingsView";
 import { DebugView } from "./DebugView";
 import { PermissionsCard } from "./PermissionsCard";
 import { PermissionsPane } from "./PermissionsPane";
+import { NudgeSettings } from "./NudgeSettings";
 import { AUTO_DETECT, LANGUAGES, SAME_AS_SPOKEN } from "./languages";
 import {
   Group,
@@ -82,9 +83,21 @@ const EVENT_DEFAULTS: Required<NotchEvents> = {
   connectivity: true,
   banners: true,
   replaceSystemHuds: false,
+  appNotifications: false,
+  appNotificationAllow: [
+    "com.apple.MobileSMS",
+    "com.apple.mail",
+    "com.apple.FaceTime",
+    "com.tinyspeck.slackmacgap",
+    "com.apple.iCal",
+  ],
 };
 
-const EVENT_ROWS: { key: keyof NotchEvents; label: string; hint: string }[] = [
+const EVENT_ROWS: {
+  key: Exclude<keyof NotchEvents, "appNotifications" | "appNotificationAllow">;
+  label: string;
+  hint: string;
+}[] = [
   {
     key: "quiet",
     label: "Quiet notch",
@@ -673,6 +686,10 @@ export function SettingsView({
                   />
                 </Row>
               ))}
+
+            {IS_MAC && (
+              <NudgeSettings value={events} onChange={(notchEvents) => update({ notchEvents })} />
+            )}
 
             {IS_MAC && (
               <Row
