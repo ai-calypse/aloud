@@ -25,6 +25,28 @@
   color: var(--notch-warn);
 }
 
+/* The widgets look speaks each event's role (islandRole), as the design does:
+   the whisper's glyph and level fill in the accent, its track tinted; a peek
+   or card's glyph tile tinted with the accent's ink on it. The word already
+   takes the accent ink (notch.css). Calm keeps the ink and the tones above. */
+[data-notch-style="widgets"] .island-pill--whisper[data-w-role] .island-pill__side [role="img"] {
+  color: var(--w-acc);
+}
+
+[data-notch-style="widgets"] .island-pill--whisper[data-w-role] .level-bar {
+  background: var(--w-track);
+}
+
+[data-notch-style="widgets"] .island-pill--whisper[data-w-role] .level-bar__fill {
+  background: var(--w-acc);
+}
+
+[data-notch-style="widgets"] .peek[data-w-role] .peek__side [role="img"],
+[data-notch-style="widgets"] .toast[data-w-role] > [role="img"] {
+  background: var(--w-track);
+  color: var(--w-ink);
+}
+
 /* The level bar: a track and a fill whose scaleX is a live spring
    (components/notch/level-bar.tsx). transform only, so a held key costs the
    compositor and not layout. */

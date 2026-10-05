@@ -334,6 +334,7 @@
 [data-w-role="sun"] { --w-acc: var(--notch-w-sun); }
 [data-w-role="info"] { --w-acc: var(--notch-w-info); }
 [data-w-role="agent"] { --w-acc: var(--notch-w-agent); }
+[data-w-role="alert"] { --w-acc: var(--notch-danger); }
 /* Light accents (Exercise, Stand, Sleep, Sun) are already AA as words. */
 [data-w-role="exercise"], [data-w-role="stand"], [data-w-role="sleep"], [data-w-role="sun"] { --w-ink: var(--w-acc); }
 

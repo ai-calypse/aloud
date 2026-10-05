@@ -18,6 +18,8 @@ export const WIDGET_ROLES = [
   "sun",
   "info",
   "agent",
+  // Alert red: a critical or muted state, as notch events use it.
+  "alert",
 ] as const;
 
 export type WidgetRole = (typeof WIDGET_ROLES)[number];

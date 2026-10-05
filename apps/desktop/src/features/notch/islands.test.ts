@@ -93,6 +93,36 @@ describe("islandRole", () => {
     expect(islandRole(island("toast:3"))).toBeUndefined();
     expect(islandRole({ ...island("battery"), priority: "urgent" })).toBeUndefined();
   });
+
+  // The events were drawn in plain ink in the widgets look: each takes the
+  // colour docs/design/notch-events.html gives it.
+  it("gives every system event the design's colour", () => {
+    const ev = (id: string, patch: Partial<Island> = {}) => islandRole({ ...island(id), ...patch });
+    expect(ev("hud:volume")).toBe("orange");
+    expect(ev("hud:brightness")).toBe("sun");
+    expect(ev("hud:caps")).toBe("info");
+    expect(ev("bt:70:ae")).toBe("info");
+    expect(ev("bt:low:70:ae")).toBe("sun");
+    expect(ev("net:wifi")).toBe("cyan");
+    expect(ev("drive:/Volumes/X")).toBe("cyan");
+    expect(ev("power:charger", { icon: "bolt" })).toBe("ok");
+    expect(ev("power:charger", { icon: "battery" })).toBeUndefined();
+    expect(ev("power:lowpower", { short: "Low Power" })).toBe("sun");
+    expect(ev("mac:privacy-seen", { icon: "camera" })).toBe("ok");
+    expect(ev("mac:privacy-seen", { icon: "mic" })).toBe("orange");
+  });
+
+  it("speaks a state's colour: a muted mic is red, a live one green", () => {
+    expect(islandRole({ ...island("hud:mic"), icon: "mic-off" })).toBe("alert");
+    expect(islandRole({ ...island("hud:mic"), icon: "mic" })).toBe("ok");
+  });
+
+  // `mac:battery-full` shares the low battery's prefix and was drawn red.
+  it("draws a full battery green, not in the low battery's red", () => {
+    expect(islandRole(island("mac:battery-full"))).toBe("ok");
+    expect(islandRole(island("mac:battery-low"))).toBe("alert");
+    expect(islandTone(island("mac:battery-full"))).toBeUndefined();
+  });
 });
 
 describe("takeovers", () => {
@@ -145,8 +175,9 @@ describe("takeovers", () => {
     expect(capsuleText(alert({ title: "Muted" }))).toBe("Muted");
   });
 
+  // Calm stays ink: a 20% battery is red only in the widgets look (islandRole).
   it("speaks red for what is critical and green for a write that landed", () => {
-    expect(islandTone(alert({ id: "mac:battery-low" }))).toBe("danger");
+    expect(islandTone(alert({ id: "mac:battery-low" }))).toBeUndefined();
     expect(islandTone(alert({ id: "x", priority: "urgent" }))).toBe("danger");
     expect(islandTone(alert({ id: "toast:3" }))).toBe("ok");
     expect(islandTone(alert({ id: "shot:/tmp/a.png" }))).toBeUndefined();
