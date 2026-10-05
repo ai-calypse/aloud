@@ -44,6 +44,8 @@ export type Subsection = {
 export type Section = {
   id: SectionId;
   name: string;
+  /** What the section is for, in a few words: the footer's caption, "Mac · The machine". */
+  blurb?: string;
   icon: LucideIcon;
   /** How many things here need the user right now: the tab's count. */
   count?: (data: NotchData) => number;

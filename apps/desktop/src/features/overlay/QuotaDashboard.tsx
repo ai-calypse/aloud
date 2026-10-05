@@ -13,6 +13,17 @@ import { Bar, type Tone } from "@/components/notch/meters";
  */
 const QUOTA_POLL_MS = 60_000;
 
+/**
+ * The last reading, kept for Home's plan-usage meter. Home must not read the
+ * token itself (that is the Keychain prompt this view makes opt-in), so it
+ * shows what Usage already fetched, if that was recent.
+ */
+let lastQuota: { quota: Quota; at: number } | null = null;
+
+export function recentQuota(maxAgeMs = 5 * 60_000): Quota | null {
+  return lastQuota && Date.now() - lastQuota.at < maxAgeMs ? lastQuota.quota : null;
+}
+
 export function useQuota() {
   const [quota, setQuota] = useState<Quota | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +39,7 @@ export function useQuota() {
       void commands.agentQuota().then((res) => {
         if (!live) return;
         if (res.status === "ok") {
+          lastQuota = { quota: res.data, at: Date.now() };
           setQuota(res.data);
           setError(null);
         } else {

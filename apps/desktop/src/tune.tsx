@@ -28,6 +28,9 @@ import { TodayWidgetGallery } from "./tune-widgets-today";
 import { MacFocusGallery } from "./tune-widgets-mac-focus";
 // --- end Mac + Focus widget fixtures ---
 import { AgentsLaunchGallery } from "./tune-widgets-agents-launch";
+// --- Calm Home fixtures (tune-calm-home.tsx) ---
+import { CalmHomeGallery } from "./tune-calm-home";
+// --- end Calm Home fixtures ---
 import "./styles/notch.css";
 import "./styles/events.css";
 
@@ -739,6 +742,12 @@ function NotchGallery() {
             </Ring>
           </div>
         </Specimen>
+
+        {/* --- Calm Home fixtures --- */}
+        <Specimen name="Shell · Home · Calm" note="the ranked tile board in the panel's chrome, from labelled fixtures; the toggles are the prototype's live items: tiles reflow and re-size as agents, the timer and music go live">
+          <CalmHomeGallery />
+        </Specimen>
+        {/* --- end Calm Home fixtures --- */}
 
         <Specimen name="Widgets look" note="the Settings › Overlay option: Apple-style tiles; primitives, the Home board, empty and urgent states">
           <WidgetGallery />

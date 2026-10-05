@@ -132,7 +132,7 @@ components:
 
 The notch panel is one sheet of pure black that grows out of the MacBook's camera cutout and settles back into it. It is the only surface in Aloud that floats over the user's work, so it behaves like hardware rather than a window: the same black as the cutout (so the seam never shows), concave shoulders welded to the menu bar, and motion that comes from the notch and returns to it. PRODUCT.md's first principle governs every decision here — *"A glance, not a visit."* The user is in an editor, a terminal or a browser; the notch answers its question in under a second and gets out of the way.
 
-The style is the one chosen in `docs/design/notch-styles.html` as "Mix": Vercel's pure black, 1px hairlines and Geist; Linear's icon tabs and the counts on tabs that need you; shadcn's Switch, Slider and bordered segmented control; Apple's notch weld and springs. Density is Control Center, not a dashboard: one fact leads each view, rows sit on hairlines, and nothing is nested in a card. It rejects PRODUCT.md's anti-references by name — **gimmicky glass** (heavy blur and glow, neon accents), **a crowded icon dock** (unlabelled icons to memorise), and **web-dashboard habits** (hero metrics with gradient accents, cards nested in cards, admin-panel chrome).
+The style is the one chosen in `docs/design/notch-styles.html` as "Mix": Vercel's pure black, 1px hairlines and Geist; Linear's icon tabs and the counts on tabs that need you; shadcn's Switch, Slider and bordered segmented control; Apple's notch weld and springs. Density is Control Center, not a dashboard: one fact leads each view, rows sit on hairlines, and nothing is nested in a card. The one exception is Home: its tiles are the card, a flat ranked board (see Home tiles below), and every list in every other section stays hairline rows. It rejects PRODUCT.md's anti-references by name — **gimmicky glass** (heavy blur and glow, neon accents), **a crowded icon dock** (unlabelled icons to memorise), and **web-dashboard habits** (hero metrics with gradient accents, cards nested in cards, admin-panel chrome).
 
 Motion is part of the system, not decoration. Springs, never durations, for anything physical; one damping ratio for the whole app (only the response varies); close a fifth slower than open; things emerge from the notch, never from their own centre; a size change is the animation. Values live in `src/styles/motion.css`; motion whose target can move mid-flight (a tab underline, the panel's size, the pill's width) runs on the live spring in `src/lib/spring.ts`. Reduced motion is a hard switch that collapses travel and keeps crossfades. The `aloud-motion` skill is the long form.
 
@@ -162,7 +162,8 @@ A restrained, monochrome palette on pure black: greys do the work, white is the 
 
 ### Semantic
 - **Focus** (system blue #0a84ff): keyboard focus, as an outline outside the control. Native macOS focus is the accent ring; anything else reads as selection.
-- **Ok / Warn / Danger** (#30d158 / #ff9f0a / #ff453a): the word on a status chip, an urgent island's dot, a meter near its cap. Always beside a word or a number.
+- **Ok / Warn / Danger** (#34c85a / #ff9f0a / #ff453a): the word on a status chip, an urgent island's dot, a meter near its cap. Always beside a word or a number. Ok is the Batteries green (it was the system green).
+- **Caution** (#ffcc00): Home's own warning yellow, for what needs you, a high plan usage and a battery at 20% and under. Home's tiles use only Ok, Caution and Danger, each with its word (see Home tiles).
 - **App Action** (#0a84ff): only inside approval cards and the alert chip, which are drawn as the acting app's own window and use that app's blue.
 
 ### Named Rules
@@ -213,7 +214,7 @@ Primitives live in `src/components/notch/` and extend `src/components/ui/` where
 - **Count** (`notch-count`): 16px, inverted, Geist Mono — Linear's count, on tabs where something needs you.
 
 ### Navigation
-- **SectionTabs:** icon + label + optional count, 40px tall, Ink 2 → Ink on hover and when selected. One white 2px underline rides the strip's bottom hairline on a live spring (inset 5px), so a click mid-travel bends it. `role="tablist"`, one Tab stop, ← → / Home / End move and select, ↓ hands focus to the body.
+- **SectionTabs:** icon + label (Calm drops the icon: `icons={false}`; the word stays) + optional count, 40px tall, Ink 2 → Ink on hover and when selected. One white 2px underline rides the strip's bottom hairline on a live spring (inset 5px), so a click mid-travel bends it. `role="tablist"`, one Tab stop, ← → / Home / End move and select, ↓ hands focus to the body.
 - **SubTabs:** a bordered track (Well, Edge, 9px radius, 3px padding) with a Raised thumb (6px radius) sliding on a live spring — position and width, since labels differ. A lone subsection shows its name instead.
 - **Segmented:** the same track at 22px as a `radiogroup`, for a choice inside a view (30 min · 2 hrs · Always). Disabled segments are skipped by the arrows.
 
@@ -262,6 +263,15 @@ Island { id, kind: Live | Alert, priority: Low | Normal | High | Urgent,
 
 The palette (`Palette.tsx`) opens in the body, in its flow, so the panel grows to fit on its own spring; the view stays mounted underneath. It searches ready sections, subsections, their features and runnable actions — built from the same registries, so it cannot offer what is not there. Approval cards ignore keys from inside the palette (`fromPalette`): its Enter must never allow the write under it.
 
+### Home tiles (signature)
+Calm's Home (`views/CalmHome.tsx`, `CalmTiles.tsx`) is a ranked tile board, from `docs/design/notch-personality.html` (Calm). It is the one place a card is the unit: 8 columns by 3 rows of 108px on the 780px panel, 10px gaps, tiles `--notch-tile` (#101010) with a 1px `--notch-tile-edge`, 12px radius (`rounded-notch-tile`), 12px padding, a 1px lift and `--notch-tile-hi` on hover only for a tile that opens something. A label is 11px semibold Ink 3 with a 13px glyph; numerals are Light 300 at 56/40/32/22/16 (`text-notch-n-*`, tracking `-0.035em`, tabular, rolling digits).
+
+**State accents.** Monochrome ink, and an accent only where it carries state: `data-tile-state="ok|caution|alert"` (Tile's `state`, or set again on one part of a tile) rebinds the widget primitives' `--w-acc`, `--w-ring` and `--w-track` and gives `text-notch-acc` and `text-notch-acc-ink` (the accent mixed 68% toward white for words). Each accent comes with its word: Good, Low, Critical, "1 needs you", "Getting full". Album art and the weather sun and cloud keep their own colours. Reuse `Ring`, `Capsule`, `SegBar`, `Numeral` and `Spark` from `components/notch/widgets`; their Calm props (`vertical`, `height`/`gap`, `tracking="calm"`, `fill`) are optional, so the Widgets look draws what it always did.
+
+**Ranking.** `calm-home.ts` is pure: `weights()` scores what is live (battery pinned 100 under 10% and off charge, agents 90, timer 70, music playing 60, charging 40; an idle tile 1, calendar 3.5, weather 1.5), `plan()` picks the sizes whose areas fill exactly 22 cells giving most area to the heaviest, `pack()` first-fits them in reading order (backing up at a dead end, which the prototype did not). A tile that moves springs there (`useFlip`, `lib/spring.ts`); one that changes size crossfades its content and is never scaled. An empty source is a tile that says so in a line, never an invented value. The calendar tile reads the clock and the `calendar:next` island, never Calendar.app; plan usage is only what Agents › Usage already fetched.
+
+**Calm chrome.** Section "Now" is named Home (its id stays). Tabs are text only; a section with one subsection draws no switcher row; the header's tools are search with its ⌘K key and a settings gear; the footer's caption is `Section · blurb` on the left (`Section.blurb`) and `⌘1–9 sections`, `esc close` on the right. Widgets keeps its own chrome.
+
 ### Looks (signature)
 The notch has two looks, chosen in Settings › Overlay (`Settings::notch_style`, `Calm | Widgets`, saved as `notchStyle`). **Calm** is everything above, the default, and is never touched by the second look. **Widgets** redraws the open panel as Apple-style widgets, taken from the CarPlay Design System Figma file (`docs/design/figma-carplay-index.md`; the prototype is `docs/design/notch-personality.html`). Only the open panel's body, its colours and its type change: the sections, shortcuts, closed notch, `pillSides` and island behaviour are shared, and an island only picks up its owner's accent (`islandRole`, `[data-w-role]`).
 
@@ -270,7 +280,7 @@ The notch has two looks, chosen in Settings › Overlay (`Settings::notch_style`
 **Registering a widget view.** A subsection gets a second view and nothing else changes:
 
 ```ts
-{ id: "overview", name: "Overview", ready: true, view: NowOverview, widgetView: WidgetHome }
+{ id: "overview", name: "Overview", ready: true, view: CalmHome, widgetView: WidgetHome }
 ```
 
 `viewFor(sub, style)` (sections.ts) returns `widgetView` only when the look is Widgets and one exists; otherwise the calm `view`, so a section nobody has drawn as widgets is never blank. A `widgetView` alone does not make a subsection ready. `panelWidth(readyCount, style)` keeps the calm 640/780 and is always 780 for Widgets (four 158pt tiles and their gaps are 698pt). Now › Overview has one (`views/WidgetHome.tsx`), as do Agents › Voice, Coding and Usage and Launch › Apps and Shortcuts (`views/widgets/Agents.tsx`, `Launch.tsx`; their words are in `agents-logic.ts` and `launch-logic.ts`). Launch › Search stays Calm: its hits are four kinds of row under an Enter-opens-the-first-hit box, which Siri Suggestions' four fixed rows would hide most of. Approval cards (`ConfirmGate`, `PermissionCard`) are the app's own and sit in a Large tile unrestyled; only `.perm`'s 380pt minimum is lifted inside a tile (notch.css).

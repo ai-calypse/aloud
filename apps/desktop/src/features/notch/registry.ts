@@ -23,7 +23,7 @@ import { MacStats } from "./views/MacStats";
 import { MacWindows } from "./views/MacWindows";
 import { FocusAwake, FocusNotes, FocusTimer } from "./views/Focus";
 import { TodayCalendar, TodayReminders, TodayStocks, TodayWeather } from "./views/Today";
-import { NowOverview } from "./views/Now";
+import { CalmHome } from "./views/CalmHome";
 import { WidgetHome } from "./views/WidgetHome";
 import { WidgetMediaDevices } from "./views/widgets/Devices";
 import { WidgetMediaLyrics } from "./views/widgets/Lyrics";
@@ -61,7 +61,9 @@ import { WidgetShelfDrives } from "./views/widgets/ShelfDrives";
 export const SECTIONS: Section[] = [
   {
     id: "now",
-    name: "Now",
+    // The id stays "now": it is stored in nav and named by the overlay.
+    name: "Home",
+    blurb: "ranked by what is live, biggest first",
     icon: ActivityIcon,
     status: (d) => {
       const live = d.islands.filter((i) => i.kind === "live").length;
@@ -73,7 +75,7 @@ export const SECTIONS: Section[] = [
         name: "Overview",
         features: ["Live activities"],
         ready: true,
-        view: NowOverview,
+        view: CalmHome,
         widgetView: WidgetHome,
       },
       { id: "activity", name: "Activity", features: ["Shell activity", "Developer API"], ready: false },
@@ -82,6 +84,7 @@ export const SECTIONS: Section[] = [
   {
     id: "agents",
     name: "Agents",
+    blurb: "Voice, coding, usage",
     icon: BotIcon,
     count: (d) => d.permissions.length,
     status: (d) => {
@@ -122,6 +125,7 @@ export const SECTIONS: Section[] = [
   {
     id: "media",
     name: "Media",
+    blurb: "Playing, lyrics, sound",
     icon: MusicIcon,
     subsections: [
       {
@@ -162,6 +166,7 @@ export const SECTIONS: Section[] = [
   {
     id: "focus",
     name: "Focus",
+    blurb: "Timer, keep awake, notes",
     icon: TimerIcon,
     subsections: [
       {
@@ -194,6 +199,7 @@ export const SECTIONS: Section[] = [
   {
     id: "shelf",
     name: "Shelf",
+    blurb: "Files in flight",
     icon: InboxIcon,
     subsections: [
       {
@@ -233,6 +239,7 @@ export const SECTIONS: Section[] = [
   {
     id: "clipboard",
     name: "Clipboard",
+    blurb: "Everything you copied",
     icon: ClipboardIcon,
     subsections: [
       {
@@ -261,6 +268,7 @@ export const SECTIONS: Section[] = [
   {
     id: "today",
     name: "Today",
+    blurb: "Calendar, reminders, weather",
     icon: CalendarIcon,
     subsections: [
       { id: "calendar", name: "Calendar", features: ["Calendar"], ready: true, view: TodayCalendar, widgetView: WidgetCalendar },
@@ -273,6 +281,7 @@ export const SECTIONS: Section[] = [
   {
     id: "mac",
     name: "Mac",
+    blurb: "The machine",
     icon: LaptopIcon,
     subsections: [
       {
@@ -314,6 +323,7 @@ export const SECTIONS: Section[] = [
   {
     id: "launch",
     name: "Launch",
+    blurb: "Start anything",
     icon: LayoutGridIcon,
     subsections: [
       {

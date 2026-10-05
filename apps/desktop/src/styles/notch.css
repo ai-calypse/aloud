@@ -293,3 +293,71 @@
   height: 1em;
   line-height: 1;
 }
+
+/* --- Calm Home (components/notch/tile.tsx, views/CalmTiles.tsx) ----------
+ * Eight columns by three rows of 108px: the prototype's geometry, which a
+ * utility cannot say without arbitrary values. */
+.notch-calm-grid {
+  position: relative; /* the offset parent useFlip measures against */
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(3, 108px);
+  gap: 10px;
+  height: 344px;
+}
+
+.notch-tile {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  translate: 0 0;
+  transition:
+    translate var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+/* Only a tile that opens something lifts: a lift on a static one promises a click. */
+.notch-tile[data-actionable]:hover {
+  translate: 0 -1px;
+  background-color: var(--notch-tile-hi);
+}
+
+/* A size change is a crossfade of what is inside, never a scale of the tile:
+ * the tile snaps to its new cell (useFlip carries it there) and the words
+ * arrive over a beat. ask-fade is the shell's own entrance (overlay.css). */
+.notch-tile__in {
+  animation: ask-fade var(--dur-base) var(--ease-out) both;
+}
+
+/* The two-note audio bars of a playing track. scaleY only, so the compositor
+ * runs them; paused, they hold still, and reduced motion's 1ms switch stops them. */
+.notch-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.notch-bars > i {
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--w-acc);
+  transform-origin: bottom;
+  transform: scaleY(0.22);
+  animation: notch-bar 0.8s ease-in-out infinite alternate paused;
+}
+
+.notch-bars[data-playing] > i {
+  animation-play-state: running;
+}
+
+.notch-bars > i:nth-child(2) { animation-duration: 0.62s; animation-delay: -0.2s; }
+.notch-bars > i:nth-child(3) { animation-duration: 0.95s; animation-delay: -0.5s; }
+.notch-bars > i:nth-child(4) { animation-duration: 0.7s; animation-delay: -0.35s; }
+.notch-bars > i:nth-child(5) { animation-duration: 0.85s; animation-delay: -0.1s; }
+
+@keyframes notch-bar {
+  from { transform: scaleY(0.2); }
+  to { transform: scaleY(1); }
+}

@@ -173,9 +173,41 @@
   --notch-primary-ink: var(--gray-50);
   /* Keyboard focus is the system's accent ring, as everywhere on macOS. */
   --notch-focus: var(--sys-blue);
-  --notch-ok: var(--sys-green);
+  /* Calm Home's green (the prototype's Batteries green) in place of the system
+     one: the same colour on the battery fill, a done agent and a Bar's ok tone. */
+  --notch-ok: #34c85a;
   --notch-warn: var(--sys-orange);
   --notch-danger: var(--sys-red);
+
+  /* --- Calm Home tiles (docs/design/notch-personality.html, Calm) -----------
+     A ranked tile dashboard on black. Monochrome ink, and an accent only where
+     it carries state, always beside its word: caution (needs you, high usage,
+     low battery), ok (a good charge, an agent done), alert (critical, failed:
+     the shared --notch-danger). Album art and the weather glyph keep their
+     own colours. */
+  --notch-tile: #101010;
+  --notch-tile-hi: #161616; /* the tile under the pointer */
+  --notch-tile-edge: #1d1d1d;
+  --notch-tile-track: var(--gray-400); /* the unfilled part of a bar or ring */
+  --notch-field: rgb(255 255 255 / 0.08); /* an event card, a chip: a quiet well on a tile */
+  --notch-on: #0b0b0c; /* words on a solid accent fill */
+  --notch-caution: #ffcc00;
+  --notch-sun: #ffd409; /* the weather glyph's own colours */
+  --notch-cloud: #dfe3ea;
+  --notch-cloud-shade: #b7bdc9;
+  --radius-notch-tile: 12px;
+
+  /* Numerals: Light 300, tight and tabular. The small ones stay in the same
+     scale so a tile reads at one weight at every size it can take. */
+  --text-notch-n-hero: 56px;
+  --text-notch-n-xl: 40px;
+  --text-notch-n-lg: 32px;
+  --text-notch-n-md: 22px;
+  --text-notch-n-sm: 16px;
+  --tracking-notch-n: -0.035em;
+  --text-notch-tile-label: 11px; /* the tile's label, beside its 13px glyph */
+  --text-notch-tile-name: 15px; /* a track or an agent, on the smallest tile */
+  --text-notch-tile-title: 18px; /* a track, on the largest */
 
   /* Type. Bundled, not Google Fonts: the CSP is default-src 'self'. */
   --font-notch: "Geist Variable", -apple-system, system-ui, sans-serif;
@@ -309,6 +341,23 @@
 [data-notch-style="widgets"] {
   --font-notch: var(--font-notch-w);
 }
+
+/* A Calm tile and its state. `data-notch-tile` rebinds the widget primitives'
+   variables (ring, capsule, segments, spark) to the tile's accent, so Calm
+   reuses them instead of copying them; `data-tile-state` is the only way an
+   accent enters, and an element can set it again for one part of a tile (the
+   plan-usage meter inside Agents). Accent words go through the same 68%-toward-
+   white rule the widgets use, so yellow on #101010 stays AA. */
+[data-notch-tile],
+[data-tile-state] {
+  --w-acc: var(--tile-acc, var(--notch-ink));
+  --w-ring: var(--w-acc);
+  --w-track: var(--notch-tile-track);
+  --tile-ink: color-mix(in srgb, var(--w-acc) 68%, white);
+}
+[data-tile-state="caution"] { --tile-acc: var(--notch-caution); }
+[data-tile-state="ok"] { --tile-acc: var(--notch-ok); }
+[data-tile-state="alert"] { --tile-acc: var(--notch-danger); }
 
 /* A widget's accent and everything derived from it. `data-w-role` is set on a
    frame, a ring or an island item; descendants inherit the three variables.
