@@ -1525,8 +1525,14 @@ function Indicator({ phase }: { phase: Phase }) {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <Overlay />
-  </React.StrictMode>,
-);
+const mount = () =>
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <Overlay />
+    </React.StrictMode>,
+  );
+
+// A plain browser (the tuner, screenshots) has no Rust: stand one in before
+// anything calls `invoke`. A dynamic import, so the real app never loads it.
+if ("__TAURI_INTERNALS__" in window) mount();
+else void import("./lib/preview-backend").then((m) => (m.installPreviewBackend(), mount()));
