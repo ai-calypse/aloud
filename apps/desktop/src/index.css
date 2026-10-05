@@ -170,6 +170,7 @@
   --color-widget-podcast-meta: var(--notch-w-podcast-meta);
   --color-widget-acc: var(--w-acc, var(--notch-w-ink));
   --color-widget-acc-ink: var(--w-ink, var(--notch-w-ink));
+  --color-widget-fill: var(--w-fill, var(--notch-w-tile));
   --color-widget-ring: var(--w-ring, var(--w-acc, var(--notch-w-ink)));
   --color-widget-track: var(--w-track, var(--notch-w-neutral-track));
   --color-widget-ev-bg: var(--w-ev-bg);
@@ -183,6 +184,8 @@
   --text-notch-w-numeral-m: var(--text-notch-w-numeral-m);
   --text-notch-w-numeral-l: var(--text-notch-w-numeral-l);
   --text-notch-w-numeral-xl: var(--text-notch-w-numeral-xl);
+  --text-notch-w-headline: var(--text-notch-w-headline);
+  --text-notch-w-body: var(--text-notch-w-body);
   --text-notch-w-title: var(--text-notch-w-title);
   --text-notch-w-meta: var(--text-notch-w-meta);
   --text-notch-w-over: var(--text-notch-w-over);

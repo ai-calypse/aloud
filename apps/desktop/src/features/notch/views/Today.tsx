@@ -20,7 +20,8 @@ import { degrees, dueText, marketLabel, nextEvent, overdue, percent, price, time
 import { cn } from "@/lib/utils";
 import { useCalendar, useNow, useReminders, useStocks, useWeather } from "../useToday";
 
-const SKY: Record<Sky, LucideIcon> = {
+/** Shared with the Home weather widget. */
+export const SKY: Record<Sky, LucideIcon> = {
   clear: SunIcon,
   partlyCloudy: CloudSunIcon,
   cloudy: CloudIcon,

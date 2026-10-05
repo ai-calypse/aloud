@@ -256,7 +256,7 @@
  * rebinds); the closed notch's geometry and behaviour are the shared ones
  * above. An island with a role (islandRole) speaks in that
  * accent's ink, the accent-ink rule that keeps words at AA. */
-[data-notch-style="widgets"] .island-pill__item[data-w-role] .island-pill__detail:not([data-urgent]) {
+[data-notch-style="widgets"] [data-w-role] .island-pill__detail:not([data-urgent]) {
   color: var(--w-ink);
 }
 

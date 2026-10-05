@@ -24,6 +24,7 @@ import { MacWindows } from "./views/MacWindows";
 import { FocusAwake, FocusNotes, FocusTimer } from "./views/Focus";
 import { TodayCalendar, TodayReminders, TodayStocks, TodayWeather } from "./views/Today";
 import { NowOverview } from "./views/Now";
+import { WidgetHome } from "./views/WidgetHome";
 import { ShelfDownloads, ShelfDrives, ShelfFiles, ShelfShots } from "./views/Shelf";
 
 /**
@@ -32,7 +33,8 @@ import { ShelfDownloads, ShelfDrives, ShelfFiles, ShelfShots } from "./views/She
  * subsections marked `ready` render, and a section with none is hidden (see
  * `readySections`), so this file is the plan and the panel is what has
  * landed. Adding a feature: write its view under `views/`, set `view`, flip
- * `ready`. The position here is the section's ⌘ number — append, never
+ * `ready`. For the Widgets look give it a `widgetView` too (until then it
+ * shows its calm `view` in either look). The position here is the section's ⌘ number — append, never
  * reorder, or a learned shortcut moves.
  */
 export const SECTIONS: Section[] = [
@@ -51,6 +53,7 @@ export const SECTIONS: Section[] = [
         features: ["Live activities"],
         ready: true,
         view: NowOverview,
+        widgetView: WidgetHome,
       },
       { id: "activity", name: "Activity", features: ["Shell activity", "Developer API"], ready: false },
     ],

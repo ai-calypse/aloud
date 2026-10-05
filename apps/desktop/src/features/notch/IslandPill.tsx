@@ -1,7 +1,7 @@
 import type { AgentPermission, AgentSession, Island } from "@/lib/bindings";
 import { AppIcon } from "@/components/notch/app-icon";
 import { AgentCats } from "@/features/overlay/NotchAgents";
-import { pillSides } from "./islands";
+import { islandRole, pillSides } from "./islands";
 
 /**
  * An island's lead, wherever it is drawn: the coding agents' cat stack for
@@ -61,7 +61,7 @@ export function IslandPill({
     >
       <div className="island-pill__side island-pill__side--left">
         {left.map((island) => (
-          <span className="island-pill__item" key={island.id}>
+          <span className="island-pill__item" key={island.id} data-w-role={islandRole(island)}>
             {icon(island)}
             {/* One activity spans both sides: its value goes right. */}
             {!single && <Detail island={island} />}
@@ -69,12 +69,16 @@ export function IslandPill({
         ))}
       </div>
       <span className="island-pill__camera" aria-hidden />
-      <div className="island-pill__side island-pill__side--right">
+      <div
+        className="island-pill__side island-pill__side--right"
+        // One activity's value sits here, outside its item.
+        data-w-role={single ? islandRole(single) : undefined}
+      >
         {single ? (
           <Detail island={single} />
         ) : (
           right.map((island) => (
-            <span className="island-pill__item" key={island.id}>
+            <span className="island-pill__item" key={island.id} data-w-role={islandRole(island)}>
               {icon(island)}
               <Detail island={island} />
             </span>

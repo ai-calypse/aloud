@@ -270,6 +270,12 @@
   --notch-w-live-tile-mix: 22%; /* accent over black: the deepest shade */
   --notch-w-live-ring-mix: 78%; /* accent toward white: the lightest tint */
 
+  /* A tile filled with an accent (Music, Weather) is the accent this far over
+     black, so white words on it clear AA; Figma's raw pink is 3.3:1 under
+     white. The accent-ink rule's other half: ink tints toward white, fills
+     shade toward black. */
+  --notch-w-fill-mix: 76%;
+
   /* Type. SF is the system face, so this look is a Mac one: it costs no font
      file, and Windows falls through to system-ui. Rounded only where the Figma
      file says (Fitness lines). */
@@ -279,6 +285,8 @@
   --text-notch-w-numeral-m: 40px;
   --text-notch-w-numeral-l: 46px; /* battery, weather: Display Light/Regular */
   --text-notch-w-numeral-xl: 56px;
+  --text-notch-w-headline: 17px; /* a track or an episode: Text Semibold */
+  --text-notch-w-body: 15px; /* the artist under it, a row's name */
   --text-notch-w-title: 13px; /* event and row titles: Text Semibold */
   --text-notch-w-meta: 12px; /* times and labels: Text Medium */
   --text-notch-w-over: 11px; /* overlines, the label under a tile: Semibold */
@@ -308,6 +316,7 @@
    role derives its track by the rule above. */
 [data-w-role] {
   --w-ring: var(--w-acc);
+  --w-fill: color-mix(in srgb, var(--w-acc) var(--notch-w-fill-mix), black);
   --w-ink: color-mix(in srgb, var(--w-acc) var(--notch-w-ink-mix), white);
   --w-track: color-mix(in srgb, var(--w-acc) var(--notch-w-track-mix), var(--notch-w-tile));
 }

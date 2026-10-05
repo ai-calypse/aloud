@@ -31,6 +31,8 @@ const GROUND = {
   tile: "bg-widget-tile",
   vibrant: "bg-widget-tile-2",
   deep: "bg-widget-tile-deep",
+  /** Filled with the accent, shaded so white words on it pass AA. Needs `accent`. */
+  accent: "bg-widget-fill",
 } as const;
 
 /**

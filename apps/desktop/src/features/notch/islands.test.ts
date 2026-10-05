@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Island } from "@/lib/bindings";
-import { applyIsland, pillSides, PILL_MAX } from "./islands";
+import { applyIsland, islandRole, pillSides, PILL_MAX } from "./islands";
 
 const island = (id: string, detail = ""): Island => ({
   id,
@@ -66,5 +66,19 @@ describe("pillSides", () => {
     const sides = pillSides(["a", "b", "c", "d", "e", "f"].map((id) => island(id)));
     expect(ids(sides.left).length + ids(sides.right).length).toBe(PILL_MAX);
     expect(sides.more).toBe(2);
+  });
+});
+
+describe("islandRole", () => {
+  it("takes the owner's accent from the id's prefix", () => {
+    expect(islandRole(island("agents"))).toBe("agent");
+    expect(islandRole(island("media:browser:Brave:youtube.com"))).toBe("media");
+    expect(islandRole(island("timer"))).toBe("move");
+    expect(islandRole(island("calendar:next"))).toBe("calendar");
+  });
+
+  it("leaves an owner with no role, and an urgent island, in the shared ink", () => {
+    expect(islandRole(island("toast:3"))).toBeUndefined();
+    expect(islandRole({ ...island("battery"), priority: "urgent" })).toBeUndefined();
   });
 });

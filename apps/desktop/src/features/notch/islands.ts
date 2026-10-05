@@ -1,4 +1,5 @@
 import type { Island, IslandChanged } from "@/lib/bindings";
+import type { WidgetRole } from "@/components/notch/widgets/roles";
 
 /**
  * The webview's copy of the island queue after one `island` event: the change
@@ -46,4 +47,25 @@ export function pillSides(live: Island[]): {
     right: shown.filter((_, i) => i % 2 === 1),
     more: live.length - shown.length,
   };
+}
+
+/** The accent each owner's island speaks in, by the prefix of its id (`media:browser:…`). */
+const ISLAND_ROLES: Record<string, WidgetRole> = {
+  agents: "agent",
+  media: "media",
+  timer: "move",
+  battery: "ok",
+  download: "info",
+  calendar: "calendar",
+};
+
+/**
+ * The widgets look's colour for an island: its owner's accent. None for an
+ * urgent island (its own warning treatment and its word stand) and for an owner
+ * with no role, which keep the shared ink. Colour only; the island's words and
+ * geometry are the same in both looks.
+ */
+export function islandRole(island: Island): WidgetRole | undefined {
+  if (island.priority === "urgent") return undefined;
+  return ISLAND_ROLES[island.id.split(":")[0]];
 }
