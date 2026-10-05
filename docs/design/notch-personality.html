@@ -1,0 +1,1028 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notch Personality</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
+<style>
+/* =============================================================================
+   Aloud notch, "Alive" style, part 1: tokens, tile system, Home.
+   Reuses the geometry of notch-sections.html (black shape welded to the camera
+   cutout, 780px panel, 24px bottom radius). "Calm" is the shipping monochrome
+   Mix so the two can be compared with one click.
+   ========================================================================== */
+:root {
+  /* ---- Neutrals (Mix, unchanged) ---- */
+  --notch-fill: #000;
+  --ink: #f5f5f7;
+  --ink-2: #a1a1a6;      /* 6.9:1 on --tile */
+  --ink-3: #8e8e93;      /* 5.2:1 on --tile */
+  --on: #0b0b0c;         /* text on a solid accent fill */
+  --sep: rgb(255 255 255 / 0.1);
+  --field: rgb(255 255 255 / 0.08);
+  --field-hi: rgb(255 255 255 / 0.14);
+
+  /* ---- Tiles ---- */
+  --tile: #1c1c1e;
+  --tile-hi: #232326;
+  --track: #38383c;      /* the unfilled part of a ring, bar, capsule */
+  --r-tile: 20px;
+  --pad: 12px;
+
+  /* ---- Accent roles. sRGB fallbacks first, OKLCH (wider gamut) after.
+     Every one is >= 5.5:1 on --tile, so a ring, a numeral or a word set in an
+     accent passes AA on its own tile. Colour is never the only carrier: a state
+     shift always comes with a word, a number or a different shape. ---- */
+  --c-media:   #ff639b;  /* pink-red: music, tinted from album art     */
+  --c-time:    #ff7c49;  /* orange-red: focus timer, countdowns        */
+  --c-today:   #fca942;  /* amber: calendar, the day                   */
+  --c-ok:      #2be179;  /* healthy                                    */
+  --c-caution: #f6d732;  /* caution                                    */
+  --c-alert:   #ff595a;  /* alert                                      */
+  --c-info:    #50a8ff;  /* info / system                              */
+  --c-clip:    #bf83fe;  /* clipboard                                  */
+  --c-net:     #44d6d6;  /* network: shelf, AirDrop, downloads         */
+  --c-agent:   #8e96ff;  /* agents (indigo, between info and clip)     */
+  --c-ink:     #f5f5f7;  /* Launch: no hue on purpose                  */
+
+  /* ---- Motion (motion.css). Critically damped spring, response 0.31s. ---- */
+  --dur-fast: 160ms;
+  --dur-base: 240ms;
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --spring: linear(0, 0.0439, 0.1421, 0.2607, 0.3804, 0.4912, 0.5887, 0.6716, 0.7404, 0.7964, 0.8415, 0.8773, 0.9055, 0.9276, 0.9447, 0.9579, 0.9681, 0.9758, 0.9818, 0.9863, 0.9897, 0.9923, 0.9942, 0.9957, 0.9968, 0.9976, 0.9982, 0.9987, 1);
+
+  color-scheme: dark;
+  font: 13px/1.4 "Geist", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+@supports (color: oklch(0.7 0.1 10)) {
+  :root {
+    --c-media:   oklch(0.72 0.2 2);
+    --c-time:    oklch(0.74 0.18 40);
+    --c-today:   oklch(0.8 0.15 68);
+    --c-ok:      oklch(0.8 0.19 152);
+    --c-caution: oklch(0.88 0.17 98);
+    --c-alert:   oklch(0.7 0.21 24);
+    --c-info:    oklch(0.72 0.16 252);
+    --c-clip:    oklch(0.72 0.18 305);
+    --c-net:     oklch(0.8 0.12 195);
+    --c-agent:   oklch(0.72 0.17 278);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #0b0b0d; color: var(--ink); min-width: 820px; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+button:focus-visible, [tabindex]:focus-visible, input:focus-visible { outline: 2px solid var(--c-info); outline-offset: 2px; border-radius: 6px; }
+kbd { font: 500 11px/1 "Geist Mono", ui-monospace, monospace; color: var(--ink-2); padding: 3px 5px; border-radius: 5px; background: var(--field); }
+svg { display: block; }
+.ic { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ic--f { fill: currentColor; stroke: none; }
+
+/* Calm = today's Mix: flat, mono, accents collapse to ink. State colours stay,
+   as they do in the shipping app (ok / warn / danger). */
+[data-mode="calm"] {
+  --tile: #101010; --tile-hi: #161616; --track: #262626; --r-tile: 12px;
+}
+[data-mode="calm"] .tile, [data-mode="calm"] .pi, [data-mode="calm"] .drop, [data-mode="calm"] .face--hud,
+[data-mode="calm"] .face--open { --acc: var(--ink); }
+[data-mode="calm"] .tile { border: 1px solid #1d1d1d; }
+[data-state="ok"] { --acc: var(--c-ok) !important; }
+[data-state="caution"] { --acc: var(--c-caution) !important; }
+[data-state="alert"] { --acc: var(--c-alert) !important; }
+
+/* ---- Accent mode: one accent per screen, or each tile owns its role ------- */
+.tile { --acc: var(--sec); }
+[data-accent="content"] .tile { --acc: var(--role, var(--sec)); }
+.r-info { --role: var(--c-info); } .r-time { --role: var(--c-time); } .r-today { --role: var(--c-today); }
+.r-agent { --role: var(--c-agent); } .r-ok { --role: var(--c-ok); } .r-media { --role: var(--c-media); }
+.face--open { --sec: var(--c-info); }
+
+/* =============================================================================
+   Page chrome
+   ========================================================================== */
+.top { position: sticky; top: 0; z-index: 50; background: rgb(11 11 13 / 0.94); border-bottom: 1px solid #1f1f23; padding: 10px 20px; display: grid; gap: 8px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; }
+.brand { display: flex; gap: 10px; align-items: baseline; margin-right: auto; }
+.brand b { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.brand span { color: var(--ink-3); font-size: 12px; }
+.grp { display: flex; align-items: center; gap: 8px; }
+.grp > label, .grp > .gl { color: var(--ink-3); font-size: 11.5px; font-weight: 500; }
+.seg2 { display: inline-flex; padding: 3px; gap: 2px; border-radius: 99px; background: var(--field); }
+.seg2 button { height: 26px; padding: 0 12px; border-radius: 99px; color: var(--ink-2); font-weight: 500; white-space: nowrap; transition: background-color var(--dur-fast), color var(--dur-fast); }
+.seg2 button:hover { color: var(--ink); }
+.seg2 button[aria-pressed="true"] { background: var(--field-hi); color: var(--ink); }
+.seg2 button.tg[aria-pressed="true"]::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--c-ok); margin-right: 6px; vertical-align: 1px; }
+.range { display: flex; align-items: center; gap: 8px; }
+.range input { width: 130px; accent-color: var(--c-info); }
+.range output { font: 500 12px "Geist Mono", monospace; color: var(--ink); min-width: 4ch; }
+
+/* ---- Desktop stage ------------------------------------------------------- */
+.stage { position: relative; height: 580px; overflow: hidden; background: radial-gradient(120% 90% at 30% 110%, #3a2f2a 0%, transparent 60%), radial-gradient(90% 80% at 85% 0%, #23303d 0%, transparent 55%), #2a2b30; }
+.menubar { position: absolute; inset: 0 0 auto 0; height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; font-size: 13px; color: rgb(255 255 255 / 0.92); background: rgb(0 0 0 / 0.22); }
+.menubar > div { display: flex; gap: 18px; align-items: center; }
+.window { position: absolute; left: 5%; top: 130px; width: 42%; height: 380px; border-radius: 12px; background: #1b1c1f; border: 1px solid rgb(255 255 255 / 0.06); box-shadow: 0 30px 60px rgb(0 0 0 / 0.35); }
+.window i { position: absolute; left: 24px; height: 9px; border-radius: 4px; background: rgb(255 255 255 / 0.06); }
+
+/* ---- The island ---------------------------------------------------------- */
+.island { position: absolute; top: 0; left: 50%; translate: -50% 0; width: 200px; height: 32px; background: var(--notch-fill); border-radius: 0 0 10px 10px; z-index: 10; font-variant-numeric: tabular-nums; }
+.island::before, .island::after { content: ""; position: absolute; top: 0; width: 12px; height: 12px; background: radial-gradient(circle at var(--sx) 100%, transparent 11.5px, var(--notch-fill) 12px); }
+.island::before { left: -12px; --sx: 0; } .island::after { right: -12px; --sx: 100%; }
+.cutout-hit { position: absolute; top: 0; left: 50%; width: 200px; height: 32px; translate: -50% 0; z-index: 30; }
+.face { position: absolute; inset: 0; opacity: 0; pointer-events: none; overflow: hidden; border-radius: inherit; transition: opacity var(--dur-fast) var(--ease-in); }
+.island[data-state="live"] .face--live, .island[data-state="hud"] .face--hud, .island[data-state="open"] .face--open { opacity: 1; pointer-events: auto; transition: opacity var(--dur-base) var(--ease-out) 90ms; }
+
+/* Live pill: items either side of the camera, never under it. */
+.face--live { display: flex; align-items: center; justify-content: space-between; padding: 0 10px; }
+.side { display: flex; align-items: center; gap: 12px; }
+.pi { display: inline-flex; align-items: center; gap: 6px; height: 20px; font: 600 12px/1 "Geist", system-ui; color: var(--ink); animation: pop 380ms var(--spring) backwards; --acc: var(--c-ink); }
+@keyframes pop { from { opacity: 0; scale: 0.6; } }
+.pi .num { font-size: 12px; }
+.pi--ring { position: relative; }
+.pi--ring .bolt { position: absolute; left: 0; top: 0; width: 20px; height: 20px; display: grid; place-items: center; font-size: 9px; color: var(--acc); }
+.pi-plus { color: var(--ink-2); font-weight: 600; padding: 0 7px; height: 20px; border-radius: 99px; background: var(--field-hi); display: inline-flex; align-items: center; }
+.agent-ic { position: relative; width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; background: color-mix(in srgb, var(--c-agent) 28%, #000); color: var(--c-agent); font-size: 13px; }
+.badge { min-width: 15px; height: 15px; padding: 0 4px; border-radius: 99px; display: grid; place-items: center; background: var(--c-caution); color: var(--on); font: 700 10px/1 "Geist", system-ui; position: absolute; right: -7px; top: -6px; box-shadow: 0 0 0 2px #000; }
+.art-s { width: 20px; height: 20px; border-radius: 6px; overflow: hidden; }
+.art-s svg, .art svg { width: 100%; height: 100%; }
+[data-mode="calm"] .agent-ic { background: #1c1c1c; color: var(--ink); }
+[data-mode="calm"] .badge { background: var(--ink); }
+
+/* HUD: icon and number either side of the camera, capsule across the bottom. */
+.face--hud { --acc: var(--c-info); }
+.hud-top { position: absolute; inset: 0 18px auto; height: 32px; display: flex; align-items: center; justify-content: space-between; }
+.hud-top > span { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: 12.5px; }
+.hud-top .ic { font-size: 15px; color: var(--acc); }
+.hud-cap { position: absolute; left: 18px; right: 18px; bottom: 7px; --h: 5px; }
+
+/* Alert chip: drops from the notch, then goes. Closing is slower than opening. */
+.drop { position: absolute; top: calc(100% + 8px); left: 50%; width: 330px; margin-left: -165px; z-index: -1; display: flex; align-items: center; gap: 11px; padding: 9px 10px 9px 12px; border-radius: 22px; background: #000; box-shadow: 0 0 0 1px #1d1d1f, 0 16px 34px rgb(0 0 0 / 0.5); opacity: 0; transform: translateY(-46px) scale(0.72); transform-origin: 50% 0; pointer-events: none; transition: transform 560ms var(--ease-in), opacity 260ms var(--ease-in) 120ms; --acc: var(--c-caution); }
+.drop.show { opacity: 1; transform: none; pointer-events: auto; transition: transform 456ms var(--spring), opacity 140ms var(--ease-out); }
+.drop-t { flex: 1; min-width: 0; line-height: 1.25; }
+.drop-t b { display: block; font-weight: 600; font-size: 13px; }
+.drop-t span { color: var(--ink-2); font-size: 12px; }
+.drop .rw { position: relative; display: grid; place-items: center; width: 32px; height: 32px; flex: none; }
+.drop .rw .ic { position: absolute; font-size: 12px; color: var(--acc); }
+.go { height: 28px; padding: 0 12px; border-radius: 99px; background: var(--acc); color: var(--on); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.go:active { scale: 0.96; }
+.island[data-state="open"] .drop { display: none; }
+
+/* ---- Open panel ---------------------------------------------------------- */
+.face--open { display: grid; grid-template-rows: auto 1fr auto; padding-top: 38px; }
+.head { position: relative; display: flex; align-items: center; gap: 8px; padding: 0 14px 6px; }
+.tabs { position: relative; display: flex; gap: 2px; flex: 1; min-width: 0; }
+.tab { position: relative; z-index: 1; height: 30px; padding: 0 11px; border-radius: 99px; white-space: nowrap; color: var(--ink-2); font-weight: 500; transition: color var(--dur-fast) var(--ease-out); }
+.tab:hover { color: var(--ink); }
+.tab[aria-selected="true"] { color: var(--ink); }
+/* One indicator for both styles: a tinted pill in Alive, a 2px underline in Calm.
+   Its colour transitions (the one thing a spring does not own). */
+.ind { position: absolute; left: 0; top: 0; height: 30px; width: 10px; border-radius: 99px; background: color-mix(in srgb, var(--ind) 20%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ind) 38%, transparent); transition: background-color 320ms var(--ease-out), box-shadow 320ms var(--ease-out), height 200ms, top 200ms, border-radius 200ms; will-change: transform, width; }
+.tab[aria-selected="true"] { color: var(--ink); }
+[data-mode="calm"] .ind { top: 36px; height: 2px; border-radius: 2px; background: var(--ink); box-shadow: none; }
+[data-mode="calm"] .head { border-bottom: 1px solid var(--sep); padding-bottom: 6px; }
+.tools { display: flex; gap: 2px; color: var(--ink-2); }
+.tools button { height: 28px; padding: 0 8px; border-radius: 99px; display: flex; align-items: center; gap: 6px; }
+.tools button:hover { background: var(--field); color: var(--ink); }
+.tools .ic { font-size: 15px; }
+.content { position: relative; overflow: hidden; }
+.view { position: absolute; inset: 8px 16px 0; }
+.foot { display: flex; justify-content: space-between; gap: 12px; padding: 9px 16px 12px; color: var(--ink-3); font-size: 11.5px; border-top: 1px solid var(--sep); }
+.foot .k { display: flex; gap: 12px; flex: none; }
+[data-mode="alive"] .foot { border-top-color: transparent; }
+
+/* =============================================================================
+   Tile system. 8 columns x 3 rows of 108px on the 780px panel.
+   Sizes: 1x1, 2x1, 3x1, 1x2, 2x2, 3x2, 4x2. One accent per tile (--acc).
+   ========================================================================== */
+.home { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(3, 108px); gap: 10px; height: 344px; }
+.tile { position: relative; min-width: 0; min-height: 0; padding: var(--pad); border-radius: var(--r-tile); background: var(--tile); overflow: hidden; translate: 0 0; transition: translate var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out); }
+.tile:hover { translate: 0 -1px; background: var(--tile-hi); }
+.tile .in { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.tile .in > div { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.xL, .xM, .xS, .xLM, .xMS { min-height: 0; }
+.tile:not([data-sz="L"]) .xL, .tile:not([data-sz="M"]) .xM, .tile:not([data-sz="S"]) .xS,
+.tile:not([data-sz="L"]):not([data-sz="M"]) .xLM, .tile:not([data-sz="M"]):not([data-sz="S"]) .xMS { display: none !important; }
+.tile.fade .in { animation: fadein 260ms var(--ease-out) backwards; }
+@keyframes fadein { from { opacity: 0; } }
+.lbl { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 11.5px; font-weight: 500; line-height: 1.2; white-space: nowrap; }
+.lbl .ic { font-size: 13px; color: var(--acc); }
+.cut { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sub { color: var(--ink-2); font-size: 12px; }
+.dim { color: var(--ink-3); }
+
+/* Numeral: tabular, tight, rolls per digit. */
+.num { display: inline-flex; align-items: baseline; font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; line-height: 1.1; font-weight: 600; letter-spacing: -0.035em; }
+.dg { display: inline-block; height: 1.1em; overflow: hidden; }
+.dg > i { display: flex; flex-direction: column; font-style: normal; transition: transform 460ms var(--spring); transform: translateY(calc(var(--d) * -1.1em)); }
+.dg > i > b { display: block; height: 1.1em; font-weight: inherit; }
+.n-hero { font-size: 56px; letter-spacing: -0.05em; } .n-xl { font-size: 38px; } .n-lg { font-size: 30px; } .n-md { font-size: 22px; } .n-sm { font-size: 16px; }
+.unit { font-size: 0.42em; font-weight: 500; letter-spacing: 0; color: var(--ink-2); margin-left: 3px; }
+
+/* Ring: stroke-dash arc, thick, round caps. Fill is a spring (JS); the per-second
+   drain of the timer is a linear CSS transition. */
+.ring { width: var(--s, 64px); height: var(--s, 64px); transform: rotate(-90deg); flex: none; }
+.ring circle { fill: none; stroke-width: var(--sw, 11); }
+.ring .tr { stroke: var(--track); }
+.ring .ar { stroke: var(--acc); stroke-linecap: round; }
+.ring.ln .ar { transition: stroke-dashoffset 1s linear; }
+.rwrap { position: relative; display: grid; place-items: center; }
+.rwrap .rc { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+
+/* SegBar: discrete steps, last lit segment is the state. */
+.seg { display: flex; gap: 3px; }
+.seg i { flex: 1; height: var(--h, 8px); border-radius: 3px; background: var(--track); transition: background-color 200ms; }
+.seg i.on { background: var(--acc); }
+
+/* Capsule: the CarPlay slider. Fill moves on a short ease; scrub sets it. */
+.cap { position: relative; height: var(--h, 10px); border-radius: 99px; background: var(--track); overflow: hidden; touch-action: none; }
+.cap > i { position: absolute; inset: 0 auto 0 0; width: calc(var(--p, 0) * 100%); border-radius: inherit; background: var(--acc); transition: width 320ms var(--ease-out), background-color 200ms; }
+.cap--v { height: auto; width: var(--w, 34px); }
+.cap--v > i { inset: auto 0 0 0; width: auto; height: calc(var(--p, 0) * 100%); transition: height 420ms var(--spring), background-color 200ms; }
+.cap--scrub { cursor: pointer; }
+
+/* Spark */
+.spark path { fill: none; stroke: var(--acc); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.spark .fill { fill: color-mix(in srgb, var(--acc) 14%, transparent); stroke: none; }
+.spark circle { fill: var(--acc); }
+
+/* Audio bars. Compositor-only (scaleY); stop when paused or reduced motion. */
+.bars { display: inline-flex; gap: 2px; align-items: flex-end; height: var(--bh, 16px); }
+.bars i { width: 3px; height: 100%; border-radius: 2px; background: var(--acc); transform-origin: bottom; transform: scaleY(0.22); animation: bar 0.8s ease-in-out infinite alternate paused; }
+.bars i:nth-child(2) { animation-duration: 0.62s; animation-delay: -0.2s; } .bars i:nth-child(3) { animation-duration: 0.95s; animation-delay: -0.5s; } .bars i:nth-child(4) { animation-duration: 0.7s; animation-delay: -0.35s; } .bars i:nth-child(5) { animation-duration: 0.85s; animation-delay: -0.1s; }
+[data-playing="true"] .bars i { animation-play-state: running; }
+@keyframes bar { from { transform: scaleY(0.2); } to { transform: scaleY(1); } }
+
+/* Chip */
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 99px; background: var(--field); color: var(--ink-2); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.chip--acc { background: color-mix(in srgb, var(--acc) 18%, transparent); color: var(--acc); font-weight: 600; }
+.chip--solid { background: var(--acc); color: var(--on); font-weight: 600; }
+.chip .ic { font-size: 12px; }
+
+/* Buttons */
+.ib { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--field); font-size: 17px; transition: scale 120ms var(--ease-out), background-color 160ms; }
+.ib:hover { background: var(--field-hi); } .ib:active { scale: 0.92; }
+.ib--solid { width: 46px; height: 46px; background: var(--ink); color: var(--on); font-size: 20px; }
+.ib--solid:hover { background: #fff; }
+.pbtn { height: 28px; padding: 0 12px; border-radius: 99px; background: var(--field); color: var(--ink); font-weight: 500; font-size: 12.5px; }
+.pbtn:hover { background: var(--field-hi); } .pbtn:active { scale: 0.96; }
+.show-play, .show-pause { display: none; }
+[data-playing="true"] .show-pause, [data-playing="false"] .show-play { display: block; }
+
+/* ---- Media ---- */
+.t-media { --art: var(--c-media); --acc: var(--art) !important; background: color-mix(in srgb, var(--art) 24%, #1c1c1e); }
+.t-media:hover { background: color-mix(in srgb, var(--art) 28%, #202023); }
+.t-media .sub, .t-media .lbl { color: #cdbfc5; }
+[data-mode="calm"] .t-media, [data-mode="calm"] .t-media:hover { background: var(--tile); --acc: var(--ink) !important; }
+[data-mode="calm"] .t-media .sub, [data-mode="calm"] .t-media .lbl { color: var(--ink-2); }
+.art { width: 88px; height: 88px; border-radius: 16px; overflow: hidden; flex: none; box-shadow: 0 6px 16px rgb(0 0 0 / 0.35); }
+.m-top { display: flex; gap: 12px; align-items: flex-start; }
+.m-meta { flex: 1; min-width: 0; padding-top: 2px; display: grid; gap: 3px; }
+.m-title { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+.m-prog { display: flex; align-items: center; gap: 8px; margin-top: auto; font-size: 11.5px; color: #cdbfc5; }
+.m-prog .cap { flex: 1; --h: 8px; background: rgb(255 255 255 / 0.16); }
+.m-prog .cap > i { background: var(--ink); }
+.m-prog .num { font-weight: 500; letter-spacing: 0; min-width: 3.4ch; justify-content: flex-start; }
+.m-prog .num:last-child { justify-content: flex-end; }
+.m-ctl { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 10px; }
+.m-ctl .ib { background: rgb(255 255 255 / 0.12); }
+.m-ctl .ib--solid { background: var(--ink); }
+.m-sm { display: flex; align-items: center; gap: 10px; height: 100%; }
+.m-sm .art { width: 64px; height: 64px; border-radius: 13px; }
+.m-sm .m-title { font-size: 15px; }
+.m-sm .ib { width: 34px; height: 34px; font-size: 15px; margin-left: auto; background: var(--ink); color: var(--on); }
+
+/* ---- Timer ---- */
+.t-timer .rwrap { margin: 2px auto 0; }
+.tm-foot { display: flex; align-items: center; gap: 10px; margin-top: auto; }
+.tm-foot .seg { flex: 1; --h: 6px; }
+.tm-row { display: flex; align-items: center; gap: 12px; height: 100%; }
+.mini { font-size: 11px; color: var(--ink-2); margin-top: 1px; font-weight: 500; }
+
+/* ---- Battery ---- */
+.t-batt .xL { align-items: flex-start; gap: 8px; }
+.t-batt .cap--v { flex: 1; --w: 100%; border-radius: 12px; }
+.t-batt .cap--v > i { border-radius: 0; }
+.bw { display: flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--acc); white-space: nowrap; }
+.bw .ic { font-size: 12px; }
+.t-batt .xS { gap: 6px; justify-content: space-between; }
+.t-batt .xS .cap { --h: 9px; }
+
+/* ---- Agents ---- */
+.ag { display: grid; gap: 2px; margin-top: 6px; }
+.ag-row { display: flex; align-items: center; gap: 8px; height: 36px; min-width: 0; }
+.ag-row .sh { width: 18px; height: 18px; flex: none; display: grid; place-items: center; }
+.ag-row .nm { flex: 1; min-width: 0; line-height: 1.2; }
+.ag-row .nm b { display: block; font-weight: 500; font-size: 12.5px; }
+.ag-row .nm span { font-size: 11.5px; color: var(--ink-2); }
+.sh-wait { width: 14px; height: 14px; border-radius: 50%; background: var(--c-caution); }
+.sh-wait::after { content: ""; display: block; width: 2px; height: 6px; margin: 4px auto 0; border-radius: 1px; background: var(--on); }
+.sh-run { width: 16px; height: 16px; border-radius: 50%; border: 2.5px solid color-mix(in srgb, var(--c-agent) 25%, transparent); border-top-color: var(--c-agent); animation: spin 0.9s linear infinite; }
+@keyframes spin { to { rotate: 360deg; } }
+.sh-done { color: var(--c-ok); font-size: 16px; }
+[data-mode="calm"] .sh-run { border-color: #2a2a2a; border-top-color: var(--ink); }
+[data-mode="calm"] .sh-wait { background: var(--c-caution); }
+.ag-use { margin-top: auto; display: grid; gap: 6px; }
+.ag-use .hd { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-2); font-weight: 500; }
+.ag-use .hd b { font-weight: 600; }
+.ag-use .seg { --h: 7px; }
+
+/* ---- Calendar ---- */
+.cal-l { display: grid; grid-template-columns: 1fr 156px; gap: 16px; height: 100%; }
+.cal-day { font-size: 12px; font-weight: 600; color: var(--acc); letter-spacing: 0.02em; }
+.ev { display: grid; gap: 1px; padding: 6px 9px; border-radius: 10px; background: color-mix(in srgb, var(--acc) 17%, transparent); min-width: 0; line-height: 1.25; }
+.ev b { font-weight: 600; font-size: 12.5px; } .ev span { font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.ev--q { background: var(--field); }
+.mg { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 1px; text-align: center; font-size: 11px; font-variant-numeric: tabular-nums; align-content: start; }
+.mg b { font-weight: 500; color: var(--ink-3); padding-bottom: 3px; font-size: 10.5px; }
+.mg span { height: 21px; display: grid; place-items: center; color: var(--ink); font-weight: 500; }
+.mg span.we { color: var(--ink-3); }
+.mg span.td { background: var(--acc); color: var(--on); border-radius: 50%; width: 21px; justify-self: center; font-weight: 700; }
+.mg span.has::after { content: ""; position: absolute; }
+.cd { display: grid; gap: 6px; margin-top: auto; }
+.cd .cap { --h: 6px; }
+
+/* ---- Weather ---- */
+.wx-art { width: var(--s, 64px); height: var(--s, 64px); flex: none; }
+.t-wx { --acc: var(--c-info); }
+.wx-big { display: flex; align-items: center; gap: 12px; height: 100%; }
+.wx-b { flex: 1; min-width: 0; display: grid; gap: 4px; }
+
+/* ---- Quick action ---- */
+.t-qa .in { justify-content: space-between; align-items: flex-start; }
+.t-qa { text-align: left; cursor: pointer; }
+.qa-ic { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--acc); color: var(--on); font-size: 18px; transition: scale 160ms var(--ease-out); }
+.t-qa:active .qa-ic { scale: 0.92; }
+.t-qa b { font-weight: 600; font-size: 13px; display: block; }
+.t-qa span { font-size: 11.5px; color: var(--ink-2); }
+
+/* ---- Placeholder (Part 2) ---- */
+.ph { display: grid; grid-template-columns: 1fr; place-content: center; justify-items: start; gap: 8px; height: 344px; }
+.ph .tile { grid-column: 1 / 5; min-height: 150px; --acc: var(--ph); }
+.ph h2 { margin: 6px 0 0; font-size: 34px; font-weight: 600; letter-spacing: -0.04em; line-height: 1; color: var(--acc); }
+.ph-wrap { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; height: 344px; align-content: start; }
+.ph-wrap .tile { grid-column: span 4; height: 160px; }
+.ph-wrap .tile.d { grid-column: span 4; background: transparent; box-shadow: inset 0 0 0 1.5px var(--field-hi); display: grid; place-content: center; text-align: center; color: var(--ink-3); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+
+/* ---- Under the stage ----------------------------------------------------- */
+.doc { max-width: 1120px; margin: 0 auto; padding: 40px 24px 90px; }
+.doc h2 { font-size: 21px; font-weight: 600; letter-spacing: -0.02em; margin: 44px 0 6px; }
+.doc h2:first-child { margin-top: 0; }
+.doc p.lede { color: var(--ink-2); margin: 0 0 18px; max-width: 72ch; }
+.sw { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.swc { background: var(--tile); border-radius: 16px; padding: 12px; display: grid; gap: 10px; }
+.swc .bar { height: 34px; border-radius: 10px; }
+.swc b { font-weight: 600; } .swc small { display: block; color: var(--ink-2); font-size: 11.5px; line-height: 1.35; }
+.swc .cr { font: 500 11.5px "Geist Mono", monospace; color: var(--ink-2); display: flex; justify-content: space-between; }
+.secmap { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.secmap span { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px 0 8px; border-radius: 99px; background: var(--tile); color: var(--ink-2); font-weight: 500; }
+.secmap i { width: 16px; height: 16px; border-radius: 50%; background: var(--c); }
+.gal { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.gal .tile { min-height: 148px; }
+.gal .lbl { margin-bottom: 10px; }
+.gal .hs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
+.notes h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+.notes ul { margin: 0; padding-left: 16px; color: var(--ink-2); display: grid; gap: 6px; }
+.notes code { font: 12px "Geist Mono", monospace; color: var(--ink); background: var(--field); padding: 1px 5px; border-radius: 5px; }
+.hint { color: var(--ink-3); font-size: 12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Travel collapses to a crossfade; loops stop; numerals and rings jump. */
+  .dg > i, .ring.ln .ar, .cap > i, .cap--v > i, .ind, .tile, .ib, .go, .qa-ic { transition-duration: 1ms !important; }
+  .bars i { animation: none !important; transform: scaleY(0.6); }
+  .sh-run { animation: none; border-top-color: var(--c-agent); border-right-color: var(--c-agent); }
+  .pi { animation: none; }
+  .tile.fade .in { animation-duration: 1ms; }
+  .drop, .drop.show { transform: none !important; transition: opacity 200ms linear !important; }
+  .face { transition-duration: 1ms !important; transition-delay: 0ms !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="row">
+    <div class="brand"><b>Notch personality</b><span>Part 1 · foundation + Home · design/notch-personality</span></div>
+    <div class="grp"><label>Style</label><div class="seg2" data-group="mode" role="group" aria-label="Style"><button data-v="calm">Calm</button><button data-v="alive">Alive</button></div></div>
+    <div class="grp"><label>Accent</label><div class="seg2" data-group="accent" role="group" aria-label="Accent"><button data-v="section">By section</button><button data-v="content">By content</button></div></div>
+  </div>
+  <div class="row">
+    <div class="grp"><label>Notch</label><div class="seg2" data-group="island" role="group" aria-label="Notch state"><button data-v="closed">Closed</button><button data-v="live">Live pill</button><button data-v="alert">Alert chip</button><button data-v="hud">HUD</button><button data-v="open">Open</button></div></div>
+    <div class="grp"><label>Live items</label><div class="seg2" data-group="preset" role="group" aria-label="Preset"><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5">+N</button></div>
+      <div class="seg2" id="liveToggles" role="group" aria-label="Live items"><button class="tg" data-k="media">Music</button><button class="tg" data-k="timer">Timer</button><button class="tg" data-k="agents">Agents</button><button class="tg" data-k="charge">Charging</button><button class="tg" data-k="dl">Download</button></div></div>
+    <div class="grp range"><label for="batt">Battery</label><input id="batt" type="range" min="1" max="100" value="82"><output id="battOut">82%</output><div class="seg2"><button data-b="82">82</button><button data-b="21">21</button><button data-b="20">20</button><button data-b="9">9</button></div></div>
+  </div>
+</div>
+
+<section class="stage" id="app" data-mode="alive" data-accent="section" data-playing="true" aria-label="Desktop with the notch">
+  <div class="menubar">
+    <div><span aria-hidden="true"></span><b>Cursor</b><span>File</span><span>Edit</span><span>View</span></div>
+    <div><span id="mbBatt">82%</span><span>Wi-Fi</span><span>Sun 2:05 PM</span></div>
+  </div>
+  <div class="window" aria-hidden="true"><i style="top:56px;width:60%"></i><i style="top:78px;width:78%"></i><i style="top:100px;width:42%"></i><i style="top:122px;width:68%"></i><i style="top:144px;width:54%"></i><i style="top:166px;width:72%"></i></div>
+
+  <div class="island" id="island" data-state="closed">
+    <div class="face face--live" aria-hidden="true"><div class="side" id="sideL"></div><div class="side" id="sideR"></div></div>
+    <div class="face face--hud" aria-hidden="true">
+      <div class="hud-top"><span id="hudLbl"></span><span><span class="num n-sm" id="hudNum" data-noroll></span></span></div>
+      <div class="cap hud-cap" id="hudCap"><i></i></div>
+    </div>
+    <div class="face face--open" id="panel">
+      <div class="head">
+        <div class="tabs" id="tabs" role="tablist" aria-label="Sections"><span class="ind" id="ind" aria-hidden="true"></span></div>
+        <div class="tools"><button aria-label="Search everything"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg><kbd>⌘K</kbd></button><button aria-label="Settings"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg></button></div>
+      </div>
+      <div class="content" id="content"></div>
+      <div class="foot"><span id="foot"></span><span class="k"><span><kbd>⌘1–9</kbd> sections</span><span><kbd>esc</kbd> close</span></span></div>
+    </div>
+    <div class="drop" id="drop" role="status" aria-live="polite"></div>
+  </div>
+  <button class="cutout-hit" id="cutout" aria-label="Open the notch"></button>
+</section>
+
+<main class="doc">
+  <h2>Palette</h2>
+  <p class="lede">Ten roles, each defined in OKLCH with an sRGB fallback. Each is measured against the tile (#1c1c1e): every one clears 5.5:1, so text, numerals and rings pass AA without a darker "text" variant. The roles are meaning, not decoration: media is pink because it is music, a ring is orange-red because time is running.</p>
+  <div class="sw" id="sw"></div>
+  <div class="secmap" id="secmap"></div>
+
+  <h2>Components</h2>
+  <p class="lede">All of it is inline SVG and CSS. The numerals roll, the rings fill on a spring, the bars run on the compositor.</p>
+  <div class="gal" id="gal"></div>
+
+  <h2>Build notes</h2>
+  <div class="notes">
+    <div><h3>Mapping onto the codebase</h3><ul>
+      <li>Roles become <code>--notch-accent-media|time|today|ok|caution|alert|info|clip|net|agent</code> beside the existing <code>--notch-ok|warn|danger</code> (those three alias caution, alert, ok). Add OKLCH values with the hex fallbacks in <code>tokens.css</code>, then expose each through <code>@theme inline</code> and the <code>cn()</code> tailwind-merge list, or <code>text-time</code> will fight <code>text-ui</code>.</li>
+      <li>New primitives in <code>components/notch/</code>: <code>Tile</code> (size prop, <code>--acc</code> from a <code>role</code> prop), <code>Gauge</code> (Ring, SegBar, Capsule as variants), <code>Numeral</code> (digit roller), <code>Chip</code>. <code>Ring</code> reuses <code>lib/spring.ts</code>.</li>
+      <li>"Calm" is the existing Mix with the accent switch off: <code>--acc: var(--notch-ink)</code>. Ship it as a Settings choice and delete nothing.</li>
+      <li>Home replaces <code>views/Now.tsx</code>; its tile list ranks <code>d.islands</code> the same way the pill does.</li>
+    </ul></div>
+    <div><h3>Risks</h3><ul>
+      <li><b>Contrast:</b> accents are 5.5–12:1 on #1c1c1e, but tinted tiles (media) lower ink-2; I lightened it for that tile. Re-check on a sunlit display.</li>
+      <li><b>Motion cost:</b> five rings can be live at once (tile, pill, drop chip). Rings are one SVG circle; the drain is a 1s CSS transition and springs run only on a jump, so the idle cost is the digit roller and bars. Cap at four rolling numerals.</li>
+      <li><b>780px:</b> the 8x3 grid leaves 85px 1x1 tiles; a 20pt numeral is the most they hold. Anything denser stays in its section.</li>
+      <li><b>Packing:</b> the ranker is brute-force over size options; with more tiles it needs a real solver, or fixed layouts per count.</li>
+    </ul></div>
+    <div><h3>What I would not do</h3><ul>
+      <li>No glow on rings, no gradient fills, no blur behind tiles. The tinted media tile is a flat mix of the art colour into the tile.</li>
+      <li>No per-tile icons in the tab strip, no tile for every feature. Home shows what is live; the rest is one tab away.</li>
+      <li>No red as a section colour: red means alert, and always arrives with a word.</li>
+      <li>Do not animate tile sizes with scale; position reflows by FLIP, content crossfades.</li>
+    </ul></div>
+  </div>
+</main>
+
+<script>
+/* ============================================================================
+   Helpers and the spring (same model as lib/spring.ts: a retarget mid-flight
+   keeps its velocity). `response` may be a function so closing can be slower.
+   ========================================================================= */
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+function spring(apply, { response = 0.31, damping = 1 } = {}) {
+  let x = null, v = null, target = null, raf = 0, last = 0;
+  const step = (now) => {
+    const dt = Math.min(0.032, (now - last) / 1000); last = now;
+    const resp = typeof response === "function" ? response(x, target) : response;
+    const k = (2 * Math.PI / resp) ** 2, c = 2 * damping * Math.sqrt(k);
+    let moving = false;
+    for (let i = 0; i < x.length; i++) {
+      v[i] += (-k * (x[i] - target[i]) - c * v[i]) * dt; x[i] += v[i] * dt;
+      if (Math.abs(v[i]) > 0.05 * (target[i] < 3 ? 0.01 : 1) || Math.abs(x[i] - target[i]) > 0.05 * (target[i] < 3 ? 0.01 : 1)) moving = true;
+    }
+    if (!moving) { x = target.slice(); v = v.map(() => 0); }
+    apply(x); raf = moving ? requestAnimationFrame(step) : 0;
+  };
+  const to = (t, { jump = false } = {}) => {
+    target = t.slice();
+    if (x === null || jump || reduce.matches) { cancelAnimationFrame(raf); raf = 0; x = t.slice(); v = t.map(() => 0); apply(x); return; }
+    if (!raf) { last = performance.now(); raf = requestAnimationFrame(step); }
+  };
+  to.stop = () => { cancelAnimationFrame(raf); raf = 0; };
+  return to;
+}
+
+/* ============================================================================
+   Icons (24px, stroke). Drawn here, no icon font.
+   ========================================================================= */
+const P = (d, f) => `<svg class="ic${f ? " ic--f" : ""}" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const I = {
+  play: P('<path d="M8 5.2v13.6a.6.6 0 0 0 .9.5l11-6.8a.6.6 0 0 0 0-1L8.9 4.7a.6.6 0 0 0-.9.5z"/>', 1),
+  pause: P('<rect x="6" y="5" width="4" height="14" rx="1.3"/><rect x="14" y="5" width="4" height="14" rx="1.3"/>', 1),
+  next: P('<path d="M5 6.2v11.6a.5.5 0 0 0 .8.4l8.2-5.8a.5.5 0 0 0 0-.8L5.8 5.8a.5.5 0 0 0-.8.4z"/><rect x="16" y="5.5" width="3" height="13" rx="1.2"/>', 1),
+  prev: P('<path d="M19 6.2v11.6a.5.5 0 0 1-.8.4L10 12.4a.5.5 0 0 1 0-.8l8.2-5.8a.5.5 0 0 1 .8.4z"/><rect x="5" y="5.5" width="3" height="13" rx="1.2"/>', 1),
+  bolt: P('<path d="M13.5 2.5 5 13.2a.4.4 0 0 0 .3.65H10l-1 7.65 8.6-10.9a.4.4 0 0 0-.3-.65H12.4z"/>', 1),
+  mic: P('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/>'),
+  note: P('<path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M9.5 12h6M9.5 16h4"/>'),
+  vol: P('<path d="M4 9.5v5h3.5l4.5 4v-13l-4.5 4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>'),
+  sun: P('<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>'),
+  bot: P('<rect x="4.5" y="8" width="15" height="11" rx="3.5"/><path d="M12 8V4.5M9.5 13v1.5M14.5 13v1.5"/>'),
+  check: P('<circle cx="12" cy="12" r="9" fill="currentColor" stroke="none"/><path d="m8 12.3 2.8 2.8L16 9.6" stroke="#0b0b0c"/>'),
+  cal: P('<rect x="4" y="5" width="16" height="15" rx="3.5"/><path d="M4 10h16M8.5 3v4M15.5 3v4"/>'),
+  timer: P('<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.3 1.5M9.5 3h5"/>'),
+  down: P('<path d="M12 5v11m0 0-4.5-4.5M12 16l4.5-4.5M5.5 20h13"/>'),
+  batt: P('<rect x="3" y="7.5" width="16" height="9" rx="2.5"/><path d="M21.5 11v2"/>'),
+  warn: P('<path d="M12 4 3 19.5h18z"/><path d="M12 10v4.5M12 17.2v.1"/>'),
+  sun2: P('<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/>'),
+};
+
+/* ============================================================================
+   Components. Numeral, Ring, SegBar, Capsule, Spark, audio bars, Chip.
+   ========================================================================= */
+const CIRC = 2 * Math.PI * 42;
+const ringHTML = (src, s, sw, cls = "") => `<svg class="ring ${cls}" data-ring="${src}" style="--s:${s}px;--sw:${sw}" viewBox="0 0 100 100" aria-hidden="true"><circle class="tr" cx="50" cy="50" r="42"/><circle class="ar" cx="50" cy="50" r="42" stroke-dasharray="${CIRC}" stroke-dashoffset="${CIRC}"/></svg>`;
+function setRing(el, f) {
+  const arc = $(".ar", el); f = clamp(f, 0, 1);
+  if (!el._sp) el._sp = spring(([p]) => { arc.style.strokeDashoffset = CIRC * (1 - p); }, { response: 0.42 });
+  const first = el._f === undefined, small = !first && Math.abs(f - el._f) < 0.02;
+  el._f = f;
+  if (small) { el._sp.stop(); el.classList.add("ln"); arc.style.strokeDashoffset = CIRC * (1 - f); el._sp([f], { jump: true }); }
+  else { el.classList.remove("ln"); el._sp([f], { jump: first ? false : false }); }
+}
+function ringFromZero(el) { el._f = undefined; el.classList.remove("ln"); el._sp?.([0], { jump: true }); if (!el._sp) $(".ar", el).style.strokeDashoffset = CIRC; }
+
+/* Numeral: one rolling column per digit, so only the digit that changes moves. */
+const COL = [...Array(10).keys()].map((d) => `<b>${d}</b>`).join("");
+function setNum(el, str) {
+  if (el._v === str) return;
+  const chars = [...str], dig = (c) => /\d/.test(c);
+  const same = el._v !== undefined && el._v.length === str.length && [...el._v].every((c, i) => dig(c) === dig(chars[i]) && (dig(c) || c === chars[i]));
+  const digits = chars.filter(dig);
+  if (!same) {
+    el.innerHTML = chars.map((c) => dig(c) ? `<span class="dg" aria-hidden="true"><i style="--d:0">${COL}</i></span>` : `<span aria-hidden="true">${c}</span>`).join("");
+    const cols = $$(".dg i", el), set = () => cols.forEach((i, k) => i.style.setProperty("--d", digits[k]));
+    if (reduce.matches || el.hasAttribute("data-noroll")) { cols.forEach((i) => (i.style.transition = "none")); set(); }
+    else requestAnimationFrame(() => requestAnimationFrame(set));
+  } else $$(".dg i", el).forEach((i, k) => i.style.setProperty("--d", digits[k]));
+  el._v = str; el.setAttribute("aria-label", str); el.setAttribute("role", "text");
+}
+const segHTML = (n, k, h) => `<div class="seg" style="--h:${h}px" data-seg="${k}">${Array(n).fill("<i></i>").join("")}</div>`;
+const setSeg = (el, k) => $$("i", el).forEach((i, j) => i.classList.toggle("on", j < k));
+const capHTML = (k, extra = "", scrub = false) => `<div class="cap ${extra}${scrub ? " cap--scrub" : ""}" data-cap="${k}"><i></i></div>`;
+function sparkHTML(vals, w, h) {
+  const mn = Math.min(...vals), mx = Math.max(...vals), n = vals.length;
+  const pts = vals.map((v, i) => [2 + (i * (w - 4)) / (n - 1), h - 3 - ((v - mn) / (mx - mn || 1)) * (h - 6)]);
+  const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  const l = pts[pts.length - 1];
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path class="fill" d="${d} L${w - 2} ${h} L2 ${h}Z"/><path d="${d}"/><circle cx="${l[0]}" cy="${l[1]}" r="3"/></svg>`;
+}
+const barsHTML = (n = 4, h = 16) => `<span class="bars" style="--bh:${h}px" aria-hidden="true">${"<i></i>".repeat(n)}</span>`;
+
+/* Artwork, all drawn: album art and the weather glyph. */
+const ART = `<svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="#2a1740"/><circle cx="50" cy="46" r="27" fill="#ff6b8b"/><rect y="52" width="100" height="3" fill="#2a1740"/><rect y="60" width="100" height="4" fill="#2a1740"/><rect y="69" width="100" height="5" fill="#2a1740"/><rect y="78" width="100" height="22" fill="#4a2466"/><rect y="78" width="100" height="2" fill="#ff9aa8"/></svg>`;
+const WX = (s) => `<svg class="wx-art" style="--s:${s}px" viewBox="0 0 64 64" aria-hidden="true"><circle cx="24" cy="24" r="11" fill="#ffd25e"/><g stroke="#ffd25e" stroke-width="3" stroke-linecap="round"><path d="M24 5v4M24 39v4M5 24h4M39 24h4M10.5 10.5l2.8 2.8M35.5 35.5l2.8 2.8M10.5 37.5l2.8-2.8M35.5 12.5l2.8-2.8"/></g><path d="M20 49a9 9 0 0 1 1.5-17.9A12 12 0 0 1 44.6 33 8 8 0 0 1 45 49z" fill="#dfe3ea"/><path d="M20 49a9 9 0 0 0 .9-5h26.4A8 8 0 0 1 45 49z" fill="#b7bdc9"/></svg>`;
+
+/* ============================================================================
+   State
+   ========================================================================= */
+const S = {
+  mode: "alive", accent: "section", island: "closed", sec: 0,
+  live: { media: true, timer: true, agents: true, charge: false, dl: false },
+  playing: true, batt: 82, left: 1122, total: 1500, timerRun: true,
+  track: 102, trackLen: 222, hud: "vol", hudV: 62,
+};
+const battState = () => (S.live.charge ? "ok" : S.batt < 10 ? "alert" : S.batt <= 30 ? "caution" : "ok");
+const battWord = () => (S.live.charge ? "Charging" : S.batt < 10 ? "Critical" : S.batt <= 30 ? "Low" : "Good");
+const pinned = () => !S.live.charge && S.batt < 10;
+const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+const fmtT = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+/* Everything that is live, ranked. The pill uses the order for its slots (left,
+   right, left, right, then "+N"); Home uses the same score for tile size. */
+function liveList() {
+  const a = [];
+  if (pinned()) a.push({ id: "battery", score: 100 });
+  if (S.live.agents) a.push({ id: "agents", score: 90 });
+  if (S.live.timer) a.push({ id: "timer", score: 70 });
+  if (S.live.media && S.playing) a.push({ id: "media", score: 60 });
+  if (S.live.charge) a.push({ id: "battery", score: 40 });
+  if (S.live.dl) a.push({ id: "dl", score: 30 });
+  return a.sort((x, y) => y.score - x.score).filter((x, i, r) => r.findIndex((y) => y.id === x.id) === i);
+}
+
+/* Live values, bound to the DOM by data-* attributes. */
+const V = {
+  num: {
+    timerText: () => mmss(S.left), timerMin: () => String(Math.ceil(S.left / 60)),
+    batt: () => S.batt + "%", battN: () => String(S.batt),
+    trackPos: () => fmtT(S.track), trackLeft: () => "-" + fmtT(S.trackLen - S.track),
+    hudNum: () => String(S.hudV),
+  },
+  ring: { timer: () => S.left / S.total, batt: () => S.batt / 100, dl: () => 0.74 },
+  cap: { track: () => S.track / S.trackLen, batt: () => S.batt / 100, hud: () => S.hudV / 100, countdown: () => 1 - 25 / 150 },
+};
+const NUMS = ["timerText", "timerMin", "batt", "battN", "trackPos", "trackLeft", "hudNum"];
+
+function paint() {
+  $$("[data-num]").forEach((el) => V.num[el.dataset.num] && setNum(el, V.num[el.dataset.num]()));
+  $$("[data-ring]").forEach((el) => { const k = el.dataset.ring, f = V.ring[k] ? V.ring[k]() : parseFloat(k); setRing(el, f); });
+  $$("[data-cap]").forEach((el) => { const f = V.cap[el.dataset.cap] ? V.cap[el.dataset.cap]() : parseFloat(el.dataset.cap); el.style.setProperty("--p", f); });
+  $$("[data-seg]").forEach((el) => setSeg(el, el.dataset.seg === "sessions" ? 2 : el.dataset.seg === "usage" ? 6 : +el.dataset.seg));
+  const bs = battState();
+  $$("[data-bstate]").forEach((el) => (el.dataset.state = bs));
+  $$("[data-text=battWord]").forEach((el) => (el.textContent = battWord()));
+  $$("[data-show=charge]").forEach((el) => (el.style.display = S.live.charge ? "" : "none"));
+  $("#mbBatt").textContent = S.batt + "%";
+  $("#app").dataset.playing = S.playing && S.island !== "closed" ? "true" : S.playing ? "true" : "false";
+  $$(".timer-btn").forEach((b) => (b.textContent = S.timerRun ? "Pause" : "Resume"));
+}
+
+/* ============================================================================
+   Home: ranked tile dashboard
+   ========================================================================= */
+const home = document.createElement("div");
+home.className = "home";
+const T = (key, role, cls, sizes, html) => ({ key, role, cls, sizes, html });
+const CAL_ROWS = (() => {
+  // October 2026, Monday first. 1 Oct is a Thursday; today is Sun 4.
+  const cells = ["M", "T", "W", "T", "F", "S", "S"].map((d) => `<b>${d}</b>`);
+  for (let i = 0; i < 3; i++) cells.push("<span></span>");
+  for (let d = 1; d <= 31; d++) { const col = (d + 2) % 7; cells.push(`<span class="${d === 4 ? "td" : col > 4 ? "we" : ""}">${d}</span>`); }
+  return cells.join("");
+})();
+const TILES = [
+  T("media", "media", "t-media", { L: [3, 2], S: [2, 1] }, `
+    <div class="xL">
+      <div class="m-top"><div class="art">${ART}</div>
+        <div class="m-meta"><div class="lbl">${I.vol} Now playing</div><div class="m-title cut">Night Drive</div><div class="sub cut">Halcyon · Moon Atlas</div><div style="margin-top:4px">${barsHTML(5, 18)}</div></div></div>
+      <div class="m-prog"><span class="num" data-num="trackPos">1:42</span>${capHTML("track", "", true)}<span class="num" data-num="trackLeft">-2:00</span></div>
+      <div class="m-ctl"><button class="ib" aria-label="Previous">${I.prev}</button><button class="ib ib--solid" data-act="play" aria-label="Play or pause"><span class="show-pause">${I.pause}</span><span class="show-play">${I.play}</span></button><button class="ib" aria-label="Next">${I.next}</button></div>
+    </div>
+    <div class="xS"><div class="m-sm"><div class="art">${ART}</div><div style="min-width:0;display:grid;gap:2px"><div class="m-title cut">Night Drive</div><div class="sub cut">Halcyon</div><div style="margin-top:3px">${barsHTML(4, 12)}</div></div><button class="ib" data-act="play" aria-label="Play or pause"><span class="show-pause">${I.pause}</span><span class="show-play">${I.play}</span></button></div></div>`),
+  T("timer", "time", "t-timer", { L: [2, 2], M: [2, 1], S: [1, 1] }, `
+    <div class="xL"><div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">${I.timer} Focus</span><span class="chip chip--acc">2 of 4</span></div>
+      <div class="rwrap" style="margin-top:8px">${ringHTML("timer", 126, 12)}<div class="rc"><span class="num n-lg" data-num="timerText">18:42</span><span class="mini">left</span></div></div>
+      <div class="tm-foot">${segHTML(4, "sessions", 6)}<button class="pbtn timer-btn" data-act="timer">Pause</button></div></div>
+    <div class="xM"><div class="tm-row"><div class="rwrap">${ringHTML("timer", 70, 13)}</div><div style="display:grid;gap:2px"><span class="lbl">Focus · 2 of 4</span><span class="num n-lg" data-num="timerText">18:42</span></div></div></div>
+    <div class="xS" style="align-items:center;gap:6px"><div class="rwrap">${ringHTML("timer", 60, 14)}<div class="rc"><span class="num n-md" data-num="timerMin">19</span></div></div><span class="lbl" style="justify-content:center">min · Focus</span></div>`),
+  T("agents", "agent", "t-agents", { L: [2, 2], M: [2, 1] }, `
+    <div class="xL"><div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">${I.bot} Agents</span><span class="chip chip--acc" style="--acc:var(--c-caution)">1 needs you</span></div>
+      <div class="ag">
+        <div class="ag-row"><span class="sh"><span class="sh-wait"></span></span><div class="nm"><b class="cut">Claude · aloud-tauri</b><span>Waiting to run cargo test</span></div></div>
+        <div class="ag-row"><span class="sh"><span class="sh-run"></span></span><div class="nm"><b class="cut">Codex · website</b><span>Running · 4m</span></div></div>
+        <div class="ag-row"><span class="sh sh-done">${I.check}</span><div class="nm"><b class="cut">Voice · email David</b><span>Done</span></div></div>
+      </div>
+      <div class="ag-use" data-state="caution"><div class="hd"><span>Plan usage</span><b style="color:var(--acc)">62% · high</b></div>${segHTML(10, "usage", 7)}</div></div>
+    <div class="xM"><div class="tm-row"><span class="num n-hero" style="font-size:48px">3</span><div style="display:grid;gap:5px;min-width:0"><span class="lbl">${I.bot} Agents</span><span class="chip chip--acc" style="--acc:var(--c-caution);width:max-content">1 needs you</span></div></div></div>`),
+  T("battery", "ok", "t-batt", { L: [1, 2], S: [1, 1] }, `
+    <div class="xL"><div class="lbl">${I.batt} Battery</div><span class="num n-md" data-num="batt">82%</span>${capHTML("batt", "cap--v")}<div class="bw"><span data-show="charge">${I.bolt}</span><span data-text="battWord">Good</span></div></div>
+    <div class="xS"><div class="lbl">${I.batt} Battery</div><span class="num n-lg" data-num="batt">82%</span>${capHTML("batt")}<div class="bw"><span data-show="charge">${I.bolt}</span><span data-text="battWord">Good</span></div></div>`),
+  T("calendar", "today", "t-cal", { L: [4, 2], M: [3, 1], S: [2, 1] }, `
+    <div class="xL"><div class="cal-l"><div style="display:flex;flex-direction:column;min-height:0;gap:6px"><div><div class="cal-day">SUNDAY</div><span class="num n-hero" style="font-size:52px">4</span></div>
+        <div class="ev"><b class="cut">Design sync</b><span>2:30 – 3:00 PM · in 25 min</span></div><div class="ev ev--q"><b class="cut">1:1 with Maya</b><span>4:00 PM</span></div></div>
+      <div style="display:flex;flex-direction:column"><div class="cal-day" style="text-align:right;margin-bottom:6px">OCT</div><div class="mg">${CAL_ROWS}</div></div></div></div>
+    <div class="xM"><div class="lbl">${I.cal} Next · Design sync</div><div style="display:flex;align-items:baseline;gap:10px;margin-top:2px"><span class="num n-xl">2:30</span><span class="num n-md dim" style="color:var(--ink-2)">PM</span></div><div class="cd"><div style="display:flex;justify-content:space-between" class="sub"><span>Zoom · 3 people</span><b style="color:var(--acc);font-weight:600">in 25 min</b></div>${capHTML("countdown")}</div></div>
+    <div class="xS"><div class="lbl">${I.cal} Next</div><span class="num n-lg" style="margin-top:4px">2:30</span><span class="sub cut" style="margin-top:auto">Design sync · 25m</span></div>`),
+  T("weather", "info", "t-wx", { L: [2, 2], M: [3, 1], S: [2, 1] }, `
+    <div class="xL"><div class="lbl">${I.sun2} Weather</div><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:6px"><span class="num n-hero">21°</span>${WX(60)}</div><div class="sub" style="margin-top:2px">Partly cloudy · H 24° L 15°</div><div style="margin-top:auto;display:grid;gap:8px">${sparkHTML([17, 18, 20, 21, 22, 24, 23, 21, 19, 17], 156, 30)}<span class="chip chip--acc" style="width:max-content">Rain at 6 PM</span></div></div>
+    <div class="xM"><div class="wx-big">${WX(54)}<div class="wx-b"><div class="lbl">${I.sun2} Weather</div><span class="num n-xl">21°</span><span class="sub cut">Partly cloudy · H 24°</span></div>${sparkHTML([17, 18, 20, 21, 22, 24, 23, 21, 19, 17], 70, 34)}</div></div>
+    <div class="xS"><div class="wx-big" style="gap:8px">${WX(46)}<div class="wx-b"><span class="num n-lg">21°</span><span class="sub cut">Cloudy</span></div></div></div>`),
+  T("qa1", "info", "t-qa", { S: [1, 1] }, `<div class="xS"><span class="qa-ic">${I.mic}</span><div><b>Dictate</b><span>Hold fn</span></div></div>`),
+  T("qa2", "info", "t-qa", { S: [1, 1] }, `<div class="xS"><span class="qa-ic">${I.note}</span><div><b>New note</b><span>⌘N</span></div></div>`),
+];
+const byKey = Object.fromEntries(TILES.map((t) => [t.key, t]));
+TILES.forEach((t) => {
+  const el = document.createElement(t.key.startsWith("qa") ? "button" : "article");
+  el.className = `tile ${t.cls} r-${t.role}`; el.dataset.tile = t.key; el.dataset.sz = "S";
+  if (t.key === "battery") el.dataset.bstate = "";
+  el.innerHTML = `<div class="in">${t.html}</div>`;
+  t.el = el; home.append(el);
+});
+
+/* Tile weights: what the glance should be about right now. */
+function weights() {
+  const rank = Object.fromEntries(liveList().map((l) => [l.id, l.score / 10]));
+  return {
+    media: rank.media || 1, timer: rank.timer || 1, agents: rank.agents || 1,
+    battery: rank.battery || (S.batt < 30 ? 3 : 1.2), calendar: 3.5, weather: 1.5,
+  };
+}
+/* Brute-force every size combination whose area fills the 8x3 grid exactly,
+   keep the one that gives the most area to the heaviest tiles, and that
+   first-fit packs in reading order. ponytail: 216 combos; a real solver if tiles grow. */
+function pack(items) {
+  const occ = Array.from({ length: 3 }, () => Array(8).fill(0)), out = {};
+  for (const it of items) {
+    let ok = false;
+    for (let r = 0; r < 3 && !ok; r++) for (let c = 0; c < 8 && !ok; c++) {
+      if (r + it.h > 3 || c + it.w > 8) continue;
+      let free = true;
+      for (let y = 0; y < it.h && free; y++) for (let x = 0; x < it.w; x++) if (occ[r + y][c + x]) { free = false; break; }
+      if (!free) continue;
+      for (let y = 0; y < it.h; y++) for (let x = 0; x < it.w; x++) occ[r + y][c + x] = 1;
+      out[it.key] = { c: c + 1, r: r + 1, w: it.w, h: it.h, sz: it.sz }; ok = true;
+    }
+    if (!ok) return null;
+  }
+  return out;
+}
+function plan() {
+  const w = weights(), flex = ["media", "timer", "agents", "battery", "calendar", "weather"];
+  const opts = flex.map((k) => Object.entries(byKey[k].sizes).map(([sz, [cw, ch]]) => ({ key: k, sz, w: cw, h: ch, a: cw * ch })));
+  let best = null, bestScore = -1;
+  const rec = (i, pick, area) => {
+    if (i === opts.length) {
+      if (area !== 22) return;
+      const score = pick.reduce((s, p) => s + w[p.key] * p.a, 0);
+      if (score <= bestScore) return;
+      const items = [...pick].sort((a, b) => w[b.key] - w[a.key] || b.a - a.a)
+        .concat([{ key: "qa1", sz: "S", w: 1, h: 1 }, { key: "qa2", sz: "S", w: 1, h: 1 }]);
+      const p = pack(items); if (p) { best = p; bestScore = score; }
+      return;
+    }
+    for (const o of opts[i]) rec(i + 1, [...pick, o], area + o.a);
+  };
+  rec(0, [], 0);
+  return best;
+}
+let lastSig = "";
+function layoutHome(first) {
+  const p = plan(); if (!p) return;
+  const sig = JSON.stringify(p); if (sig === lastSig && !first) return; lastSig = sig;
+  const before = new Map(TILES.map((t) => [t.key, t.el.getBoundingClientRect()]));
+  TILES.forEach((t) => {
+    const q = p[t.key], el = t.el, changed = el.dataset.sz !== q.sz;
+    el.style.gridColumn = `${q.c} / span ${q.w}`; el.style.gridRow = `${q.r} / span ${q.h}`; el.dataset.sz = q.sz;
+    if (changed && !first && !reduce.matches) { el.classList.remove("fade"); void el.offsetWidth; el.classList.add("fade"); }
+    else if (changed && !first) { el.classList.remove("fade"); void el.offsetWidth; el.classList.add("fade"); }
+  });
+  if (first || !home.offsetParent) return;
+  TILES.forEach((t) => {
+    const a = before.get(t.key), b = t.el.getBoundingClientRect();
+    const dx = a.left - b.left, dy = a.top - b.top;
+    if (reduce.matches || (!dx && !dy)) return;
+    t.el.animate([{ transform: `translate(${dx}px,${dy}px)` }, { transform: "none" }], { duration: 456, easing: getComputedStyle(document.documentElement).getPropertyValue("--spring").trim() });
+  });
+}
+
+/* ============================================================================
+   Sections strip. Home is designed; the other eight are Part 2 placeholders.
+   ========================================================================= */
+const SECS = [
+  ["Home", "info", "What is live, ranked", ["Live", "Next", "Quick actions"]],
+  ["Agents", "agent", "Voice, coding, usage", ["Voice", "Coding", "Usage", "Pull requests"]],
+  ["Media", "media", "Playing, lyrics, sound", ["Now playing", "Lyrics", "Sound", "Devices"]],
+  ["Focus", "time", "Timer, keep awake, notes", ["Timer", "Keep awake", "Notes", "Call prep"]],
+  ["Shelf", "net", "Files in flight", ["Files", "Screenshots", "Downloads", "Drives"]],
+  ["Clipboard", "clip", "Everything you copied", ["History", "Snippets", "Colors"]],
+  ["Today", "today", "Calendar, reminders, weather", ["Calendar", "Reminders", "Weather", "Stocks"]],
+  ["Mac", "ok", "The machine", ["Stats", "Power", "Privacy", "Windows"]],
+  ["Launch", "ink", "Start anything", ["Apps", "Shortcuts", "Search"]],
+];
+const tabsEl = $("#tabs"), panel = $("#panel"), content = $("#content");
+SECS.forEach((s, i) => {
+  const b = document.createElement("button");
+  b.className = "tab"; b.role = "tab"; b.textContent = s[0]; b.title = `${s[0]} · ⌘${i + 1}`;
+  b.addEventListener("click", () => goSec(i)); tabsEl.append(b);
+});
+const indTo = spring(([x, w]) => { const e = $("#ind"); e.style.transform = `translateX(${x}px)`; e.style.width = w + "px"; });
+function topRole() { const l = liveList()[0]; return { media: "media", timer: "time", agents: "agent", battery: pinned() ? "alert" : "ok", dl: "net" }[l?.id] || "info"; }
+function setIndColor() {
+  const role = S.accent === "content" && S.sec === 0 ? topRole() : SECS[S.sec][1];
+  panel.style.setProperty("--ind", `var(--c-${role})`);
+  panel.style.setProperty("--sec", `var(--c-${SECS[S.sec][1]})`);
+  tabsEl.dataset.role = role;
+}
+function placeInd(jump) {
+  const t = $$(".tab", tabsEl)[S.sec];
+  if (S.mode === "calm") indTo([t.offsetLeft + 11, t.offsetWidth - 22], { jump });
+  else indTo([t.offsetLeft, t.offsetWidth], { jump });
+}
+let view = null;
+function viewFor(i) {
+  if (i === 0) return home;
+  const s = SECS[i], v = document.createElement("div");
+  v.className = "ph-wrap"; v.style.setProperty("--ph", `var(--c-${s[1]})`);
+  v.innerHTML = `<article class="tile" style="--acc:var(--c-${s[1]});grid-column:span 4;height:200px"><div class="in"><div><div class="lbl">Part 2</div><h2 style="margin:8px 0 0;font-size:40px;font-weight:600;letter-spacing:-0.045em;line-height:1;color:var(--acc)">${s[0]}</h2><div class="sub" style="margin-top:6px">${s[2]}</div><div class="chips">${s[3].map((x) => `<span class="chip">${x}</span>`).join("")}</div></div></div></article><div class="tile d"><div>Designed in part 2<br><span class="dim">${s[3].length} subsections, accent <b style="color:var(--acc)">${s[1]}</b></span></div></div>`;
+  return v;
+}
+function goSec(i, { jump = false } = {}) {
+  i = (i + SECS.length) % SECS.length; const dir = Math.sign(i - S.sec) || 1, same = i === S.sec && view;
+  S.sec = i;
+  $$(".tab", tabsEl).forEach((t, j) => t.setAttribute("aria-selected", j === i));
+  setIndColor(); requestAnimationFrame(() => placeInd(jump));
+  $("#foot").textContent = i === 0 ? "Home · ranked by what is live, biggest first" : `${SECS[i][0]} · ${SECS[i][2]}`;
+  if (same) return;
+  const old = view, nv = viewFor(i); view = nv;
+  nv.classList.add("view"); content.append(nv);
+  if (nv === home) { layoutHome(true); enterHome(); }
+  const anim = !reduce.matches && !jump && old;
+  nv.animate(anim ? [{ opacity: 0, transform: `translateX(${dir * 14}px)` }, { opacity: 1, transform: "none" }] : [{ opacity: 0 }, { opacity: 1 }], { duration: reduce.matches ? 160 : 300, easing: "cubic-bezier(0.22,0.61,0.36,1)", fill: "both" });
+  if (old) old.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 140, fill: "forwards" }).finished.then(() => old.remove(), () => old.remove());
+}
+function enterHome() {
+  $$("[data-ring]", home).forEach((r, k) => { ringFromZero(r); setTimeout(() => setRing(r, V.ring[r.dataset.ring]?.() ?? parseFloat(r.dataset.ring)), reduce.matches ? 0 : 40 + k * 35); });
+  $$("[data-num]", home).forEach((n) => { n._v = undefined; });
+  paint();
+}
+
+/* ============================================================================
+   The island: closed, live pill, alert chip, HUD, open. Geometry is a spring,
+   so a click mid-flight redirects with its momentum; closing is slower.
+   ========================================================================= */
+const island = $("#island");
+const geoTo = spring(([w, h, r]) => { island.style.width = w + "px"; island.style.height = h + "px"; island.style.borderRadius = `0 0 ${r}px ${r}px`; },
+  { response: (x, t) => (t[1] < x[1] - 1 || t[0] < x[0] - 1 ? 0.37 : 0.31) });
+const openW = () => Math.min(780, innerWidth - 16);
+const PILL = {
+  media: () => `<span class="pi" style="--acc:var(--c-media)"><span class="art-s">${ART}</span>${barsHTML(3, 12)}</span>`,
+  timer: () => `<span class="pi" style="--acc:var(--c-time)">${ringHTML("timer", 20, 15)}<span class="num" data-num="timerText"></span></span>`,
+  agents: () => `<span class="pi" aria-label="Agents, 1 needs you"><span class="agent-ic">${I.bot}<b class="badge">1</b></span></span>`,
+  battery: () => `<span class="pi pi--ring" data-bstate data-state="${battState()}">${ringHTML("batt", 20, 15)}${S.live.charge ? `<span class="bolt">${I.bolt}</span>` : ""}${pinned() ? '<span class="num" data-num="batt"></span>' : ""}</span>`,
+  dl: () => `<span class="pi pi--ring" style="--acc:var(--c-net)">${ringHTML("dl", 20, 15)}<span class="bolt">${I.down}</span></span>`,
+};
+const pillNodes = new Map();
+function renderPill() {
+  const list = liveList(), L = $("#sideL"), R = $("#sideR");
+  const sig = (id) => id + (id === "battery" ? S.live.charge + "" + pinned() : "");
+  const keep = new Set(list.slice(0, 4).map((l) => sig(l.id)));
+  [...pillNodes].forEach(([k, n]) => { if (!keep.has(k)) { n.remove(); pillNodes.delete(k); } });
+  list.slice(0, 4).forEach((l, i) => {
+    const k = sig(l.id);
+    if (!pillNodes.has(k)) { const t = document.createElement("div"); t.innerHTML = PILL[l.id](); pillNodes.set(k, t.firstElementChild); }
+    (i % 2 ? R : L).append(pillNodes.get(k));
+  });
+  $("#plus")?.remove();
+  if (list.length > 4) { const p = document.createElement("span"); p.id = "plus"; p.className = "pi pi-plus"; p.textContent = "+" + (list.length - 4); p.setAttribute("aria-label", `${list.length - 4} more`); R.append(p); }
+  paint();
+}
+function pillWidth() { return clamp(200 + 2 * Math.max($("#sideL").scrollWidth, $("#sideR").scrollWidth) + 32, 236, 520); }
+
+const GEO = { closed: () => [200, 32, 10], live: () => [pillWidth(), 32, 12], hud: () => [340, 46, 18], open: () => [openW(), 486, 24] };
+let dropT = 0;
+function setIsland(state) {
+  if (state === "alert") { S.island = liveList().length ? "live" : "closed"; applyIsland(); fireDrop("agent"); return; }
+  S.island = state; applyIsland();
+}
+function applyIsland() {
+  const st = S.island;
+  island.dataset.state = st;
+  $$('[data-group="island"] button').forEach((b) => b.setAttribute("aria-pressed", b.dataset.v === st || (b.dataset.v === "alert" && $("#drop").classList.contains("show"))));
+  if (st === "live") renderPill();
+  if (st === "hud") paintHud();
+  geoTo(GEO[st](), {});
+  if (st === "open" && !view) goSec(S.sec, { jump: true });
+  if (st === "open") requestAnimationFrame(() => placeInd(true));
+  if (st !== "open") $("#cutout").style.display = ""; else $("#cutout").style.display = "none";
+  paint();
+}
+function paintHud() {
+  const vol = S.hud === "vol";
+  $("#hudLbl").innerHTML = (vol ? I.vol : I.sun2) + (vol ? "Volume" : "Brightness");
+  $(".face--hud").style.setProperty("--acc", vol ? "var(--c-info)" : "var(--c-today)");
+  S.hudV = vol ? 62 : 40; paint();
+}
+
+/* Alert chip. kind: "agent" | "b20" | "b9". Drops, holds, goes. */
+function fireDrop(kind) {
+  const d = $("#drop"); clearTimeout(dropT);
+  const C = {
+    agent: { acc: "--c-agent", ring: 0.4, ic: I.bot, t: "Claude needs approval", s: "Run cargo test in aloud-tauri", b: "Review" },
+    b20: { acc: "--c-caution", ring: 0.2, ic: I.bolt, t: "Battery at 20%", s: "About 1 hr 40 min left", b: "Low Power" },
+    b9: { acc: "--c-alert", ring: 0.09, ic: I.bolt, t: "Battery at 9%", s: "Plug in now. Pinned to the notch", b: "Dismiss" },
+  }[kind];
+  d.style.setProperty("--acc", `var(${C.acc})`); d.dataset.state = kind === "b9" ? "alert" : kind === "b20" ? "caution" : "";
+  d.innerHTML = `<span class="rw">${ringHTML(C.ring, 32, 13)}${C.ic}</span><span class="drop-t"><b>${C.t}</b><span>${C.s}</span></span><button class="go">${C.b}</button>`;
+  d.classList.remove("show"); void d.offsetWidth; d.classList.add("show");
+  paint(); applyIsland();
+  $(".go", d).addEventListener("click", () => { d.classList.remove("show"); applyIsland(); });
+  dropT = setTimeout(() => { d.classList.remove("show"); applyIsland(); }, 4800);
+}
+
+/* The low-battery rule: a chip once at 20% that drops and goes; a pinned pill
+   item only below 10%, which stays until charged or dismissed above 10. */
+function setBatt(v, { fromSlider = false } = {}) {
+  const prev = S.batt; S.batt = clamp(v, 1, 100);
+  $("#batt").value = S.batt; $("#battOut").textContent = S.batt + "%";
+  $$("[data-b]").forEach((b) => b.removeAttribute("aria-pressed"));
+  if (!S.live.charge && S.island !== "open") {
+    if (prev > 20 && S.batt <= 20 && S.batt >= 10) fireDrop("b20");
+    else if (prev >= 10 && S.batt < 10) fireDrop("b9");
+  }
+  if (S.island === "live") { renderPill(); geoTo(GEO.live()); }
+  paint(); layoutHome(); setIndColor();
+}
+
+/* ============================================================================
+   Controls
+   ========================================================================= */
+function syncToggles() {
+  $$("#liveToggles button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.k === "media" ? S.live.media && S.playing : S.live[b.dataset.k]));
+  const n = liveList().length;
+  $$('[data-group="preset"] button').forEach((b) => b.setAttribute("aria-pressed", (b.dataset.v === "5" ? n > 4 : +b.dataset.v === n)));
+}
+function liveChanged() {
+  syncToggles(); layoutHome(); setIndColor();
+  if (S.island === "live") { renderPill(); geoTo(GEO.live()); }
+  paint();
+}
+$$("[data-group=mode] button, [data-group=accent] button").forEach((b) => b.addEventListener("click", () => {
+  const g = b.parentElement.dataset.group; S[g] = b.dataset.v; $("#app").dataset[g] = b.dataset.v;
+  $$("button", b.parentElement).forEach((x) => x.setAttribute("aria-pressed", x === b));
+  setIndColor(); placeInd(true);
+}));
+$$('[data-group=island] button').forEach((b) => b.addEventListener("click", () => {
+  if (b.dataset.v === "hud" && S.island === "hud") { S.hud = S.hud === "vol" ? "bri" : "vol"; paintHud(); return; }
+  setIsland(b.dataset.v);
+}));
+$$("#liveToggles button").forEach((b) => b.addEventListener("click", () => {
+  const k = b.dataset.k;
+  if (k === "media") { if (!S.live.media) { S.live.media = true; S.playing = true; } else S.playing = !S.playing; } else S.live[k] = !S.live[k];
+  liveChanged();
+}));
+$$("[data-group=preset] button").forEach((b) => b.addEventListener("click", () => {
+  const n = +b.dataset.v, order = ["media", "timer", "agents", "charge", "dl"];
+  Object.keys(S.live).forEach((k) => (S.live[k] = false));
+  S.playing = true; if (S.batt < 10) S.batt = 82;
+  order.slice(0, n).forEach((k) => (S.live[k] = true));
+  if (n === 1) { S.live.media = true; }
+  S.island === "live" || setIsland("live"); liveChanged(); $("#batt").value = S.batt; $("#battOut").textContent = S.batt + "%";
+}));
+$("#batt").addEventListener("input", (e) => setBatt(+e.target.value, { fromSlider: true }));
+$$("[data-b]").forEach((b) => b.addEventListener("click", () => { setBatt(+b.dataset.b); b.setAttribute("aria-pressed", "true"); }));
+$("#cutout").addEventListener("click", () => setIsland("open"));
+addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && S.island === "open") setIsland("closed");
+  if (S.island === "open" && (e.metaKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) { e.preventDefault(); goSec(+e.key - 1); }
+  if (S.island === "open" && !e.metaKey && (e.key === "ArrowRight" || e.key === "ArrowLeft")) goSec(S.sec + (e.key === "ArrowRight" ? 1 : -1));
+});
+addEventListener("resize", () => { if (S.island === "open") { geoTo(GEO.open(), { jump: true }); placeInd(true); } });
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-act]")?.dataset.act;
+  if (a === "play") { S.playing = !S.playing; liveChanged(); }
+  if (a === "timer") { S.timerRun = !S.timerRun; paint(); }
+});
+/* Scrub: a capsule is a slider. */
+document.addEventListener("pointerdown", (e) => {
+  const c = e.target.closest(".cap--scrub"); if (!c) return;
+  const set = (ev) => { const r = c.getBoundingClientRect(); S.track = Math.round(clamp((ev.clientX - r.left) / r.width, 0, 1) * S.trackLen); paint(); };
+  set(e); const mv = (ev) => set(ev), up = () => { removeEventListener("pointermove", mv); removeEventListener("pointerup", up); };
+  addEventListener("pointermove", mv); addEventListener("pointerup", up);
+});
+setInterval(() => {
+  if (S.timerRun && S.left > 0) S.left--;
+  if (S.playing && S.track < S.trackLen) S.track++; else if (S.track >= S.trackLen) S.track = 0;
+  paint();
+}, 1000);
+
+/* ============================================================================
+   Palette + component sheet
+   ========================================================================= */
+const ROLES = [
+  ["media", "Media", "Music and anything with art. The tile tints from the album art."], ["time", "Time / focus", "Timer ring, countdowns."],
+  ["today", "Today", "Calendar, the date, today's dot."], ["ok", "Healthy", "Charged, connected, done."], ["caution", "Caution", "Low, high usage, waiting on you."],
+  ["alert", "Alert", "Critical. Always with a word."], ["info", "Info / system", "Weather, HUDs, quick actions."], ["clip", "Clipboard", "Clips, colours, snippets."],
+  ["net", "Network", "Shelf, AirDrop, downloads."], ["agent", "Agents", "Voice and coding agents."],
+];
+function lum(rgb) { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]); }
+function px(cssColor) { const c = document.createElement("canvas").getContext("2d", { willReadFrequently: true }); c.fillStyle = "#000"; c.fillRect(0, 0, 1, 1); c.fillStyle = cssColor; c.fillRect(0, 0, 1, 1); return [...c.getImageData(0, 0, 1, 1).data]; }
+function contrast(a, b) { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+function buildSheet() {
+  const tile = px("#1c1c1e");
+  $("#sw").innerHTML = ROLES.map(([k, n, d]) => {
+    const rgb = px(getComputedStyle(document.documentElement).getPropertyValue(`--c-${k}`).trim() || "#fff"), c = contrast(rgb, tile);
+    return `<div class="swc"><div class="bar" style="background:var(--c-${k})"></div><div><b>${n}</b><small>${d}</small></div><div class="cr"><span>--c-${k}</span><span>${c.toFixed(1)}:1 ${c >= 4.5 ? "AA" : "fail"}</span></div></div>`;
+  }).join("");
+  $("#secmap").innerHTML = SECS.map((s) => `<span style="--c:var(--c-${s[1]})"><i></i>${s[0]}</span>`).join("");
+  const G = (title, body, role = "info", extra = "") => `<article class="tile r-${role}" style="--acc:var(--c-${role})"><div class="lbl">${title}</div>${body}${extra}</article>`;
+  $("#gal").innerHTML = [
+    G("Ring · three sizes", `<div class="hs">${ringHTML(0.72, 74, 12)}${ringHTML(0.45, 48, 13)}${ringHTML(0.9, 28, 15)}</div>`, "time"),
+    G("Ring · state, with a word", `<div class="hs">${["ok", "caution", "alert"].map((s, i) => `<span data-state="${s}" style="display:grid;justify-items:center;gap:4px">${ringHTML([0.8, 0.28, 0.08][i], 52, 14)}<span class="mini" style="color:var(--acc)">${["Good", "Low", "Critical"][i]}</span></span>`).join("")}</div>`),
+    G("Numeral · rolls on change", `<div class="hs"><span class="num n-xl" id="galNum" data-noroll>41</span><button class="pbtn" id="galBtn">+ 1</button></div>`, "info"),
+    G("SegBar", `<div style="display:grid;gap:10px;margin-top:4px">${[["ok", 8], ["caution", 6], ["alert", 2]].map(([s, k]) => `<div data-state="${s}">${segHTML(10, k, 8)}</div>`).join("")}</div>`),
+    G("Capsule slider", `<div style="display:flex;gap:16px;align-items:flex-end"><div style="flex:1;display:grid;gap:12px">${capHTML(0.62, "", false).replace("class=\"cap ", "style=\"--h:12px\" class=\"cap ")}${capHTML(0.3).replace("class=\"cap ", "style=\"--h:8px\" class=\"cap ")}</div><div style="height:78px">${capHTML(0.7, "cap--v").replace("class=\"cap ", "style=\"--w:30px;height:78px\" class=\"cap ")}</div></div>`, "media"),
+    G("Spark and audio bars", `<div style="display:flex;justify-content:space-between;align-items:flex-end">${sparkHTML([3, 5, 4, 7, 9, 8, 12, 10, 14], 110, 44)}${barsHTML(5, 30)}</div>`, "net"),
+    G("Chips", `<div class="hs"><span class="chip">Quiet</span><span class="chip chip--acc">Rain at 6 PM</span><span class="chip chip--solid">Review</span><span class="chip chip--acc" style="--acc:var(--c-caution)">1 needs you</span><span class="chip chip--acc" style="--acc:var(--c-alert)">Critical</span></div>`),
+    G("Tile sizes on the grid", `<div style="display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(2,36px);gap:6px;margin-top:2px"><i style="background:var(--field-hi);border-radius:8px;grid-column:span 2;grid-row:span 2"></i><i style="background:var(--field-hi);border-radius:8px"></i><i style="background:var(--field-hi);border-radius:8px"></i><i style="background:var(--field-hi);border-radius:8px;grid-column:span 2"></i></div><div class="hint" style="margin-top:8px">1×1 85 · 2×1 180 · 3×1 275 · 4×2 370 px, rows 108 px, gap 10</div>`),
+  ].join("");
+  let gv = 41; $("#galBtn").addEventListener("click", () => { gv = gv >= 99 ? 9 : gv + 1; setNum($("#galNum"), String(gv)); });
+  setNum($("#galNum"), "41");
+}
+
+/* ============================================================================
+   Init
+   ========================================================================= */
+$$('[data-group=mode] button')[1].setAttribute("aria-pressed", "true");
+$$('[data-group=accent] button')[0].setAttribute("aria-pressed", "true");
+syncToggles();
+geoTo(GEO.closed(), { jump: true });
+goSec(0, { jump: true });
+applyIsland();
+paint();
+buildSheet();
+const q = new URLSearchParams(location.search);   // ?state=open&mode=calm&accent=content&live=3
+if (q.get("mode")) $(`[data-group=mode] [data-v=${q.get("mode")}]`)?.click();
+if (q.get("accent")) $(`[data-group=accent] [data-v=${q.get("accent")}]`)?.click();
+if (q.get("live")) $(`[data-group=preset] [data-v="${q.get("live")}"]`)?.click();
+if (q.get("sec")) goSec(+q.get("sec"), { jump: true });
+if (q.get("batt")) setBatt(+q.get("batt"));
+if (q.get("state")) setIsland(q.get("state"));
+</script>
+</body>
+</html>
