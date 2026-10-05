@@ -21,7 +21,8 @@ export type SectionTab = {
  * needs you), one underline that travels on a live spring between them.
  *
  * Labels are never dropped for icons alone — "Named, not memorised"
- * (PRODUCT.md). The strip is one Tab stop; arrows move between sections.
+ * (PRODUCT.md); the reverse, a label with no icon, is Calm's text-only strip.
+ * The strip is one Tab stop; arrows move between sections.
  *
  * ponytail: no overflow handling. The shell widens once more than six
  * sections are ready (NotchShell's `WIDTH`), which fits all nine with
@@ -36,6 +37,7 @@ export function SectionTabs({
   panelId,
   /** ↓ from the strip: hand focus to the body. */
   onExit,
+  icons = true,
   className,
 }: {
   items: SectionTab[];
@@ -43,6 +45,8 @@ export function SectionTabs({
   onChange: (id: string) => void;
   panelId: string;
   onExit?: () => void;
+  /** Calm's Home drops the glyphs: the names alone, each still a word. */
+  icons?: boolean;
   className?: string;
 }) {
   // A ref callback into state, so the underline re-measures the frame the
@@ -90,7 +94,7 @@ export function SectionTabs({
               on && "text-notch-ink",
             )}
           >
-            <Icon className="size-3.5 opacity-85" strokeWidth={1.8} aria-hidden />
+            {icons && <Icon className="size-3.5 opacity-85" strokeWidth={1.8} aria-hidden />}
             {label}
             {count ? (
               <Badge variant="notch-count" aria-label={`${count} need you`}>
