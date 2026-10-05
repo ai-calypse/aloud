@@ -9,6 +9,12 @@ export const commands = {
 	/**  Persists settings and applies them to the running app. */
 	updateSettings: (settings: Settings) => typedError<null, string>(__TAURI_INVOKE("update_settings", { settings })),
 	getStats: () => __TAURI_INVOKE<StatsView>("get_stats"),
+	/**
+	 *  Time saved by dictating and by agent commands completing, today and all
+	 *  time. The formula and its assumed minutes per action live in
+	 *  `aloud_store::stats`.
+	 */
+	getTimeSaved: () => typedError<TimeSavedView, string>(__TAURI_INVOKE("get_time_saved")),
 	searchNotes: (query: string) => typedError<SearchResult[], string>(__TAURI_INVOKE("search_notes", { query })),
 	/**  Newest notes, for the empty-query state. */
 	recentNotes: (limit: number) => typedError<Note[], string>(__TAURI_INVOKE("recent_notes", { limit })),
@@ -1738,7 +1744,42 @@ export type Quota = {
 	fiveHour: QuotaWindow | null,
 	sevenDay: QuotaWindow | null,
 	sevenDayOpus: QuotaWindow | null,
+	sevenDaySonnet: QuotaWindow | null,
+	sevenDayOauthApps: QuotaWindow | null,
+	sevenDayCowork: QuotaWindow | null,
+	sevenDayOmelette: QuotaWindow | null,
 	extraUsagePercent: number | null,
+	extra: QuotaExtra | null,
+	/**  The app's own readings of the last week, oldest first, this one last. */
+	history: QuotaSample[],
+};
+
+/**  The extra-usage credit pool, amounts in minor units (cents) of `currency`. */
+export type QuotaExtra = {
+	enabled: boolean,
+	monthlyLimit: number | null,
+	usedCredits: number | null,
+	currency: string | null,
+	utilization: number | null,
+};
+
+/**
+ *  One reading of the two windows that have a chart. See
+ *  [`crate::history::Entry`] on why the i64 exports as `number`.
+ * 
+ *  Each window carries the reset time it was reading. Two samples with the
+ *  same reset belong to one window, where use only climbs, so the chart can
+ *  join them across the hours the view was closed; a different reset means the
+ *  window rolled over in between, and the line must break there.
+ */
+export type QuotaSample = {
+	/**  Unix seconds. */
+	at: number,
+	fiveHour: number | null,
+	/**  Unix seconds. Absent in samples saved before this field existed. */
+	fiveHourResetsAt?: number | null,
+	sevenDay: number | null,
+	sevenDayResetsAt?: number | null,
 };
 
 /**  One rolling limit window, flattened for the webview. */
@@ -2259,6 +2300,22 @@ export type Ticker = {
 export type Tier = "confirm" | 
 /**  Red, needs a click, never auto-runs, and "Always allow" cannot cover it. */
 "strict";
+
+/**  Time saved, split by where it came from. */
+export type TimeSaved = {
+	/**  Dictation plus actions. */
+	totalSeconds: number | null,
+	dictationSeconds: number | null,
+	actionSeconds: number | null,
+	/**  Agent commands that completed. */
+	actions: number,
+};
+
+/**  Today and all time, for the Agents › Voice tile. */
+export type TimeSavedView = {
+	allTime: TimeSaved,
+	today: TimeSaved,
+};
 
 export type TimerMode = "pomodoro" | "stopwatch";
 

@@ -78,6 +78,21 @@ pub struct StatsView {
     pub time_saved_seconds: f64,
 }
 
+/// Time saved by dictating and by agent commands completing, today and all
+/// time. The formula and its assumed minutes per action live in
+/// `aloud_store::stats`.
+#[tauri::command]
+#[specta::specta]
+pub fn get_time_saved(state: State<'_, AppState>) -> CmdResult<aloud_store::stats::TimeSavedView> {
+    let stats = state.pipeline.stats();
+    let history = state.pipeline.history_db().map_err(|e| format!("{e:#}"))?;
+    to_string_err(aloud_store::stats::time_saved(
+        &stats,
+        &history,
+        chrono::Local::now(),
+    ))
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn search_notes(query: String) -> CmdResult<Vec<aloud_notes::SearchResult>> {

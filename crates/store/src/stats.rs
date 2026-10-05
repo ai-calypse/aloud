@@ -1,5 +1,6 @@
 //! Lifetime dictation stats.
 
+use crate::history::History;
 use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,75 @@ const TYPING_WPM: f64 = 40.0;
 /// Speaking speed used to estimate time spent, since the recorder's real
 /// duration is not available at the success hook.
 const SPEAKING_WPM: f64 = 150.0;
+
+/// Seconds an average completed agent command saves over doing it by hand.
+///
+/// An assumption, not a measurement: nothing records how long the same task
+/// takes manually. It is weighted toward the common short commands. Opening an
+/// app or pausing the music is ~15 s by hand; creating a note or reminder,
+/// drafting an email or finding a setting is 2-3 min. Weighting that mix gives
+/// about a minute and a half. One constant because history keeps no step or
+/// tool counts to weight by; change it here and the Voice tile follows.
+pub const SECONDS_SAVED_PER_ACTION: f64 = 90.0;
+
+/// Time saved versus typing at `TYPING_WPM`, minus time spent speaking, clamped
+/// so a slow talker never "loses" time. The one dictation formula: the lifetime
+/// total and today's both go through it.
+pub fn dictation_saved_seconds(words: u64, spoken_seconds: f64) -> f64 {
+    (words as f64 / TYPING_WPM * 60.0 - spoken_seconds).max(0.0)
+}
+
+/// Time saved, split by where it came from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeSaved {
+    /// Dictation plus actions.
+    pub total_seconds: f64,
+    pub dictation_seconds: f64,
+    pub action_seconds: f64,
+    /// Agent commands that completed.
+    pub actions: u32,
+}
+
+impl TimeSaved {
+    pub fn new(dictation_seconds: f64, actions: u64) -> Self {
+        let action_seconds = actions as f64 * SECONDS_SAVED_PER_ACTION;
+        Self {
+            total_seconds: dictation_seconds + action_seconds,
+            dictation_seconds,
+            action_seconds,
+            actions: u32::try_from(actions).unwrap_or(u32::MAX),
+        }
+    }
+}
+
+/// Today and all time, for the Agents › Voice tile.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeSavedView {
+    pub all_time: TimeSaved,
+    pub today: TimeSaved,
+}
+
+/// Lifetime dictation time comes from `stats` (it outlives the history cap);
+/// actions, and today's dictation, from the history rows. A day is the local
+/// calendar day, as the streak's is.
+pub fn time_saved(stats: &Stats, history: &History, now: DateTime<Local>) -> Result<TimeSavedView> {
+    let midnight = now
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .and_then(|m| m.and_local_timezone(Local).earliest())
+        .map_or(i64::MIN, |m| m.timestamp());
+    let (_, all_actions) = history.voice_activity_since(i64::MIN)?;
+    let (words_today, actions_today) = history.voice_activity_since(midnight)?;
+    Ok(TimeSavedView {
+        all_time: TimeSaved::new(stats.time_saved_seconds(), all_actions),
+        today: TimeSaved::new(
+            dictation_saved_seconds(words_today, Stats::estimated_spoken_seconds(words_today)),
+            actions_today,
+        ),
+    })
+}
 
 /// See [`crate::history::Entry`] on why u64 exports as `number`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -76,7 +146,7 @@ impl Stats {
     /// Time saved versus typing at 40 wpm, minus time actually spent speaking.
     /// Clamped so a slow talker never "loses" time.
     pub fn time_saved_seconds(&self) -> f64 {
-        (self.total_words as f64 / TYPING_WPM * 60.0 - self.total_spoken_seconds).max(0.0)
+        dictation_saved_seconds(self.total_words, self.total_spoken_seconds)
     }
 
     pub fn estimated_spoken_seconds(words: u64) -> f64 {
@@ -186,6 +256,49 @@ mod tests {
         );
         // 100 words: 150s to type, 40s to speak.
         assert!((stats.time_saved_seconds() - 110.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn an_action_saves_the_assumed_time_and_adds_to_dictation() {
+        let saved = TimeSaved::new(110.0, 4);
+        assert_eq!(saved.action_seconds, 4.0 * SECONDS_SAVED_PER_ACTION);
+        assert_eq!(saved.total_seconds, 110.0 + 360.0);
+        assert_eq!(saved.actions, 4);
+        assert_eq!(TimeSaved::new(0.0, 0), TimeSaved::default());
+    }
+
+    /// Guards: today's dictation and the lifetime total drifting onto two
+    /// formulas, and a failed command counting as time saved.
+    #[test]
+    fn time_saved_counts_completed_commands_and_todays_words_only() {
+        let history = History::open_in_memory().unwrap();
+        let now = day(2026, 3, 10);
+        let today = now.timestamp();
+        let last_week = day(2026, 3, 3).timestamp();
+        let keep = crate::history::Retention::entries(50);
+        let words = "one two three four five six seven eight nine ten";
+        history
+            .insert(today, words, words, None, 0, Some(1), None, keep)
+            .unwrap();
+        history
+            .insert_run(today, "pause", "Paused.", true, None, 5, 2, keep)
+            .unwrap();
+        history
+            .insert_run(today, "email", "no gmail", false, None, 5, 3, keep)
+            .unwrap();
+        history
+            .insert_run(last_week, "open", "Opened.", true, None, 5, 4, keep)
+            .unwrap();
+
+        let mut stats = Stats::default();
+        stats.record_session(500, Stats::estimated_spoken_seconds(500), day(2026, 3, 3));
+        let view = time_saved(&stats, &history, now).unwrap();
+
+        assert_eq!(view.today.actions, 1, "the failed command saved nothing");
+        assert_eq!(view.all_time.actions, 2);
+        // Ten words: 15 s to type, 4 s to speak.
+        assert!((view.today.dictation_seconds - 11.0).abs() < 0.1);
+        assert_eq!(view.all_time.dictation_seconds, stats.time_saved_seconds());
     }
 
     #[test]

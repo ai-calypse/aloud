@@ -2,8 +2,11 @@
 //!
 //! The path mirrors notchi's `ClaudeUsageService`: read the Claude Code OAuth
 //! token from the login Keychain, then `GET /api/oauth/usage` with it. The
-//! response carries a 5-hour window and weekly windows, each a utilization
-//! percentage and a reset time.
+//! response carries a 5-hour window and weekly windows (all models, per model,
+//! and a few non-model buckets), each a utilization percentage and a reset
+//! time, plus an `extra_usage` credit pool. The endpoint is undocumented; the
+//! field names are the ones public clients (Claude Code's own status line,
+//! usage monitors) read, and every one is optional.
 //!
 //! MVP of that approach — no silent token refresh and no `/v1/messages` header
 //! fallback (notchi's two resilience layers). An expired token surfaces as
@@ -46,14 +49,36 @@ pub struct Window {
     pub resets_at: Option<String>,
 }
 
+/// The extra-usage credit pool: pay-as-you-go spend past the plan's limits.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Extra {
+    pub enabled: bool,
+    /// Monthly spend cap, in minor units (cents) of `currency`.
+    pub monthly_limit: Option<f64>,
+    /// Spent this month, in the same minor units.
+    pub used_credits: Option<f64>,
+    /// ISO-4217 code when the response names one; the plan's own otherwise.
+    pub currency: Option<String>,
+    /// 0-100.
+    pub utilization: Option<f64>,
+}
+
 /// The parsed usage: the windows a dashboard shows.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Quota {
     pub five_hour: Option<Window>,
     pub seven_day: Option<Window>,
     pub seven_day_opus: Option<Window>,
+    pub seven_day_sonnet: Option<Window>,
+    /// Third-party apps signed in with the same account.
+    pub seven_day_oauth_apps: Option<Window>,
+    /// Routines (Claude Cowork).
+    pub seven_day_cowork: Option<Window>,
+    /// Claude Design.
+    pub seven_day_omelette: Option<Window>,
     /// Extra (pay-as-you-go over plan) utilization %, when the account has it on.
     pub extra_usage_percent: Option<f64>,
+    pub extra: Option<Extra>,
 }
 
 /// Read the token from the Keychain and fetch current usage. One shot — the
@@ -117,7 +142,12 @@ pub fn parse(body: &str) -> anyhow::Result<Quota> {
         five_hour: raw.five_hour.map(Into::into),
         seven_day: raw.seven_day.map(Into::into),
         seven_day_opus: raw.seven_day_opus.map(Into::into),
-        extra_usage_percent: raw.extra_usage.and_then(|e| e.utilization),
+        seven_day_sonnet: raw.seven_day_sonnet.map(Into::into),
+        seven_day_oauth_apps: raw.seven_day_oauth_apps.map(Into::into),
+        seven_day_cowork: raw.seven_day_cowork.map(Into::into),
+        seven_day_omelette: raw.seven_day_omelette.map(Into::into),
+        extra_usage_percent: raw.extra_usage.as_ref().and_then(|e| e.utilization),
+        extra: raw.extra_usage.map(Into::into),
     })
 }
 
@@ -126,6 +156,10 @@ struct RawUsage {
     five_hour: Option<RawPeriod>,
     seven_day: Option<RawPeriod>,
     seven_day_opus: Option<RawPeriod>,
+    seven_day_sonnet: Option<RawPeriod>,
+    seven_day_oauth_apps: Option<RawPeriod>,
+    seven_day_cowork: Option<RawPeriod>,
+    seven_day_omelette: Option<RawPeriod>,
     extra_usage: Option<RawExtra>,
 }
 
@@ -139,7 +173,24 @@ struct RawPeriod {
 
 #[derive(Deserialize)]
 struct RawExtra {
+    #[serde(default)]
+    is_enabled: bool,
+    monthly_limit: Option<f64>,
+    used_credits: Option<f64>,
+    currency: Option<String>,
     utilization: Option<f64>,
+}
+
+impl From<RawExtra> for Extra {
+    fn from(e: RawExtra) -> Self {
+        Extra {
+            enabled: e.is_enabled,
+            monthly_limit: e.monthly_limit,
+            used_credits: e.used_credits,
+            currency: e.currency,
+            utilization: e.utilization,
+        }
+    }
 }
 
 impl From<RawPeriod> for Window {
@@ -171,6 +222,43 @@ mod tests {
         );
         assert_eq!(q.seven_day_opus.unwrap().percent, 88.0);
         assert_eq!(q.extra_usage_percent, Some(15.0));
+    }
+
+    /// A shape captured from public clients: a disabled pool is all nulls, and
+    /// the per-model windows are present or null independently.
+    #[test]
+    fn parses_per_model_windows_and_the_credit_pool() {
+        let body = r#"{
+            "five_hour": {"utilization": 33.0, "resets_at": "2026-04-11T07:00:00.528743+00:00"},
+            "seven_day": {"utilization": 13.0, "resets_at": "2026-04-17T00:59:59.951713+00:00"},
+            "seven_day_opus": null,
+            "seven_day_sonnet": {"utilization": 1.0, "resets_at": "2026-04-16T03:00:00.951719+00:00"},
+            "seven_day_oauth_apps": {"utilization": 4.0},
+            "seven_day_cowork": null,
+            "extra_usage": {"is_enabled": true, "monthly_limit": 5000, "used_credits": 479.0,
+                            "currency": "USD", "utilization": 9.58}
+        }"#;
+        let q = parse(body).unwrap();
+        assert!(q.seven_day_opus.is_none());
+        assert_eq!(q.seven_day_sonnet.unwrap().percent, 1.0);
+        assert_eq!(q.seven_day_oauth_apps.unwrap().percent, 4.0);
+        assert!(q.seven_day_cowork.is_none());
+        let extra = q.extra.unwrap();
+        assert!(extra.enabled);
+        assert_eq!(extra.monthly_limit, Some(5000.0));
+        assert_eq!(extra.used_credits, Some(479.0));
+        assert_eq!(extra.currency.as_deref(), Some("USD"));
+    }
+
+    #[test]
+    fn a_disabled_credit_pool_parses_as_off() {
+        let q = parse(
+            r#"{"extra_usage": {"is_enabled": false, "monthly_limit": null,
+                "used_credits": null, "utilization": null}}"#,
+        )
+        .unwrap();
+        assert!(!q.extra.unwrap().enabled);
+        assert_eq!(q.extra_usage_percent, None);
     }
 
     #[test]
