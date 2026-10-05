@@ -242,3 +242,64 @@
     animation-timing-function: steps(3, end);
   }
 }
+
+/* --- Weather backdrop -------------------------------------------------------
+   Ambient loops behind a weather card (Weather.tsx). They are not physical, so
+   they are linear or eased durations rather than springs, and they run only
+   while the card is on screen. transform only: the compositor owns every frame.
+   Rain and snow fall by exactly one pattern tile so the loop has no seam. */
+.wx {
+  mask-image: linear-gradient(to bottom, #000 38%, transparent 62%);
+}
+.wx-fall {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--wx-tile) * -1);
+  height: calc(100% + var(--wx-tile));
+  animation: wx-fall var(--wx-secs) linear infinite;
+  will-change: transform;
+}
+.wx-fall--rain { --wx-tile: 44px; --wx-secs: 1.1s; }
+.wx-fall--storm { --wx-tile: 44px; --wx-secs: 0.7s; }
+.wx-fall--snow { --wx-tile: 64px; --wx-secs: 9s; }
+@keyframes wx-fall {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, var(--wx-tile), 0); }
+}
+
+.wx-puff,
+.wx-band {
+  position: absolute;
+  will-change: transform;
+  animation: wx-drift var(--wx-secs) ease-in-out infinite alternate;
+}
+.wx-puff {
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--notch-w-ink) 24%, transparent), transparent);
+}
+.wx-puff--a { --wx-secs: 16s; left: -10%; top: -8%; width: 70%; height: 38%; }
+.wx-puff--b { --wx-secs: 22s; right: -20%; top: 10%; width: 80%; height: 34%; animation-direction: alternate-reverse; }
+.wx-band {
+  left: -20%;
+  width: 140%;
+  height: 14%;
+  background: linear-gradient(to right, transparent, color-mix(in srgb, var(--notch-w-ink) 22%, transparent) 30% 70%, transparent);
+}
+.wx-band--a { --wx-secs: 13s; top: 6%; }
+.wx-band--b { --wx-secs: 17s; top: 20%; animation-direction: alternate-reverse; }
+.wx-band--c { --wx-secs: 21s; top: 34%; }
+@keyframes wx-drift {
+  from { transform: translate3d(-6%, 0, 0); }
+  to { transform: translate3d(6%, 0, 0); }
+}
+
+/* Not the global 1ms collapse: an infinite loop at 1ms is a strobe. A still
+   picture of the same weather is the reduced-motion version. */
+@media (prefers-reduced-motion: reduce) {
+  .wx-fall,
+  .wx-puff,
+  .wx-band {
+    animation: none;
+  }
+}

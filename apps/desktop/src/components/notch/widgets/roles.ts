@@ -20,6 +20,13 @@ export const WIDGET_ROLES = [
   "agent",
   // Alert red: a critical or muted state, as notch events use it.
   "alert",
+  // A weather card's sky: Weather picks one from the condition and the light.
+  "sky-night",
+  "sky-overcast",
+  "sky-rain",
+  "sky-storm",
+  "sky-snow",
+  "sky-fog",
 ] as const;
 
 export type WidgetRole = (typeof WIDGET_ROLES)[number];

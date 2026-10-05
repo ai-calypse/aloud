@@ -55,6 +55,7 @@ export function WidgetFrame({
   label,
   accent,
   live = false,
+  dim = false,
   ground = "tile",
   onActivate,
   children,
@@ -65,6 +66,8 @@ export function WidgetFrame({
   label: string;
   accent?: WidgetRole;
   live?: boolean;
+  /** The accent after dark: a weather card's sky with the light taken out (`[data-w-night]`). */
+  dim?: boolean;
   ground?: keyof typeof GROUND;
   onActivate?: () => void;
   children: ReactNode;
@@ -90,6 +93,7 @@ export function WidgetFrame({
         data-size={size}
         data-w-role={accent}
         data-w-live={live && accent ? "" : undefined}
+        data-w-night={dim ? "" : undefined}
         data-actionable={onActivate ? "" : undefined}
         onClick={onActivate ? open : undefined}
         className={cn(
