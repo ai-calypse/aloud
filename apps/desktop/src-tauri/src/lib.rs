@@ -114,6 +114,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_settings,
             commands::update_settings,
             commands::get_stats,
+            commands::get_time_saved,
             commands::search_notes,
             commands::recent_notes,
             commands::default_prompt,

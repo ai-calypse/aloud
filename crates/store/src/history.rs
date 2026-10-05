@@ -251,6 +251,37 @@ impl History {
             .context("reading history")
     }
 
+    /// Words dictated and commands completed among the rows at or after `since`
+    /// (unix seconds): the two inputs to the time-saved estimate. A failed
+    /// command saved nothing, so it is not counted.
+    ///
+    /// ponytail: counts only the rows the retention cap still holds, so the
+    /// all-time action count stops growing once the cap is reached. A lifetime
+    /// counter beside `Stats::total_words` is the upgrade path.
+    pub fn voice_activity_since(&self, since: i64) -> Result<(u64, u64)> {
+        let mut stmt = self.conn.prepare(
+            "SELECT kind, success, CASE kind WHEN 'dictation' THEN final_transcript ELSE '' END
+             FROM history WHERE created_at >= ?1",
+        )?;
+        let rows = stmt.query_map([since], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, bool>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let (mut words, mut actions) = (0u64, 0u64);
+        for row in rows {
+            let (kind, success, text) = row.context("reading history")?;
+            if kind == "dictation" {
+                words += crate::Stats::word_count(&text);
+            } else if success {
+                actions += 1;
+            }
+        }
+        Ok((words, actions))
+    }
+
     /// One entry, or None if it has since been pruned or deleted.
     pub fn get(&self, id: i64) -> Result<Option<Entry>> {
         let mut stmt = self.conn.prepare(&format!("{SELECT} WHERE id = ?1"))?;

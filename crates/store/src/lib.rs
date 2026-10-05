@@ -7,6 +7,7 @@ pub mod grants;
 pub mod history;
 pub mod macros;
 pub mod migrate;
+pub mod quota_history;
 pub mod rules;
 pub mod settings;
 pub mod stats;
