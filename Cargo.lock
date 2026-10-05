@@ -230,9 +230,12 @@ dependencies = [
 name = "aloud-hotkey"
 version = "0.1.0"
 dependencies = [
+ "aloud-media",
  "anyhow",
  "core-foundation",
  "core-graphics 0.24.0",
+ "foreign-types",
+ "objc2 0.5.2",
  "serde",
  "specta",
  "tracing",
