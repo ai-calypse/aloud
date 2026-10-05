@@ -31,6 +31,7 @@ import type {
   Weather,
 } from "./bindings";
 import { VOICE_RUN_PREVIEWS, livePreviews } from "@/features/overlay/previews";
+import { sessionFixture } from "./session-fixture";
 
 /**
  * A stand-in for Rust, for opening the overlay in a plain browser (the tuner,
@@ -375,13 +376,23 @@ const REMINDERS: Reminder[] = [
   { id: "r6", title: "Schedule car maintenance", due: T0 + 4 * HOUR, allDay: false, list: "Home" },
 ];
 
+// `?wx=night|cloudy|rain|storm|snow|fog|rainNight` previews the weather card's skies.
+const SKIES: Record<string, Pick<Weather, "sky" | "summary" | "isDay">> = {
+  day: { sky: "partlyCloudy", summary: "Partly cloudy", isDay: true },
+  night: { sky: "clear", summary: "Clear", isDay: false },
+  cloudy: { sky: "cloudy", summary: "Overcast", isDay: true },
+  rain: { sky: "rain", summary: "Rain", isDay: true },
+  rainNight: { sky: "rain", summary: "Rain", isDay: false },
+  storm: { sky: "storm", summary: "Thunderstorm", isDay: true },
+  snow: { sky: "snow", summary: "Snow", isDay: true },
+  fog: { sky: "fog", summary: "Fog", isDay: true },
+};
+
 const WEATHER: Weather = {
   place: "Oakland",
   temperature: 21,
   feelsLike: 20,
-  sky: "partlyCloudy",
-  summary: "Partly cloudy",
-  isDay: true,
+  ...(SKIES[params.get("wx") ?? "day"] ?? SKIES.day),
   days: [
     { day: isoDay(0), sky: "partlyCloudy", high: 24, low: 15 },
     { day: isoDay(-1), sky: "cloudy", high: 20, low: 13 },
@@ -392,10 +403,11 @@ const WEATHER: Weather = {
 };
 
 const TICKERS: Ticker[] = [
-  { symbol: "AAPL", name: "Apple Inc.", price: 232.14, changePct: 0.85, state: "open", delayed: false, error: null, currency: "USD" },
-  { symbol: "^GSPC", name: "S&P 500", price: 5712.69, changePct: -1.2, state: "closed", delayed: false, error: null, currency: "USD" },
-  { symbol: "BTC-USD", name: "Bitcoin USD", price: 85809.2, changePct: 0.02, state: "open", delayed: true, error: null, currency: "USD" },
-  { symbol: "NVDA", name: "NVIDIA Corp.", price: 131.4, changePct: 2.31, state: "open", delayed: false, error: null, currency: "USD" },
+  { symbol: "AAPL", name: "Apple Inc.", price: 232.14, changePct: 0.85, state: "open", delayed: false, error: null, currency: "USD", previousClose: 230.18, series: sessionFixture(3, 229.4, 232.14, 0.62) },
+  { symbol: "^GSPC", name: "S&P 500", price: 5712.69, changePct: -1.2, state: "closed", delayed: false, error: null, currency: "USD", previousClose: 5782.1, series: sessionFixture(11, 5790, 5712.69) },
+  { symbol: "BTC-USD", name: "Bitcoin USD", price: 85809.2, changePct: 0.02, state: "open", delayed: true, error: null, currency: "USD", previousClose: 85792, series: sessionFixture(5, 85500, 85809.2, 0.5) },
+  { symbol: "NVDA", name: "NVIDIA Corp.", price: 131.4, changePct: 2.31, state: "open", delayed: false, error: null, currency: "USD", previousClose: 128.43, series: sessionFixture(7, 128.6, 131.4, 0.62) },
+  { symbol: "TSLA", name: "Tesla, Inc.", price: 251.3, changePct: -0.4, state: "closed", delayed: false, error: null, currency: "USD", previousClose: 252.3, series: [] },
 ];
 
 // ── mac ──────────────────────────────────────────────────────────────────

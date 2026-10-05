@@ -272,6 +272,19 @@
   --notch-w-info: #0a84ff; /* Maps location blue */
   --notch-w-agent: #7d7aff; /* not in the file: system indigo, light */
 
+  /* Weather surfaces, after Apple's Weather: the card is the sky. Each is the
+     card's lighter end, shaded by the same fill rule as any accent, so white
+     words clear AA at both ends of the gradient (day is `blue`, above). Rain,
+     storm, snow and fog darken at night instead of having a second set: the
+     card keeps what kind of weather it is and loses the light. */
+  --notch-w-sky-night: #3d4d9c;
+  --notch-w-sky-overcast: #5d7087;
+  --notch-w-sky-rain: #476a8f;
+  --notch-w-sky-storm: #5a4d94;
+  --notch-w-sky-snow: #527ba0;
+  --notch-w-sky-fog: #6c7882;
+  --notch-w-sky-night-keep: 62%; /* how much of the accent a night card keeps */
+
   /* Calendar event cards: fill, title, time, leading bar. Green and yellow are
      Figma's; red and blue are the prototype's, for the rest of a calendar. */
   --notch-w-ev-green-bg: #1f4013;
@@ -378,6 +391,15 @@
 [data-w-role="info"] { --w-acc: var(--notch-w-info); }
 [data-w-role="agent"] { --w-acc: var(--notch-w-agent); }
 [data-w-role="alert"] { --w-acc: var(--notch-danger); }
+/* A weather card's sky. `data-w-night` is set on the frame for the kinds of
+   weather that darken after sunset; `sky-night` is already dark. */
+[data-w-night] { --w-night-keep: var(--notch-w-sky-night-keep); }
+[data-w-role="sky-night"] { --w-acc: var(--notch-w-sky-night); }
+[data-w-role="sky-overcast"] { --w-acc: color-mix(in srgb, var(--notch-w-sky-overcast) var(--w-night-keep, 100%), black); }
+[data-w-role="sky-rain"] { --w-acc: color-mix(in srgb, var(--notch-w-sky-rain) var(--w-night-keep, 100%), black); }
+[data-w-role="sky-storm"] { --w-acc: color-mix(in srgb, var(--notch-w-sky-storm) var(--w-night-keep, 100%), black); }
+[data-w-role="sky-snow"] { --w-acc: color-mix(in srgb, var(--notch-w-sky-snow) var(--w-night-keep, 100%), black); }
+[data-w-role="sky-fog"] { --w-acc: color-mix(in srgb, var(--notch-w-sky-fog) var(--w-night-keep, 100%), black); }
 /* Light accents (Exercise, Stand, Sleep, Sun) are already AA as words. */
 [data-w-role="exercise"], [data-w-role="stand"], [data-w-role="sleep"], [data-w-role="sun"] { --w-ink: var(--w-acc); }
 

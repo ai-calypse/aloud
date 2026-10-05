@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { MoonIcon } from "lucide-react";
+import { CloudMoonIcon, MoonIcon } from "lucide-react";
 import { TextField } from "@/components/notch/field";
 import { Numeral, WidgetBoard, WidgetFrame } from "@/components/notch/widgets";
 import type { Weather } from "@/lib/bindings";
@@ -9,10 +9,12 @@ import { useWeather } from "../../useToday";
 import { SKY } from "../sky";
 import { Notice, Pill, QuietPill } from "./shared";
 import { dayLabel, rangeBar, weekRange } from "./today-logic";
+import { WeatherBackdrop } from "./weather-backdrop";
+import { weatherSurface, type Glyph } from "./weather-surface";
 
 /**
- * Today › Weather as a widget board: Apple's Weather widget (a blue tile, a
- * Light temperature, the sky, and the days as low-to-high bars) beside a Place
+ * Today › Weather as a widget board: Apple's Weather widget (a tile that is the
+ * sky, a Light temperature, and the days as low-to-high bars) beside a Place
  * tile that keeps the controls: change the city, go back to this
  * Mac's location, refresh.
  *
@@ -79,15 +81,9 @@ export function WeatherBoard({
 }
 
 /** The sky's glyph: the sun is the one yellow thing, everything else is white. */
-function SkyGlyph({
-  data,
-  className,
-}: {
-  data: Pick<Weather, "sky" | "isDay">;
-  className: string;
-}) {
-  const Icon = data.sky === "clear" && !data.isDay ? MoonIcon : SKY[data.sky];
-  const sun = data.sky === "clear" && data.isDay;
+function SkyGlyph({ glyph, className }: { glyph: Glyph; className: string }) {
+  const Icon = glyph === "moon" ? MoonIcon : glyph === "cloudMoon" ? CloudMoonIcon : SKY[glyph];
+  const sun = glyph === "clear";
   return (
     <span
       data-w-role={sun ? "sun" : undefined}
@@ -102,13 +98,21 @@ function SkyGlyph({
 export function ForecastTile({ data }: { data: Weather }) {
   const today = data.days[0];
   const range = weekRange(data.days);
+  const surface = weatherSurface(data.sky, data.isDay);
   return (
-    <WidgetFrame size="large" label="Weather" accent="blue" ground="accent">
-      {/* Deep blue to the accent, so white words pass AA at the bottom too. */}
+    <WidgetFrame
+      size="large"
+      label="Weather"
+      accent={surface.role}
+      dim={surface.dim}
+      ground="accent"
+    >
+      {/* The sky's deep shade to its accent, so white words pass AA at the bottom too. */}
       <div
         aria-hidden
         className="absolute inset-0 bg-linear-to-b from-widget-fill to-widget-acc/70"
       />
+      {surface.backdrop && <WeatherBackdrop kind={surface.backdrop} />}
       <div className="relative flex h-full flex-col p-3.5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -118,7 +122,7 @@ export function ForecastTile({ data }: { data: Weather }) {
             <Numeral text={degrees(data.temperature)} size="l" />
           </div>
           <div className="shrink-0 text-right text-notch-w-title leading-snug font-medium">
-            <SkyGlyph data={data} className="ml-auto size-5" />
+            <SkyGlyph glyph={surface.glyph} className="ml-auto size-5" />
             <div>{data.summary}</div>
             {today && (
               <div className="text-widget-ink/85">
@@ -146,10 +150,7 @@ export function ForecastTile({ data }: { data: Weather }) {
                 <span className="w-11 font-semibold">
                   {dayLabel(d.day, i === 0)}
                 </span>
-                <SkyGlyph
-                  data={{ sky: d.sky, isDay: true }}
-                  className="size-4.5"
-                />
+                <SkyGlyph glyph={d.sky} className="size-4.5" />
                 <span className="w-8 text-right font-medium tabular-nums text-widget-ink/70">
                   {degrees(d.low)}
                 </span>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Event as CalendarEvent, Reminder } from "@/lib/bindings";
 import {
+  dayChart,
   dayLabel,
   GRID_HOURS,
   hourLabel,
@@ -224,5 +225,45 @@ describe("moveOf", () => {
     expect(moveOf(-1.2)).toBe("down");
     expect(moveOf(0.03)).toBe("flat");
     expect(moveOf(null)).toBeNull();
+  });
+});
+
+describe("dayChart", () => {
+  const W = 100;
+  const H = 40;
+  const pts = (...ys: number[]) => ys.map((y, i) => ({ x: i / (ys.length - 1), y }));
+
+  it("draws the baseline on the chart even when the day never reaches it", () => {
+    // Up the whole day, yesterday's close well below: the box has to stretch to hold it.
+    const c = dayChart(pts(110, 112, 115), 100, W, H)!;
+    expect(c.baseline).toBe(H - 3);
+    expect(c.end[1]).toBe(3);
+    expect(c.move).toBe("up");
+  });
+
+  it("stops short of the right edge on a day still in progress", () => {
+    const half = [{ x: 0, y: 1 }, { x: 0.5, y: 2 }];
+    expect(dayChart(half, 1, W, H)!.end[0]).toBe(W / 2);
+  });
+
+  it("colours the day by where it ended against yesterday's close, not against where it opened", () => {
+    // Opened above the close, faded, ended below it: down, whatever the climb.
+    expect(dayChart(pts(105, 99), 100, W, H)!.move).toBe("down");
+    // Without a close it can only be read against the open.
+    expect(dayChart(pts(100, 101), null, W, H)!.move).toBe("up");
+    expect(dayChart(pts(100, 100.01), 100, W, H)!.move).toBe("flat");
+  });
+
+  it("drops a NaN bar instead of drawing it as zero, and says nothing for less than a line", () => {
+    const withGap = [{ x: 0, y: 5 }, { x: 0.3, y: null }, { x: 1, y: 6 }];
+    expect(dayChart(withGap, null, W, H)!.line.match(/[ML]/g)).toHaveLength(2);
+    expect(dayChart([{ x: 0, y: 5 }], 5, W, H)).toBeNull();
+    expect(dayChart([], 5, W, H)).toBeNull();
+  });
+
+  it("holds a flat day mid-box rather than dividing by zero", () => {
+    const c = dayChart(pts(7, 7, 7), 7, W, H)!;
+    expect(c.end[1]).toBe(H / 2);
+    expect(c.baseline).toBe(H / 2);
   });
 });

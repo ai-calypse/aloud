@@ -1829,6 +1829,16 @@ export type SearchResult = {
 };
 
 /**
+ *  One bar of the day's line. `x` is where it falls in the regular session
+ *  (0 at the open, 1 at the close), worked out here so the webview needs no
+ *  clock and a half-finished day draws as a half-finished line.
+ */
+export type SeriesPoint = {
+	x: number | null,
+	y: number | null,
+};
+
+/**
  *  Everything the app remembers between launches. One coarse struct rather
  *  than ~70 commands: it is a few hundred bytes and the frontend gets one
  *  `get`/`update` pair.
@@ -2236,6 +2246,10 @@ export type Ticker = {
 	/**  Why there is no price, in a sentence. */
 	error: string | null,
 	currency: string | null,
+	/**  Yesterday's close: the baseline the day's line is drawn against. */
+	previousClose: number | null,
+	/**  The regular session so far, empty when there are fewer than two bars. */
+	series: SeriesPoint[],
 };
 
 /**

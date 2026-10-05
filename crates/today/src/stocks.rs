@@ -40,6 +40,19 @@ pub struct Ticker {
     /// Why there is no price, in a sentence.
     pub error: Option<String>,
     pub currency: Option<String>,
+    /// Yesterday's close: the baseline the day's line is drawn against.
+    pub previous_close: Option<f64>,
+    /// The regular session so far, empty when there are fewer than two bars.
+    pub series: Vec<SeriesPoint>,
+}
+
+/// One bar of the day's line. `x` is where it falls in the regular session
+/// (0 at the open, 1 at the close), worked out here so the webview needs no
+/// clock and a half-finished day draws as a half-finished line.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, specta::Type)]
+pub struct SeriesPoint {
+    pub x: f64,
+    pub y: f64,
 }
 
 /// Upper-cases and checks a symbol before it goes into a URL or a file:
@@ -117,6 +130,52 @@ fn state(now: i64, p: &Periods) -> MarketState {
     }
 }
 
+/// The regular session's bars as a line.
+///
+/// `currentTradingPeriod` names the *next* session once one has closed (the
+/// recorded weekend fixture says Monday's while the bars are Friday's), so the
+/// window is slid by whole days to the one the bars belong to. Pre- and
+/// post-market bars fall outside it and are dropped: a thin extended-hours
+/// tail would squash the real session's shape.
+///
+/// ponytail: the slide ignores a DST change between the two days, which shifts
+/// the window an hour for one session; per-exchange tz data is the upgrade.
+fn session_series(
+    timestamps: &[i64],
+    closes: &[Option<f64>],
+    regular: Option<&Span>,
+) -> Vec<SeriesPoint> {
+    let bars: Vec<(i64, f64)> = timestamps
+        .iter()
+        .zip(closes)
+        .filter_map(|(t, c)| c.map(|c| (*t, c)))
+        .collect();
+    let (Some(first), Some(last)) = (bars.first(), bars.last()) else {
+        return Vec::new();
+    };
+    let (start, end) = match regular {
+        Some(s) => {
+            let days = ((last.0 - s.start) as f64 / 86_400.0).round() as i64;
+            (s.start + days * 86_400, s.end + days * 86_400)
+        }
+        None => (first.0, last.0),
+    };
+    let span = (end - start) as f64;
+    let points: Vec<SeriesPoint> = bars
+        .iter()
+        .filter(|(t, _)| (start..=end).contains(t))
+        .map(|(t, y)| SeriesPoint {
+            x: (t - start) as f64 / span,
+            y: *y,
+        })
+        .collect();
+    if span > 0.0 && points.len() >= 2 {
+        points
+    } else {
+        Vec::new()
+    }
+}
+
 /// `now` is unix seconds, a parameter so the clock is testable.
 fn parse(body: &str, now: i64) -> Result<Ticker> {
     let chart: Chart = serde_json::from_str(body).context("reading the quote")?;
@@ -162,6 +221,19 @@ fn parse(body: &str, now: i64) -> Result<Ticker> {
     let delayed =
         market == Some(MarketState::Open) && last_bar.is_none_or(|(t, _)| now - t > STALE_SECS);
 
+    let series = r
+        .indicators
+        .as_ref()
+        .and_then(|i| i.quote.first())
+        .map(|q| {
+            session_series(
+                &r.timestamp,
+                &q.close,
+                r.meta.current_trading_period.as_ref().map(|p| &p.regular),
+            )
+        })
+        .unwrap_or_default();
+
     Ok(Ticker {
         name: r
             .meta
@@ -175,6 +247,8 @@ fn parse(body: &str, now: i64) -> Result<Ticker> {
         delayed,
         error: price.is_none().then(|| "no price yet".to_string()),
         currency: r.meta.currency,
+        previous_close: r.meta.chart_previous_close,
+        series,
     })
 }
 
@@ -205,6 +279,8 @@ async fn one(symbol: &str, now: i64) -> Ticker {
         delayed: false,
         error: Some(e.to_string()),
         currency: None,
+        previous_close: None,
+        series: Vec::new(),
     })
 }
 
@@ -277,6 +353,58 @@ mod tests {
         let t = parse(&stale, 2000 + STALE_SECS + 5).unwrap();
         assert_eq!(t.state, Some(MarketState::Open));
         assert!(t.delayed);
+    }
+
+    /// Recorded from Yahoo on a Monday morning for Friday's session: the
+    /// trading period it names is Monday's, the bars are Friday's, and 79 of
+    /// the 193 are regular-session. The failure this guards: a window taken
+    /// verbatim from `currentTradingPeriod` puts no bar inside it and the
+    /// chart comes back empty on every weekend and evening.
+    #[test]
+    fn a_closed_markets_chart_is_the_last_regular_session_not_the_next_one() {
+        let body = include_str!("../tests/fixtures/aapl-1d-5m.json");
+        let t = parse(body, 1_791_100_000).unwrap();
+        assert_eq!(t.symbol, "AAPL");
+        assert_eq!(t.series.len(), 79);
+        let (first, last) = (t.series[0], t.series[78]);
+        assert_eq!(first.x, 0.0); // the 9:30 bar
+        assert!(
+            last.x == 1.0,
+            "the 16:00 bar is the right edge, got {}",
+            last.x
+        );
+        assert!(t.series.windows(2).all(|w| w[0].x < w[1].x));
+        assert_eq!(t.previous_close, Some(330.32));
+        assert_eq!(t.state, Some(MarketState::Closed));
+    }
+
+    #[test]
+    fn a_session_in_progress_stops_short_of_the_right_edge() {
+        let r = |t: &[i64], c: &[Option<f64>]| {
+            session_series(
+                t,
+                c,
+                Some(&Span {
+                    start: 2000,
+                    end: 3000,
+                }),
+            )
+        };
+        let half = r(
+            &[1500, 2000, 2250, 2500],
+            &[Some(1.0), Some(2.0), None, Some(3.0)],
+        );
+        // The pre-market bar and the gap are gone; the line ends mid-session.
+        assert_eq!(
+            half,
+            [
+                SeriesPoint { x: 0.0, y: 2.0 },
+                SeriesPoint { x: 0.5, y: 3.0 }
+            ]
+        );
+        // One bar is a dot, not a line; no bars is nothing to draw.
+        assert!(r(&[2000], &[Some(2.0)]).is_empty());
+        assert!(r(&[], &[]).is_empty());
     }
 
     #[test]

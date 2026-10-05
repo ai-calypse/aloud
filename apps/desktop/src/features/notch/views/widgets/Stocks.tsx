@@ -8,17 +8,19 @@ import { marketLabel, percent, price } from "@/lib/today";
 import { cn } from "@/lib/utils";
 import { useStocks } from "../../useToday";
 import { Notice, Pill } from "./shared";
-import { moveOf } from "./today-logic";
+import { dayChart, moveOf } from "./today-logic";
 
 /**
  * Today › Stocks as a widget board: Apple's Stocks list (symbol and name on
  * the left, price and a green or red change on the right) and a tile to follow
  * another symbol. Quotes are fetched while this is open, each
  * marked with what its market is doing so a closed market's last price is
- * never read as live.
+ * never read as live. Each row carries the day's line, from the same quote
+ * call, so the chart refreshes exactly when the price does.
  *
- * No sparkline: a quote carries today's change but no price history, and a
- * line drawn from two points would be made up.
+ * ponytail: today only. A 5-day or 1-month view is another Yahoo call per
+ * symbol (a different range and interval), which would double the traffic the
+ * minute-refresh makes; add it as an on-demand fetch behind a toggle.
  */
 export function WidgetStocks() {
   const { tickers, error, add, remove } = useStocks();
@@ -91,6 +93,65 @@ function Change({ pct }: { pct: number | null }) {
   );
 }
 
+const CHART_W = 76;
+const CHART_H = 34;
+
+/**
+ * The day's line against yesterday's close. A thin 1.75px stroke in the
+ * up/down colour with the last bar ringed in the tile's own colour, a dashed
+ * baseline at the previous close, and no axes: at this size the price and the
+ * pill beside it carry the numbers. A day with no series says so in words
+ * rather than drawing nothing.
+ */
+function DayChart({ t }: { t: Ticker }) {
+  const chart = dayChart(t.series, t.previousClose, CHART_W, CHART_H);
+  if (!chart) {
+    return (
+      <span
+        style={{ width: CHART_W }}
+        className="shrink-0 text-center text-notch-w-over leading-tight font-medium text-widget-ink-2"
+      >
+        No chart yet
+      </span>
+    );
+  }
+  const role = chart.move === "up" ? "ok" : chart.move === "down" ? "calendar" : undefined;
+  const word = { up: "up", down: "down", flat: "flat" }[chart.move];
+  return (
+    <svg
+      role="img"
+      aria-label={`${t.symbol} today, ${word} on the previous close`}
+      data-w-role={role}
+      viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+      width={CHART_W}
+      height={CHART_H}
+      className="shrink-0 overflow-visible"
+    >
+      {chart.baseline !== null && (
+        <line
+          x1={0}
+          x2={CHART_W}
+          y1={chart.baseline}
+          y2={chart.baseline}
+          strokeWidth={1}
+          strokeDasharray="2 3"
+          className="stroke-widget-neutral-track"
+        />
+      )}
+      <path
+        d={chart.line}
+        fill="none"
+        strokeWidth={1.75}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={role ? "stroke-widget-acc" : "stroke-widget-ink-2"}
+      />
+      <circle cx={chart.end[0]} cy={chart.end[1]} r={3.6} className="fill-widget-tile" />
+      <circle cx={chart.end[0]} cy={chart.end[1]} r={2.2} className={role ? "fill-widget-acc" : "fill-widget-ink-2"} />
+    </svg>
+  );
+}
+
 /** Stocks, large: every symbol followed, scrolling when there are more than fit. */
 export function ListTile({
   tickers,
@@ -120,8 +181,9 @@ export function ListTile({
                   [t.name, marketLabel(t)].filter(Boolean).join(" · ")}
               </span>
             </span>
+            {t.price != null && <DayChart t={t} />}
             {t.price != null && (
-              <span className="flex shrink-0 flex-col items-end gap-1">
+              <span className="flex w-[78px] shrink-0 flex-col items-end gap-1">
                 <span className="text-notch-w-body leading-none font-semibold tabular-nums">
                   {price(t.price)}
                 </span>
