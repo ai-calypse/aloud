@@ -6,7 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 const ROUTES = ["/", "/privacy", "/bugs", "/waitlist"];
 
 // SEO plumbing: swaps __SITE_URL__ in index.html, adds the Search Console verification tag
-// when GSC_TOKEN is set, and emits sitemap.xml and robots.txt at build.
+// when GSC_TOKEN is set, and emits the sitemap index, the page sitemap and robots.txt at build.
 function seo(site: string, gscToken: string): Plugin {
   return {
     name: "aloud-seo",
@@ -27,20 +27,16 @@ function seo(site: string, gscToken: string): Plugin {
     },
     generateBundle() {
       const today = new Date().toISOString().slice(0, 10);
-      const urls = ROUTES.map(
-        (r) =>
-          `  <url><loc>${site}${r === "/" ? "/" : r}</loc><lastmod>${today}</lastmod></url>`,
-      ).join("\n");
-      this.emitFile({
-        type: "asset",
-        fileName: "sitemap.xml",
-        source: `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`,
-      });
-      this.emitFile({
-        type: "asset",
-        fileName: "robots.txt",
-        source: `User-agent: *\nAllow: /\nDisallow: /thanks\n\nSitemap: ${site}/sitemap.xml\n`,
-      });
+      const xml = (body: string) => `<?xml version="1.0" encoding="UTF-8"?>\n${body}\n`;
+      const urls = ROUTES.map((r) => `  <url><loc>${site}${r}</loc><lastmod>${today}</lastmod></url>`).join("\n");
+      const pages = xml(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`);
+      // The index points at sitemap-0.xml (the real list). sitemap.xml is kept as a copy so an
+      // earlier submission of that address keeps working.
+      const index = xml(`<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <sitemap><loc>${site}/sitemap-0.xml</loc><lastmod>${today}</lastmod></sitemap>\n</sitemapindex>`);
+      for (const [fileName, source] of [["sitemap-0.xml", pages], ["sitemap.xml", pages], ["sitemap-index.xml", index]] as const) {
+        this.emitFile({ type: "asset", fileName, source });
+      }
+      this.emitFile({ type: "asset", fileName: "robots.txt", source: `User-agent: *\nAllow: /\nDisallow: /thanks\n\nSitemap: ${site}/sitemap-index.xml\n` });
     },
   };
 }
