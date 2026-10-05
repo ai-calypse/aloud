@@ -149,7 +149,7 @@ export function VoiceRun({
           {/* Before any tool call resolves we are still parsing the transcript; a plain
               answer finishes with no steps at all, so `finished` ends this too. */}
           <div ref={bodyRef} className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain">
-            {run.steps.length === 0 && !run.error && !run.status && !run.finished && (
+            {run.steps.length === 0 && !run.error && !run.status && !run.finished && !run.question && (
               <p className="m-0 flex items-center gap-2 text-notch-w-body text-widget-ink-2">
                 <LoaderCircleIcon className="size-4 animate-spin" aria-hidden />
                 {/* `as="span"`: Shimmer renders a <p> by default, and a <p> in a <p> is invalid. */}
@@ -561,7 +561,7 @@ export function CodingDetail({
           onPeek={onPeek}
           extra={
             (folder || usage) && (
-              <span className="truncate text-notch-w-meta text-widget-ink-2" title={session.cwd ?? undefined}>
+              <span className="line-clamp-2 text-notch-w-meta leading-snug text-widget-ink-2" title={session.cwd ?? undefined}>
                 {[folder, usage].filter(Boolean).join(" · ")}
               </span>
             )
@@ -607,7 +607,8 @@ function ActivityTile({ data, error }: { data: AgentTranscript | null; error: st
     const ticks = toolTicks(data.entries);
     body = (
       <>
-        {latest && <MessageResponse>{latest}</MessageResponse>}
+        {/* `size-auto`: the response is `size-full` by default and would push the ticks below the tile. */}
+        {latest && <MessageResponse className="size-auto">{latest}</MessageResponse>}
         {ticks.length > 0 && (
           <ul className="m-0 mt-2 list-none p-0" aria-label="Recent tool calls">
             {ticks.map((tick, i) => (
@@ -728,11 +729,11 @@ export function UsageBoard({
           </div>
 
           {/* The chart: gridlines at 0, 50 and 100 as Screen Time's 0m/30m/60m. */}
-          <div className="relative mt-3 mb-2 flex-1">
+          <div className="relative mt-4 mb-4 flex-1">
             {["100%", "50%", "0%"].map((tick, i) => (
               <div
                 key={tick}
-                className="absolute inset-x-0 flex items-center gap-1.5"
+                className="absolute inset-x-0 flex -translate-y-1/2 items-center gap-1.5"
                 // Evenly spaced; the arithmetic is the layout, not a value to tokenise.
                 style={{ top: `${i * 50}%` }}
               >
@@ -767,9 +768,9 @@ export function UsageBoard({
             ))}
             {extra !== null && (
               <li data-w-role="move" className="min-w-0">
-                <div className="truncate text-notch-w-meta font-medium text-widget-acc-ink">Extra usage</div>
+                <div className="truncate text-notch-w-meta font-medium text-widget-acc-ink">Extra</div>
                 <div className="text-notch-w-headline leading-tight font-semibold">{extra}%</div>
-                <div className="truncate text-notch-w-meta text-widget-ink-2">Past the plan&apos;s limits</div>
+                <div className="truncate text-notch-w-meta text-widget-ink-2">Past limits</div>
               </li>
             )}
           </ul>
@@ -783,7 +784,7 @@ export function UsageBoard({
 function UsageColumn({ bar }: { bar: UsageBar }) {
   return (
     <li data-w-role={bar.role} className="min-w-0">
-      <div className="truncate text-notch-w-meta font-medium text-widget-acc-ink">{bar.label}</div>
+      <div className="truncate text-notch-w-meta font-medium text-widget-acc-ink">{bar.short}</div>
       <div className="text-notch-w-headline leading-tight font-semibold tabular-nums">{bar.percent}%</div>
       <div className="truncate text-notch-w-meta text-widget-ink-2">{bar.warning ?? bar.resets ?? " "}</div>
     </li>

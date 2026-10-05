@@ -26,6 +26,14 @@ describe("usageBars", () => {
     ]);
   });
 
+  it("gives each window a heading short enough for a four-column row", () => {
+    expect(usageBars({ ...quota, sevenDayOpus: { percent: 5, resetsAt: null } }, NOW).map((b) => b.short)).toEqual([
+      "5-hour",
+      "Week",
+      "Opus",
+    ]);
+  });
+
   it("rounds to the whole percent the words say and keeps the bar on the same number", () => {
     const [five] = usageBars(quota, NOW);
     expect(five.percent).toBe(42);

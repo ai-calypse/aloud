@@ -18,6 +18,7 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "./index.css";
 import { WidgetGallery } from "./tune-widgets";
+import { AgentsLaunchGallery } from "./tune-widgets-agents-launch";
 import "./styles/notch.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
@@ -669,6 +670,12 @@ function NotchGallery() {
         <Specimen name="Widgets look" note="the Settings › Overlay option: Apple-style tiles; primitives, the Home board, empty and urgent states">
           <WidgetGallery />
         </Specimen>
+
+        {/* --- Widgets look: Agents and Launch fixtures (feat/notch-widgets-agents-launch) --- */}
+        <Specimen name="Widgets look · Agents and Launch" note="fixtures: Voice, Coding, Usage, Apps and Shortcuts in their states; Launch › Search stays calm">
+          <AgentsLaunchGallery />
+        </Specimen>
+        {/* --- end Widgets look: Agents and Launch fixtures --- */}
 
         <Specimen name="Empty" note="a view with nothing to show teaches what fills it">
           <Empty

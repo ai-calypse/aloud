@@ -6,7 +6,7 @@ import type { Run } from "../Launch";
  * yellow, green and teal, but white words on those fills (the accent at 76%
  * over black) fall under AA, so the set is the hues that clear it.
  */
-export const SHORTCUT_ROLES: WidgetRole[] = ["media", "blue", "podcast", "agent", "calendar"];
+export const SHORTCUT_ROLES: WidgetRole[] = ["media", "blue", "podcast", "agent"];
 
 /**
  * A shortcut's colour, from its name: the same shortcut keeps its colour when

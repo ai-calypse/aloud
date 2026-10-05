@@ -11,6 +11,8 @@ import { percent, shownWindows } from "@/features/overlay/QuotaDashboard";
  */
 
 /** Screen Time's three chart colours, one per plan window and always the same one. */
+const SHORT: Record<string, string> = { "5-hour window": "5-hour", "Week · Opus": "Opus" };
+
 const WINDOW_ROLE: Record<string, WidgetRole> = {
   "5-hour window": "blue",
   Week: "cyan",
@@ -19,6 +21,8 @@ const WINDOW_ROLE: Record<string, WidgetRole> = {
 
 export type UsageBar = {
   label: string;
+  /** Four columns share 310pt, so the column heading is the short name. */
+  short: string;
   /** Whole percent, what the words say. */
   percent: number;
   /** 0…1, what the bar and the meter draw. */
@@ -40,6 +44,7 @@ export function usageBars(quota: Quota | null, now = Date.now()): UsageBar[] {
     const left = w.resetsAt ? resetsIn(w.resetsAt, now) : "";
     return {
       label,
+      short: SHORT[label] ?? label,
       percent: pct,
       value: pct / 100,
       role: WINDOW_ROLE[label] ?? "blue",
