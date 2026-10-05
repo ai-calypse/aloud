@@ -179,6 +179,56 @@ export function monthGrid(now: number, weekStart = firstWeekday(), locale?: stri
   };
 }
 
+/** Local midnight of the day `ms` falls on. */
+export const dayStartOf = (ms: number): number => new Date(ms).setHours(0, 0, 0, 0);
+
+/** The local midnight `n` days from `dayStart`, by the calendar: a day with a clock change is not 24 hours. */
+export function shiftDay(dayStart: number, n: number): number {
+  const d = new Date(dayStart);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n).getTime();
+}
+
+/** The first of the month `n` months from the one `ms` is in. */
+export function shiftMonth(ms: number, n: number): number {
+  const d = new Date(ms);
+  return new Date(d.getFullYear(), d.getMonth() + n, 1).getTime();
+}
+
+/** Whether two instants are on the same local day. */
+export const sameDay = (a: number, b: number): boolean => dayStartOf(a) === dayStartOf(b);
+
+/**
+ * What the month card's arrow keys do to a selected date: a day either way,
+ * a week up or down, and Escape back to today. `null` means "not a key for
+ * this", so the panel's own handling goes on.
+ */
+export function moveSelection(key: string, selected: number): number | null {
+  switch (key) {
+    case "ArrowLeft":
+      return shiftDay(selected, -1);
+    case "ArrowRight":
+      return shiftDay(selected, 1);
+    case "ArrowUp":
+      return shiftDay(selected, -7);
+    case "ArrowDown":
+      return shiftDay(selected, 7);
+    default:
+      return null;
+  }
+}
+
+/**
+ * One day's events out of a longer read (today and tomorrow, which are already
+ * in hand), without asking Calendar again: everything that overlaps the day,
+ * all-day first.
+ */
+export function eventsOnDay(items: CalendarEvent[], dayStart: number): CalendarEvent[] {
+  const next = shiftDay(dayStart, 1);
+  return items
+    .filter((e) => e.start < next && e.end > dayStart)
+    .sort((a, b) => Number(!a.allDay) - Number(!b.allDay) || a.start - b.start);
+}
+
 /** The reminders tile's two numbers: what is due, and what has slipped. */
 export function reminderCounts(items: Reminder[], now: number): { total: number; late: number; due: number } {
   const late = items.filter((r) => overdue(r.due, r.allDay, now)).length;
