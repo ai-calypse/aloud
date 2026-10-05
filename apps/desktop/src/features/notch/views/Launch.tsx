@@ -17,10 +17,10 @@ import { useLoaded } from "../use-loaded";
 
 const NO_PREFS: LauncherPrefs = { pins: [], recents: [] };
 /** One array for "not loaded yet", so memos keyed on the app list hold. */
-const NO_APPS: InstalledApp[] = [];
+export const NO_APPS: InstalledApp[] = [];
 
 /** The apps, in the order Spotlight-like launchers show them: pins, recents, the rest. */
-function sections(apps: InstalledApp[], prefs: LauncherPrefs) {
+export function sections(apps: InstalledApp[], prefs: LauncherPrefs) {
   const byName = new Map(apps.map((app) => [app.name, app]));
   const pick = (names: string[]) =>
     names.flatMap((name) => {
@@ -37,7 +37,7 @@ function sections(apps: InstalledApp[], prefs: LauncherPrefs) {
 }
 
 /** What an app launch hands back, kept where the panel can show it. */
-function useLauncher() {
+export function useLauncher() {
   const [prefs, setPrefs] = useState<LauncherPrefs>(NO_PREFS);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -177,11 +177,10 @@ export function LaunchApps() {
   );
 }
 
-type Run = { state: "running" } | { state: "done" } | { state: "failed"; message: string };
+export type Run = { state: "running" } | { state: "done" } | { state: "failed"; message: string };
 
-/** Launch › Shortcuts: the Apple Shortcuts library, each one a click away. */
-export function LaunchShortcuts() {
-  const [query, setQuery] = useState("");
+/** The Shortcuts library and what each run last did; shared with the widgets look. */
+export function useShortcuts() {
   const [runs, setRuns] = useState<Record<string, Run>>({});
   const { data: names } = useLoaded(async () => {
     const res = await commands.shortcutList();
@@ -196,6 +195,13 @@ export function LaunchShortcuts() {
       [name]: res.status === "ok" ? { state: "done" } : { state: "failed", message: res.error },
     }));
   };
+  return { names, runs, run };
+}
+
+/** Launch › Shortcuts: the Apple Shortcuts library, each one a click away. */
+export function LaunchShortcuts() {
+  const [query, setQuery] = useState("");
+  const { names, runs, run } = useShortcuts();
 
   if (names === null) return null;
   if (names.length === 0) {

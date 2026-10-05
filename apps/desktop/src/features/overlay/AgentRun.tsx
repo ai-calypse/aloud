@@ -197,7 +197,7 @@ export function AgentRun({
  * until results land — the panel's own height animation covers the gap, and
  * an empty list flashing before the fill would fight it.
  */
-function FinderGrid({
+export function FinderGrid({
   query,
   kind,
   found,
@@ -325,7 +325,7 @@ function FinderList({ results }: { results: FinderResults }) {
   );
 }
 
-function AskGate({ asked }: { asked: { question: string; options: string[] } }) {
+export function AskGate({ asked }: { asked: { question: string; options: string[] } }) {
   const [typed, setTyped] = useState("");
   const answer = (text: string | null) => void commands.answerAgent(text);
 
@@ -397,7 +397,7 @@ function AskGate({ asked }: { asked: { question: string; options: string[] } }) 
  * Every answer carries the card's revision, so one meant for this card can
  * never answer the next.
  */
-function ConfirmGate({
+export function ConfirmGate({
   step,
   onDecide,
 }: {
@@ -546,7 +546,7 @@ function ConfirmGate({
  * Puts a tidied folder back as it was. The only write with a reverse already
  * built, so the only row with an Undo.
  */
-function UndoButton({ folder }: { folder: string }) {
+export function UndoButton({ folder }: { folder: string }) {
   const [undone, setUndone] = useState(false);
   return (
     <Button
@@ -567,7 +567,7 @@ function UndoButton({ folder }: { folder: string }) {
  * folder. The tools that made it stayed in the background, so this is the way
  * to go and look.
  */
-function ShowButton({ show }: { show: ShowTarget }) {
+export function ShowButton({ show }: { show: ShowTarget }) {
   return (
     <Button
       variant="plain"

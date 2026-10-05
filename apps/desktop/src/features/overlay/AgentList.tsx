@@ -178,6 +178,27 @@ export function AgentList({
   );
 }
 
+/** A session's transcript, read once per session when `enabled`; shared with the widgets look. */
+export function useTranscript(sessionId: string, enabled: boolean) {
+  const [transcript, setTranscript] = useState<AgentTranscript | null>(null);
+  const [transcriptError, setTranscriptError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    setTranscript(null);
+    setTranscriptError(null);
+    let live = true;
+    void commands.readAgentTranscript(sessionId).then((res) => {
+      if (!live) return;
+      if (res.status === "ok") setTranscript(res.data);
+      else setTranscriptError(res.error);
+    });
+    return () => {
+      live = false;
+    };
+  }, [enabled, sessionId]);
+  return { transcript, transcriptError };
+}
+
 /**
  * One agent in full: avatar + tag, cwd, prompt, the approve/deny card if it is
  * asking (so the decision sits with the terminal it belongs to), the live
@@ -210,22 +231,7 @@ export function AgentDetailBody({
 
   // The transcript backs both the usage line (in the meta) and the thread list.
   // Only the clicked-in detail (onBack) reads it; the hover peek stays compact.
-  const [transcript, setTranscript] = useState<AgentTranscript | null>(null);
-  const [transcriptError, setTranscriptError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!onBack) return;
-    setTranscript(null);
-    setTranscriptError(null);
-    let live = true;
-    void commands.readAgentTranscript(session.id).then((res) => {
-      if (!live) return;
-      if (res.status === "ok") setTranscript(res.data);
-      else setTranscriptError(res.error);
-    });
-    return () => {
-      live = false;
-    };
-  }, [onBack, session.id]);
+  const { transcript, transcriptError } = useTranscript(session.id, Boolean(onBack));
 
   return (
     <div className="agent-detail">
@@ -394,14 +400,14 @@ function AgentTranscriptView({
 }
 
 /** One collapsed line of tool activity. */
-type Tick = { text: string; tool: string | null; count: number; isError: boolean; title: string };
+export type Tick = { text: string; tool: string | null; count: number; isError: boolean; title: string };
 
 /** The recent tool calls, most-recent last, collapsed hierarchically: a run of
  *  the same tool folds into one tick with a count, so a burst of reads reads as
  *  "Read ×5", not five lines. Grouped on the structured `tool` field, not by
  *  re-parsing the rendered prose. A single call keeps its full prose ("Reading
  *  x.rs"); a folded run shows the tool name. Capped to the last few. */
-function toolTicks(entries: AgentTranscriptEntry[], max = 6): Tick[] {
+export function toolTicks(entries: AgentTranscriptEntry[], max = 6): Tick[] {
   const tools = entries.filter((e) => e.kind === "toolUse");
   const ticks: Tick[] = [];
   for (const t of tools) {
