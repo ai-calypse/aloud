@@ -19,6 +19,11 @@ pub const HOVER_GRACE: Duration = Duration::from_secs(8);
 /// read as one thing changing.
 pub const GAP: Duration = Duration::from_millis(150);
 
+/// The beat after a peek or card: the notch has to collapse back into the
+/// cutout (the webview's exit is about 600 ms) before anything else claims it,
+/// or a whisper would land on a panel that is leaving.
+pub const EXIT_GAP: Duration = Duration::from_millis(650);
+
 /// How long a whisper that rides a peek's top row, or echoes under a card, stays.
 const SIDE_DWELL_MS: u32 = 1_500;
 
@@ -101,8 +106,9 @@ pub struct Stage {
     current: Option<Shown>,
     side: Option<Shown>,
     waiting: Vec<Held>,
-    /// When the stage last emptied, for [`GAP`].
-    idle_since: Option<Instant>,
+    /// When the stage last emptied and how long to leave it empty: [`GAP`]
+    /// after a whisper, [`EXIT_GAP`] after anything that dropped a panel.
+    idle_since: Option<(Instant, Duration)>,
     /// The "+N" last announced, so it is announced only when it changes.
     told: usize,
 }
@@ -173,9 +179,8 @@ impl Stage {
     /// An island went away — dismissed, expired, taken down by its owner. The
     /// next waiting event takes the stage on a later [`Stage::tick`].
     pub fn end(&mut self, id: &str, now: Instant) {
-        if self.current.as_ref().is_some_and(|s| s.island.id == id) {
-            self.current = None;
-            self.idle_since = Some(now);
+        if let Some(shown) = self.current.take_if(|s| s.island.id == id) {
+            self.idle_since = Some((now, Self::gap_after(&shown)));
         }
         if self.side.as_ref().is_some_and(|s| s.island.id == id) {
             self.side = None;
@@ -192,7 +197,7 @@ impl Stage {
             out.push(Action::Clear(side.island.id));
         }
         if let Some(shown) = self.current.take() {
-            self.idle_since = Some(now);
+            self.idle_since = Some((now, Self::gap_after(&shown)));
             out.push(Action::Clear(shown.island.id.clone()));
             if shown.tier == IslandTier::Card {
                 self.waiting.push(Held {
@@ -213,7 +218,7 @@ impl Stage {
         let mut out = Vec::new();
         if self.current.as_ref().is_some_and(|s| s.overdue(now)) {
             if let Some(shown) = self.current.take() {
-                self.idle_since = Some(now);
+                self.idle_since = Some((now, Self::gap_after(&shown)));
                 out.push(Action::Clear(shown.island.id));
             }
         }
@@ -255,6 +260,14 @@ impl Stage {
         match gate::decide(&self.waiting[at].island, &ctx) {
             _ if env.panel_open => Decision::Queue(gate::Hold::PanelOpen),
             decision => decision,
+        }
+    }
+
+    fn gap_after(shown: &Shown) -> Duration {
+        if shown.tier == IslandTier::Whisper {
+            GAP
+        } else {
+            EXIT_GAP
         }
     }
 
@@ -363,7 +376,7 @@ impl Stage {
         if self.waiting.is_empty() {
             return;
         }
-        if self.current.is_none() && self.idle_since.is_some_and(|t| now < t + GAP) {
+        if self.current.is_none() && self.idle_since.is_some_and(|(t, gap)| now < t + gap) {
             return;
         }
         self.waiting.sort_by(|a, b| {
@@ -455,10 +468,10 @@ mod tests {
 
         stage.end("screenshot", at(t, 4_000));
         assert!(
-            stage.tick(&env, at(t, 4_100)).is_empty(),
-            "a beat between the two"
+            stage.tick(&env, at(t, 4_600)).is_empty(),
+            "the notch collapses before the next one drops"
         );
-        let out = stage.tick(&env, at(t, 4_150));
+        let out = stage.tick(&env, at(t, 4_650));
         assert_eq!(ids(&out), ["drive"]);
         assert!(out.contains(&Action::Waiting(0)));
     }
@@ -474,7 +487,7 @@ mod tests {
         assert!(out.contains(&Action::Clear("download".into())));
 
         stage.end("call", at(t, 9_000));
-        let out = stage.tick(&env, at(t, 9_200));
+        let out = stage.tick(&env, at(t, 9_700));
         let Some(Action::Show(back)) = out.first() else {
             panic!("the peek resumes: {out:?}");
         };
@@ -538,10 +551,10 @@ mod tests {
         stage.end("battery", at(t, 100));
         let order: Vec<String> = (0..3)
             .flat_map(|n| {
-                let out = stage.tick(&env, at(t, 300 + n * 1_000));
+                let out = stage.tick(&env, at(t, 800 + n * 1_000));
                 let id = ids(&out);
                 if let Some(first) = id.first() {
-                    stage.end(first, at(t, 300 + n * 1_000));
+                    stage.end(first, at(t, 800 + n * 1_000));
                 }
                 id
             })
@@ -660,7 +673,7 @@ mod tests {
 
         stage.end("battery-low", at(t, 2_300));
         stage.end("shot", at(t, 4_000));
-        let out = stage.tick(&env, at(t, 4_200));
+        let out = stage.tick(&env, at(t, 4_700));
         assert_eq!(ids(&out), ["drive"]);
         stage.end("drive", at(t, 8_000));
         assert!(!stage.is_active());

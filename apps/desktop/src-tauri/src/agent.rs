@@ -2041,10 +2041,11 @@ mod tests {
         assert_eq!(island.actions.len(), 1);
         assert_eq!(island.actions[0].action, "files.undoTidy");
         assert_eq!(island.actions[0].args["folder"], "Downloads");
-        assert!(
-            island.expires.is_some(),
-            "an alert never outlives its backstop"
-        );
+        // A write that worked is a whisper with its one word; the stage, not a
+        // queue lease, decides how long it lives.
+        assert_eq!(island.tier, Some(aloud_islands::IslandTier::Whisper));
+        assert_eq!(island.short.as_deref(), Some("Sorted"));
+        assert_eq!(island.source, aloud_islands::IslandSource::Own);
     }
 
     fn slack_send(named_rule: bool) -> Gate {

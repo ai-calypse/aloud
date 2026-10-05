@@ -130,7 +130,7 @@ fn main() {
     let mut ms = 9_000;
     while let Some(id) = stage.on_stage().map(str::to_owned) {
         stage.end(&id, at(ms));
-        let actions = stage.tick(&env, at(ms + 200));
+        let actions = stage.tick(&env, at(ms + 700));
         say(ms, &format!("{id} ended"), &actions, stage.waiting());
         ms += 4_200;
     }

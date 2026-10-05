@@ -176,6 +176,25 @@ carries one label (a bare `call` is a session of its own and every click comes
 back stale), and an ended label is dead for good, so each run gets a fresh one.
 A driver action takes ~1.5–2s — its own post-action window watch, no knob.
 
+## Notch takeovers
+
+An alert island is a *takeover*: it borrows the notch, sized by what it costs to
+miss — **Whisper** (notch height, 1.2–2 s, no buttons), **Peek** (one extra row,
+4 s, opens on hover), **Card** (sticky, buttons; a call, an approval, battery
+under 10%, a failed critical action). Anything that wants attention calls
+`islands::takeover(app, island)` and never `show_toast` + `push` itself; live
+islands (media, timer, agents) stay plain `islands::push`.
+
+`crates/islands/src/gate.rs` is the design's rules as one pure `decide()`
+(urgent interrupts, high interrupts a whisper not a peek, low only when idle,
+typing shrinks, panel open holds, Quiet drops a tier, Focus holds system news);
+`stage.rs` holds the one on screen and the line behind it. Both are tested
+without a window — `cargo run -p aloud-islands --example takeovers` prints a
+realistic sequence. A producer sets `tier`, `priority`, `source` (which Settings
+switch silences it), `short` (the whisper's word), `level` and `dwell_ms`; the
+gate fills in the rest. `docs/design/notch-events.html` (branch
+`design/notch-events`) is the reference.
+
 ## Frontend architecture
 
 ```
