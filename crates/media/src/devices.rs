@@ -5,11 +5,20 @@
 //! paired device and the batteries it reports (AirPods, most headphones);
 //! `ioreg` knows the Apple HID accessories' `BatteryPercent`.
 //!
+//! Connect and disconnect edges are not polled for: [`watch`] subscribes to
+//! IOBluetooth's notifications and [`react`] turns an edge into notch
+//! takeovers. The profiler is read once per connect (batteries appear a moment
+//! after one) and whenever a caller already has a fresh list ([`check_batteries`]).
+//!
 //! ponytail: no "AirPods case nearby" popup. That is BLE scanning of Apple's
 //! proximity packets, a Swift helper's job, not a subprocess's.
 
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
+use aloud_islands::{Island, IslandKind, IslandPriority, IslandSource, IslandTier};
 use aloud_native::run_jxa;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -235,6 +244,365 @@ pub fn connect(address: &str) -> Result<()> {
     }
 }
 
+// ---- connect / disconnect edges ---------------------------------------------
+
+/// A Bluetooth device connected or disconnected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BtEvent {
+    /// `aa:bb:cc:dd:ee:ff`, lowercase, like [`BtDevice::address`].
+    pub address: String,
+    pub name: String,
+    /// Its Bluetooth class says audio (headphones, headsets, speakers): the
+    /// only devices worth a whisper. A keyboard reconnects after every wake.
+    pub audio: bool,
+    pub connected: bool,
+}
+
+/// IOBluetooth can announce the same edge twice (a device with several
+/// profiles, or one this process armed twice); inside this window the second
+/// is the first again.
+const DEBOUNCE: Duration = Duration::from_secs(4);
+/// Battery fields reach the profiler a second or two after a connect.
+const SETTLE: Duration = Duration::from_millis(1500);
+/// At or under this a battery is low; it must climb back to `REARM` (charging)
+/// before it can be low again: once per discharge, not once per reading.
+const LOW: u8 = 20;
+const REARM: u8 = 25;
+
+/// The part of a device with the least charge: left, right or case.
+fn lowest(batteries: &[DeviceBattery]) -> Option<&DeviceBattery> {
+    batteries.iter().min_by_key(|b| b.percent)
+}
+
+#[derive(Debug, Default)]
+struct Tracker {
+    edges: HashMap<(String, bool), Instant>,
+    low: HashSet<String>,
+}
+
+impl Tracker {
+    /// False for an edge already seen within [`DEBOUNCE`].
+    fn accept(&mut self, address: &str, connected: bool, now: Instant) -> bool {
+        let key = (address.to_string(), connected);
+        if self
+            .edges
+            .get(&key)
+            .is_some_and(|t| now.duration_since(*t) < DEBOUNCE)
+        {
+            return false;
+        }
+        self.edges.insert(key, now);
+        true
+    }
+
+    /// The battery that has just gone low, once per discharge.
+    fn low_fires(&mut self, d: &BtDevice) -> Option<DeviceBattery> {
+        // A disconnected device's reading is the last one it sent, not news.
+        if !d.connected {
+            return None;
+        }
+        let part = lowest(&d.batteries)?;
+        let key = if d.address.is_empty() {
+            &d.name
+        } else {
+            &d.address
+        };
+        if part.percent >= REARM {
+            self.low.remove(key);
+        } else if part.percent <= LOW && self.low.insert(key.clone()) {
+            return Some(part.clone());
+        }
+        None
+    }
+}
+
+static TRACKER: Mutex<Option<Tracker>> = Mutex::new(None);
+
+fn with_tracker<R>(f: impl FnOnce(&mut Tracker) -> R) -> R {
+    f(TRACKER
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_default())
+}
+
+fn alert(id: String, icon: &str, title: String, tier: IslandTier) -> Island {
+    Island {
+        id,
+        kind: IslandKind::Alert,
+        tier: Some(tier),
+        priority: IslandPriority::Normal,
+        source: IslandSource::Connectivity,
+        icon: Some(icon.into()),
+        title,
+        detail: Some("Bluetooth".into()),
+        ..Island::default()
+    }
+}
+
+/// The whisper for headphones coming on: their lowest battery, or the bare
+/// fact while no battery has been reported yet.
+fn connected_island(address: &str, name: &str, percent: Option<u8>) -> Island {
+    Island {
+        short: Some(percent.map_or_else(|| "Connected".into(), |p| format!("{p}%"))),
+        ..alert(
+            format!("bt:{address}"),
+            "headphones",
+            name.into(),
+            IslandTier::Whisper,
+        )
+    }
+}
+
+/// Same id as the connect whisper, so it replaces one still on screen.
+fn disconnected_island(address: &str, name: &str) -> Island {
+    Island {
+        short: Some("Off".into()),
+        ..alert(
+            format!("bt:{address}"),
+            "headphones",
+            name.into(),
+            IslandTier::Whisper,
+        )
+    }
+}
+
+fn low_island(d: &BtDevice, part: &DeviceBattery) -> Island {
+    let what = if part.label.is_empty() {
+        "battery".to_string()
+    } else {
+        format!("{} battery", part.label.to_lowercase())
+    };
+    let icon = match d.kind.as_str() {
+        "headphones" | "mouse" | "keyboard" | "trackpad" => d.kind.as_str(),
+        _ => "battery",
+    };
+    alert(
+        format!("bt:low:{}", d.address),
+        icon,
+        format!("{} {what} is at {}%", d.name, part.percent),
+        IslandTier::Peek,
+    )
+}
+
+/// A peek for each connected device whose battery has just gone low. Run it
+/// on any fresh list: the one a connect reads, the one the Devices view asks
+/// for, one at launch. No timer exists only to call this.
+pub fn check_batteries(devices: &[BtDevice]) -> Vec<Island> {
+    with_tracker(|t| {
+        devices
+            .iter()
+            .filter_map(|d| t.low_fires(d).map(|part| low_island(d, &part)))
+            .collect()
+    })
+}
+
+/// What an edge is worth showing. Blocking on a connect (it waits for the
+/// batteries to appear, then reads the profiler once): call it off the run loop.
+pub fn react(event: BtEvent) -> Vec<Island> {
+    let fresh = with_tracker(|t| t.accept(&event.address, event.connected, Instant::now()));
+    if !fresh {
+        return Vec::new();
+    }
+    if !event.connected {
+        return if event.audio {
+            vec![disconnected_island(&event.address, &event.name)]
+        } else {
+            Vec::new()
+        };
+    }
+    std::thread::sleep(SETTLE);
+    let devices = list().unwrap_or_default();
+    let mut out = Vec::new();
+    if event.audio {
+        let me = devices.iter().find(|d| d.address == event.address);
+        out.push(connected_island(
+            &event.address,
+            me.map_or(event.name.as_str(), |d| d.name.as_str()),
+            me.and_then(|d| lowest(&d.batteries)).map(|b| b.percent),
+        ));
+    }
+    out.extend(check_batteries(&devices));
+    out
+}
+
+/// Starts delivering [`BtEvent`]s to `sink` for the life of the process. Call
+/// it on the main thread, and keep the main run loop running (an app's always
+/// is; a command-line example pumps it). A second call does nothing. `sink`
+/// runs on the main run loop, so it must return quickly.
+#[cfg(target_os = "macos")]
+pub fn watch(sink: impl Fn(BtEvent) + Send + Sync + 'static) {
+    iobt::start(Box::new(sink));
+}
+
+/// No Bluetooth notifications off macOS yet: no edges, and so no whispers.
+#[cfg(not(target_os = "macos"))]
+pub fn watch(_sink: impl Fn(BtEvent) + Send + Sync + 'static) {}
+
+/// IOBluetooth: `+registerForConnectNotifications:selector:` for every device
+/// that connects from now on, and `-registerForDisconnectNotification:selector:`
+/// per connected device, because macOS offers no global disconnect.
+///
+/// The callbacks arrive on the main run loop, whatever thread registered: a
+/// probe that registered from a thread of its own, running its own `CFRunLoop`,
+/// found that loop had nothing scheduled and would never have heard an edge. So
+/// there is no thread here. [`watch`] registers on its caller, and the app's
+/// main thread (where Tauri's `setup` runs, and whose run loop is the app's)
+/// delivers. Callbacks only forward an event; the profiler read and the
+/// takeover happen elsewhere.
+#[cfg(target_os = "macos")]
+mod iobt {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock, PoisonError};
+
+    use objc2::rc::{autoreleasepool, Retained};
+    use objc2::runtime::{AnyClass, AnyObject, NSObject};
+    use objc2::{define_class, msg_send, sel, AnyThread};
+    use objc2_foundation::{NSArray, NSString};
+
+    use super::{normalize_address, BtEvent};
+
+    // Loads the framework, so `IOBluetoothDevice` is a class the runtime knows.
+    #[link(name = "IOBluetooth", kind = "framework")]
+    unsafe extern "C" {}
+
+    type Sink = Box<dyn Fn(BtEvent) + Send + Sync>;
+
+    // ponytail: one watcher per process, so the Objective-C callbacks reach
+    // their sink through a static. Per-observer ivars are the upgrade path.
+    static SINK: OnceLock<Sink> = OnceLock::new();
+    /// Addresses with a disconnect registration outstanding: connecting twice
+    /// must not stack a second one on the same device.
+    static ARMED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+    fn armed<R>(f: impl FnOnce(&mut HashSet<String>) -> R) -> R {
+        f(ARMED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_or_insert_default())
+    }
+
+    define_class!(
+        // SAFETY: NSObject has no subclassing requirements and this class
+        // implements no Drop.
+        #[unsafe(super(NSObject))]
+        #[name = "AloudBluetoothObserver"]
+        struct Observer;
+
+        impl Observer {
+            #[unsafe(method(deviceConnected:device:))]
+            fn device_connected(&self, _note: &AnyObject, device: &AnyObject) {
+                autoreleasepool(|_| {
+                    let event = describe(device, true);
+                    self.arm(device, &event.address);
+                    emit(event);
+                });
+            }
+
+            #[unsafe(method(deviceDisconnected:fromDevice:))]
+            fn device_disconnected(&self, note: &AnyObject, device: &AnyObject) {
+                autoreleasepool(|_| {
+                    let event = describe(device, false);
+                    armed(|a| a.remove(&event.address));
+                    // One registration is one disconnect; the next connect arms anew.
+                    // SAFETY: `note` is the IOBluetoothUserNotification we were given.
+                    let () = unsafe { msg_send![note, unregister] };
+                    emit(event);
+                });
+            }
+        }
+    );
+
+    impl Observer {
+        fn arm(&self, device: &AnyObject, address: &str) {
+            if !armed(|a| a.insert(address.to_string())) {
+                return;
+            }
+            // SAFETY: instance method of IOBluetoothDevice; the observer outlives
+            // the registration (its thread never ends) and the selector matches
+            // the method defined above.
+            let _note: Option<Retained<AnyObject>> = unsafe {
+                msg_send![
+                    device,
+                    registerForDisconnectNotification: self,
+                    selector: sel!(deviceDisconnected:fromDevice:)
+                ]
+            };
+        }
+    }
+
+    fn describe(device: &AnyObject, connected: bool) -> BtEvent {
+        // SAFETY: plain property getters of IOBluetoothDevice.
+        let (address, name, major): (Option<Retained<NSString>>, Option<Retained<NSString>>, u32) = unsafe {
+            (
+                msg_send![device, addressString],
+                msg_send![device, name],
+                msg_send![device, deviceClassMajor],
+            )
+        };
+        BtEvent {
+            address: normalize_address(&address.map(|a| a.to_string()).unwrap_or_default()),
+            name: name.map(|n| n.to_string()).unwrap_or_default(),
+            // kBluetoothDeviceClassMajorAudio.
+            audio: major == 4,
+            connected,
+        }
+    }
+
+    fn emit(event: BtEvent) {
+        if let Some(sink) = SINK.get() {
+            sink(event);
+        }
+    }
+
+    pub fn start(sink: Sink) {
+        if SINK.set(sink).is_err() {
+            return;
+        }
+        // The observer is never released: its registrations live as long as the process.
+        std::mem::forget(autoreleasepool(|_| register()));
+    }
+
+    fn register() -> Retained<Observer> {
+        let observer: Retained<Observer> =
+            // SAFETY: NSObject's designated initialiser.
+            unsafe { msg_send![super(Observer::alloc().set_ivars(())), init] };
+        let Some(class) = AnyClass::get(c"IOBluetoothDevice") else {
+            tracing::warn!("IOBluetooth is not available");
+            return observer;
+        };
+        // SAFETY: class method of IOBluetoothDevice with this selector shape.
+        let note: Option<Retained<AnyObject>> = unsafe {
+            msg_send![
+                class,
+                registerForConnectNotifications: &*observer,
+                selector: sel!(deviceConnected:device:)
+            ]
+        };
+        // Held for the process: it is what the registration lives in. None means
+        // IOBluetooth refused (Bluetooth off or denied) and no edge will come.
+        tracing::debug!(
+            registered = note.is_some(),
+            "IOBluetooth connect notifications"
+        );
+        std::mem::forget(note);
+        // Notifications cover devices that connect from now on; the ones already
+        // connected need their disconnect watched too.
+        // SAFETY: class method returning an NSArray of IOBluetoothDevice, or nil.
+        let paired: Option<Retained<NSArray<AnyObject>>> =
+            unsafe { msg_send![class, pairedDevices] };
+        for device in paired.iter().flat_map(|a| a.iter()) {
+            // SAFETY: property getter.
+            let connected: bool = unsafe { msg_send![&*device, isConnected] };
+            if connected {
+                let address = describe(&device, true).address;
+                tracing::debug!(%address, "watching an already connected device");
+                observer.arm(&device, &address);
+            }
+        }
+        observer
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,5 +741,116 @@ mod tests {
     fn connect_refuses_what_is_not_an_address() {
         assert!(connect("--help").is_err());
         assert!(connect("").is_err());
+    }
+
+    fn pods(left: u8, right: u8, case: u8) -> BtDevice {
+        let part = |label: &str, percent| DeviceBattery {
+            label: label.into(),
+            percent,
+        };
+        BtDevice {
+            name: "AirPods Pro".into(),
+            address: "aa:bb:cc:dd:ee:01".into(),
+            kind: "headphones".into(),
+            connected: true,
+            batteries: vec![part("Left", left), part("Right", right), part("Case", case)],
+        }
+    }
+
+    /// The whisper shows one number, and it is the one that runs out first.
+    #[test]
+    fn the_lowest_part_speaks_for_the_device() {
+        let d = pods(92, 88, 64);
+        assert_eq!(lowest(&d.batteries).map(|b| b.percent), Some(64));
+        assert_eq!(lowest(&[]), None);
+        let island = connected_island(&d.address, &d.name, Some(64));
+        assert_eq!(island.short.as_deref(), Some("64%"));
+        assert_eq!(island.tier, Some(IslandTier::Whisper));
+        assert_eq!(island.source, IslandSource::Connectivity);
+        let bare = connected_island(&d.address, &d.name, None);
+        assert_eq!(bare.short.as_deref(), Some("Connected"));
+    }
+
+    /// Guards: a connect that IOBluetooth announces twice in a burst drew two
+    /// whispers; a reconnect after the window is a real one.
+    #[test]
+    fn a_repeated_edge_inside_the_window_is_one_edge() {
+        let mut t = Tracker::default();
+        let t0 = Instant::now();
+        assert!(t.accept("a", true, t0));
+        assert!(!t.accept("a", true, t0 + Duration::from_secs(1)));
+        assert!(
+            t.accept("a", false, t0 + Duration::from_secs(1)),
+            "a disconnect is its own edge"
+        );
+        assert!(t.accept("b", true, t0 + Duration::from_secs(1)));
+        assert!(t.accept("a", true, t0 + DEBOUNCE));
+    }
+
+    /// Guards: a battery sitting at 19% re-announced on every connect and every
+    /// Devices poll. Once per discharge: it re-arms only after charging past 25%.
+    #[test]
+    fn low_battery_is_announced_once_per_discharge() {
+        let mut t = Tracker::default();
+        let part = t.low_fires(&pods(90, 19, 50)).expect("first low reading");
+        assert_eq!((part.label.as_str(), part.percent), ("Right", 19));
+        assert!(t.low_fires(&pods(90, 19, 50)).is_none(), "same discharge");
+        assert!(
+            t.low_fires(&pods(90, 12, 50)).is_none(),
+            "still the same one"
+        );
+        assert!(
+            t.low_fires(&pods(90, 22, 50)).is_none(),
+            "not charged enough to re-arm"
+        );
+        assert!(t.low_fires(&pods(90, 20, 50)).is_none());
+        assert!(t.low_fires(&pods(90, 80, 50)).is_none(), "charged");
+        assert!(t.low_fires(&pods(90, 20, 50)).is_some(), "a new discharge");
+    }
+
+    #[test]
+    fn a_disconnected_device_or_a_healthy_one_is_never_low() {
+        let mut t = Tracker::default();
+        let mut gone = pods(5, 5, 5);
+        gone.connected = false;
+        assert!(t.low_fires(&gone).is_none());
+        assert!(t.low_fires(&pods(21, 40, 90)).is_none(), "21% is not low");
+        assert!(t.low_fires(&pods(50, 50, 100)).is_none());
+        let island = low_island(
+            &pods(90, 15, 50),
+            &DeviceBattery {
+                label: "Right".into(),
+                percent: 15,
+            },
+        );
+        assert_eq!(island.tier, Some(IslandTier::Peek));
+        assert_eq!(island.title, "AirPods Pro right battery is at 15%");
+        assert_eq!(island.icon.as_deref(), Some("headphones"));
+    }
+
+    #[test]
+    fn a_disconnect_replaces_the_connect_whisper() {
+        let off = disconnected_island("aa:bb", "AirPods Pro");
+        assert_eq!(off.id, connected_island("aa:bb", "AirPods Pro", Some(1)).id);
+        assert_eq!(off.short.as_deref(), Some("Off"));
+    }
+
+    /// Guards: a keyboard reconnecting after every wake is not news, and a
+    /// disconnect of one must not even look at the profiler.
+    #[test]
+    fn only_audio_devices_whisper_on_disconnect() {
+        let edge = |audio| BtEvent {
+            address: "aa:bb:cc:dd:ee:77".into(),
+            name: "Thing".into(),
+            audio,
+            connected: false,
+        };
+        assert!(react(edge(false)).is_empty());
+        let shown = react(BtEvent {
+            address: "aa:bb:cc:dd:ee:78".into(),
+            ..edge(true)
+        });
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].short.as_deref(), Some("Off"));
     }
 }

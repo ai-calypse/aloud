@@ -80,6 +80,7 @@ fn enable() {
 }
 
 pub fn start(app: &AppHandle) {
+    watch_bluetooth(app);
     let app = app.clone();
     // A change MediaRemote reports is shown at once, not at the next tick.
     aloud_media::mediaremote::start(poll_now);
@@ -115,6 +116,52 @@ pub fn start(app: &AppHandle) {
             }
         }
     });
+}
+
+/// Headphones connecting or disconnecting, and a device battery running low,
+/// as notch takeovers. Called from `setup`, on the main thread: IOBluetooth
+/// delivers its notifications on that thread's run loop, so the sink only hands
+/// the edge to a blocking task (a connect waits for the batteries to appear).
+///
+/// ponytail: read once at launch, so switching Connectivity on in Settings
+/// takes effect on the next launch. Off means IOBluetooth is never touched, so
+/// a user who does not want these never meets the Bluetooth permission prompt.
+fn watch_bluetooth(app: &AppHandle) {
+    let on = app
+        .try_state::<crate::AppState>()
+        .and_then(|state| {
+            state
+                .settings
+                .lock()
+                .ok()
+                .map(|s| s.notch_events.connectivity)
+        })
+        .unwrap_or(true);
+    if !on {
+        return;
+    }
+    let handle = app.clone();
+    aloud_media::devices::watch(move |event| {
+        let app = handle.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            offer_all(&app, aloud_media::devices::react(event));
+        });
+    });
+    // Once at launch, for a battery already low: after that, only fresh lists
+    // (a connect's, the Devices view's) are looked at, never a timer.
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(Duration::from_secs(20));
+        if let Ok(devices) = aloud_media::devices::list() {
+            offer_all(&app, aloud_media::devices::check_batteries(&devices));
+        }
+    });
+}
+
+fn offer_all(app: &AppHandle, islands: Vec<aloud_islands::Island>) {
+    for island in islands {
+        crate::islands::takeover(app, island);
+    }
 }
 
 /// Sends `reading` if it differs from the last in anything but the position
@@ -343,11 +390,14 @@ pub async fn sound_set_mic_muted(muted: bool) -> Result<(), String> {
 /// second or two), so the view asks on a slow clock, not a fast one.
 #[tauri::command]
 #[specta::specta]
-pub async fn bluetooth_devices() -> Result<Vec<BtDevice>, String> {
-    tauri::async_runtime::spawn_blocking(aloud_media::devices::list)
+pub async fn bluetooth_devices(app: AppHandle) -> Result<Vec<BtDevice>, String> {
+    let devices = tauri::async_runtime::spawn_blocking(aloud_media::devices::list)
         .await
         .map_err(|e| e.to_string())?
-        .map_err(|e| format!("{e:#}"))
+        .map_err(|e| format!("{e:#}"))?;
+    // The view already paid for this list; a low battery in it is news.
+    offer_all(&app, aloud_media::devices::check_batteries(&devices));
+    Ok(devices)
 }
 
 #[tauri::command]
