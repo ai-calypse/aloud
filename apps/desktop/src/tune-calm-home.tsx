@@ -17,6 +17,7 @@ import type {
 import { SECTIONS } from "./features/notch/registry";
 import { liveOf, plan, weights } from "./features/notch/views/calm-home";
 import { CalmBoard, type CalmBoardData } from "./features/notch/views/CalmHome";
+import { BatteryTile } from "./features/notch/views/CalmTiles";
 
 /**
  * "Shell · Home · Calm": the Calm Home board in the panel's chrome, from
@@ -214,7 +215,7 @@ export function CalmHomeGallery({ initial = "live" }: { initial?: "live" | "idle
             {label}
           </button>
         ))}
-        {[82, 18, 9].map((p) => (
+        {[100, 82, 18, 9].map((p) => (
           <button
             key={p}
             type="button"
@@ -229,6 +230,19 @@ export function CalmHomeGallery({ initial = "live" }: { initial?: "live" | "idle
       </div>
       <Panel caption="Home · ranked by what is live, biggest first">
         <CalmBoard data={dataFor(scene)} on={ON} />
+      </Panel>
+      {/* The 1x1 battery, which the ranking only picks when Home is crowded:
+          "100%" is the widest it ever has to fit. */}
+      <Panel caption="Battery · 1x1 at full, good and critical">
+        <div className="notch-calm-grid" data-battery-small>
+          {[100, 82, 9].map((percent, i) => (
+            <BatteryTile
+              key={percent}
+              placement={{ id: `battery-${percent}`, col: i + 1, row: 1, w: 1, h: 1, size: "S" }}
+              battery={{ percent, state: percent === 100 ? "full" : "discharging", minutes: 300, cycles: 120, health: 94 }}
+            />
+          ))}
+        </div>
       </Panel>
     </div>
   );

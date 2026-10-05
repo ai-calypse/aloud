@@ -556,13 +556,13 @@ export function BatteryTile({
   const label = (
     <TileLabel icon={b.charging ? <BatteryChargingIcon /> : <BatteryIcon />}>Battery</TileLabel>
   );
-  const meter = (vertical: boolean) => (
+  const meter = (
     <Capsule
       value={b.percent / 100}
       label="Battery charge"
       valueText={`${b.percent}%, ${b.word}`}
-      vertical={vertical}
-      className={vertical ? "rounded-notch-tile" : "h-2.25"}
+      vertical
+      className="rounded-notch-tile"
     />
   );
   return (
@@ -571,15 +571,23 @@ export function BatteryTile({
         <div className="flex h-full flex-col items-start gap-2">
           {label}
           <Num text={`${b.percent}%`} size="md" roll />
-          <div className="min-h-0 w-full flex-1">{meter(true)}</div>
+          <div className="min-h-0 w-full flex-1">{meter}</div>
           {word}
         </div>
       ) : (
-        <div className="flex h-full flex-col justify-between gap-1">
+        // The battery stands upright at every size. A 1x1 tile leaves about
+        // 40px beside the upright, and "100%" at the md numeral is 47: the %
+        // goes (the upright, the word and the meter's valueText carry it),
+        // and "100" is 37.
+        <div className="flex h-full flex-col gap-1.5">
           {label}
-          <Num text={`${b.percent}%`} size="lg" roll />
-          {meter(false)}
-          {word}
+          <div className="flex min-h-0 flex-1 gap-1.5">
+            <div className="w-2 flex-none">{meter}</div>
+            <div className="flex min-w-0 flex-col justify-between">
+              <Num text={String(b.percent)} size="md" roll />
+              {word}
+            </div>
+          </div>
         </div>
       )}
     </Tile>
