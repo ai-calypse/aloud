@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import Agents from "./Agents";
 import { pageView } from "./analytics";
 import Apps from "./Apps";
+import { BlogIndex, BlogPost } from "./Blog";
 import Bugs from "./Bugs";
 import { BroToggle } from "./bro";
 import Closing from "./Closing";
@@ -58,6 +59,8 @@ export default function App() {
         <Route path="/waitlist" element={<Waitlist />} />
         <Route path="/thanks" element={<Thanks />} />
         <Route path="/bugs" element={<Bugs />} />
+        <Route path="/blog" element={<BlogIndex />} />
+        <Route path="/blog/:slug" element={<BlogPost />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
       <BroToggle />

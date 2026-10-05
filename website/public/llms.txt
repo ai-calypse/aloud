@@ -1,0 +1,10 @@
+# SpeakOS
+
+> SpeakOS is voice dictation and voice commands for the Mac. Hold a key and speak, and clean text lands in whatever app has focus. Say what you want done (reminders, messages, files, music, connected apps) and SpeakOS does it, showing each action before it happens. Dictation runs on the Mac by default and works offline. A Windows version is on a waitlist.
+
+## Pages
+
+- [Home](https://speakos.app/): what SpeakOS does, with real commands
+- [Privacy](https://speakos.app/privacy): what stays on the Mac and what goes online
+- [Windows waitlist](https://speakos.app/waitlist): sign up for the Windows version
+- [Report a bug](https://speakos.app/bugs): send a bug report

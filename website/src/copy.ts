@@ -231,6 +231,7 @@ const normal = {
     error: "something went wrong. try again.",
     unconfigured: "bug reports aren’t connected yet. check back soon.",
   },
+  blog: { title: "blog · SpeakOS", pill: "blog", h1: "notes from the tin can.", lede: "short posts on talking to your mac.", all: "all posts", empty: "nothing here yet.", read: (m: number) => `${m} min read` },
   notFound: { home: "take me home" },
 };
 
@@ -462,6 +463,7 @@ const bro1: Copy = {
     error: "that didn’t go through. try again.",
     unconfigured: "bug reports aren’t connected yet. check back soon.",
   },
+  blog: { title: "blog · SpeakOS", pill: "blog", h1: "notes from the tin can.", lede: "short posts on talking to your mac. no fluff, promise.", all: "all posts", empty: "nothing here yet. we’re working on it.", read: (m: number) => `${m} min read` },
   notFound: { home: "take me home, bro" },
 };
 
@@ -691,6 +693,7 @@ const bro2: Copy = {
     error: "the bug report failed too. fantastic. try again.",
     unconfigured: "bug reports aren’t connected yet. check back soon. yes, the irony is obvious.",
   },
+  blog: { title: "blog · SpeakOS", pill: "blog", h1: "notes from the tin can, bro.", lede: "short posts on yelling at your mac productively.", all: "all the posts", empty: "nothing here yet. we’re on it.", read: (m: number) => `${m} min read, bro` },
   notFound: { home: "bro, get me back home" },
 };
 
