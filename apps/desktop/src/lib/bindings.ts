@@ -287,8 +287,23 @@ export const commands = {
 	 *  that is not running launches it, which the background tick never does.
 	 */
 	calendarEvents: (refresh: boolean) => typedError<Event[], AgendaError>(__TAURI_INVOKE("calendar_events", { refresh })),
-	/**  Incomplete reminders due by the end of today, overdue ones first. */
+	/**
+	 *  What the last read saw, from memory or the last run's file: the view paints
+	 *  this immediately and `reminders_due` corrects it. `None` only before the
+	 *  first read there has ever been.
+	 */
+	remindersCached: () => __TAURI_INVOKE<Reminder[] | null>("reminders_cached"),
+	/**
+	 *  Incomplete reminders due by the end of today, overdue ones first. EventKit
+	 *  when granted (this is the call that may raise its one-time prompt), else a
+	 *  script; either way the result becomes the cache.
+	 */
 	remindersDue: () => typedError<Reminder[], AgendaError>(__TAURI_INVOKE("reminders_due")),
+	/**
+	 *  One day's events for the month card's date picker. `day` is any instant on
+	 *  the day, in unix ms (a number, not a bigint: it is a day, not a count).
+	 */
+	calendarDay: (day: number | null) => typedError<Event[], AgendaError>(__TAURI_INVOKE("calendar_day", { day })),
 	/**  Ticks a reminder off. The only thing in Today that writes to the account. */
 	completeReminder: (id: string) => typedError<null, AgendaError>(__TAURI_INVOKE("complete_reminder", { id })),
 	/**

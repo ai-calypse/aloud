@@ -59,7 +59,7 @@ fn main() {
     }
 
     let started = Instant::now();
-    match agenda::reminders(agenda::day_start(1)) {
+    match agenda::reminders(agenda::day_start(1), false) {
         Ok(rs) => {
             println!(
                 "{} reminders due by end of today, in {:?}",

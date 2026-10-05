@@ -1,21 +1,32 @@
-//! Today's events and reminders, read through Calendar.app and Reminders.app
-//! with JXA (`aloud_native::run_jxa`).
+//! Today's events and reminders, read through Calendar.app and Reminders.app.
 //!
-//! JXA rather than EventKit: Calendar and Reminders are scripted under the
-//! Automation permission the app already handles, while EventKit needs its own
-//! entitlement and usage string — and from a script host it answered "write
-//! only" and an empty list on the machine this was built on. The cost is
-//! speed and a hole in the dictionary, both handled here:
+//! **Reminders** go through EventKit when macOS has granted it ([`eventkit`],
+//! in process, ~35ms), else through JXA (`aloud_native::run_jxa`, ~0.9s: every
+//! property read on Reminders.app costs 100-200ms whatever it returns, so the
+//! script asks for five properties in five events, never one per reminder).
+//! The first attempt at EventKit "answered write only and an empty list": it
+//! used the pre-macOS-14 request, which only ever yields write-only; reads need
+//! the full-access request and its Info.plist usage string. A refusal, an OS
+//! without that call, or a failed fetch lands on the script, so the grant is an
+//! accelerator and never a requirement. [`cache`] keeps the last read in memory
+//! and on disk so the view never waits on either.
+//!
+//! **Events** stay on JXA: Calendar is scripted under the Automation permission
+//! the app already handles, and the dictionary has holes handled here:
 //!
 //! - **Recurring events** come back as their first occurrence only, so the
 //!   rule is expanded in [`recur`].
 //! - **Read-only calendars** (holidays, birthdays, Siri suggestions, other
 //!   subscriptions) are skipped. Filtering a subscription's thousands of
 //!   events took ~10s a calendar; the calendars you write to take ~0.1s.
-//!   ponytail: a calendar shared read-only with you is skipped too; EventKit
-//!   through a signed helper is the way to read those.
+//!   ponytail: a calendar shared read-only with you is skipped too, and
+//!   events still cost ~0.4s a read; EventKit's `EKEventStore` (same grant
+//!   dance as reminders, `NSCalendarsFullAccessUsageDescription`) reads both
+//!   in milliseconds and would replace [`EVENTS_JXA`] and the recurrence
+//!   expansion (EventKit expands rules itself).
 //!
-//! Read-only on the user's account except [`complete_reminder`].
+//! Read-only on the user's account except [`complete_reminder`], which is still
+//! a script (~1s) because the view removes the row before it lands.
 
 use std::collections::HashSet;
 
@@ -23,6 +34,9 @@ use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority};
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone};
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_os = "macos")]
+pub mod cache;
+pub mod eventkit;
 pub mod recur;
 
 /// Why a read failed, in the one distinction the view acts on: a missing
@@ -283,12 +297,18 @@ pub fn island(events: &[Event], now: i64) -> Option<Island> {
     })
 }
 
+/// Five Apple events however many reminders match: every property read on
+/// Reminders.app costs ~100-200ms by itself, and `q.container()` followed by a
+/// `name()` each would add one more per reminder. `container.name()` asks for
+/// all the names in one. Nothing due is one event, not five.
 const REMINDERS_JXA: &str = r#"
 const R = Application('Reminders');
 const to = new Date(ARG.to);
 const q = R.reminders.whose({_and: [{completed: false}, {dueDate: {_lessThan: to}}]});
-const id = q.id(), name = q.name(), due = q.dueDate(), day = q.alldayDueDate();
-const lists = q.container().map(c => c.name());
+const id = q.id();
+if (id.length === 0) return '[]';
+const name = q.name(), due = q.dueDate(), day = q.alldayDueDate();
+const lists = q.container.name();
 return JSON.stringify(id.map((_, i) => ({
   id: id[i], title: name[i], due: due[i].toISOString(),
   allDay: due[i].getTime() === day[i].getTime(), list: lists[i],
@@ -306,8 +326,41 @@ struct RawReminder {
 }
 
 /// Incomplete reminders due before `to_ms` — overdue ones included — soonest
-/// first.
-pub fn reminders(to_ms: i64) -> Result<Vec<Reminder>, AgendaError> {
+/// first. EventKit when it is granted (in process, milliseconds), else the
+/// scripting read (about a second).
+///
+/// `ask` lets the first call raise EventKit's one-time permission prompt; the
+/// background ticks pass `false` so a prompt only ever follows a view the user
+/// opened. Any refusal or failure on the EventKit side lands on the script.
+pub fn reminders(to_ms: i64, ask: bool) -> Result<Vec<Reminder>, AgendaError> {
+    #[cfg(target_os = "macos")]
+    {
+        use eventkit::Access;
+        let mut access = eventkit::access();
+        if access == Access::Undecided && ask {
+            eventkit::request_access(std::time::Duration::from_secs(90));
+            access = eventkit::access();
+        }
+        if access == Access::Granted {
+            if let Some(found) = eventkit::reminders(to_ms) {
+                return Ok(found);
+            }
+        }
+    }
+    reminders_scripted(to_ms)
+}
+
+/// Whether [`reminders`] would answer in process, so a background tick can read
+/// without Reminders.app open (a script would launch it).
+pub fn reminders_in_process() -> bool {
+    #[cfg(target_os = "macos")]
+    return eventkit::access() == eventkit::Access::Granted;
+    #[cfg(not(target_os = "macos"))]
+    false
+}
+
+/// The scripting read: Reminders under the Automation grant, no EventKit.
+pub fn reminders_scripted(to_ms: i64) -> Result<Vec<Reminder>, AgendaError> {
     let arg =
         serde_json::json!({ "to": DateTime::from_timestamp_millis(to_ms).map(|d| d.to_rfc3339()) });
     let json = aloud_native::run_jxa("Reminders", REMINDERS_JXA, &arg)?;
@@ -373,6 +426,23 @@ pub fn app_running(app: &str) -> bool {
 pub fn day_start(days: i64) -> i64 {
     let day = Local::now().date_naive() + Duration::days(days);
     day.and_hms_opt(0, 0, 0).and_then(ms).unwrap_or(0)
+}
+
+/// The local day around `at_ms`, midnight to the next midnight, in unix ms.
+pub fn day_bounds(at_ms: i64) -> (i64, i64) {
+    let date = DateTime::from_timestamp_millis(at_ms).map_or_else(
+        || Local::now().date_naive(),
+        |d| d.with_timezone(&Local).date_naive(),
+    );
+    let midnight = |d: NaiveDate| d.and_hms_opt(0, 0, 0).and_then(ms).unwrap_or(0);
+    (midnight(date), midnight(date + Duration::days(1)))
+}
+
+/// One day's events, for the month card's date picker: the same read as
+/// today's (recurrence expanded, read-only calendars skipped), over that day.
+pub fn events_on(at_ms: i64) -> Result<Vec<Event>, AgendaError> {
+    let (from, to) = day_bounds(at_ms);
+    events(from, to)
 }
 
 // ---- nudges: an event about to start, a reminder that has come due ----------
@@ -515,6 +585,45 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].start, at("2026-10-04 09:30"));
         assert_eq!(got[0].end - got[0].start, 15 * 60_000);
+    }
+
+    /// The date picker's read: a weekly event begun months ago has to show on
+    /// the Thursday a user taps, not only on the day it was created.
+    #[test]
+    fn a_recurring_event_shows_on_a_day_picked_weeks_after_it_began() {
+        let (from, to) = day_bounds(at("2026-10-15 12:00"));
+        assert_eq!(from, at("2026-10-15 00:00"));
+        assert_eq!(to, at("2026-10-16 00:00"));
+        let sync = raw(
+            "sync",
+            "2026-08-06 14:00",
+            "2026-08-06 15:00",
+            Some("FREQ=WEEKLY;BYDAY=TH"),
+        );
+        let got = expand(&[sync], from, to);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].start, at("2026-10-15 14:00"));
+        // The day before has none of it.
+        let (from, to) = day_bounds(at("2026-10-14 09:00"));
+        let sync = raw(
+            "sync",
+            "2026-08-06 14:00",
+            "2026-08-06 15:00",
+            Some("FREQ=WEEKLY;BYDAY=TH"),
+        );
+        assert!(expand(&[sync], from, to).is_empty());
+    }
+
+    /// An all-day event begins at local midnight, the edge a day's window
+    /// must keep and the next day's must not.
+    #[test]
+    fn a_day_window_keeps_its_midnight_and_gives_up_the_next() {
+        let mut holiday = raw("h", "2026-10-15 00:00", "2026-10-16 00:00", None);
+        holiday.all_day = true;
+        let (from, to) = day_bounds(at("2026-10-15 23:59"));
+        assert_eq!(expand(std::slice::from_ref(&holiday), from, to).len(), 1);
+        let (from, to) = day_bounds(at("2026-10-16 00:00"));
+        assert!(expand(&[holiday], from, to).is_empty());
     }
 
     #[test]

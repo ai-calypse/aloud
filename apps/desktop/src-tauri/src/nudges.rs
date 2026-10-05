@@ -232,13 +232,15 @@ pub fn calendar_tick(app: &AppHandle, events: &[aloud_agenda::Event], now: i64) 
     }
 }
 
-/// Called every other minute: reads Reminders if it is open and was allowed,
+/// Called every other minute: reads Reminders if it can do so without launching it (EventKit, or the app already open) and was allowed,
 /// then raises a Normal peek for each that just came due.
 pub async fn reminders_tick(app: &AppHandle, now: i64) {
-    if !REMINDERS_ALLOWED.load(Ordering::Relaxed) || !aloud_agenda::app_running("Reminders") {
+    let readable = aloud_agenda::reminders_in_process() || aloud_agenda::app_running("Reminders");
+    if !REMINDERS_ALLOWED.load(Ordering::Relaxed) || !readable {
         return;
     }
-    let read = tauri::async_runtime::spawn_blocking(move || aloud_agenda::reminders(now)).await;
+    let read =
+        tauri::async_runtime::spawn_blocking(move || aloud_agenda::reminders(now, false)).await;
     let Ok(Ok(reminders)) = read else { return };
     for reminder in aloud_agenda::due(&reminders, now) {
         raise_agenda(app, aloud_agenda::due_island(reminder), "Reminders");

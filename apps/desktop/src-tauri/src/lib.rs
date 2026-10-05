@@ -183,7 +183,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             today::add_stock,
             today::remove_stock,
             today::calendar_events,
+            today::reminders_cached,
             today::reminders_due,
+            today::calendar_day,
             today::complete_reminder,
             today::open_meeting_link,
             // notch-today-focus: commands end

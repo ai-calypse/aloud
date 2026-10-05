@@ -9,35 +9,34 @@ import { useNow, useReminders } from "../../useToday";
 import { Aside, AgendaNotice, Notice, QuietPill } from "./shared";
 import { reminderCounts } from "./today-logic";
 
+/** Nothing is ever "in flight" here: a tick removes the row first. */
+const NOT_TICKING: ReadonlySet<string> = new Set();
+
 /**
  * Today › Reminders as a widget board: Apple's Reminders widget (a red count
  * and title over rows on hairlines, an unfilled radio for each) with two small
- * tiles that say how many are due and how many have slipped. Ticking one off
- * is one write, to Reminders itself.
+ * tiles that say how many are due and how many have slipped. The rows are the
+ * last ones seen, drawn at once, and the read only corrects them. Ticking one
+ * off is one write, to Reminders itself, and the row leaves before it lands
+ * (the write is a script, about a second) and comes back if it fails.
  */
 export function WidgetReminders() {
   const { items, error, reload, setItems } = useReminders();
   const now = useNow();
-  const [ticking, setTicking] = useState<Set<string>>(new Set());
   const [failed, setFailed] = useState<string | null>(null);
 
   const tick = async (r: Reminder) => {
     setFailed(null);
-    setTicking((s) => new Set(s).add(r.id));
+    const before = items ?? [];
+    setItems(before.filter((x) => x.id !== r.id));
     const res = await commands.completeReminder(r.id);
-    setTicking((s) => {
-      const next = new Set(s);
-      next.delete(r.id);
-      return next;
-    });
-    if (res.status === "ok")
-      setItems((items ?? []).filter((x) => x.id !== r.id));
-    else
-      setFailed(
-        res.error.kind === "failed"
-          ? res.error.message
-          : "Aloud is not allowed to change Reminders.",
-      );
+    if (res.status === "ok") return;
+    setItems(before);
+    setFailed(
+      res.error.kind === "failed"
+        ? res.error.message
+        : "Aloud is not allowed to change Reminders.",
+    );
   };
 
   return (
@@ -45,7 +44,7 @@ export function WidgetReminders() {
       items={items}
       error={error}
       now={now}
-      ticking={ticking}
+      ticking={NOT_TICKING}
       failed={failed}
       onTick={(r) => void tick(r)}
       onReload={() => void reload()}
@@ -118,6 +117,12 @@ export function RemindersBoard({
         />
       </WidgetBoard>
       {failed && <Aside>{failed}</Aside>}
+      {error && (
+        <Aside>
+          Could not refresh:{" "}
+          {error.kind === "failed" ? error.message : "access was refused"}
+        </Aside>
+      )}
     </>
   );
 }
