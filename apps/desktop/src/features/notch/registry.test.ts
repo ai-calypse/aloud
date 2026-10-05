@@ -1,6 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { READY, SECTIONS } from "./registry";
 import { viewFor } from "./sections";
+import { CalmHome } from "./views/CalmHome";
+import { WidgetHome } from "./views/WidgetHome";
+
+describe("registry Home", () => {
+  it("calls the first section Home, and draws its Overview as Calm tiles and as a Widgets board", () => {
+    const home = READY[0];
+    expect(home.id).toBe("now");
+    expect(home.name).toBe("Home");
+    const overview = home.subsections.find((s) => s.id === "overview");
+    expect(overview?.view).toBe(CalmHome);
+    expect(overview?.widgetView).toBe(WidgetHome);
+  });
+
+  it("holds Home to one subsection, so Calm hides the switcher", () => {
+    expect(READY[0].subsections).toHaveLength(1);
+  });
+
+  it("gives every section a footer caption, in the prototype's words for Home", () => {
+    expect(READY[0].blurb).toBe("ranked by what is live, biggest first");
+    for (const s of READY) expect(s.blurb, s.id).toBeTruthy();
+  });
+});
 
 describe("registry widget views", () => {
   it("gives Now › Overview a widget view, so Home is a board in the widgets look", () => {
