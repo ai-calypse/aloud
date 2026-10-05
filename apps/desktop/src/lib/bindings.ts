@@ -1421,7 +1421,7 @@ export type NotchEvents = {
 	quiet?: boolean,
 	/**  Hold ordinary system events while a macOS Focus is on. */
 	focusAware?: boolean,
-	/**  Volume, mic mute, Caps Lock: whispers for a key you pressed. */
+	/**  Volume, brightness, mic mute, Caps Lock: whispers for a key you pressed. */
 	huds?: boolean,
 	/**  Battery, charger and Low Power Mode. */
 	power?: boolean,
@@ -1430,11 +1430,15 @@ export type NotchEvents = {
 	/**  What happened in another app: a screenshot, a finished download. */
 	banners?: boolean,
 	/**
-	 *  Eat the volume keys and draw the level in the notch instead of macOS's
-	 *  HUD. Off: the keys are only watched and macOS draws its own. Needs
-	 *  `huds` on, or the keys would move the volume with nothing to show it.
+	 *  Eat the volume and brightness keys and draw the level in the notch
+	 *  instead of macOS's HUDs. Off: the keys are only watched and macOS draws
+	 *  its own. Needs `huds` on, or the keys would move the level with nothing
+	 *  to show it. Was `replaceVolumeHud` (volume only) before brightness
+	 *  joined it; `from_json` carries a saved choice over. (Not a serde alias:
+	 *  that makes specta emit split Serialize/Deserialize types for the whole
+	 *  of `Settings`.)
 	 */
-	replaceVolumeHud?: boolean,
+	replaceSystemHuds?: boolean,
 };
 
 /**

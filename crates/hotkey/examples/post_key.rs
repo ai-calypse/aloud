@@ -1,11 +1,16 @@
-//! Posts real volume-key and Caps Lock events for `--example keys` to see.
+//! Posts real volume-key, brightness-key and Caps Lock events for
+//! `--example keys` to see.
 //!
 //!   cargo run -p aloud-hotkey --example post_key -- volume up|down|mute [option-shift]
+//!   LOC=1 cargo run -p aloud-hotkey --example post_key -- brightness up|down [option-shift|keycode]
 //!   cargo run -p aloud-hotkey --example post_key -- caps on|off
 //!
 //! A volume key is an NX_SYSDEFINED event built through `NSEvent`, posted at
 //! the HID level so macOS acts on it as well unless a tap eats it: it moves
-//! the real volume. Caps Lock is a flagsChanged with keycode 57, which only
+//! the real volume. Brightness is the same event with key type 2/3, or with
+//! `keycode` a plain key-down of keycode 144/145; post it with `LOC=1`
+//! (session level, after the HID system has acted) so it exercises the tap
+//! without macOS moving the real brightness. Caps Lock is a flagsChanged with keycode 57, which only
 //! the tap hears; the keyboard's real Caps Lock state is not touched.
 
 #[cfg(target_os = "macos")]
@@ -41,15 +46,35 @@ fn main() {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("volume") => {
-            let code: i64 = match args.get(1).map(String::as_str) {
-                Some("up") => 0,
-                Some("down") => 1,
-                Some("mute") => 7,
-                _ => panic!("volume up|down|mute"),
+        Some("brightness") if args.iter().any(|a| a == "keycode") => {
+            let up = match args.get(1).map(String::as_str) {
+                Some("up") => true,
+                Some("down") => false,
+                _ => panic!("brightness up|down"),
+            };
+            let code = if up { 144 } else { 145 };
+            let src = CGEventSource::new(CGEventSourceStateID::HIDSystemState).unwrap();
+            for down in [true, false] {
+                let e = CGEvent::new_keyboard_event(src.clone(), code, down).unwrap();
+                if args.iter().any(|a| a == "option-shift") {
+                    e.set_flags(CGEventFlags::CGEventFlagAlternate | CGEventFlags::CGEventFlagShift);
+                }
+                e.post(CGEventTapLocation::Session);
+                sleep(Duration::from_millis(60));
+            }
+            println!("posted brightness keycode {code}");
+        }
+        Some(kind @ ("volume" | "brightness")) => {
+            let code: i64 = match (kind, args.get(1).map(String::as_str)) {
+                ("volume", Some("up")) => 0,
+                ("volume", Some("down")) => 1,
+                ("volume", Some("mute")) => 7,
+                ("brightness", Some("up")) => 2,
+                ("brightness", Some("down")) => 3,
+                _ => panic!("volume up|down|mute, brightness up|down"),
             };
             // NSEventModifierFlagOption | NSEventModifierFlagShift
-            let flags: usize = if args.get(2).is_some() {
+            let flags: usize = if args.iter().any(|a| a == "option-shift") {
                 (1 << 19) | (1 << 17)
             } else {
                 0
@@ -74,7 +99,7 @@ fn main() {
                 unsafe { CGEventPost(at.unwrap_or(0), cg.0) };
                 sleep(Duration::from_millis(60));
             }
-            println!("posted volume {:?}", &args[1..]);
+            println!("posted {kind} {:?}", &args[1..]);
         }
         Some("caps") => {
             let on = args.get(1).map(String::as_str) == Some("on");
@@ -89,7 +114,7 @@ fn main() {
             e.post(CGEventTapLocation::Session);
             println!("posted caps {}", if on { "on" } else { "off" });
         }
-        _ => eprintln!("usage: post_key volume up|down|mute [option-shift] | caps on|off"),
+        _ => eprintln!("usage: post_key volume up|down|mute [option-shift] | brightness up|down [option-shift|keycode] | caps on|off"),
     }
 }
 

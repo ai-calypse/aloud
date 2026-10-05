@@ -230,6 +230,7 @@ dependencies = [
 name = "aloud-hotkey"
 version = "0.1.0"
 dependencies = [
+ "aloud-mac",
  "aloud-media",
  "anyhow",
  "core-foundation",

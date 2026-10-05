@@ -1,22 +1,27 @@
-//! The keys that raise the notch: volume, Caps Lock and the microphone's mute.
-//! Thin wiring — the tap's decode is `aloud_hotkey::aux`, the CoreAudio work is
-//! `aloud_media::sound` — mapping what they report to whispers through
+//! The keys that raise the notch: volume, brightness, Caps Lock and the
+//! microphone's mute. Thin wiring — the tap's decode is `aloud_hotkey::aux`,
+//! the CoreAudio work is `aloud_media::sound`, the display's is
+//! `aloud_mac::brightness` — mapping what they report to whispers through
 //! [`crate::islands::takeover`].
 
-use aloud_hotkey::aux::{self, AuxEvent, VolumeKey};
+use aloud_hotkey::aux::{self, AuxEvent, BrightnessKey, VolumeKey};
 use aloud_islands::{Island, IslandKind, IslandSource, IslandTier};
 use aloud_media::sound::{self, Output, VolumeAction};
 use aloud_store::settings::NotchEvents;
 use tauri::{AppHandle, Manager};
 
-/// Tells the key tap whether to eat the volume keys. Called at launch and on
-/// every settings save, so the switch needs no restart. Replacement needs the
-/// key whispers on: an eaten key with nothing drawn is a dead key.
+/// Tells the key tap whether to eat the volume and brightness keys. Called at
+/// launch and on every settings save, so the switch needs no restart.
+/// Replacement needs the key whispers on: an eaten key with nothing drawn is a
+/// dead key.
 pub fn apply_settings(events: &NotchEvents) {
-    aux::set_replace_volume(events.replace_volume_hud && events.huds);
+    let on = events.replace_system_huds && events.huds;
+    aux::set_replace_volume(on);
+    aux::set_replace_brightness(on);
 }
 
 pub fn start(app: &AppHandle) {
+    aux::set_brightness_probe(aloud_mac::brightness::controllable);
     if let Some(state) = app.try_state::<crate::AppState>() {
         if let Ok(settings) = state.settings.lock() {
             apply_settings(&settings.notch_events);
@@ -38,6 +43,11 @@ pub fn start(app: &AppHandle) {
                             fine,
                             swallowed,
                         } => volume(&app, key, fine, swallowed),
+                        AuxEvent::Brightness {
+                            key,
+                            fine,
+                            swallowed,
+                        } => brightness(&app, key, fine, swallowed),
                         AuxEvent::CapsLock(on) => crate::islands::takeover(&app, caps(on)),
                     }
                 }
@@ -79,13 +89,27 @@ fn volume(app: &AppHandle, key: VolumeKey, fine: bool, swallowed: bool) {
     }
 }
 
+fn brightness(app: &AppHandle, key: BrightnessKey, fine: bool, swallowed: bool) {
+    // Not swallowed: macOS moved it and drew its own HUD (external main
+    // display, Option/Control held, replacement off).
+    if !swallowed {
+        return;
+    }
+    match aloud_mac::brightness::nudge(key == BrightnessKey::Up, fine) {
+        Ok(level) => crate::islands::takeover(app, brightness_island(level)),
+        // ponytail: the key that found this out is already eaten; the probe
+        // says "not controllable" for the next ones. Re-posting is the upgrade.
+        Err(e) => tracing::warn!(%e, "could not move the brightness"),
+    }
+}
+
 fn replacement_on(app: &AppHandle) -> bool {
     app.try_state::<crate::AppState>()
         .and_then(|s| {
             s.settings
                 .lock()
                 .ok()
-                .map(|s| s.notch_events.replace_volume_hud)
+                .map(|s| s.notch_events.replace_system_huds)
         })
         .unwrap_or(false)
 }
@@ -113,6 +137,13 @@ fn volume_island(output: Output) -> Island {
             "Volume",
             muted.then_some("Muted"),
         )
+    }
+}
+
+fn brightness_island(level: f32) -> Island {
+    Island {
+        level: Some(aloud_mac::brightness::percent(level)),
+        ..hud("hud:brightness", "brightness", "Brightness", None)
     }
 }
 
@@ -158,6 +189,7 @@ mod tests {
                 level: 0.3,
                 muted: false,
             }),
+            brightness_island(0.5),
             caps(true),
             mic(true),
         ] {
@@ -165,6 +197,11 @@ mod tests {
             assert_eq!(island.tier, Some(IslandTier::Whisper));
             assert!(island.id.starts_with("hud:"));
         }
+        let b = brightness_island(0.5625);
+        assert_eq!(
+            (b.id.as_str(), b.icon.as_deref(), b.level),
+            ("hud:brightness", Some("brightness"), Some(56))
+        );
         assert_eq!(caps(false).short.as_deref(), Some("Caps off"));
         assert_eq!(mic(false).short.as_deref(), Some("Mic on"));
     }
