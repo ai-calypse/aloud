@@ -25,6 +25,10 @@ import { FocusAwake, FocusNotes, FocusTimer } from "./views/Focus";
 import { TodayCalendar, TodayReminders, TodayStocks, TodayWeather } from "./views/Today";
 import { NowOverview } from "./views/Now";
 import { WidgetHome } from "./views/WidgetHome";
+import { WidgetMediaDevices } from "./views/widgets/Devices";
+import { WidgetMediaLyrics } from "./views/widgets/Lyrics";
+import { WidgetMediaPlaying } from "./views/widgets/Playing";
+import { WidgetMediaSound } from "./views/widgets/Sound";
 import { ShelfDownloads, ShelfDrives, ShelfFiles, ShelfShots } from "./views/Shelf";
 import { WidgetShelfFiles } from "./views/widgets/ShelfFiles";
 import { WidgetShelfShots } from "./views/widgets/ShelfShots";
@@ -98,8 +102,16 @@ export const SECTIONS: Section[] = [
         features: ["Now Playing", "Audio spectrum"],
         ready: true,
         view: MediaPlaying,
+        widgetView: WidgetMediaPlaying,
       },
-      { id: "lyrics", name: "Lyrics", features: ["Synced lyrics"], ready: true, view: MediaLyrics },
+      {
+        id: "lyrics",
+        name: "Lyrics",
+        features: ["Synced lyrics"],
+        ready: true,
+        view: MediaLyrics,
+        widgetView: WidgetMediaLyrics,
+      },
       {
         id: "sound",
         name: "Sound",
@@ -107,8 +119,16 @@ export const SECTIONS: Section[] = [
         features: ["Audio switcher", "Mic mute"],
         ready: true,
         view: MediaSound,
+        widgetView: WidgetMediaSound,
       },
-      { id: "devices", name: "Devices", features: ["AirPods", "Device battery"], ready: true, view: MediaDevices },
+      {
+        id: "devices",
+        name: "Devices",
+        features: ["AirPods", "Device battery"],
+        ready: true,
+        view: MediaDevices,
+        widgetView: WidgetMediaDevices,
+      },
     ],
   },
   {

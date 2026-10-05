@@ -21,6 +21,7 @@ import { WidgetGallery } from "./tune-widgets";
 // --- Widgets look › Shelf fixtures (tune-shelf.tsx) ---
 import { ShelfGallery } from "./tune-shelf";
 // --- end Shelf fixtures ---
+import { MediaWidgetGallery } from "./tune-widgets-media"; // fixtures: Media widgets
 import "./styles/notch.css";
 
 const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
@@ -678,6 +679,11 @@ function NotchGallery() {
           <ShelfGallery />
         </Specimen>
         {/* --- end Shelf fixtures --- */}
+        {/* --- FIXTURES: Media widgets (tune-widgets-media.tsx). Made-up data, tune page only. --- */}
+        <Specimen name="Widgets look · Media" note="Now Playing, Lyrics, Sound and Devices as widgets, every state; fixtures, never the app">
+          <MediaWidgetGallery />
+        </Specimen>
+        {/* --- end FIXTURES --- */}
 
         <Specimen name="Empty" note="a view with nothing to show teaches what fills it">
           <Empty

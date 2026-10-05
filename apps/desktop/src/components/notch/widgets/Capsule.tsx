@@ -18,6 +18,7 @@ export function Capsule({
   valueText,
   onChange,
   thick = false,
+  onFill = false,
   accent,
   className,
 }: {
@@ -31,6 +32,11 @@ export function Capsule({
   onChange?: (value: number) => void;
   /** The chunky shape of a volume slider, against a thin progress line. */
   thick?: boolean;
+  /**
+   * Drawn on a tile filled with the accent (Music): the accent over itself
+   * would vanish, so the fill is the ink and the track a veil of it.
+   */
+  onFill?: boolean;
   accent?: WidgetRole;
   className?: string;
 }) {
@@ -39,7 +45,8 @@ export function Capsule({
   // spring-timed clip would trail the thumb it is meant to be under.
   const [scrubbing, setScrubbing] = useState(false);
   const shape = cn(
-    "relative w-full overflow-hidden rounded-full bg-widget-track",
+    "relative w-full overflow-hidden rounded-full",
+    onFill ? "bg-widget-ink/25" : "bg-widget-track",
     thick ? "h-7" : "h-1.5",
     // The ring around the capsule, drawn from the hidden input's focus.
     "has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-solid has-[input:focus-visible]:outline-notch-focus",
@@ -49,7 +56,8 @@ export function Capsule({
     <div
       aria-hidden
       className={cn(
-        "h-full rounded-full bg-widget-acc",
+        "h-full rounded-full",
+        onFill ? "bg-widget-ink" : "bg-widget-acc",
         !scrubbing && "transition-[clip-path] duration-[var(--spring-dur)] ease-[var(--spring)]",
       )}
       style={{ clipPath: `inset(0 ${100 - v * 100}% 0 0 round 999px)` }}

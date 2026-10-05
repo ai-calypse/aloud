@@ -42,4 +42,14 @@ describe("registry widget views", () => {
     const shelf = READY.find((s) => s.id === "shelf");
     for (const sub of shelf?.subsections ?? []) expect(sub.widgetView, `shelf/${sub.id}`).toBeDefined();
   });
+
+  it("draws every Media subsection in the widgets look", () => {
+    const media = READY.find((s) => s.id === "media");
+    expect(media?.subsections.map((s) => [s.id, s.widgetView !== undefined])).toEqual([
+      ["playing", true],
+      ["lyrics", true],
+      ["sound", true],
+      ["devices", true],
+    ]);
+  });
 });
