@@ -20,7 +20,7 @@ export const post: Post = {
   cover: { src: "/blog/mac-dictation-not-working.webp", alt: "Pixel art of an orange cat sitting beside a laptop that shows two red exclamation marks, with a crossed-out microphone above them" },
   blocks: [
     { p: `"dictation stops automatically when no speech is detected for 30 seconds" ([Apple Support](${APPLE})). that one sentence is the first thing to rule out when mac dictation is not working. you paused to think, the clock ran out, and dictation quietly stopped.` },
-    { p: "it isn't the only cause. standard dictation isn't available while Voice Control is on, and it can pick the wrong microphone. this guide goes through Apple's own troubleshooting list first, then the fixes for an external mic, Google Docs and Chrome." },
+    { p: "mac dictation is the speech-to-text feature built into macOS, controlled from Keyboard settings. it isn't the only cause. standard dictation isn't available while Voice Control is on, and it can pick the wrong microphone. this guide goes through Apple's own troubleshooting list first, then the fixes for an external mic, Google Docs and Chrome." },
     {
       takeaways: [
         `dictation stops after 30 seconds without speech ([Apple](${APPLE})).`,
@@ -28,21 +28,23 @@ export const post: Post = {
         "Google Docs has its own voice typing, separate from macOS dictation, with its own microphone permission.",
       ],
     },
-    { cta: { slot: "intro", button: "stop fighting the toggle: let me try hold-to-talk" } },
-
+    
     { h: "why does mac dictation keep stopping?" },
-    { p: `because Apple built it to. dictation stops automatically after 30 seconds with no speech, and it can run for any length otherwise ([Apple Support](${APPLE})). Apple documents no other auto-stop. so if it quits mid-thought, count the silence before you blame the settings. to stop it yourself, press the Escape key, the Microphone key or your Dictation shortcut ([Apple Support](${APPLE})). Apple also says you can otherwise dictate text of any length without a timeout.` },
+    { p: `because Apple built it to. dictation stops automatically after 30 seconds with no speech, and it can run for any length otherwise ([Apple Support](${APPLE})). the Dictation page we checked lists no other automatic stop. so if it quits mid-thought, count the silence before you blame the settings.` },
+    { p: `to stop it yourself, press the Escape key, the Microphone key or your Dictation shortcut ([Apple Support](${APPLE})).` },
     { p: "the practical fixes are small. keep talking through the pause, say your next sentence out loud even if it's rough, or restart with the shortcut when it drops. if you're stuck on the shortcut itself, see the [mac dictation shortcut guide](/blog/mac-dictation-shortcut)." },
 
+    { cta: { slot: "intro", button: "hit the 30-second wall? try hold-to-talk" } },
+
     { h: "what's on Apple's dictation troubleshooting checklist?" },
-    { p: `Apple's page for dictation problems gives its fixes as a run of short tips with no numbering ([Apple Support](${APPLE_FIX})). we split them into ten steps and kept Apple's order. the first three are quick settings checks.` },
+    { p: `Apple's page for dictation problems lists its fixes as short tips ([Apple Support](${APPLE_FIX})). we've numbered them and kept Apple's order. the first three are quick settings checks.` },
     {
       ol: [
         "turn Dictation on in Keyboard settings.",
         "choose the correct language and region.",
         "use the correct Dictation keyboard shortcut.",
         "no internal microphone? connect an external one and select it in Sound or Keyboard settings.",
-        "with an external microphone, make sure its input volume is high enough. if your Mac isn't responding to your voice, pick the microphone in Sound, Input and raise its volume.",
+        "with an external microphone, make sure its input volume is sufficient.",
         "keep the microphone clear of clothing, your body and other objects.",
         "sit where you normally use your Mac, and speak clearly at a steady volume.",
         "cut background noise. in a noisy or echoey room, a headset microphone may help.",
@@ -50,6 +52,7 @@ export const post: Post = {
         "check Keyboard settings to see whether voice input is processed on your device and not sent to Siri servers.",
       ],
     },
+    { p: `one cause isn't on that list. when Voice Control is on, you use Voice Control to dictate text, and standard macOS Dictation isn't available ([Apple Support](${APPLE})).` },
     { img: "/blog/cat-error-cat.webp", alt: "A cat in sunglasses and a headscarf sipping from a mug in a deckchair while the house behind it burns", caption: "your dictation at second 31, probably.", width: 520, height: 514 },
     {
       cta: {
@@ -95,7 +98,7 @@ export const post: Post = {
         ["why does dictation stop on mac?", `Apple documents one automatic stop: dictation ends after 30 seconds with no speech ([Apple Support](${APPLE})). pressing Escape, the Microphone key or your shortcut stops it too.`],
         ["why is mac dictation not working in Google Docs?", `Docs uses its own voice typing under Tools, then Voice typing ([Google Docs Help](${DOCS})), with ⌘ + Shift + S as the shortcut ([Google shortcuts](${DOCS_KEYS})). check Chrome's site microphone permission as well.`],
         ["does dictation work with an external microphone?", `yes. choose the device in System Settings, Sound, Input, and set the Dictation microphone source in Keyboard settings. Apple says to make sure an external microphone's input volume is sufficient ([Apple Support](${APPLE_FIX})).`],
-        ["does mac dictation work in Terminal?", "we couldn't find Apple or Google documentation either way, so we won't guess. try a plain text field first to confirm dictation works, then check that Terminal is allowed under Privacy & Security, Microphone."],
+        ["does mac dictation work in Terminal?", "we couldn't find Apple or Google documentation either way, so we won't guess. try a plain text field first to confirm dictation works, then "],
         ["why won't dictation start at all?", `check that it's on, that the language is right, and that Voice Control is off. Apple says standard Dictation isn't available while Voice Control is on ([Apple Support](${APPLE})). our [Dictation vs Voice Control comparison](/blog/dictation-vs-voice-control-mac) explains the difference.`],
       ],
     },

@@ -15,7 +15,7 @@ const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 // Blog pages get their real text, title and description written into static HTML at build time;
 // React replaces it the moment it boots. ponytail: only /blog is prerendered, the other routes
 // still depend on the crawler running JS. Prerendering the rest means SSR-safe components.
-type Static = { path: string; title: string; description: string; body: string; noindex: boolean; image?: string; imageAlt?: string; published?: string; ld?: object[] };
+type Static = { path: string; title: string; description: string; body: string; noindex: boolean; image?: string; imageAlt?: string; published?: string; modified?: string; ld?: object[] };
 function staticPages(site: string): Static[] {
   const pub = publicPosts();
   const list = POSTS.map((p): Static => ({
@@ -23,10 +23,11 @@ function staticPages(site: string): Static[] {
     title: p.metaTitle,
     description: p.description,
     noindex: Boolean(p.draft),
-    body: `<article><h1>${esc(p.title)}</h1><p>by ${esc(AUTHOR.name)}, ${p.date}${p.checked ? `. sources last checked ${p.checked}.` : ""}</p><img src="${p.cover.src}" alt="${esc(p.cover.alt)}" width="1280" height="720" fetchpriority="high" decoding="async" />${postHtml(p)}</article>`,
-    image: `${site}${p.cover.src}`,
+    body: `<article><h1>${esc(p.title)}</h1><p>by <a href="${AUTHOR.url}">${esc(AUTHOR.name)}</a>, ${p.date}${p.checked ? `. sources last checked ${p.checked} (<a href="/about">how we choose sources</a>).` : ""}</p><img src="${p.cover.src}" alt="${esc(p.cover.alt)}" width="1280" height="720" fetchpriority="high" decoding="async" />${postHtml(p)}</article>`,
+    image: `${site}${p.cover.src.replace(/\.webp$/, "-og.jpg")}`,
     imageAlt: p.cover.alt,
     published: p.date,
+    modified: p.updated ?? p.checked ?? p.date,
     ld: [
       {
         "@context": "https://schema.org",
@@ -47,7 +48,7 @@ function staticPages(site: string): Static[] {
         image: { "@type": "ImageObject", url: `${site}${p.cover.src}`, width: 1280, height: 720 },
         mainEntityOfPage: `${site}${postPath(p)}`,
         // The primary sources the post cites, so a reader (or a model) can follow the evidence.
-        citation: [...new Set([...postHtml(p).matchAll(/href="(https?:[^"]+)"/g)].map((m) => m[1]))],
+        citation: [...new Set([...postHtml(p).matchAll(/href="(https?:[^"]+)"/g)].map((m) => m[1].replace(/&amp;/g, "&")))],
       },
       {
         "@context": "https://schema.org",
@@ -88,13 +89,14 @@ function renderStatic(shell: string, site: string, pg: Static) {
   html = meta(html, "og:type", pg.ld ? "article" : "website");
   if (pg.image) {
     for (const k of ["og:image", "twitter:image"]) html = meta(html, k, pg.image);
-    // the blog covers are 1280x720; the shell declares the 1200x630 home image
-    html = meta(html, "og:image:width", "1280");
-    html = meta(html, "og:image:height", "720");
+    // blog posts share a 1200x630 JPG crop of the cover, the format social crawlers handle best
+    html = meta(html, "og:image:width", "1200");
+    html = meta(html, "og:image:height", "630");
   }
   const extraMeta = [
     pg.imageAlt ? `<meta property="og:image:alt" content="${esc(pg.imageAlt)}" />` : "",
     pg.published ? `<meta property="article:published_time" content="${pg.published}" />` : "",
+    pg.modified ? `<meta property="article:modified_time" content="${pg.modified}" />` : "",
   ].filter(Boolean);
   const head = [
     `<link rel="canonical" href="${url}" />`,

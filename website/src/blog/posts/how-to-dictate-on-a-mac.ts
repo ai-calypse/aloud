@@ -8,7 +8,7 @@ export const post: Post = {
   slug: "how-to-dictate-on-a-mac",
   title: "how do you dictate on a mac?",
   metaTitle: "How to Dictate on a Mac: 5 Easy Steps and Fixes",
-  description: "Speech ran 2.93x faster than phone typing in a lab study (153 vs 52 wpm). Turn on Mac dictation in under a minute, see where it trips, and how to fix it.",
+  description: "Speech ran 2.93x faster than phone typing in a lab study (153 vs 52 wpm). Turn on Mac dictation in a few clicks, see where it trips, and learn how to fix it.",
   date: "2026-10-05",
   checked: "2026-10-05",
   minutes: 7,
@@ -16,7 +16,7 @@ export const post: Post = {
   cover: { src: "/blog/how-to-dictate-on-a-mac.webp", alt: "Pixel art of a small orange cat talking into a tin-can phone connected to a laptop, with speech turning into lines of text on the screen" },
   draft: false,
   blocks: [
-    { p: `in a controlled study from Stanford, the University of Washington and Baidu, people spoke 153 words a minute into a phone and typed 52 ([Ruan et al.](${RUAN}), 2017). so why do most of us still type every email? mostly because dictation on a mac feels fiddly. you press a key, talk, pause to think, and it quits on you.` },
+    { p: `to dictate on a mac, open System Settings, click Keyboard, turn on Dictation, then press your shortcut and talk ([Apple Support](${APPLE})). why bother? in a controlled lab study, people spoke 153 words a minute into a phone and typed 52 ([Ruan et al.](${RUAN}), 2017). so why do most of us still type every email? often because dictation on a mac feels fiddly: you press a key, talk, pause to think, and it stops after 30 seconds of silence.` },
     { p: "this guide shows how to dictate on a mac using the dictation that's already built in: how to turn it on, where it trips people up, and what to change so you actually use it. we make SpeakOS, a mac app for hold-to-talk dictation, so we say where it fits and where it doesn't." },
     {
       takeaways: [
@@ -28,18 +28,18 @@ export const post: Post = {
     { cta: { slot: "intro", button: "skip the setup: try hold-to-talk on my mac" } },
 
     { h: "how do you turn on dictation on a mac?" },
-    { p: `Apple puts Dictation in System Settings under Keyboard. you choose the shortcut there: the Microphone key, pressing Fn twice, or your own combination such as Option-Z ([Apple Support](${APPLE})). it takes a few clicks.` },
+    { p: `Apple puts Dictation in System Settings under Keyboard. you choose the shortcut there: the Microphone key (if your Mac has one), a Dictation keyboard shortcut, or Edit, then Start Dictation. Customize lets you set your own, such as Option-Z ([Apple Support](${APPLE})). it takes a few clicks.` },
     {
       ol: [
         "open the Apple menu, then System Settings, then Keyboard.",
-        "turn on Dictation.",
+        "turn on Dictation, then click Enable.",
         "pick a shortcut from the pop-up, or choose Customize to set your own.",
         "click into any text field, press the shortcut and start talking.",
         "stop with Escape, the Microphone key, or the shortcut again.",
       ],
     },
     { p: "you can say punctuation and emoji names out loud, and words it isn't sure about get a blue underline. on a mac with Apple silicon you can keep typing while you talk. Apple says there's no need to stop dictation." },
-    { p: "the shortcut is the part people fight with. if yours does nothing, the [mac dictation shortcut guide](/blog/mac-dictation-shortcut) walks through every fix." },
+    { p: "the shortcut is the part people fight with. if yours does nothing, the [mac dictation shortcut guide](/blog/mac-dictation-shortcut) walks through every fix, and [mac dictation not working?](/blog/mac-dictation-not-working) covers Apple's ten-step checklist." },
     {
       cta: {
         slot: "mid",
@@ -58,7 +58,7 @@ export const post: Post = {
         head: ["question", "answer from Apple"],
         rows: [
           ["where do I turn it on?", "System Settings, Keyboard, Dictation"],
-          ["what shortcuts can I use?", "the Microphone key, Fn twice, or your own via Customize"],
+          ["what shortcuts can I use?", "the Microphone key, a Dictation keyboard shortcut, Edit, then Start Dictation, or your own via Customize"],
           ["how do I stop it?", "Escape, the Microphone key, or the shortcut"],
           ["does it have a time limit?", "no limit on length, but it stops after 30 seconds with no speech"],
           ["is it on-device?", "check Keyboard settings to see whether voice input and transcripts are processed on your device"],
@@ -102,9 +102,9 @@ export const post: Post = {
     },
 
     { h: "why does dictation invent words or miss names?" },
-    { p: `speech models sometimes write text nobody said. a 2024 study of more than 13,000 clips found about 1% of Whisper transcriptions contained entire hallucinated phrases, more often around long pauses ([Cornell, FAccT 2024](https://www.news.cornell.edu/stories/2024/06/ai-speech-text-can-hallucinate-violent-language)). the clips came mostly from speakers with aphasia, alongside a comparison group, so everyday dictation should do better. silence is still where models slip.` },
+    { p: `speech models sometimes write text nobody said. a 2024 study of more than 13,000 clips found about 1% of Whisper transcriptions contained entire hallucinated phrases, and the researchers think longer pauses make it more likely ([Cornell, FAccT 2024](https://www.news.cornell.edu/stories/2024/06/ai-speech-text-can-hallucinate-violent-language)). the clips came from AphasiaBank, recordings of people with aphasia and people without speech impairments. Cornell reports rates have fallen since model updates, so everyday dictation probably does better, but silence is still where models slip.` },
     { note: "we hit this building SpeakOS. on near-silence, Whisper large-v3 confidently wrote stock outro lines like \"thanks for watching\". we now drop a known list of those phrases when the model also reports a high no-speech probability. the cutoff was tuned on about 500 samples across quiet and noisy rooms." },
-    { p: `names are the other weak spot. in a [MacStories comparison](https://www.macstories.net/stories/hands-on-how-apples-new-speech-apis-outpace-whisper-for-lightning-fast-transcription/) of Apple's newer speech API and Whisper tools, quality was similar and all three tools stumbled on last names and unusual words (2025). so read back anything with a person or product name in it.` },
+    { p: `names are the other weak spot. in a [MacStories test](https://www.macstories.net/stories/hands-on-how-apples-new-speech-apis-outpace-whisper-for-lightning-fast-transcription/) transcribing a podcast (2025), Apple's new speech API and Whisper-based tools all had similar trouble with last names and words like "AppStories". that was recorded audio, not live dictation, but the weak spot is the same. so read back anything with a person or product name in it.` },
 
     { h: "when is hold-to-talk better than a toggle?" },
     { p: `when you pause to think. a toggle ends when you go quiet: Apple's dictation stops after 30 seconds of silence ([Apple Support](${APPLE})). hold-to-talk puts the boundary under your finger, so you hold a key, speak, and let go when you are done.` },

@@ -241,7 +241,8 @@ textarea:focus-visible {
 .post caption { padding: 0 0 10px; text-align: left; font-weight: 600; }
 .post th, .post td { padding: 10px 12px; text-align: left; vertical-align: top; border-top: 1px solid var(--line); }
 .post thead th { border-top: 0; border-bottom: 2px solid var(--blue-500); font-size: 13px; }
-.post tbody th { font-weight: 600; width: 34%; }
+.post tbody th { font-weight: 600; }
+.post td, .post tbody th { min-width: 120px; }
 .post .tablewrap { overflow-x: auto; margin: 4px 0; }
 .post .cta { display: grid; justify-items: start; gap: 10px; padding: 22px; border-radius: 16px; background: var(--blue-700); color: #fff; }
 .post .cta .cta-title { font-family: var(--font-head); font-size: 1.35rem; font-weight: 500; letter-spacing: -0.02em; }

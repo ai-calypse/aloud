@@ -57,12 +57,12 @@ export const post: Post = {
     },
 
     { h: "how do you stop dictation?" },
-    { p: `press Escape, the Microphone key, or your dictation shortcut ([Apple Support](${APPLE})). dictation also stops by itself when it hears no speech for 30 seconds, though you can dictate text of any length otherwise. if it keeps quitting, our [dictation not working guide](/blog/mac-dictation-not-working) goes through every fix.` },
-    { p: `one detail that trips people up: Apple says to press and release the Microphone key to start dictation, and to press and hold it to activate Siri if Siri is on ([Apple Support](${APPLE}), same wording in the [macOS 26 guide](${APPLE_26})). so holding that key opens Siri, not dictation. if you customized the shortcut, that same shortcut stops dictation too, and you can dictate text of any length until then.` },
+    { p: `press Escape or the Microphone key ([Apple Support](${APPLE})). Apple's shortcut list also gives Fn-D as "start or stop dictation" ([Apple Support](${APPLE_KEYS})). dictation also stops by itself when it hears no speech for 30 seconds, though you can dictate text of any length otherwise. if it keeps quitting, our [dictation not working guide](/blog/mac-dictation-not-working) goes through every fix.` },
+    { p: `one detail that trips people up: Apple says to press and release the Microphone key to start dictation, and to press and hold it to activate Siri if Siri is on ([Apple Support](${APPLE}), same wording in the [macOS 26 guide](${APPLE_26})). so holding that key opens Siri, not dictation. on a Mac with Apple silicon you can still use the keyboard while you speak, so you don't need to stop dictation to type a correction ([Apple Support](${APPLE_26})).` },
 
     { h: "how do you turn the dictation shortcut off?" },
     { p: `switch Dictation off. in System Settings, Keyboard, Dictation, turn it off ([Apple Support](${APPLE})). that is the only way Apple documents. Apple's own troubleshooting checklist starts with "be sure Dictation is turned on in Keyboard settings" ([Apple Support](${APPLE_FIX})), so expect the shortcut to do nothing until you switch Dictation back on from the same place.` },
-    { p: "we could not confirm that the Shortcut pop-up has an Off choice, and we didn't see one named in Apple's pages, so we won't claim it does. if you want only the key freed up, change it to another shortcut or a custom one." },
+    { p: "to free the key without turning Dictation off, pick another shortcut from the Shortcut pop-up or choose Customize ([Apple Support](${APPLE}))." },
 
     { h: "why is the mac dictation shortcut not working?" },
     { p: `most causes are on Apple's own checklist: Dictation is off, the language is wrong, or you're not using the right shortcut ([Apple Support](${APPLE_FIX})). the table below adds the shortcut-specific causes Apple documents.` },
@@ -75,14 +75,14 @@ export const post: Post = {
           ["dictation won't start, Voice Control is on", "Voice Control replaces Dictation", `"when Voice Control is on, you use Voice Control to dictate text; standard macOS Dictation isn't available" ([Apple](${APPLE_VC}))`],
           ["your custom shortcut is ignored", "it clashes with another shortcut", `a shortcut that already exists for another command or app won't work, so change one of them ([Apple](${APPLE_CUSTOM}))`],
           ["external keyboard, no Fn key", "no function key to press", `Apple says to hold Control while pressing a function key, and some non-Apple keyboards need a third-party utility ([Apple](${APPLE_FN}))`],
-          ["Fn twice does something else", "linked Fn or Globe key setting", `Apple's older macOS 14 guide says choosing "Press Fn Key Twice" changes the "Press Fn key to" option automatically ([Apple](${APPLE_14}))`],
+          ["Fn or Globe key behaves differently after you set a shortcut", "Keyboard settings changed along with the shortcut", `Apple's macOS 14 guide says that, depending on your Mac model, choosing a Dictation shortcut may automatically change the "Press fn key to" or "Press Globe key to" option in Keyboard settings ([Apple](${APPLE_14}))`],
         ],
       },
     },
-    { p: "the Fn row comes from an older guide, and the current pages didn't repeat it, so treat it as a place to look, not a rule." },
+    { p: "the Fn row comes from Apple's macOS 14 guide, so check your own Keyboard settings." },
 
     { h: "what can you say once dictation starts?" },
-    { p: `quite a lot. Apple's commands page groups its commands into eight categories, including punctuation, symbols, formatting, capitalization, math, currency and emoticons, and says the listed commands are always available while you dictate ([Apple Support](${APPLE_COMMANDS})). in supported languages, dictation also adds some punctuation on its own ([Apple Support](${APPLE})).` },
+    { p: `quite a lot. Apple's commands page groups its commands under eight headings (punctuation, typography, formatting, capitalization, mathematical, currency, emoticons and intellectual property) and says the listed commands are always available while you dictate ([Apple Support](${APPLE_COMMANDS})). in supported languages, dictation also inserts commas, periods and question marks on its own, and you can turn that off with Auto-punctuation under Keyboard, Dictation ([Apple Support](${APPLE})).` },
     {
       table: {
         caption: "Commands Apple lists for dictating text",

@@ -23,7 +23,7 @@ export const post: Post = {
   cover: { src: "/blog/is-dictation-faster-than-typing.webp", alt: "Pixel art race track with two lanes: a long blue bar with a microphone for speaking, and a short pale bar with a keyboard for typing, and a yellow finish flag" },
   blocks: [
     { p: `speech input beat typing 153 words a minute to 52 in a controlled study, a ratio of 2.93 ([Ruan et al.](${RUAN}), 2017). it's a number that "dictation is 3x faster" headlines tend to lean on. it's also a number about copying phrases on a phone, which is a different job from writing an email.` },
-    { p: "so is dictation faster than typing? it depends what you're doing. here's what the research does and doesn't show, with the limits of each study stated next to its result." },
+    { p: "so is dictation faster than typing? here, dictation means speech-to-text: you talk and software writes the words. the 1978 studies below used human dictation, and we flag that where it matters. it depends what you're doing. here's what the research does and doesn't show, with the limits of each study stated next to its result." },
     {
       takeaways: [
         `speech input ran at 153 words a minute against 52 for a phone keyboard, but participants entered given phrases ([Ruan et al.](${RUAN}), 2017).`,
@@ -34,10 +34,10 @@ export const post: Post = {
     { cta: { slot: "intro", button: "test it yourself: put SpeakOS on my mac" } },
 
     { h: "is dictation faster than typing?" },
-    { p: `for entering text you already have in mind, yes, by a wide margin. in the Stanford, University of Washington and Baidu study, speech input was 2.93 times faster than the built-in iPhone keyboard in English (153 against 52 words a minute), and 2.87 times faster in Mandarin ([Ruan et al.](${RUAN}), 2017).` },
+    { p: `for entering text you already have in mind, yes, by a wide margin. in the Ruan et al. study, speech input was 2.93 times faster than the built-in iPhone keyboard in English: 153 words a minute against 52. in Mandarin it was 2.87 times faster, 123 against 43 ([Ruan et al.](${RUAN}), 2017).` },
     { p: "the catch is in the method. participants entered given phrases on an iPhone 6 Plus in a quiet indoor setting, so it measured transcription speed, not how fast people compose." },
 
-    { h: "how fast do people actually type and talk?" },
+    { h: "dictation vs typing speed: how fast do people actually type and talk?" },
     { p: `the average typist manages 52 words a minute. an Aalto University and Cambridge study, presented at CHI 2018, of 136 million keystrokes from 168,000 volunteers found most people type between 30 and 60, with the fastest reaching 120 ([Aalto University](${AALTO}), 2018). trained typists studied decades earlier typically reached 60 to 90.` },
     { p: `speaking is faster than either. in casual English telephone conversation, researchers measured roughly 164 words a minute per speaking turn and 196 overall, and 236 once silences are removed ([Language Log](${LIBERMAN}), quoting Yuan, Liberman and Cieri, 2006). the figures shift with how you count, so read them as "about 165 to 235".` },
     {
@@ -65,8 +65,8 @@ export const post: Post = {
         head: ["study", "who and what", "result", "limit"],
         rows: [
           [`[Gould and Boies, 1978](${GOULD_BOIES})`, "writing vs dictating letters", "planning about two-thirds of the time; novices matched their writing speed and quality", "human dictation, abstract only"],
-          [`[Blackley et al., 2020](${BLACKLEY})`, "10 physicians, simulated visits", "dictated notes longer (320.6 vs 180.8 words) and rated higher (7.7 vs 6.6); time comparable; typed notes had more uncorrected errors (2.9 vs 1.5)", "very small sample"],
-          [`[Hodgson et al., 2017](${HODGSON})`, "35 clinicians, record tasks", "speech 18.11% slower overall (165.46 s vs 140.09 s), 138 errors vs 32", "emergency department, 2017-era software; authors blame part of the error rise on EHR integration"],
+          [`[Blackley et al., 2020](${BLACKLEY})`, "10 physicians, simulated visits", "dictated notes longer (320.6 vs 180.8 words) and rated higher (7.7 vs 6.6); typed notes had more uncorrected errors per note (2.9 vs 1.5), mostly minor", "very small sample"],
+          [`[Hodgson et al., 2017](${HODGSON})`, "35 clinicians, record tasks", "speech 18.11% slower overall (165.46 s vs 140.09 s), 138 errors vs 32", "emergency department, Dragon Medical with Cerner; 92 of the 138 speech errors were integration problems such as network delays, per the authors"],
           [`[De La Paz and Graham, 1997](${DELAPAZ})`, "students with learning disabilities", "better essays when dictation came with planning instruction", "grades 5 to 7, not adult writers"],
         ],
       },
@@ -95,7 +95,7 @@ export const post: Post = {
       ),
       caption: "speech caught more errors on the way in and let slightly more slip through. proofreading is where the accuracy comes back.",
     },
-    { p: `clinical settings are less clear-cut. a 2016 systematic review of 23 studies called the evidence for speech recognition in clinical documentation "weak", though turnaround improved in every study that measured it, mostly against human transcription services, not against typing ([Hodgson and Coiera](${REVIEW}), 2016).` },
+    { p: `clinical settings are less clear-cut. a 2016 systematic review of 23 studies called the evidence for speech recognition in clinical documentation "weak", though turnaround improved in all 8 studies that measured it, and its error comparisons were against human transcription, not typing ([Hodgson and Coiera](${REVIEW}), 2016).` },
 
     { h: "does dictating change the quality of what you write?" },
     { p: `possibly, in the right conditions. in the small physician study, dictated notes were longer and scored 7.7 against 6.6 on quality ([Blackley et al.](${BLACKLEY}), 2020). in a school study, dictation produced better essays only when it came with advanced-planning instruction ([De La Paz and Graham](${DELAPAZ}), 1997).` },
@@ -123,7 +123,7 @@ export const post: Post = {
       faq: [
         ["is dictation faster than typing?", `for entering known text, yes: 153 against 52 words a minute in a phone study ([Ruan et al.](${RUAN}), 2017). for composing, the evidence is mixed because planning dominates the time ([Gould and Boies](${GOULD_BOIES}), 1978).`],
         ["how many words per minute can you dictate?", `casual English conversation runs about 165 to 235 words a minute depending on how you count ([Language Log](${LIBERMAN}), 2006). dictating composed text is likely slower because you pause to think.`],
-        ["is dictation more accurate than typing?", `the evidence conflicts. speech left 1.30% errors in the final text against 0.79% for the keyboard in one phone study ([Ruan et al.](${RUAN}), 2017), and an emergency-department test counted 138 errors for speech against 32 for keyboard and mouse ([Hodgson et al.](${HODGSON}), 2017). but in a 10-physician study, typed notes had more uncorrected errors than dictated ones, 2.9 against 1.5 ([Blackley et al.](${BLACKLEY}), 2020).`],
+        ["is dictation more accurate than typing?", `the evidence conflicts. speech left 1.30% errors in the final text against 0.79% for the keyboard in one phone study ([Ruan et al.](${RUAN}), 2017), and an emergency-department test counted 138 errors for speech against 32 for keyboard and mouse, 92 of them system-integration failures ([Hodgson et al.](${HODGSON}), 2017). but in a 10-physician study, typed notes had more uncorrected errors per note than dictated ones, 2.9 against 1.5, mostly minor ([Blackley et al.](${BLACKLEY}), 2020).`],
         ["what is the average typing speed?", `52 words a minute, from 136 million keystrokes by 168,000 volunteers ([Aalto University](${AALTO}), 2018). most people type between 30 and 60.`],
         ["does dictation improve writing quality?", `in one small study of 10 physicians, dictated notes were longer and rated 7.7 against 6.6 ([Blackley et al.](${BLACKLEY}), 2020). it's early evidence, not a rule.`],
       ],

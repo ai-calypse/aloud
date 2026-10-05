@@ -6,7 +6,7 @@ const VC_COMMANDS = "https://support.apple.com/guide/mac-help/use-voice-control-
 const VC_CUSTOM = "https://support.apple.com/guide/mac-help/customize-voice-control-mchl9899c8a5/mac";
 const VC_VOCAB = "https://support.apple.com/guide/mac-help/use-a-custom-vocabulary-mchl3eb7b79a/mac";
 const ACCESS = "https://support.apple.com/guide/mac-pro/apd4c143b3c5/mac";
-const SIRI = "https://support.apple.com/en-au/guide/mac-help/mchl6b029310";
+const SIRI = "https://support.apple.com/guide/mac-help/mchl6b029310/mac";
 const AVAIL = "https://www.apple.com/macos/feature-availability/";
 
 export const post: Post = {
@@ -21,37 +21,38 @@ export const post: Post = {
   cover: { src: "/blog/dictation-vs-voice-control-mac.webp", alt: "Pixel art with a white card holding a microphone on the left, a card with a grid of squares and a mouse pointer on the right, and an orange cat between them" },
   blocks: [
     { p: `Apple says it plainly: "when Voice Control is on, you use Voice Control to dictate text; standard macOS Dictation isn't available" ([Apple Support](${VC_COMMANDS})). if your mac's dictation shortcut suddenly does nothing, that sentence is the first thing to check.` },
-    { p: "dictation, Voice Control and Siri all listen to your voice, so they get mixed up constantly. they do different jobs. this guide compares them side by side, using Apple's own documentation, and tells you which to reach for." },
+    { p: "dictation vs Voice Control on a mac is a common mix-up, and Siri makes it a three-way one. all three listen to your voice, but they do different jobs. this guide compares them using Apple's own documentation, and tells you which to reach for." },
     {
       takeaways: [
         `Dictation turns speech into text anywhere you can type ([Apple](${DICTATION})).`,
         `Voice Control lets you navigate the desktop, click, and dictate and edit text by voice ([Apple](${VC_ON})).`,
-        "they conflict: while Voice Control is on, standard Dictation isn't available.",
+        `they conflict: while Voice Control is on, standard Dictation isn't available ([Apple](${VC_COMMANDS})).`,
       ],
     },
     { cta: { slot: "intro", button: "just want to type by voice? try SpeakOS" } },
 
     { h: "what's the difference between dictation and voice control on a mac?" },
     { p: `Dictation is for text. Apple describes it as speaking "to enter text anywhere you can type it" ([Apple Support](${DICTATION})). Voice Control is for operating the whole mac: you can "navigate the desktop and apps, interact with what's on the screen, dictate and edit text, and more" ([Apple Support](${VC_ON})).` },
-    { p: `Siri is a third thing. Apple calls it "an intelligent assistant that's built into your Mac" that helps you "find the information you need and get things done" ([Apple Support](${SIRI})). Apple files Siri and Voice Control in separate parts of its guide.` },
+    { p: `Siri is a third thing. Apple calls it "an intelligent assistant that's built into your Mac" that helps you "find the information you need and get things done" ([Apple Support](${SIRI})). Apple documents Siri on its own page, "Use Siri to find information and get things done on Mac", apart from Voice Control.` },
     {
       table: {
-        caption: "Dictation, Voice Control and Siri, from Apple's documentation",
-        head: ["", "Dictation", "Voice Control", "Siri"],
+        caption: "Dictation and Voice Control, from Apple's documentation",
+        head: ["", "Dictation", "Voice Control"],
         rows: [
-          ["main job", "enter text", "control the mac and apps, plus dictate and edit text", "answer questions and run tasks"],
-          ["turn it on", "System Settings, Keyboard, Dictation", "System Settings, Accessibility, Voice Control", "see Apple's Siri guide"],
-          ["start it", "Microphone key, shortcut, or Edit, then Start Dictation", "toggle it on, then it keeps listening", "see Apple's Siri guide"],
-          ["time limit", "no limit, but stops after 30 seconds of silence", "stays on until you turn it off or say \"Stop listening\"", "not covered"],
-          ["offline", "check Keyboard settings for on-device processing", "one-time download, then no internet needed", "not verified"],
-          ["languages", "more than 50", "about 20", "see Apple"],
+          ["main job", "enter text", "control the mac and apps, plus dictate and edit text"],
+          ["turn it on", "System Settings, Keyboard, Dictation", "System Settings, Accessibility, Voice Control"],
+          ["start it", "Microphone key, shortcut, or Edit, then Start Dictation", "toggle it on, then it keeps listening"],
+          ["time limit", "no length limit, but stops after 30 seconds of silence", "Apple describes no silence timeout; say \"Stop listening\" to pause"],
+          ["offline", "check Keyboard settings for on-device processing", "one-time download, then no internet needed"],
+          ["language and regional options", "more than 60", "20"],
         ],
       },
     },
-    { p: `sources: [Dictation](${DICTATION}), [Voice Control](${VC_ON}) and [Siri](${SIRI}) in Apple's Mac User Guide. language lists are on [Apple's feature availability page](${AVAIL}), where Dictation lists more than 50 languages and Voice Control about 20.` },
+    { p: `sources: [Dictation](${DICTATION}) and [Voice Control](${VC_ON}) in Apple's Mac User Guide. language lists are on [Apple's feature availability page](${AVAIL}), where Dictation lists more than 60 language and regional options (such as English (Australia) and French (Canada)) and Voice Control lists 20. Siri is covered in the next section.` },
 
     { h: "when should you use Dictation?" },
-    { p: `whenever the job is writing. Dictation puts words into an email, a doc or a chat, and you can say punctuation and formatting such as "new line" and "new paragraph" ([Apple Support](${DICTATION})). on a mac with Apple silicon you can keep using the keyboard while you speak, so there's no need to stop dictation. to turn it on, open System Settings, click Keyboard in the sidebar, switch on Dictation and click Enable. Apple says you can dictate "text of any length without a timeout", and you can check in Keyboard settings whether your voice is processed on your device. if the writing is email, see our [guide to dictating emails on a mac](/blog/how-to-dictate-emails-on-mac).` },
+    { p: `whenever the job is writing. Dictation puts words into an email, a doc or a chat, and you can say punctuation and formatting such as "new line" and "new paragraph" ([Apple Support](${DICTATION})). on a mac with Apple silicon you can keep using the keyboard while you speak, so there's no need to stop dictation.` },
+    { p: `to turn it on, open System Settings, click Keyboard in the sidebar, switch on Dictation and click Enable. Apple says you can dictate "text of any length without a timeout", and you can check in Keyboard settings whether your voice is processed on your device. if the writing is email, see our [guide to dictating emails on a mac](/blog/how-to-dictate-emails-on-mac).` },
     { p: "the trade-off is the timer: dictation ends after 30 seconds with no speech. our [dictation not working guide](/blog/mac-dictation-not-working) covers that, and the [shortcut guide](/blog/mac-dictation-shortcut) covers starting and stopping." },
     { img: "/blog/cat-listening-cat.webp", alt: "A white cat with its paws folded and the words I am listening over the picture", caption: "Voice Control, on its best behavior.", width: 520, height: 520 },
 
