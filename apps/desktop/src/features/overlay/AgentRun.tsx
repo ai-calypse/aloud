@@ -36,12 +36,13 @@ import { Panel } from "./Panel";
 export function AgentRun({
   run,
   bodyRef,
-  onAddTab,
+  onExpand,
   onDecide,
 }: {
   run: Run;
   bodyRef: React.RefObject<HTMLDivElement | null>;
-  onAddTab?: () => void;
+  /** Given on the compact panel, which has no sections to browse to. */
+  onExpand?: () => void;
   /** The open gate was answered: `confirmed` false is a decline. */
   onDecide?: (confirmed: boolean) => void;
 }) {
@@ -54,7 +55,7 @@ export function AgentRun({
       // Nothing to copy until the run has said something.
       copyText={run.finished || undefined}
       onClose={() => void commands.closeAgent()}
-      onAddTab={onAddTab}
+      onExpand={onExpand}
       footer={
         <span className="agent__trail">
           {run.steps.length > 0

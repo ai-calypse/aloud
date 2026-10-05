@@ -4,8 +4,10 @@ import {
   CheckIcon,
   CopyIcon,
   LoaderCircleIcon,
+  Maximize2Icon,
   MicIcon,
   PlusIcon,
+  Trash2Icon,
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
@@ -15,6 +17,7 @@ import {
   type AgentSession,
   type AgentTranscript,
   type ApprovalReply,
+  type Entry,
 } from "@/lib/bindings";
 import { groupSteps, pendingStep, stepStatus, withDecision, type Run, type Step } from "@/lib/agent-steps";
 import { agentHue, agentStage, stageSeed, type AgentStage } from "@/lib/agent-stage";
@@ -37,8 +40,8 @@ import { AGENT_NAME, AgentAvatar, rowName, rowTag, type PeekFn } from "@/feature
 import { CodingAgentComposer } from "@/features/overlay/CodingAgentComposer";
 import { PermissionCard, baseName } from "@/features/overlay/PermissionCards";
 import { useQuota } from "@/features/overlay/QuotaDashboard";
-import { MAX_TABS, TabStrip } from "@/features/overlay/TabStrip";
 import { useNotch } from "../../context";
+import { justFinished, liveRun, voiceRow, voiceStats, type VoiceRow } from "../../voice-runs";
 import {
   extraUsage,
   runSummary,
@@ -58,61 +61,100 @@ const wordClass = (role: WidgetRole | undefined) => (role ? "text-widget-acc-ink
  * ------------------------------------------------------------------------- */
 
 /**
- * Agents › Voice in the widgets look. The tab strip and the composer for a new
- * coding agent are the calm ones: they are a tab bar and a text form, not a
- * view of data, and a second copy would drift. The run itself is a board: the
+ * Agents › Voice in the widgets look: the command running now as a board (the
  * command and its steps in one Large tile, then either the approval it is
- * waiting on or its answer, how far it got and where it stands.
+ * waiting on or its answer, how far it got and where it stands), and under it
+ * the past runs, newest first, in a Large tile with two small ones counting
+ * today and what failed.
  */
 export function WidgetVoice() {
-  const { agent, setAgent, voice, bodyRef } = useNotch();
-  const composing = voice.tabs.find((tab) => tab.id === voice.active)?.blank;
-  const addTab = voice.tabs.length < MAX_TABS ? voice.add : undefined;
+  const { agent, setAgent, runs, removeRun, bodyRef } = useNotch();
+  return (
+    <VoiceBoards
+      run={agent}
+      runs={runs}
+      bodyRef={bodyRef}
+      onDecide={(confirmed) =>
+        setAgent((r) => r && { ...r, steps: withDecision(r.steps, confirmed) })
+      }
+      onDelete={removeRun}
+    />
+  );
+}
 
+export function VoiceBoards({
+  run,
+  runs,
+  bodyRef,
+  onDecide,
+  onDelete,
+  now,
+}: {
+  run: Run | null;
+  runs: Entry[];
+  bodyRef: RefObject<HTMLDivElement | null>;
+  onDecide: (confirmed: boolean) => void;
+  onDelete: (id: number) => void;
+  now?: number;
+}) {
+  const live = liveRun(run, runs);
+  const [picked, setPicked] = useState<number | null | undefined>(undefined);
+  const open = picked === undefined ? justFinished(run, runs) : picked;
+  const stats = voiceStats(runs, now);
   return (
     <>
-      {voice.tabs.some((tab) => tab.blank) && (
-        <TabStrip
-          tabs={voice.tabs}
-          active={voice.active}
-          runOpen={agent !== null}
-          title={agent?.heard ?? "Aloud"}
-          onSelect={voice.select}
-          onClose={voice.close}
-          onClosed={voice.drop}
-          onAdd={voice.add}
-        />
-      )}
-      {composing ? (
-        <CodingAgentComposer
-          key={voice.active}
-          bodyRef={bodyRef}
-          onClose={() => voice.close(voice.active)}
-          onAddTab={addTab}
-        />
-      ) : agent ? (
-        <VoiceRun
-          key={agent.heard}
-          run={agent}
-          bodyRef={bodyRef}
-          onAddTab={addTab}
-          onDecide={(confirmed) =>
-            setAgent((r) => r && { ...r, steps: withDecision(r.steps, confirmed) })
-          }
-        />
+      {live && <VoiceRun key={live.heard} run={live} bodyRef={bodyRef} onDecide={onDecide} />}
+      {runs.length === 0 ? (
+        !live && (
+          <WidgetBoard label="Voice history">
+            <WidgetFrame size="medium" label="Voice history">
+              <Idle icon={<MicIcon strokeWidth={1.6} />} title="Nothing said yet">
+                What you say to Aloud, by dictation or as a command, is listed here, newest first.
+                Hold the Command key and say what to do.
+              </Idle>
+            </WidgetFrame>
+          </WidgetBoard>
+        )
       ) : (
-        <WidgetBoard label="Voice command">
-          <WidgetFrame size="medium" label="Voice command">
-            <Idle icon={<MicIcon strokeWidth={1.6} />} title="No command running">
-              Hold the Command key and say what to do. Its steps, and anything that needs your yes, show up here.
-              {addTab && (
-                <span className="mt-2 flex">
-                  <Pill quiet onClick={addTab}>
-                    Start a coding agent
-                  </Pill>
-                </span>
-              )}
-            </Idle>
+        <WidgetBoard label="Past voice runs" className={live ? "mt-3" : undefined}>
+          <WidgetFrame size="large" label={live ? "Before this" : "Recent"}>
+            <ul className="m-0 h-full list-none overflow-y-auto overscroll-contain p-3 pt-1.5">
+              {runs.map((entry) => (
+                <PastRun
+                  key={entry.id}
+                  row={voiceRow(entry, now)}
+                  open={open === entry.id}
+                  onToggle={() => setPicked(open === entry.id ? null : entry.id)}
+                  onDelete={() => onDelete(entry.id)}
+                />
+              ))}
+            </ul>
+          </WidgetFrame>
+          <WidgetFrame size="small" label="Today" ground="deep">
+            <div className="flex h-full flex-col justify-between p-3.5">
+              <MicIcon aria-hidden className="size-6 text-widget-ink-2" strokeWidth={1.6} />
+              <div>
+                <Numeral text={String(stats.today)} size="s" />
+                <div className="text-notch-w-title font-medium text-widget-ink-2">
+                  {stats.today === 1 ? "run today" : "runs today"}
+                </div>
+              </div>
+            </div>
+          </WidgetFrame>
+          <WidgetFrame size="small" label="Failed" accent={stats.failed > 0 ? "move" : undefined}>
+            <div className="flex h-full flex-col justify-between p-3.5">
+              <TriangleAlertIcon
+                aria-hidden
+                className={cn("size-6", stats.failed > 0 ? "text-widget-acc-ink" : "text-widget-ink-2")}
+                strokeWidth={1.6}
+              />
+              <div>
+                <Numeral text={String(stats.failed)} size="s" className={stats.failed > 0 ? "text-widget-acc-ink" : undefined} />
+                <div className="text-notch-w-title font-medium text-widget-ink-2">
+                  {stats.failed === 1 ? "failed command" : "failed commands"}
+                </div>
+              </div>
+            </div>
           </WidgetFrame>
         </WidgetBoard>
       )}
@@ -120,15 +162,68 @@ export function WidgetVoice() {
   );
 }
 
+/** One past run in the Recent tile: two lines closed, the whole text when open. */
+function PastRun({
+  row,
+  open,
+  onToggle,
+  onDelete,
+}: {
+  row: VoiceRow;
+  open: boolean;
+  onToggle: () => void;
+  onDelete: () => void;
+}) {
+  const Glyph = row.kind === "dictation" ? MicIcon : BotIcon;
+  return (
+    <li className="border-b border-widget-sep last:border-b-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex w-full items-center gap-2 rounded-notch-chip py-1.5 text-left outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-notch-focus"
+      >
+        <Glyph aria-hidden className="size-4 shrink-0 text-widget-ink-2" strokeWidth={1.8} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-notch-w-title font-medium">{row.said || "(nothing heard)"}</span>
+          <span
+            data-w-role={row.failed ? "move" : undefined}
+            className={cn("block truncate text-notch-w-meta", wordClass(row.failed ? "move" : undefined))}
+          >
+            {row.result}
+          </span>
+        </span>
+        <span className="shrink-0 text-notch-w-meta text-widget-ink-2 tabular-nums">{row.when}</span>
+      </button>
+      {open && (
+        <div className="pb-2 pl-6">
+          {row.app && <p className="m-0 text-notch-w-meta text-widget-ink-2">in {row.app}</p>}
+          <p className="m-0 mt-0.5 text-notch-w-body leading-snug whitespace-pre-wrap select-text">
+            {row.full || row.result}
+          </p>
+          <div className="mt-1.5 flex gap-1.5">
+            <CopyPill text={row.full || row.said} />
+            <Pill quiet onClick={onDelete}>
+              <Trash2Icon className="size-3.5" aria-hidden />
+              Delete
+            </Pill>
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
+
 export function VoiceRun({
   run,
   bodyRef,
-  onAddTab,
+  onExpand,
   onDecide,
 }: {
   run: Run;
   bodyRef?: RefObject<HTMLDivElement | null>;
-  onAddTab?: () => void;
+  /** Given on the compact panel, which has no sections to browse to. */
+  onExpand?: () => void;
   onDecide?: (confirmed: boolean) => void;
 }) {
   const pending = pendingStep(run);
@@ -176,10 +271,10 @@ export function VoiceRun({
             )}
           </div>
           <div className="mt-2 flex items-center gap-1.5">
-            {onAddTab && (
-              <Pill quiet onClick={onAddTab}>
-                <PlusIcon className="size-3.5" strokeWidth={2.5} aria-hidden />
-                New tab
+            {onExpand && (
+              <Pill quiet onClick={onExpand}>
+                <Maximize2Icon className="size-3.5" strokeWidth={2.5} aria-hidden />
+                Open in Agents
               </Pill>
             )}
             {run.finished && <CopyPill text={run.finished} />}
@@ -356,8 +451,15 @@ function StepGlyph({ step, pending }: { step: Step; pending: boolean }) {
  * permission card answers Enter for itself, so two on screen would approve both.
  */
 export function WidgetCoding() {
-  const { sessions, permissions, selected, select, resolvePermission, showPeek } = useNotch();
+  const { sessions, permissions, selected, select, resolvePermission, showPeek, bodyRef } =
+    useNotch();
+  // The form is the calm one: it is a text form, not a view of data, and a
+  // second copy would drift.
+  const [composing, setComposing] = useState(false);
   const session = sessions.find((s) => s.id === selected);
+  if (composing) {
+    return <CodingAgentComposer bodyRef={bodyRef} onClose={() => setComposing(false)} />;
+  }
   if (session) {
     return (
       <CodingDetail
@@ -377,6 +479,7 @@ export function WidgetCoding() {
       onSelect={select}
       onResolve={resolvePermission}
       onPeek={showPeek}
+      onNew={() => setComposing(true)}
     />
   );
 }
@@ -387,12 +490,14 @@ export function CodingList({
   onSelect,
   onResolve,
   onPeek,
+  onNew,
 }: {
   sessions: AgentSession[];
   permissions: AgentPermission[];
   onSelect: (id: string) => void;
   onResolve: (id: string, reply: ApprovalReply) => void;
   onPeek: PeekFn;
+  onNew: () => void;
 }) {
   const askingIds = new Set(permissions.map((p) => p.sessionId).filter(Boolean));
   return (
@@ -400,6 +505,12 @@ export function CodingList({
       {permissions[0] && (
         <ApprovalTile request={permissions[0]} queued={permissions.length - 1} onResolve={onResolve} />
       )}
+      <WidgetFrame size="small" label="New coding agent" ground="deep" onActivate={onNew}>
+        <div className="flex h-full flex-col justify-between p-3.5">
+          <PlusIcon aria-hidden className="size-6 text-widget-ink-2" strokeWidth={1.6} />
+          <p className="m-0 text-notch-w-headline leading-tight font-semibold">New agent</p>
+        </div>
+      </WidgetFrame>
       {sessions.length === 0 ? (
         <WidgetFrame size="medium" label="Coding agents">
           <Idle icon={<BotIcon strokeWidth={1.6} />} title="No coding agents running">

@@ -3,13 +3,13 @@ import type {
   AgentPermission,
   AgentSession,
   ApprovalReply,
+  Entry,
   Island,
   IslandAction,
   NotchStyle,
 } from "@/lib/bindings";
 import type { Run } from "@/lib/agent-steps";
 import type { PeekFn } from "@/features/overlay/agentIdentity";
-import type { Tab } from "@/features/overlay/TabStrip";
 import type { SectionId } from "./sections";
 
 /**
@@ -28,6 +28,8 @@ export type NotchData = {
   islands: Island[];
   /** The look chosen in Settings: calm (default) or widgets. */
   style: NotchStyle;
+  /** What was said to Aloud before now, dictations and commands, newest first. */
+  runs: Entry[];
 };
 
 export type NotchContextValue = NotchData & {
@@ -39,15 +41,8 @@ export type NotchContextValue = NotchData & {
   select: (id: string | null) => void;
   resolvePermission: (id: string, reply: ApprovalReply) => void;
   showPeek: PeekFn;
-  /** The voice run's tab strip: the run itself, plus coding-agent composers. */
-  voice: {
-    tabs: Tab[];
-    active: number;
-    select: (id: number) => void;
-    add: () => void;
-    close: (id: number) => void;
-    drop: (id: number) => void;
-  };
+  /** Forgets one past run, through the same delete the Run Log uses. */
+  removeRun: (id: number) => void;
   /** Followed to the newest step while a run streams. */
   bodyRef: RefObject<HTMLDivElement | null>;
   navigate: (section: SectionId, sub?: string) => void;

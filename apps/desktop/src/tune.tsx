@@ -30,6 +30,7 @@ import { MacFocusGallery } from "./tune-widgets-mac-focus";
 import { AgentsLaunchGallery } from "./tune-widgets-agents-launch";
 // --- Calm Home fixtures (tune-calm-home.tsx) ---
 import { CalmHomeGallery } from "./tune-calm-home";
+import { CoherenceGallery } from "./tune-coherence";
 // --- end Calm Home fixtures ---
 import "./styles/notch.css";
 import "./styles/events.css";
@@ -365,7 +366,16 @@ function Tuner() {
             <Action onClick={() => send({ rest: true, open: { section: "agents", sub: "usage" } })}>
               Shell · Usage
             </Action>
-            <Action onClick={() => send({ rest: true, agent: "pending" })}>Run + approval</Action>
+            <Action onClick={() => send({ rest: true, runs: true, open: { section: "agents", sub: "voice" } })}>
+              Shell · Voice · history
+            </Action>
+            <Action onClick={() => send({ rest: true, runs: true, notchStyle: "widgets", open: { section: "agents", sub: "voice" } })}>
+              Shell · Voice · history · Widgets
+            </Action>
+            <Action onClick={() => send({ rest: true, islands: 2, hover: true })}>Hover · opens Home</Action>
+            <Action onClick={() => send({ hover: false })}>Hover · leaves</Action>
+            <Action onClick={() => send({ rest: true, agent: "pending" })}>Run + approval (compact)</Action>
+            <Action onClick={() => send({ rest: true, notchStyle: "widgets", agent: "pending" })}>Run + approval (compact · Widgets)</Action>
             <Action
               onClick={() =>
                 send({ rest: true, open: { section: "agents", sub: "voice" }, palette: true })
@@ -787,6 +797,10 @@ function NotchGallery() {
           <AgentsLaunchGallery />
         </Specimen>
         {/* --- end Widgets look: Agents and Launch fixtures --- */}
+
+        <Specimen name="Agents · Voice history and the coding composer" note="fixtures: past voice runs in both looks, with and without a live run, and the composer that moved to Coding">
+          <CoherenceGallery />
+        </Specimen>
 
         <Specimen name="Empty" note="a view with nothing to show teaches what fills it">
           <Empty

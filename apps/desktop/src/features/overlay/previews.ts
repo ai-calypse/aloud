@@ -1,6 +1,7 @@
 import type {
   ActionPreview,
   CardKind,
+  Entry,
   Field,
   FinderResults,
   FoundFile,
@@ -27,6 +28,44 @@ export const PARTIAL_PREVIEW = [
   "So the thing about a spring is that you can redirect it mid-flight and it keeps the velocity it already had, which is the whole reason",
   "So the thing about a spring is that you can redirect it mid-flight and it keeps the velocity it already had, which is the whole reason it does not stall halfway.",
 ];
+
+/**
+ * Past voice runs as history.sqlite hands them over: both kinds, a failure and
+ * a long answer, newest first. Times are relative to the page load, so a
+ * screenshot always reads "now, 4m, 1h…".
+ */
+export const VOICE_RUN_PREVIEWS: Entry[] = (() => {
+  const now = Date.now() / 1000;
+  const row = (
+    id: number,
+    ago: number,
+    kind: Entry["kind"],
+    said: string,
+    outcome: string,
+    appName: string | null,
+    success = true,
+  ): Entry => ({
+    id,
+    createdAt: now - ago,
+    kind,
+    rawTranscript: said,
+    finalTranscript: outcome,
+    success,
+    appName,
+    durationMs: 1800,
+    utteranceId: id,
+    audioPath: null,
+  });
+  return [
+    row(7, 20, "command", "What is the capital of Australia", "Canberra. It was picked in 1908 as a compromise between Sydney and Melbourne, and Parliament moved there in 1927.", "Safari"),
+    row(6, 4 * 60, "dictation", "um let's meet on thursday at three", "Let's meet on Thursday at three.", "Messages"),
+    row(5, 22 * 60, "command", "Email David the project update", "Gmail is not connected. Connect it in Settings and ask again.", "Mail", false),
+    row(4, 3600, "command", "Pause the music", "Paused Spotify.", null),
+    row(3, 5 * 3600, "dictation", "Sounds good, see you then", "Sounds good, see you then.", "Slack"),
+    row(2, 26 * 3600, "command", "Create a note called groceries with milk, eggs and flour", "Created the note Groceries.", "Notes"),
+    row(1, 50 * 3600, "dictation", "Remind me to call the dentist tomorrow morning", "Remind me to call the dentist tomorrow morning.", null),
+  ];
+})();
 
 /** How fast `partial: "stream"` advances, in ms between revisions. */
 export const PARTIAL_MS = 320;

@@ -55,8 +55,13 @@ export type PreviewCommand = {
   waiting?: number;
   /** Overrides the fixture's level: how a held volume key moves the bar in place. */
   level?: number;
-  /** The pointer over the notch, which a peek opens on and a whisper with a button too. */
+  /**
+   * The pointer over the notch: Home opens after the hover delay, and a whisper
+   * with a button opens its own peek at once.
+   */
   hover?: boolean;
+  /** Fills Agents › Voice with past runs (`VOICE_RUN_PREVIEWS`), or empties it. */
+  runs?: boolean;
   /**
    * The app icon a `card` or `toast` wears: the tuner runs in a browser, which
    * can read no app's icon, so one is handed in (a `data:` URI) to check the slot.

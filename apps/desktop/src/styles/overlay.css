@@ -227,225 +227,27 @@
   padding: 0;
 }
 
-/* Resting-hover: the dealt row + peek the notch grows into. Top-aligned so the
-   row sits below the cutout, and a FIXED width matching the clicked-in detail
-   panel — so the hover peek (which renders that same detail) is always the
-   notch-panel size, never as wide as its longest line of text (a long cwd path
-   under `max-content` blew the notch out to most of the screen). The dealt row
-   is narrower and centres within it. */
-.drop-pill__body--agents {
+/* A command's run, in place: the compact panel the notch grows when you ask
+   for something. Fixed width, so only the height changes as the answer streams
+   rather than the panel's shoulders crawling outward per token. The Widgets
+   look draws the run as a board, which is wider. */
+.drop-pill__body--ask {
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: flex-start;
   gap: 0;
-  width: 460px;
+  width: 480px;
   height: auto;
   padding: 0;
+  font-family: var(--font-notch);
 }
 
-/* --- The tab strip ------------------------------------------------------
- *
- * The gap does not collapse with the wrapper below, so a new tab shoves its
- * neighbours sideways by this much on its first frame. Kept small enough that
- * the jump is imperceptible against the 80pt the panel travels underneath —
- * three pixels buys every chip a visible edge, which is worth more.
- */
-.tabs {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 7px 8px 0;
-  /* The same entrance `.ask > *` gets, leading the stagger — the strip is the
-     panel's first row and was the only one popping in flat.
-     It also fixes the `+`: the row is composited for the animation and stays
-     that way (`both` retains the transform), so every child paints into that
-     one layer. Without it `.tabs` was un-composited while each `.tab` inside
-     promoted itself, and in WKWebView the `+` — the only child that never
-     animates — went unpainted until an unrelated repaint forced it. The footer
-     `+`, identical markup inside the already-composited `.ask__footer`, never
-     had the problem. */
-  animation:
-    ask-rise var(--spring-pop-dur) var(--spring-pop) both,
-    ask-fade var(--dur-fast) var(--ease-out) both;
+[data-notch-style="widgets"] .drop-pill__body--ask {
+  width: 780px;
+  padding: 14px 16px 12px;
 }
 
-/* The collapsing wrapper — the same 0fr→1fr technique as `.motion-row` in
-   motion.css, turned ninety degrees. A grid track interpolates; `width: auto`
-   does not, and measuring each chip to animate a real width buys nothing here.
-   The child needs `overflow: hidden` or it spills out of the 0fr track. */
-/* Shrinks rather than pushing the `+` off the end: past four tabs the strip is
-   over its 480pt budget, and a browser would rather ellipsis a label than lose
-   the control that made it. `min-width: 0` is what lets a flex item shrink
-   below its content at all. */
-.tab {
-  display: grid;
-  grid-template-columns: 1fr;
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-.tab > * {
-  overflow: hidden;
-}
-
-.tab[data-motion="in"] {
-  animation: tab-in var(--spring-dur) var(--spring) both;
-}
-
-/* Slower than the entrance, per the app's open/close asymmetry, and eased
-   rather than sprung: a tab on its way out must not overshoot back into the
-   strip and make the neighbours it is handing space to hesitate. */
-.tab[data-motion="out"] {
-  animation: tab-out var(--spring-dur-slow) var(--ease-in) both;
-}
-
-/* Both ends stated on both keyframes: an implicit end resolves to the
-   element's computed `1fr`, which reads as no animation in and a cut out. */
-@keyframes tab-in {
-  from {
-    grid-template-columns: 0fr;
-    opacity: 0;
-    filter: blur(3px);
-  }
-  to {
-    grid-template-columns: 1fr;
-    opacity: 1;
-    filter: blur(0);
-  }
-}
-
-@keyframes tab-out {
-  from {
-    grid-template-columns: 1fr;
-    opacity: 1;
-    filter: blur(0);
-  }
-  to {
-    grid-template-columns: 0fr;
-    opacity: 0;
-    filter: blur(3px);
-  }
-}
-
-.tab__chip {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 150px;
-  padding: 4px 5px 4px 10px;
-  border-radius: 8px;
-  /* Filled even when inactive. With only the active one filled, four tabs read
-     as four loose words with air between them rather than as a strip. */
-  background: rgb(255 255 255 / 0.045);
-  color: rgb(255 255 255 / 0.45);
-  /* No sliding indicator behind the chips: a new tab is active before it has
-     finished growing, so the indicator would sit over the `+` for the whole
-     entrance. The active state is the chip's own fill. */
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
-}
-
-.tab__chip:hover {
-  background: rgb(255 255 255 / 0.09);
-  color: rgb(255 255 255 / 0.7);
-}
-
-/* An agent is waiting on an answer: the chip carries the flag so the ask is
-   visible even while another tab has the panel. */
-.tab__chip[data-asking]::after {
-  content: "";
-  width: 6px;
-  height: 6px;
-  margin-right: 8px;
-  border-radius: 50%;
-  background: var(--sys-orange, #ff9f0a);
-}
-
-.tab__chip[data-active] {
-  background: rgb(255 255 255 / 0.16);
-  color: rgb(255 255 255 / 0.92);
-}
-
-.tab__select {
-  flex: 1;
-  /* Without this the flex item refuses to shrink and the ellipsis never
-     engages — the label pushes the chip past its max-width instead. */
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tab__close {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: none;
-  color: inherit;
-  /* Revealed on the tab being pointed at or read, so a strip at rest is
-     labels and not a row of crosses. */
-  opacity: 0;
-  transition:
-    opacity var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-
-.tab__chip:hover .tab__close,
-.tab__chip[data-active] .tab__close {
-  opacity: 1;
-}
-
-.tab__close:hover {
-  background: rgb(255 255 255 / 0.18);
-}
-
-.tab__add {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  margin-left: 4px;
-  padding: 0;
-  /* Outlined as well as filled. It is the only control in the strip with no
-     label, so it has to read as a button from its shape alone — a glyph at
-     the strip's own ink level was clickable and unfindable. */
-  border: 1px solid rgb(255 255 255 / 0.14);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 0.08);
-  color: rgb(255 255 255 / 0.75);
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
-    transform var(--dur-instant) var(--ease-out);
-}
-
-.tab__add:hover {
-  background: rgb(255 255 255 / 0.18);
-  color: rgb(255 255 255 / 0.95);
-}
-
-.tab__add:active {
-  transform: scale(0.88);
-}
-
-/* A new tab holds the coding-agent composer, inside a `.ask` panel — so its
+/* Agents › Coding's coding-agent composer, inside a `.ask` panel — so its
    entrance, dark chrome and exit all come from `.ask`, and only the fields
    below need their own layout. */
 .composer {
@@ -2033,25 +1835,9 @@ textarea.preview__input {
   cursor: default;
 }
 
-/* Hovered, the panel has grown by one row and the row fades up into it. The
-   fade is opacity only — the movement is the panel getting taller underneath,
-   so animating position here would be two things moving at once. */
+/* Under the pointer the notch is about to open Home. */
 .drop-pill--resting[data-hover] {
   cursor: pointer;
-}
-
-/* The "No agents running" line shown when the notch is hovered with an empty
-   list. The only surviving `.notch-peek`: the old one-line hover row it styled
-   is now the dealt cards (`.notch-card`). */
-.notch-peek--empty {
-  margin: 0;
-  padding: 2px 14px 8px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--pill-ink);
-  opacity: 0.55;
-  white-space: nowrap;
-  animation: peek-in var(--dur-fast) var(--ease-out) both;
 }
 
 @keyframes peek-in {
@@ -2822,10 +2608,8 @@ textarea.preview__input {
 /* --- The agents' cat stack + notch agent rows ---------------------------- */
 
 /* The coding agents' face in the closed notch: the `agents` island's lead,
-   left of the camera inside the live pill (`.island-pill`). It does NOT
-   expand in place — hovering grows the notch down and deals the same agents
-   out as a bigger row (`.notch-card`, dealt from this side via `--from`).
-   No entrance of its own: it arrives with the pill. */
+   left of the camera inside the live pill (`.island-pill`). No entrance of
+   its own: it arrives with the pill. */
 .ambient {
   display: inline-flex;
   align-items: center;
@@ -2908,328 +2692,9 @@ textarea.preview__input {
   }
 }
 
-/* The agents dealt into the notch, shown while the resting notch is hovered.
-   The cats deal out from the resting stack into a straight row of bigger
-   circles (layout B), staggered like a dealer going round the table, then a
-   quiet "view all agents" underneath. Grows downward with the drop-pill. */
-.notch-agents {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 4px 10px 8px;
-}
-
-/* The deal table: the layer the cards are dealt across. Sized inline (absolute
-   cards contribute nothing, so the panel would collapse without it). Its centre
-   (`left: 50%`) is the notch centre, so a card's `--tx` places it symmetrically
-   about the cutout. */
-.notch-deal {
-  position: relative;
-  margin-top: 2px;
-  /* Fits a 56px disc + gap + one label line, snug. The width is set inline (it
-     depends on the card count and the absolute cards do not measure); the
-     height is constant, so it lives here. Was 84px — that left a dead band
-     under the label, tallest on a single-agent hover. */
-  height: 74px;
-}
-
-/* One dealt card: a button into that agent's detail, centred on the deal layer
-   then slid to its `--tx` slot. Before the deal (`:not([data-dealt])`) it sits
-   collapsed on the resting stack (`--from`, left of the cutout), tiny and
-   faded; the `data-dealt` flip transitions it out to its slot — 520ms travel,
-   with the per-card `transition-delay` (set inline) giving the round-the-table
-   stagger. `--tx` also carries into the resting state so it deals from the
-   stack, not from centre. */
-.notch-card {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  /* ponytail: width must equal `DEAL_CARD_W` in NotchAgents.tsx (it sizes the
-     deal layer, which the panel measures); keep the two in sync. */
-  width: 86px;
-  margin-left: -43px; /* centre the card on its --tx (half of width) */
-  /* Where a card deals FROM: the resting stack, a hair left of the cutout —
-     identical for every card, so it lives here, not inline per card. */
-  --from: calc(-1 * (var(--notch-w, 200px) / 2 + 20px));
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--pill-ink);
-  cursor: pointer;
-  opacity: 0;
-  transform: translate(var(--from), 4px) scale(0.34);
-  transition:
-    transform 520ms cubic-bezier(0.2, 0.72, 0.24, 1),
-    opacity 320ms var(--ease-out);
-}
-
-.notch-agents[data-dealt] .notch-card {
-  opacity: 1;
-  transform: translateX(var(--tx, 0));
-}
-
-/* The disc holds the cat and its corner badge, and is the thing that pops. The
-   pop is driven by `--pop` (0→1) written each frame by the live spring in
-   `NotchCard` — NOT a CSS transition, or a glide between cats would restart its
-   curve from zero and stall. `--pop` is the spring's position (it overshoots
-   past 1 and settles, so the scale rides the rebound). The card's own transform
-   stays owned by the deal; the pop rides here, so the two never fight.
-   `transform-origin` at the bottom so it grows *up* out of the row, not its own
-   centre. Badge is a child so it scales with the disc and stays in the corner. */
-.notch-card__disc {
-  position: relative;
-  display: block;
-  width: 56px;
-  height: 56px;
-  transform-origin: 50% 100%;
-  transform:
-    translateY(calc(var(--pop, 0) * -5px))
-    scale(calc(1 + var(--pop, 0) * 0.16));
-  /* The spring writes --pop every frame; own layer so the pop composites and
-     never repaints the row behind it. */
-  will-change: transform;
-}
-
-/* The profile image, ringed in this agent's stable identity hue (`--ring`) so
-   two agents in the same stage are still told apart at a glance. The ring
-   brightens with the pop (the glow), so a popped cat also reads as picked. */
-.notch-card__cat {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  object-fit: cover;
-  box-shadow:
-    0 6px 16px rgb(0 0 0 / 0.5),
-    0 0 0 2px var(--ring, rgb(255 255 255 / 0.3));
-  filter: drop-shadow(
-    0 0 calc(var(--pop, 0) * 8px) color-mix(in srgb, var(--ring, #fff) 60%, transparent)
-  );
-}
-
-/* The stage badge: a small dot in the disc's corner saying what the agent is
-   doing right now, coloured like the agent-list rows. A ring of the notch fill
-   punches it off the cat so it reads at 12px. */
-.notch-card__badge {
-  position: absolute;
-  right: 1px;
-  bottom: 1px;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--notch-fill, #000);
-  background: var(--sys-grey, #8e8e93);
-}
-.notch-card__badge[data-state="busy"] {
-  background: var(--sys-green, #32d74b);
-  animation: breathe 1.6s var(--ease-in-out) infinite;
-}
-.notch-card__badge[data-state="live"] {
-  background: var(--sys-green, #32d74b);
-}
-.notch-card__badge[data-state="asking"] {
-  background: var(--sys-orange, #ff9f0a);
-  animation: breathe 1.2s var(--ease-in-out) infinite;
-}
-
-.notch-card__label {
-  font-size: 11px;
-  font-weight: 500;
-  opacity: 0.9;
-  white-space: nowrap;
-  max-width: 86px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* "View all agents": opens the full list. Sits under the dealt row, quieter
-   than the cards so it reads as the way out rather than another agent. */
-.notch-agents__all {
-  margin-top: 6px;
-  padding: 7px 16px;
-  border: 0;
-  border-radius: 10px;
-  background: rgb(255 255 255 / 0.12);
-  color: var(--pill-ink);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out);
-}
-
-.notch-agents__all:hover {
-  background: rgb(255 255 255 / 0.2);
-}
-
-/* The detail plate (option A): unfolds under the dealt row for the hovered
-   card. Collapsed to nothing at rest — max-height + opacity + margin so it
-   *grows* out of the row rather than popping in, the same downward direction
-   the notch itself grows, timed to the card's pop so the two read as one. */
-.notch-plate {
-  width: 100%;
-  max-height: 0;
-  margin-top: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition:
-    max-height var(--spring-dur) var(--spring),
-    opacity var(--dur-fast) var(--ease-out),
-    margin-top var(--spring-dur) var(--spring);
-}
-
-.notch-plate[data-open] {
-  /* The quick-peek head: title, stage, meta, and the "Now" line, plus the
-     hairline + padding. A ceiling for the fold; the real height is content. */
-  max-height: 104px;
-  margin-top: 6px;
-  opacity: 1;
-}
-
-/* Dwelled long enough to show the full detail view — a much taller ceiling; the
-   `.agent-detail` inside supplies the real height (it can scroll if huge). */
-.notch-plate[data-open][data-expanded] {
-  max-height: 520px;
-}
-
-/* The full-detail tier: the real AgentDetail, sized to the plate (never wider,
-   so a long cwd wraps instead of stretching the notch), scrolling if it is
-   taller than the ceiling. Left-aligned like the pinned view. */
-/* Both classes, so this outranks the base `.notch-plate__inner`'s
-   `text-align: center` regardless of source order — the full detail is
-   left-aligned like the clicked-in page, not centred like the quick head. */
-.notch-plate__inner.notch-plate__inner--full {
-  text-align: left;
-  max-height: 500px;
-  overflow-y: auto;
-}
-.notch-plate__inner--full .agent-detail {
-  min-width: 0;
-  width: 100%;
-}
-
-/* The contents are keyed on the session, so gliding to another card remounts
-   this and it crossfades in rather than the text swapping under you. */
-.notch-plate__inner {
-  border-top: 1px solid var(--sep, rgb(255 255 255 / 0.1));
-  padding-top: 8px;
-  text-align: center;
-  animation: notch-plate-in var(--dur-fast) var(--ease-out) both;
-}
-
-@keyframes notch-plate-in {
-  from {
-    opacity: 0;
-    transform: translateY(2px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.notch-plate__title {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--pill-ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* What it is doing right now, led by the same status dot as the card badge —
-   the live status, brighter than the "what it is" meta below it. */
-.notch-plate__stage {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  margin-top: 3px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--pill-ink);
-  white-space: nowrap;
-}
-
-.notch-plate__pip {
-  width: 7px;
-  height: 7px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--sys-grey, #8e8e93);
-}
-.notch-plate__pip[data-state="busy"] {
-  background: var(--sys-green, #32d74b);
-  animation: breathe 1.6s var(--ease-in-out) infinite;
-}
-.notch-plate__pip[data-state="live"] {
-  background: var(--sys-green, #32d74b);
-}
-.notch-plate__pip[data-state="asking"] {
-  background: var(--sys-orange, #ff9f0a);
-  animation: breathe 1.2s var(--ease-in-out) infinite;
-}
-
-.notch-plate__meta {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--pill-ink);
-  opacity: 0.6;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* The live "Now" line — always shown, the quick "what is it doing" answer. A
-   monospace tool string on a faint chip, matching the pinned detail's Now. */
-.notch-plate__now {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  justify-content: center;
-  margin-top: 6px;
-  font-size: 11px;
-  min-width: 0;
-}
-.notch-plate__now-label {
-  flex: none;
-  font-weight: 600;
-  opacity: 0.5;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 10px;
-}
-.notch-plate__now-tool {
-  min-width: 0;
-  padding: 1px 7px;
-  border-radius: 6px;
-  background: rgb(255 255 255 / 0.08);
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  color: var(--pill-ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.notch-plate__now-tool[data-idle] {
-  background: none;
-  opacity: 0.5;
-}
-
-/* Movement can make some users unwell — collapse the deal to a snap. The cards
-   still appear (opacity), they just do not travel; the 1ms durations in
-   motion.css shrink the shimmer/attn loops. */
+/* Movement can make some users unwell; the 1ms durations in motion.css shrink
+   the shimmer/attn loops. */
 @media (prefers-reduced-motion: reduce) {
-  .notch-card,
-  .notch-plate {
-    transition-duration: 1ms;
-  }
-  .notch-plate__inner {
-    animation: none;
-  }
   .ambient,
   .ambient[data-busy] .ambient__cats::after,
   .ambient[data-asking] .ambient__cat-img[data-asking] {
@@ -3348,7 +2813,7 @@ textarea.preview__input {
 /* The answer must be gone before the panel collapses over it — the collapse
    clips its contents, and a paragraph sliced off line by line reads as the
    window being killed. Faster than the collapse for that reason. */
-.overlay-root[data-exiting] :is(.ask > *, .tabs, .notch-shell > *) {
+.overlay-root[data-exiting] :is(.ask > *, .notch-shell > *) {
   animation: ask-out var(--dur-fast) var(--ease-in) both;
   animation-delay: 0ms;
 }

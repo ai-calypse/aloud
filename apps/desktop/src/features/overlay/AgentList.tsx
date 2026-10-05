@@ -202,16 +202,12 @@ export function useTranscript(sessionId: string, enabled: boolean) {
 /**
  * One agent in full: avatar + tag, cwd, prompt, the approve/deny card if it is
  * asking (so the decision sits with the terminal it belongs to), the live
- * "Now" tool, and every subagent. Shared verbatim between the clicked-in
- * detail (Agents › Coding, drilled) and the hover peek (`NotchAgents` on
- * dwell), so the two are the same view — one just needs no click.
+ * "Now" tool, and every subagent: Agents › Coding, drilled into.
  *
  * Reads live: it is handed the session straight from the `agentSessions`
  * state, which the event listener replaces on every poll.
  *
- * `onBack` renders the "‹ All agents" link only when given; the hover peek
- * omits it (there is nowhere to go back to). `onPeek` may be a no-op: the
- * enlarged cat-peek does not fire inside a hover peek.
+ * `onBack` renders the "‹ All agents" link only when given.
  */
 export function AgentDetailBody({
   session,

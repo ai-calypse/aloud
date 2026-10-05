@@ -187,10 +187,6 @@
   max-height: 300px;
 }
 
-.notch-shell .tabs {
-  padding: 0 0 10px;
-}
-
 /* An approval card is drawn as the acting app's own window, so it keeps the
    system face its app would use rather than taking the panel's Geist. */
 .notch-shell .preview {

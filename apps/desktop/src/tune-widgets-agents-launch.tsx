@@ -199,15 +199,15 @@ export function AgentsLaunchGallery() {
   return (
     <div data-notch-style="widgets" className="grid w-[780px] gap-9 font-notch-w">
       <Block name="Agents › Voice · at an approval" note="the run's steps and the gate it is waiting on; the gate is the app's own card in a tile">
-        <VoiceRun run={AGENT_PREVIEW} onAddTab={noop} onDecide={noop} />
+        <VoiceRun run={AGENT_PREVIEW} onDecide={noop} />
       </Block>
       <Block name="Agents › Voice · working" note="a step queued, a transient status line, a Finder result under its step">
-        <VoiceRun run={RUN_WORKING} onAddTab={noop} />
+        <VoiceRun run={RUN_WORKING} />
         <div className="h-9" />
-        <VoiceRun run={RUN_FINDER} onAddTab={noop} />
+        <VoiceRun run={RUN_FINDER} />
       </Block>
       <Block name="Agents › Voice · done, failed, asking" note="the answer, an error in words, and the model's question with options">
-        <VoiceRun run={RUN_DONE} onAddTab={noop} />
+        <VoiceRun run={RUN_DONE} onExpand={noop} />
         <div className="h-9" />
         <VoiceRun run={RUN_FAILED} />
         <div className="h-9" />
@@ -215,10 +215,10 @@ export function AgentsLaunchGallery() {
       </Block>
 
       <Block name="Agents › Coding · a session each" note="busy, asking permission (its card first) and idle">
-        <CodingList sessions={SESSIONS} permissions={[PERMISSION]} onSelect={noop} onResolve={noop} onPeek={noop} />
+        <CodingList sessions={SESSIONS} permissions={[PERMISSION]} onSelect={noop} onResolve={noop} onPeek={noop} onNew={noop} />
       </Block>
       <Block name="Agents › Coding · empty" note="no sessions: the calm view's words">
-        <CodingList sessions={[]} permissions={[]} onSelect={noop} onResolve={noop} onPeek={noop} />
+        <CodingList sessions={[]} permissions={[]} onSelect={noop} onResolve={noop} onPeek={noop} onNew={noop} />
       </Block>
       <Block name="Agents › Coding · one session" note="the latest message and tool calls, subagents, usage, the approval if it is asking">
         <CodingDetail

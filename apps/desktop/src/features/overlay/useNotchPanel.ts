@@ -243,6 +243,9 @@ export function useNotchPanel(
         collapsed = true;
         width.to(base.width, PANEL.close);
         height.to(base.height, PANEL.close);
+        // The click region follows the drawing in, not the settled size it
+        // is leaving: Home's hover-open collapses while the window lives on.
+        onTarget(base.width, base.height);
       },
       remeasure() {
         measure();

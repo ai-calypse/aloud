@@ -234,6 +234,10 @@ Primitives live in `src/components/notch/` and extend `src/components/ui/` where
 
 Keys: **⌘1–9** go to sections by their *registry position* (⌘2 is Agents in every build, even while Now is hidden in front of it); **Tab / Shift-Tab** step subsections from the chrome and stay native inside the body (so an approval card's buttons stay reachable); **⌘K** opens the palette; **esc** closes the palette, else the panel. The last place the user chose is remembered across opens and launches; a voice run or an approval takes the panel to itself without moving that memory.
 
+**Three ways in.** A *click* opens the shell where the user last chose. *Hovering* the resting notch opens it at **Home** after 400 ms of rest (`features/notch/hover.ts`, so a cursor passing to the menu bar opens nothing): it takes no keyboard focus, closes when the pointer leaves, and becomes an ordinary panel the moment anything inside is clicked or typed. A whisper with a button keeps its own hover and wins over Home's. A *run* never opens the shell: a spoken command is the **compact run panel**, 480px (the widgets board in the Widgets look), just the run grown from the notch, closed by esc, a click away or its ×, with one small expand icon that opens the same run in Agents › Voice. The exception is a command that names a section ("show my agents", "open the shelf"), which the fast path resolves to the shell at that section, and an approval from a coding agent, which opens Agents › Coding.
+
+**Agents.** Voice lists what was said to Aloud, dictations and commands, newest first (`history.sqlite`), with the command running now on top; a row opens to its full text, Copy and Delete. Coding holds the coding agents and "New coding agent", which opens the composer in place of the list.
+
 **The registry** (`features/notch/registry.ts`) is the whole map from `docs/design/notch-sections.html`: nine sections in ⌘ order, each subsection with an id, name, the features it holds, a `ready` flag and a view. `readySections` hides every subsection that is not ready and every section left empty — there is no "coming soon".
 
 **Adding a feature:**

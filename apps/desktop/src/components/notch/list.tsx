@@ -30,7 +30,8 @@ export function List({
  *
  * With `onClick` the whole row is one button — then `trailing` must not hold
  * another control (a button in a button is invalid and unreachable). A row
- * with its own actions takes no `onClick`.
+ * with its own actions takes no `onClick`; `detail` sits outside the button, so
+ * an expanded row can hold controls of its own.
  */
 export function Row({
   lead,
@@ -41,6 +42,8 @@ export function Row({
   selected,
   className,
   pointer,
+  detail,
+  expanded,
 }: {
   lead?: ReactNode;
   title: ReactNode;
@@ -48,6 +51,10 @@ export function Row({
   trailing?: ReactNode;
   onClick?: () => void;
   selected?: boolean;
+  /** More under the row, inside its hairline: what an expanded row says. */
+  detail?: ReactNode;
+  /** The row opens `detail`: read out as expanded or collapsed. */
+  expanded?: boolean;
   className?: string;
   /** Pointer handlers for the whole row — what arms a drag out of it. */
   pointer?: Pick<HTMLAttributes<HTMLLIElement>, "onMouseDown" | "onMouseUp">;
@@ -78,6 +85,7 @@ export function Row({
           type="button"
           onClick={onClick}
           aria-current={selected || undefined}
+          aria-expanded={expanded}
           className={cn(
             shape,
             "outline-none hover:bg-notch-hover active:bg-notch-well disabled:opacity-40",
@@ -90,6 +98,7 @@ export function Row({
       ) : (
         <div className={shape}>{body}</div>
       )}
+      {detail}
     </li>
   );
 }
