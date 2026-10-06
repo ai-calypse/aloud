@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bodyFor, humanise, labelFor, viewFor } from "./tool-views";
+import { humanise, labelFor, rowLabel } from "./tool-views";
 
 describe("tool views", () => {
   it("says what the tool is doing, not what it is called", () => {
@@ -28,10 +28,20 @@ describe("tool views", () => {
   });
 
   /** After Connectors, most tools come from toolkits nobody wrote a view for. */
+  it("labels an unregistered write by its card's title, not its slug", () => {
+    expect(rowLabel("SLACK_CHAT_POST_MESSAGE", {}, "Send message to launch")).toBe(
+      "Send message to launch",
+    );
+    expect(rowLabel("SLACK_FIND_CHANNELS", {}, null)).toBe(humanise("SLACK_FIND_CHANNELS"));
+    // A hand-written label still wins over the card's title.
+    expect(rowLabel("ALOUD_NOTES_CREATE", { title: "Groceries" }, "New Note")).toBe(
+      labelFor("ALOUD_NOTES_CREATE", { title: "Groceries" }),
+    );
+  });
+
   it("falls back to a readable label for an unregistered tool", () => {
     expect(humanise("SLACK_SEND_MESSAGE")).toBe("Slack: send message");
     expect(labelFor("LINEAR_CREATE_ISSUE", {})).toBe("Linear: create issue");
-    expect(viewFor("LINEAR_CREATE_ISSUE").body).toBeUndefined();
   });
 
   /**
@@ -60,29 +70,6 @@ describe("tool views", () => {
     expect(labelFor("MYSTERY", {})).toBe("MYSTERY");
   });
 
-  /**
-   * The reported bug: asked to mail "Charlie yang", the agent took an
-   * unrelated person a search happened to return and wrote to them. The gate
-   * showed "Sending an email to nadege.guillaumat" — the local part only —
-   * and the body card showed subject and message but never the address, so
-   * there was nowhere on screen that said who it was really going to.
-   */
-  describe("the recipient of a send", () => {
-    it("shows the whole address, domain included", () => {
-      const body = bodyFor("GMAIL_SEND_EMAIL", {
-        recipient_email: "nadege.guillaumat@example.com",
-        subject: "hi",
-        body: "hi",
-      });
-      expect(JSON.stringify(body)).toContain("nadege.guillaumat@example.com");
-    });
-
-    it("says so loudly when a send has no recipient at all", () => {
-      const body = bodyFor("GMAIL_SEND_EMAIL", { subject: "hi", body: "hi" });
-      expect(JSON.stringify(body)).toContain("No recipient");
-    });
-  });
-
   it("names who a directory lookup is looking for", () => {
     expect(labelFor("GMAIL_SEARCH_PEOPLE", { query: "Charlie yang" })).toBe(
       "Looking for Charlie yang",
@@ -95,8 +82,8 @@ describe("tool views", () => {
   /**
    * The People API nests names and addresses in arrays of objects rather than
    * the flat strings every other tool here uses, so this reader digs two levels
-   * and has two levels to get wrong. The gate that approves writing a contact
-   * shows what these return.
+   * and has two levels to get wrong. The row for a contact write shows what
+   * these return.
    */
   describe("saving a contact", () => {
     const dad = {
@@ -137,7 +124,9 @@ describe("tool views", () => {
     });
 
     it("does not blank on an empty, wrongly-typed or empty-object array", () => {
-      expect(labelFor("GOOGLECONTACTS_CREATE_CONTACT", {})).toBe("Saving a contact");
+      expect(labelFor("GOOGLECONTACTS_CREATE_CONTACT", {})).toBe(
+        "Saving a contact",
+      );
       expect(labelFor("GOOGLECONTACTS_CREATE_CONTACT", { names: "Dad" })).toBe(
         "Saving a contact",
       );

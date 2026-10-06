@@ -29,6 +29,71 @@ pub enum OverlayStyle {
     Wings,
 }
 
+/// What the notch's takeovers may do (`aloud_islands::gate`). Quiet is the
+/// only one that is off by default: the rest are the notch doing its job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(default, rename_all = "camelCase")]
+pub struct NotchEvents {
+    /// Everything one tier smaller: a card becomes a peek, a peek a whisper.
+    pub quiet: bool,
+    /// Hold ordinary system events while a macOS Focus is on.
+    pub focus_aware: bool,
+    /// Volume, brightness, mic mute, Caps Lock: whispers for a key you pressed.
+    pub huds: bool,
+    /// Battery, charger and Low Power Mode.
+    pub power: bool,
+    /// Drives, displays, Wi-Fi, VPN and Bluetooth.
+    pub connectivity: bool,
+    /// What happened in another app: a screenshot, a finished download.
+    pub banners: bool,
+    /// Eat the volume and brightness keys and draw the level in the notch
+    /// instead of macOS's HUDs. Off: the keys are only watched and macOS draws
+    /// its own. Needs `huds` on, or the keys would move the level with nothing
+    /// to show it. Was `replaceVolumeHud` (volume only) before brightness
+    /// joined it; `from_json` carries a saved choice over. (Not a serde alias:
+    /// that makes specta emit split Serialize/Deserialize types for the whole
+    /// of `Settings`.)
+    pub replace_system_huds: bool,
+    /// Mirror other apps' notifications in the notch (Messages, a ringing
+    /// FaceTime call, Slack…) by reading Notification Center's database.
+    /// Off until chosen: it needs Full Disk Access and reads what other apps
+    /// say. Distinct from `banners`, which is Aloud's own events.
+    pub app_notifications: bool,
+    /// Bundle ids of the apps mirrored when `app_notifications` is on. Empty
+    /// mirrors nothing.
+    pub app_notification_allow: Vec<String>,
+}
+
+/// The apps mirrored once the user turns app notifications on, until they
+/// choose their own.
+pub fn default_notification_allow() -> Vec<String> {
+    [
+        "com.apple.MobileSMS",
+        "com.apple.mail",
+        "com.apple.FaceTime",
+        "com.tinyspeck.slackmacgap",
+        "com.apple.iCal",
+    ]
+    .map(String::from)
+    .into()
+}
+
+impl Default for NotchEvents {
+    fn default() -> Self {
+        Self {
+            quiet: false,
+            focus_aware: true,
+            huds: true,
+            power: true,
+            connectivity: true,
+            banners: true,
+            replace_system_huds: false,
+            app_notifications: false,
+            app_notification_allow: default_notification_allow(),
+        }
+    }
+}
+
 /// Which monitor the overlay appears on. `Named` stores the OS name, not an
 /// index: indices are reassigned on unplug, so a saved index changes meaning.
 /// A name that no longer resolves falls back to the primary.
@@ -41,6 +106,18 @@ pub enum OverlayDisplay {
     Named(String),
 }
 
+/// Removes `key` from a settings document when it no longer parses as `T`.
+fn drop_if_unparseable<T: serde::de::DeserializeOwned>(raw: &mut serde_json::Value, key: &str) {
+    if raw
+        .get(key)
+        .is_some_and(|value| serde_json::from_value::<T>(value.clone()).is_err())
+    {
+        if let Some(object) = raw.as_object_mut() {
+            object.remove(key);
+        }
+    }
+}
+
 /// Everything the app remembers between launches. One coarse struct rather
 /// than ~70 commands: it is a few hundred bytes and the frontend gets one
 /// `get`/`update` pair.
@@ -49,12 +126,14 @@ pub enum OverlayDisplay {
 pub struct Settings {
     pub groq_api_key: String,
     pub composio_api_key: String,
-    /// Gemini key. Agent tool-call parsing runs here — Groq's tokens-per-minute
-    /// limit is too low for the agent's heavier calls.
+    /// Gemini key: the brain behind Groq — see `aloud_agent::brains` for the
+    /// order.
     pub gemini_api_key: String,
-    /// Cerebras key. Commands run here first — see `aloud_agent::brains` —
-    /// and fall back to Gemini when it is unset or out of budget.
+    /// Cerebras key. Off the brain list while its account is unpaid; the eval
+    /// still reaches it by name.
     pub cerebras_api_key: String,
+    /// NVIDIA key: the last brain, for when Groq's and Gemini's budgets trip.
+    pub nvidia_api_key: String,
     /// Deepgram key. Always-listening streams the mic to Deepgram's Flux, which
     /// decides where a spoken request ends; without it the mode falls back to a
     /// pause detector and local whisper.
@@ -135,10 +214,20 @@ pub struct Settings {
     pub show_menu_bar_icon: bool,
     /// Drop-down pill or menu-bar wings; wings are macOS-only.
     pub overlay_style: OverlayStyle,
+    /// How the notch's takeovers behave: Quiet mode, Focus, per-source switches.
+    pub notch_events: NotchEvents,
     /// Whether a coding agent's permission request opens the notch by itself.
     /// Off means the request waits quietly — the Agents surface flags it, and
     /// the user opens the notch when they hover. The hook waits either way.
     pub agent_open_on_permission: bool,
+    /// Whether the notch's Now Playing also reads video and audio playing in a
+    /// browser tab. It reads only media state (title, host, position), but it
+    /// does script the browser, which asks macOS for Automation permission.
+    pub browser_media: bool,
+    /// Whether the notch's Now Playing shows whatever any app plays, through
+    /// macOS's private MediaRemote interface (`aloud_media::mediaremote`). Off
+    /// means the helper process is not running at all.
+    pub any_app_media: bool,
     pub overlay_display: OverlayDisplay,
     /// Put the previous clipboard back after pasting. Off leaves the dictated
     /// text on the clipboard so it can be pasted again.
@@ -175,6 +264,7 @@ impl Default for Settings {
             composio_api_key: String::new(),
             gemini_api_key: String::new(),
             cerebras_api_key: String::new(),
+            nvidia_api_key: String::new(),
             deepgram_api_key: String::new(),
             // Local by default: works with no key and no network.
             engine: aloud_transcribe::Engine::Local,
@@ -203,9 +293,12 @@ impl Default for Settings {
             mute_system_audio: false,
             show_menu_bar_icon: true,
             overlay_style: OverlayStyle::DropPill,
+            notch_events: NotchEvents::default(),
             // On: a blocked agent is usually why the user looks up. The
             // toggle exists for people who find the self-opening notch rude.
             agent_open_on_permission: true,
+            browser_media: true,
+            any_app_media: true,
             overlay_display: OverlayDisplay::Active,
             preserve_clipboard: true,
             history_retention: 50,
@@ -280,6 +373,8 @@ impl Settings {
     ///
     /// `hotkeys.command` became `hotkeys.rewrite`; without this the field
     /// deserializes to None and the user's hotkey stops working silently.
+    /// `notchEvents.replaceVolumeHud` became `replaceSystemHuds`, or a user who
+    /// switched the volume HUD replacement on would find it off.
     pub(crate) fn from_json(text: &str) -> serde_json::Result<Self> {
         let mut raw: serde_json::Value = serde_json::from_str(text)?;
         if let Some(hotkeys) = raw.get_mut("hotkeys").and_then(|h| h.as_object_mut()) {
@@ -287,18 +382,16 @@ impl Settings {
                 hotkeys.entry("rewrite").or_insert(old);
             }
         }
-        // An unrecognised `overlayStyle` is dropped so the field defaults.
-        // Asking serde whether it parses beats a per-dead-value rename list,
-        // which once collided with a live name. The document must not fail over
-        // one stale enum — that would reset the file, and the API keys are in it.
-        if raw
-            .get("overlayStyle")
-            .is_some_and(|style| serde_json::from_value::<OverlayStyle>(style.clone()).is_err())
-        {
-            if let Some(object) = raw.as_object_mut() {
-                object.remove("overlayStyle");
+        if let Some(events) = raw.get_mut("notchEvents").and_then(|e| e.as_object_mut()) {
+            if let Some(old) = events.remove("replaceVolumeHud") {
+                events.entry("replaceSystemHuds").or_insert(old);
             }
         }
+        // An unrecognised `overlayStyle` (from a newer build) is dropped so the field defaults. Asking serde whether it parses
+        // beats a per-dead-value rename list, which once collided with a live
+        // name. The document must not fail over one stale enum — that would
+        // reset the file, and the API keys are in it.
+        drop_if_unparseable::<OverlayStyle>(&mut raw, "overlayStyle");
         serde_json::from_value(raw)
     }
 
@@ -314,6 +407,7 @@ impl Settings {
             ("COMPOSIO_API_KEY", &mut self.composio_api_key),
             ("GEMINI_API_KEY", &mut self.gemini_api_key),
             ("CEREBRAS_API_KEY", &mut self.cerebras_api_key),
+            ("NVIDIA_API_KEY", &mut self.nvidia_api_key),
             ("DEEPGRAM_API_KEY", &mut self.deepgram_api_key),
         ] {
             if !field.trim().is_empty() {
@@ -561,6 +655,38 @@ mod tests {
         assert!(parsed.play_sounds, "missing field falls back to default");
     }
 
+    /// The failure this guards: renaming the field silently turning the HUD
+    /// replacement back off for everyone who had enabled it for volume.
+    #[test]
+    fn a_saved_replace_volume_hud_carries_over_to_replace_system_huds() {
+        let parsed = Settings::from_json(r#"{"notchEvents":{"replaceVolumeHud":true}}"#).unwrap();
+        assert!(parsed.notch_events.replace_system_huds);
+        let parsed = Settings::from_json(r#"{"notchEvents":{"replaceSystemHuds":true}}"#).unwrap();
+        assert!(parsed.notch_events.replace_system_huds);
+        // The new key wins when both are present (a build that wrote the new
+        // one, then an older one that wrote the old).
+        let parsed = Settings::from_json(
+            r#"{"notchEvents":{"replaceVolumeHud":true,"replaceSystemHuds":false}}"#,
+        )
+        .unwrap();
+        assert!(!parsed.notch_events.replace_system_huds);
+        assert!(!Settings::default().notch_events.replace_system_huds);
+    }
+
+    /// The failure this guards: a build that reads Notification Center turning
+    /// the mirror on for people who never asked, by default or on upgrade.
+    #[test]
+    fn mirroring_other_apps_notifications_is_off_until_chosen() {
+        assert!(!Settings::default().notch_events.app_notifications);
+        let old = Settings::from_json(r#"{"notchEvents":{"banners":true}}"#).unwrap();
+        assert!(!old.notch_events.app_notifications);
+        assert!(old
+            .notch_events
+            .app_notification_allow
+            .iter()
+            .any(|a| a == "com.apple.MobileSMS"));
+    }
+
     #[test]
     fn corrupt_json_falls_back_to_defaults() {
         let parsed: Result<Settings, _> = serde_json::from_str("{not json");
@@ -615,6 +741,40 @@ mod rename_tests {
             let reloaded = Settings::from_json(&format!(r#"{{ "overlayStyle": {saved} }}"#))
                 .expect("a current style must parse");
             assert_eq!(reloaded.overlay_style, style);
+        }
+    }
+
+    /// An old settings file has no `notchEvents`, and a partial one (a switch
+    /// from a newer build is unknown, one is missing) must keep every other
+    /// switch at its default rather than resetting the group.
+    #[test]
+    fn notch_events_default_to_on_except_quiet_and_survive_a_partial_file() {
+        let fresh = Settings::from_json("{}").expect("must parse");
+        assert_eq!(fresh.notch_events, NotchEvents::default());
+        assert!(!fresh.notch_events.quiet && fresh.notch_events.focus_aware);
+        assert!(fresh.notch_events.huds && fresh.notch_events.banners);
+
+        let partial =
+            Settings::from_json(r#"{ "notchEvents": { "quiet": true, "power": false } }"#)
+                .expect("must parse");
+        assert!(partial.notch_events.quiet && !partial.notch_events.power);
+        assert!(
+            partial.notch_events.focus_aware && partial.notch_events.connectivity,
+            "unmentioned switches keep their defaults"
+        );
+    }
+
+    /// The notch had a `notchStyle` setting (Calm or Widgets) until it became
+    /// one look. A file saved by that build still carries the key; it must load
+    /// and cost nothing else, the API keys beside it above all.
+    #[test]
+    fn a_settings_file_with_the_retired_notch_style_still_loads() {
+        for style in ["widgets", "calm", "alive"] {
+            let old = Settings::from_json(&format!(
+                r#"{{ "notchStyle": "{style}", "groqApiKey": "keep-me" }}"#
+            ))
+            .expect("a retired key must not fail the document");
+            assert_eq!(old.groq_api_key, "keep-me");
         }
     }
 

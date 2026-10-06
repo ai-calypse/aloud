@@ -1,0 +1,19 @@
+[package]
+name = "aloud-notify"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Mirrors other apps' notifications into the notch by reading Notification Center's database, read-only and opt-in"
+
+[dependencies]
+aloud-islands = { path = "../islands" }
+# Already in the tree through Tauri's build; reads the binary plist in each row.
+plist = "1"
+# Same bundled build as store and clipboard, so one SQLite in the binary.
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde.workspace = true
+specta.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

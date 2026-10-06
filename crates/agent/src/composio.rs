@@ -66,9 +66,10 @@ const PINNED_TOOLS: &[(&str, &[&str])] = &[
             "GOOGLECALENDAR_DELETE_EVENT",
         ],
     ),
-    // Slack's send verbs rank fine from the command; only the directory needs
-    // the pin.
-    ("slack", &["SLACK_FIND_USERS"]),
+    // The send is pinned too: "send hi to the team channel on slack" ranked
+    // eight channel and team tools above it and offered no way to post
+    // (measured 2026-10-04).
+    ("slack", &["SLACK_FIND_USERS", "SLACK_CHAT_POST_MESSAGE"]),
     // Look someone up, and write one down. `CREATE_CONTACT` carries no
     // `readOnlyHint`, so it takes the confirmation gate like any other write —
     // which is the whole approval flow for "save Dad to my contacts", with no
@@ -278,6 +279,36 @@ fn catalogue(
     CACHE.get_or_init(Default::default)
 }
 
+/// How long a read an approval card made is reused. A channel's name or an event's title does
+/// not change between one command and the next, and the card waits on every read it makes.
+const CARD_READ_TTL: Duration = Duration::from_secs(600);
+
+/// Card reads by hash of (credential, slug, arguments), the catalogue's shape.
+// ponytail: dropped wholesale at 256 entries rather than evicting the oldest — being wrong
+// costs one refetch, and a session rarely names that many things.
+fn card_reads(
+) -> &'static std::sync::Mutex<std::collections::HashMap<u64, (std::time::Instant, Value)>> {
+    static CACHE: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<u64, (std::time::Instant, Value)>>,
+    > = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// How long the account list is reused. Every Composio call looks its
+/// connection up first, so a round of three made three identical fetches. The
+/// Connectors pane always asks fresh and refreshes this, so an account connected
+/// a moment ago is seen as soon as the pane has looked.
+const CONNECTIONS_TTL: Duration = Duration::from_secs(30);
+
+/// Account lists by hash of the credential, with when each was fetched.
+type ConnectionLists =
+    std::sync::Mutex<std::collections::HashMap<u64, (std::time::Instant, Vec<Connection>)>>;
+
+fn connection_lists() -> &'static ConnectionLists {
+    static CACHE: std::sync::OnceLock<ConnectionLists> = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
 pub struct ComposioClient {
     client: reqwest::Client,
     api_key: String,
@@ -299,14 +330,27 @@ impl ComposioClient {
         })
     }
 
-    /// Every connected account, any toolkit, all statuses. Filtering by toolkit
-    /// here once made a freshly connected one look unconnected everywhere.
+    /// Every connected account, any toolkit, all statuses, reused for
+    /// [`CONNECTIONS_TTL`]. Filtering by toolkit here once made a freshly
+    /// connected one look unconnected everywhere.
+    pub async fn connections(&self) -> Result<Vec<Connection>> {
+        let hit = connection_lists()
+            .lock()
+            .ok()
+            .and_then(|c| c.get(&self.credential()).cloned());
+        if let Some((_, list)) = hit.filter(|(at, _)| at.elapsed() < CONNECTIONS_TTL) {
+            return Ok(list);
+        }
+        self.fresh_connections().await
+    }
+
+    /// [`Self::connections`] straight from Composio, refreshing the copy it reuses.
     ///
     /// ponytail: one page of 100 accounts; paginate if anyone connects more.
-    pub async fn connections(&self) -> Result<Vec<Connection>> {
+    async fn fresh_connections(&self) -> Result<Vec<Connection>> {
         let json = self.get("/connected_accounts?limit=100").await?;
         let items = json["items"].as_array().cloned().unwrap_or_default();
-        Ok(items
+        let list: Vec<Connection> = items
             .iter()
             .filter_map(|item| {
                 let id = item["id"].as_str()?;
@@ -318,7 +362,20 @@ impl ComposioClient {
                     status: item["status"].as_str().unwrap_or("").to_string(),
                 })
             })
-            .collect())
+            .collect();
+        if let Ok(mut cache) = connection_lists().lock() {
+            cache.insert(self.credential(), (std::time::Instant::now(), list.clone()));
+        }
+        Ok(list)
+    }
+
+    /// The cache key for this client's account, so a key change never serves
+    /// another account's view.
+    fn credential(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.api_key.hash(&mut hasher);
+        hasher.finish()
     }
 
     /// Tools for every toolkit with an ACTIVE connection, chosen for `command`.
@@ -604,6 +661,34 @@ impl ComposioClient {
         Ok(out)
     }
 
+    /// A toolkit's logo, as its catalogue entry links it, for
+    /// [`crate::icons`]. Fetched without the API key: the logo sits on another
+    /// host, which has no business seeing it.
+    pub async fn logo(&self, toolkit: &str) -> Result<Vec<u8>> {
+        // A logo is a few KB; anything far past that is not one.
+        const MAX_BYTES: u64 = 256 * 1024;
+        let json = self.get(&format!("/toolkits/{toolkit}")).await?;
+        let url = json["meta"]["logo"]
+            .as_str()
+            .filter(|url| url.starts_with("https://"))
+            .context("the toolkit links no logo")?;
+        let response = self
+            .client
+            .get(url)
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await?
+            .error_for_status()?;
+        if response.content_length().is_some_and(|n| n > MAX_BYTES) {
+            bail!("a logo too big to be one");
+        }
+        let bytes = response.bytes().await?;
+        if bytes.len() as u64 > MAX_BYTES {
+            bail!("a logo too big to be one");
+        }
+        Ok(bytes.to_vec())
+    }
+
     /// Starts an OAuth connection and returns the URL the user must visit.
     /// Composio needs an auth config per toolkit first; this reuses the
     /// project's or creates a managed one, so the user supplies no credentials.
@@ -655,14 +740,18 @@ impl ComposioClient {
             None,
             Duration::from_secs(30),
         )
-        .await
-        .map(|_| ())
+        .await?;
+        if let Ok(mut cache) = connection_lists().lock() {
+            cache.remove(&self.credential());
+        }
+        Ok(())
     }
 
-    /// Active connections as slug → connected-account id.
+    /// Active connections as slug → connected-account id. Fresh: this is what
+    /// the Connectors pane shows, right after the user connects something.
     async fn connected_by_slug(&self) -> Result<std::collections::HashMap<String, String>> {
         Ok(self
-            .connections()
+            .fresh_connections()
             .await?
             .into_iter()
             .filter(Connection::is_active)
@@ -807,6 +896,33 @@ impl ComposioClient {
         }
     }
 
+    /// A read an approval card makes to name what a write points at
+    /// (`preview::enrich`), reused for [`CARD_READ_TTL`]. `None` when it fails, and a failure is
+    /// not kept, so the next card asks again. The caller bounds the wait.
+    pub async fn read_cached(&self, slug: &str, arguments: &Value) -> Option<Value> {
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (&self.api_key, slug, arguments.to_string()).hash(&mut hasher);
+            hasher.finish()
+        };
+        let hit = card_reads().lock().ok().and_then(|c| c.get(&key).cloned());
+        if let Some((_, value)) = hit.filter(|(at, _)| at.elapsed() < CARD_READ_TTL) {
+            return Some(value);
+        }
+        let value: Value = serde_json::from_str(&self.execute(slug, arguments).await).ok()?;
+        if value.get("successful").and_then(Value::as_bool) != Some(true) {
+            return None;
+        }
+        if let Ok(mut cache) = card_reads().lock() {
+            if cache.len() >= 256 {
+                cache.clear();
+            }
+            cache.insert(key, (std::time::Instant::now(), value.clone()));
+        }
+        Some(value)
+    }
+
     async fn execute_inner(&self, slug: &str, arguments: &Value) -> Result<String> {
         // Match against connected toolkits, not a slug guess:
         // `MICROSOFT_TEAMS_SEND_MESSAGE` split on `_` gives "microsoft", which
@@ -890,8 +1006,8 @@ impl ComposioClient {
     // MARK: transport
 
     async fn get(&self, path: &str) -> Result<Value> {
-        // Only the tool catalogue: connections stay live, so an account connected a moment ago
-        // shows up on the next command.
+        // Only the tool catalogue: the account list keeps its own, much shorter, copy in
+        // `connections`.
         let cacheable = path.starts_with("/tools?");
         let key = {
             use std::hash::{Hash, Hasher};

@@ -45,6 +45,14 @@ pub fn run(app: &str, source: &str) -> Result<String, ScriptError> {
     osascript(app, &["-e", source])
 }
 
+/// Runs an AppleScript whose `on run argv` takes `args`. Like [`run_jxa`], the
+/// data travels in argv and never touches the script source.
+pub fn run_args(app: &str, source: &str, args: &[&str]) -> Result<String, ScriptError> {
+    let mut argv = vec!["-e", source, "--"];
+    argv.extend(args);
+    osascript(app, &argv)
+}
+
 /// Runs a JavaScript for Automation `body` with `arg` available as `ARG`, and
 /// returns its stdout. Ported from eliotshea/notes-mcp's `runJxa` (MIT): the
 /// argument travels as one JSON string in argv, so user text never touches the

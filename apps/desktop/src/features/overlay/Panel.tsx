@@ -1,10 +1,5 @@
 import React, { useState, type ReactNode } from "react";
-import {
-  CheckIcon,
-  CopyIcon,
-  PlusIcon,
-  XIcon,
-} from "lucide-react";
+import { CheckIcon, CopyIcon, Maximize2Icon, XIcon } from "lucide-react";
 
 /**
  * The chrome an agent run draws inside the notch panel: what was heard,
@@ -16,7 +11,7 @@ export function Panel({
   /** Omit to hide the copy button — there is nothing worth copying yet. */
   copyText,
   onClose,
-  onAddTab,
+  onExpand,
   footer,
   children,
 }: {
@@ -24,9 +19,9 @@ export function Panel({
   bodyRef?: React.RefObject<HTMLDivElement | null>;
   copyText?: string;
   onClose: () => void;
-  /** Omitted at MAX_TABS — the button goes away rather than sitting dead. */
-  onAddTab?: () => void;
-  /** Sits left of new/copy/close. */
+  /** Only on the compact run panel: opens the same run in Agents › Voice. */
+  onExpand?: () => void;
+  /** Sits left of expand/copy/close. */
   footer?: ReactNode;
   children: ReactNode;
 }) {
@@ -40,17 +35,14 @@ export function Panel({
       </div>
       <div className="ask__footer">
         {footer}
-        {/* The second way to open a tab. The strip's own `+` is the discoverable
-            one; this sits in the row the eye already goes to for copy/close.
-            Absent, not disabled, at the cap — matching the strip's. */}
-        {onAddTab && (
+        {onExpand && (
           <button
             className="ask__button"
-            aria-label="New tab"
-            title="New tab"
-            onClick={onAddTab}
+            aria-label="Open in Agents"
+            title="Open in Agents › Voice"
+            onClick={onExpand}
           >
-            <PlusIcon size={15} strokeWidth={2.5} />
+            <Maximize2Icon size={14} />
           </button>
         )}
         {copyText !== undefined && (

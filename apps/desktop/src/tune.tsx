@@ -2,7 +2,40 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { overshoot, springCurve } from "./lib/spring-curve";
 import { PREVIEW_EVENT, type PreviewCommand } from "./lib/overlay-preview";
+import type { CardKind } from "./lib/bindings";
+import { CARD_PREVIEWS } from "./features/overlay/previews";
+import { Badge } from "./components/ui/badge";
+import { Button } from "./components/ui/button";
+import { AppIcon } from "./components/notch/app-icon";
+import { Kbd, Slider as NotchSlider, Switch } from "./components/notch/controls";
+import { SearchBox, Swatch, TextArea, TextField } from "./components/notch/field";
+import { Empty, Label, Lead, List, Row, Value } from "./components/notch/list";
+import { Bar, Ring } from "./components/notch/meters";
+import { SectionTabs } from "./components/notch/section-tabs";
+import { Segmented, SubTabs } from "./components/notch/segmented";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "./index.css";
+import { WidgetGallery } from "./tune-widgets";
+// --- Widget boards › Shelf fixtures (tune-shelf.tsx) ---
+import { ShelfGallery } from "./tune-shelf";
+// --- end Shelf fixtures ---
+import { MediaWidgetGallery } from "./tune-widgets-media"; // fixtures: Media widgets
+// --- Today widgets (w-today): fixtures live in tune-widgets-today.tsx ---
+import { TodayWidgetGallery } from "./tune-widgets-today";
+// --- Mac + Focus widget fixtures (feat/notch-widgets-mac-focus) ---
+import { MacFocusGallery } from "./tune-widgets-mac-focus";
+// --- end Mac + Focus widget fixtures ---
+import { AgentsLaunchGallery } from "./tune-widgets-agents-launch";
+// --- Calm Home fixtures (tune-calm-home.tsx) ---
+import { CalmHomeGallery } from "./tune-calm-home";
+import { CoherenceGallery } from "./tune-coherence";
+// --- end Calm Home fixtures ---
+import "./styles/notch.css";
+import "./styles/events.css";
+import "./styles/nudges.css";
+
+const CARD_KINDS = Object.keys(CARD_PREVIEWS) as CardKind[];
 
 /**
  * The motion tuner. Dev-only: not a Tauri window, not a build input, served
@@ -185,6 +218,10 @@ function tokensFor(settings: Settings): Record<string, string> {
 function Tuner() {
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
   const [stage, setStage] = useState<Stage>("dropPill");
+  // The framed overlay, or the notch primitives laid out by state.
+  const [view, setView] = useState<"overlay" | "primitives">(
+    new URLSearchParams(location.search).get("view") === "primitives" ? "primitives" : "overlay",
+  );
   const [copied, setCopied] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
 
@@ -234,6 +271,20 @@ function Tuner() {
           bottom into <code>styles/motion.css</code>.
         </p>
 
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {(["overlay", "primitives"] as const).map((v) => (
+            <button
+              key={v}
+              className={`rounded-full border border-separator px-3 py-1 text-ui ${
+                view === v ? "bg-brand text-white" : "bg-surface"
+              }`}
+              onClick={() => setView(v)}
+            >
+              {v === "overlay" ? "Overlay" : "Notch primitives"}
+            </button>
+          ))}
+        </div>
+
         <div className="mb-5 flex flex-wrap gap-1.5">
           {(["dropPill", "wings"] as Stage[]).map((s) => (
             <button
@@ -270,7 +321,6 @@ function Tuner() {
             </Action>
             <Action onClick={() => send({ agent: "planned" })}>Agent (queued)</Action>
             <Action onClick={() => send({ agent: "pending" })}>Agent (approve)</Action>
-            <Action onClick={() => send({ agent: "fallback" })}>Agent (schema card)</Action>
             <Action onClick={() => send({ agent: "run" })}>Agent (done)</Action>
             <Action onClick={() => send({ dismissing: true })}>Dismiss</Action>
             <Action
@@ -285,6 +335,183 @@ function Tuner() {
             The full run: Listening → Transcript → Transcribing → Agent
             (done) → Dismiss. The transcript preview includes the revisions
             whisper really makes, which is what can shrink the panel mid-flight.
+          </p>
+        </Section>
+
+        <Section title="Notch system">
+          <div className="grid grid-cols-2 gap-1.5">
+            <Action onClick={() => send({ rest: true, islands: 2, open: { section: "now" } })}>
+              Shell · Now
+            </Action>
+            <Action onClick={() => send({ rest: true, open: { section: "agents", sub: "voice" } })}>
+              Shell · Voice
+            </Action>
+            <Action onClick={() => send({ rest: true, open: { section: "agents", sub: "coding" } })}>
+              Shell · Coding
+            </Action>
+            <Action onClick={() => send({ rest: true, open: { section: "agents", sub: "usage" } })}>
+              Shell · Usage
+            </Action>
+            <Action onClick={() => send({ rest: true, runs: true, open: { section: "agents", sub: "voice" } })}>
+              Shell · Voice · history
+            </Action>
+            <Action onClick={() => send({ rest: true, islands: 2, hover: true })}>Hover · opens Home</Action>
+            <Action onClick={() => send({ hover: false })}>Hover · leaves</Action>
+            <Action onClick={() => send({ rest: true, agent: "pending" })}>Run + approval (compact)</Action>
+            <Action
+              onClick={() =>
+                send({ rest: true, open: { section: "agents", sub: "voice" }, palette: true })
+              }
+            >
+              ⌘K palette
+            </Action>
+            <Action onClick={() => send({ rest: true, islands: 1 })}>Pill · 1</Action>
+            <Action onClick={() => send({ rest: true, islands: 2 })}>Pill · 2</Action>
+            <Action onClick={() => send({ rest: true, islands: 3 })}>Pill · 3</Action>
+            <Action onClick={() => send({ rest: true, islands: 0 })}>Pill · none</Action>
+          </div>
+          <p className="mt-2 mb-0 text-caption text-ink-2">
+            Pill · 2 → Pill · 1 → Pill · none plays the pill narrowing on the
+            panel's spring and collapsing into the cutout. The alert island is
+            Toast · Show below.
+          </p>
+        </Section>
+
+        <Section title="Approval cards">
+          <div className="grid grid-cols-3 gap-1.5">
+            {CARD_KINDS.map((card) => (
+              <Action key={card} onClick={() => send({ card })}>
+                {card}
+              </Action>
+            ))}
+          </div>
+        </Section>
+
+        <Section title="Results and toasts">
+          <div className="grid grid-cols-2 gap-1.5">
+            <Action onClick={() => send({ finder: "list" })}>Finder list</Action>
+            <Action onClick={() => send({ finder: "grid" })}>Finder grid</Action>
+            <Action onClick={() => send({ toast: "show" })}>Toast · Show</Action>
+            <Action onClick={() => send({ toast: "undo" })}>Toast · Undo</Action>
+            <Action onClick={() => send({ toast: "plain" })}>Toast · plain</Action>
+            <Action
+              onClick={() => {
+                send({ agent: "run" });
+                setTimeout(() => send({ toast: "show" }), 1200);
+              }}
+            >
+              Run → toast
+            </Action>
+          </div>
+          <p className="mt-2 mb-0 text-caption text-ink-2">
+            A toast sent at rest grows out of the notch; Run → toast plays a
+            run's panel collapsing into one. Each leaves after 4s, or on ×.
+          </p>
+        </Section>
+
+        <Section title="Nudges">
+          <div className="grid grid-cols-2 gap-1.5">
+            {(
+              [
+                ["nudgeMsg", "Messages"],
+                ["nudgeMail", "Mail"],
+                ["nudgeSlack", "Slack"],
+                ["nudgeCal", "Calendar soon"],
+                ["nudgeRem", "Reminder due"],
+                ["nudgeAirdrop", "AirDrop"],
+                ["nudgeGeneric", "Generic app"],
+                ["nudgeCall", "Call (card)"],
+                ["nudgeMsgTyping", "Typing (capsule)"],
+              ] as const
+            ).map(([takeover, name]) => (
+              <Action key={takeover} onClick={() => send({ rest: true, takeover, stay: true })}>
+                {name}
+              </Action>
+            ))}
+            <Action onClick={() => send({ rest: true, takeover: "nudgeMsg", stay: true, hover: true })}>
+              Messages · hover
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "nudgeMsg", stay: true, waiting: 2 })}>
+              Messages · +2 waiting
+            </Action>
+          </div>
+          <p className="mt-2 mb-0 text-caption text-ink-2">
+            Other apps' notifications, an event about to start, a reminder come
+            due: the same routing as Rust's island event, one fixture per kind.
+            The only buttons are Open and Join; Aloud cannot answer a call or
+            reply for you. Icons are stand-ins for the app's own.
+          </p>
+        </Section>
+
+        <Section title="Notch events">
+          <div className="mb-1.5 grid grid-cols-2 gap-1.5">
+            {(
+              ["volume", "brightness", "caps", "micMuted", "airpods", "charger", "lowPower", "wifi", "drive", "batteryLow"] as const
+            ).map((takeover) => (
+              <Action key={takeover} onClick={() => send({ rest: true, takeover, stay: true })}>
+                {takeover}
+              </Action>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Action onClick={() => send({ rest: true, takeover: "volume", stay: true })}>
+              Whisper · volume
+            </Action>
+            <Action onClick={() => send({ takeover: "volume", stay: true, level: 20 + Math.round(Math.random() * 70) })}>
+              Whisper · volume key
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "sent", stay: true })}>
+              Whisper · sent
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "sent", stay: true, hover: true })}>
+              Whisper · sent · hover
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "batteryLow", stay: true })}>
+              Whisper · battery 20%
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "shot", stay: true })}>
+              Peek · screenshot
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "shot", stay: true, hover: true })}>
+              Peek · hover
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "timerTyping", stay: true })}>
+              Peek · typing (capsule)
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "batteryCritical" })}>
+              Card · battery 9%
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "failed" })}>
+              Card · failed
+            </Action>
+            <Action
+              onClick={() => {
+                send({ rest: true, takeover: "shot", stay: true });
+                setTimeout(() => send({ takeover: "batteryLow", stay: true }), 200);
+              }}
+            >
+              Peek + whisper on top
+            </Action>
+            <Action
+              onClick={() => {
+                send({ rest: true, takeover: "batteryCritical" });
+                setTimeout(() => send({ takeover: "volume", stay: true }), 200);
+              }}
+            >
+              Card + key echo
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "shot", stay: true, waiting: 3 })}>
+              Peek · +3 waiting
+            </Action>
+            <Action onClick={() => send({ rest: true, takeover: "volume", stay: true, waiting: 2 })}>
+              Whisper · +2 waiting
+            </Action>
+            <Action onClick={() => send({ rest: true, waiting: 2 })}>Bare notch · +2</Action>
+          </div>
+          <p className="mt-2 mb-0 text-caption text-ink-2">
+            Each is the real routing (the same path Rust's island event takes),
+            held on screen instead of leaving on its dwell. Whisper · volume key
+            moves the bar in place on its live spring.
           </p>
         </Section>
 
@@ -347,8 +574,11 @@ function Tuner() {
         </Section>
       </aside>
 
-      {/* Checkerboard, so the panel's black reads against something. */}
+      {view === "primitives" && <NotchGallery />}
+      {/* Checkerboard, so the panel's black reads against something. Kept
+          mounted under the gallery, so the overlay's state survives a look. */}
       <main
+        hidden={view === "primitives"}
         className="relative flex-1 overflow-hidden"
         style={{
           backgroundColor: "#2b2b30",
@@ -362,13 +592,265 @@ function Tuner() {
           ref={frame}
           title="overlay"
           // Seeded via the query param, not the onLoad below: `load` fires
-          // before the framed React has mounted its listener.
-          src="/overlay.html?style=dropPill&phase=recording"
+          // before the framed React has mounted its listener. `notch` is a
+          // MacBook-sized cutout and `agents` two coding agents (with their
+          // island), so the notch states have their real proportions and data.
+          src="/overlay.html?style=dropPill&phase=recording&notch=200x32&agents=2"
           className="absolute left-1/2 top-0 h-[720px] w-[1000px] -translate-x-1/2 border-0"
           onLoad={() => send({ style: "dropPill", phase: "recording" })}
         />
       </main>
     </div>
+  );
+}
+
+/**
+ * Every notch primitive, in each state it can be put in without a pointer:
+ * default, selected, disabled, and the tones. Hover, focus-visible and
+ * active are live — point at them, Tab through them. On the panel's own
+ * black, in its own type, so what reads here reads in the notch.
+ */
+function NotchGallery() {
+  const [section, setSection] = useState("agents");
+  const [sub, setSub] = useState("coding");
+  const [length, setLength] = useState("2h");
+  const [awake, setAwake] = useState(true);
+  const [volume, setVolume] = useState(64);
+  const [picked, setPicked] = useState("music");
+  const [query, setQuery] = useState("");
+
+  return (
+    <div
+      data-notch-gallery
+      className="flex-1 overflow-y-auto bg-notch px-10 py-8 font-notch text-notch-ink"
+    >
+      <div className="grid max-w-[720px] gap-9">
+        <Specimen name="SectionTabs" note="text labels, a count where something needs you; ← → move, the underline springs">
+          <div className="border-b border-notch-sep">
+            <SectionTabs
+              panelId="gallery-panel"
+              value={section}
+              onChange={setSection}
+              items={[
+                { id: "now", label: "Now", shortcut: "⌘1" },
+                { id: "agents", label: "Agents", count: 2, shortcut: "⌘2" },
+                { id: "media", label: "Media", shortcut: "⌘3" },
+                { id: "today", label: "Today", shortcut: "⌘7" },
+              ]}
+            />
+          </div>
+        </Specimen>
+
+        <Specimen name="SubTabs · Segmented" note="one bordered track; a tablist and a radiogroup; the last segment is disabled">
+          <div className="flex flex-wrap items-center gap-4">
+            <SubTabs
+              panelId="gallery-panel"
+              value={sub}
+              onChange={setSub}
+              items={[
+                { id: "voice", label: "Voice" },
+                { id: "coding", label: "Coding" },
+                { id: "usage", label: "Usage" },
+              ]}
+            />
+            <Segmented
+              label="Keep awake for"
+              value={length}
+              onChange={setLength}
+              items={[
+                { id: "30m", label: "30 min" },
+                { id: "2h", label: "2 hrs" },
+                { id: "always", label: "Always" },
+                { id: "until", label: "Until…", disabled: true },
+              ]}
+            />
+          </div>
+        </Specimen>
+
+        <Specimen name="Button" note="primary (one per view), quiet, danger, icon; each also disabled">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="notch" size="notch">Allow</Button>
+            <Button variant="notch-quiet" size="notch">Not now</Button>
+            <Button variant="notch-danger" size="notch">Delete</Button>
+            <Button variant="notch-quiet" size="notch-icon" aria-label="Close">
+              <span aria-hidden>×</span>
+            </Button>
+            <span className="mx-2 h-5 w-px bg-notch-sep" />
+            <Button variant="notch" size="notch" disabled>Allow</Button>
+            <Button variant="notch-quiet" size="notch" disabled>Not now</Button>
+            <Button variant="notch-danger" size="notch" disabled>Delete</Button>
+          </div>
+        </Specimen>
+
+        <Specimen name="Chip · count" note="a status chip carries its word; colour only confirms it">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="notch">Working</Badge>
+            <Badge variant="notch-ok">Done</Badge>
+            <Badge variant="notch-warn">Review</Badge>
+            <Badge variant="notch-danger">Failing</Badge>
+            <Badge variant="notch-count">3</Badge>
+          </div>
+        </Specimen>
+
+        <Specimen name="Switch · Slider" note="on, off, disabled; a native range, keyboard and all">
+          <div className="flex flex-wrap items-center gap-5">
+            <Switch label="Keep awake" checked={awake} onChange={setAwake} />
+            <Switch label="Off" checked={false} onChange={() => {}} />
+            <Switch label="Disabled" checked onChange={() => {}} disabled />
+            <div className="w-40">
+              <NotchSlider label="Volume" value={volume} onChange={setVolume} />
+            </div>
+            <div className="w-40">
+              <NotchSlider label="Volume (disabled)" value={30} onChange={() => {}} disabled />
+            </div>
+          </div>
+        </Specimen>
+
+        <Specimen name="List · Row" note="lead, title, subtitle, trailing; a clickable row; a selected one">
+          <div>
+            <Label>Live now</Label>
+            <List label="Live activities">
+              <Row
+                lead={<AppIcon icon="agents" label="Claude Code" />}
+                title="Claude Code · aloud-tauri"
+                subtitle="Wants to run cargo test --workspace"
+                trailing={<Button variant="notch" size="notch">Review</Button>}
+              />
+              <Row
+                lead={<AppIcon icon="timer" label="Focus session" />}
+                title="Focus session"
+                subtitle="2 of 4 · ends 10:24"
+                trailing={<Value>18:42</Value>}
+              />
+              <Row
+                lead={<AppIcon icon="music" label="Now Playing" />}
+                title="Clickable row"
+                subtitle="The whole row is one button"
+                selected={picked === "music"}
+                onClick={() => setPicked(picked === "music" ? "" : "music")}
+                trailing={<Value>1:42</Value>}
+              />
+            </List>
+          </div>
+        </Specimen>
+
+        <Specimen name="TextField · TextArea · SearchBox · Swatch" note="the notch's inputs; a swatch is the user's own colour, so it is the one raw value">
+          <div className="grid max-w-[420px] gap-2">
+            <SearchBox label="Search clipboard" value={query} onChange={setQuery} />
+            <TextField aria-label="Name" placeholder="Name" />
+            <TextArea aria-label="Text" placeholder="Text to paste" />
+            <div className="flex items-center gap-2">
+              <Swatch color="#ff8800" />
+              <Swatch color="#000000" />
+              <Swatch color="#30d158" size="lg" />
+            </div>
+          </div>
+        </Specimen>
+
+        <Specimen name="Lead · Label · Kbd" note="one lead per view; labels name, never shout">
+          <div className="flex items-end gap-10">
+            <Lead sub="Resets in 2h 14m">42%</Lead>
+            <div className="flex items-center gap-1.5 text-notch-label text-notch-ink-3">
+              <Kbd>⌘K</Kbd> search <Kbd>⇥</Kbd> next <Kbd>esc</Kbd> close
+            </div>
+          </div>
+        </Specimen>
+
+        <Specimen name="AppIcon" note="sm · md · lg; a named glyph; the neutral window when nothing is known">
+          <div className="flex items-center gap-3">
+            <AppIcon icon="agents" label="Agents" size="sm" />
+            <AppIcon icon="download" label="Download" />
+            <AppIcon icon="timer" label="Timer" size="lg" />
+            <AppIcon label="Unknown app" />
+          </div>
+        </Specimen>
+
+        <Specimen name="Bar · Ring" note="clipped, so the end stays round; tone beside a number, never instead of it">
+          <div className="flex items-center gap-10">
+            <div className="grid w-56 gap-3">
+              <Bar value={0.42} label="5-hour window" />
+              <Bar value={0.76} tone="warn" label="Week" />
+              <Bar value={0.95} tone="danger" label="Week · Opus" />
+            </div>
+            <Ring value={0.62} label="Focus session" size={120} stroke={8}>
+              <Lead sub="2 of 4">18:42</Lead>
+            </Ring>
+          </div>
+        </Specimen>
+
+        {/* --- Calm Home fixtures --- */}
+        <Specimen name="Shell · Home · Calm" note="the ranked tile board in the panel's chrome, from labelled fixtures; the toggles are the prototype's live items: tiles reflow and re-size as agents, the timer and music go live">
+          <CalmHomeGallery />
+        </Specimen>
+        {/* --- end Calm Home fixtures --- */}
+
+        <Specimen name="Widget primitives" note="the tiles the widget-board sections are drawn with: frames, rings, capsules, numerals, event cards, accent roles">
+          <WidgetGallery />
+        </Specimen>
+
+        {/* --- Shelf board fixtures: Downloads, Drives --- */}
+        <Specimen name="Widget boards · Shelf" note="Downloads and Drives as widget boards, from labelled fixtures; with empty, off and nearly-full states">
+          <ShelfGallery />
+        </Specimen>
+        {/* --- end Shelf fixtures --- */}
+        {/* --- FIXTURES: Media widgets (tune-widgets-media.tsx). Made-up data, tune page only. --- */}
+        <Specimen name="Widget boards · Media" note="Sound and Devices as widget boards, every state; fixtures, never the app">
+          <MediaWidgetGallery />
+        </Specimen>
+        {/* --- end FIXTURES --- */}
+        {/* --- Today widgets (w-today) --- */}
+        <Specimen name="Widget boards · Today" note="Calendar, Reminders, Weather and Stocks: fixtures, then not-allowed, reading and empty states">
+          <TodayWidgetGallery />
+        </Specimen>
+        {/* --- end Today widgets --- */}
+        {/* --- Mac + Focus widget fixtures (feat/notch-widgets-mac-focus) --- */}
+        <Specimen name="Widget boards · Mac and Focus" note="the Mac (Stats, Power, Privacy, Windows) and Focus (Timer, Keep Awake, Notes) boards, with fixtures and every empty or urgent state">
+          <MacFocusGallery />
+        </Specimen>
+        {/* --- end Mac + Focus widget fixtures --- */}
+        {/* --- Widget boards: Agents and Launch fixtures --- */}
+        <Specimen name="Widget boards · Agents and Launch" note="fixtures: Voice, a coding session in detail, Apps and Shortcuts in their states; Launch › Search stays a list">
+          <AgentsLaunchGallery />
+        </Specimen>
+        {/* --- end Widget boards: Agents and Launch fixtures --- */}
+
+        <Specimen name="Agents · Voice history and the coding composer" note="fixtures: past voice runs as a board, with and without a live run, and the coding-agent composer">
+          <CoherenceGallery />
+        </Specimen>
+
+        <Specimen name="Empty" note="a view with nothing to show teaches what fills it">
+          <Empty
+            title="No command running"
+            action={
+              <Button variant="notch-quiet" size="notch" className="-ml-2.5">
+                Start a coding agent
+              </Button>
+            }
+          >
+            Hold the Command key and say what to do. Its steps, and anything
+            that needs your yes, show up here.
+          </Empty>
+        </Specimen>
+      </div>
+    </div>
+  );
+}
+
+function Specimen({
+  name,
+  note,
+  children,
+}: {
+  name: string;
+  note: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <h2 className="m-0 text-notch-body font-semibold text-notch-ink">{name}</h2>
+      <p className="m-0 mb-3 text-notch-meta text-notch-ink-3">{note}</p>
+      {children}
+    </section>
   );
 }
 

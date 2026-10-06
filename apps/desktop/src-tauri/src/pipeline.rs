@@ -218,7 +218,12 @@ impl Pipeline {
         }
 
         match phase {
-            Phase::Recording => crate::overlay::show(&self.app, phase),
+            Phase::Recording => {
+                // Over an open card this may be the user about to say
+                // "cancel": its countdown must not send while they do.
+                crate::agent::hold_open(&self.app);
+                crate::overlay::show(&self.app, phase)
+            }
             // The transcript panel stays up through transcription: the last
             // preview pass is the only place the end of the sentence is
             // readable.
@@ -515,9 +520,14 @@ impl Pipeline {
         // generation gate stops it between tools instead, as the Command key does.
         match result? {
             Outcome::Command(command) => {
-                crate::agent::run(&self.app, command, &self.settings(), false, || {
-                    self.generation() != generation
-                })
+                crate::agent::run(
+                    &self.app,
+                    command,
+                    utterance_id,
+                    &self.settings(),
+                    false,
+                    || self.generation() != generation,
+                )
                 .await
             }
             _ => Ok(()),
@@ -564,10 +574,12 @@ impl Pipeline {
     /// Finalizes the recording, transcribes it, and returns the WAV only when
     /// the caller is going to write a history row pointing at it.
     ///
-    /// Ask, agent and rewrite pass `false`: they keep no history row, so a kept
-    /// recording would be an orphan — invisible to the size budget, unreachable
-    /// from the Run Log, and a permanent copy of a question never chosen to be
-    /// stored. Their audio goes to the OS temp dir and is unlinked here.
+    /// Ask, agent and rewrite pass `false`: their history row (a command keeps
+    /// one, for Agents › Voice) holds words and an outcome, never audio, so a
+    /// kept recording would be an orphan — invisible to the size budget,
+    /// unreachable from the Run Log, and a permanent copy of a question never
+    /// chosen to be stored. Their audio goes to the OS temp dir and is
+    /// unlinked here.
     async fn capture(
         &self,
         captured: Captured,
@@ -955,6 +967,38 @@ impl Pipeline {
         }
     }
 
+    /// Records how a command ended, for Agents › Voice. The same retention as a
+    /// dictation, in the same table. Never fails the run: the answer is already
+    /// on its way to the user.
+    // One argument per column, as in `record`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_command(
+        &self,
+        said: &str,
+        outcome: &str,
+        success: bool,
+        app_name: Option<&str>,
+        duration_ms: i64,
+        utterance_id: i64,
+        settings: &Settings,
+    ) {
+        let Ok(history) = self.history.lock() else {
+            return;
+        };
+        if let Err(e) = history.insert_run(
+            chrono::Utc::now().timestamp(),
+            said,
+            outcome,
+            success,
+            app_name,
+            duration_ms,
+            utterance_id,
+            settings.retention(),
+        ) {
+            tracing::warn!(%e, "could not record the command");
+        }
+    }
+
     /// Notes the selection for a plain dictation, if the OS will say what it is
     /// without being asked twice.
     ///
@@ -1078,25 +1122,34 @@ impl Pipeline {
     /// rather than pasting it. The whole utterance is the command, so no spoken
     /// trigger phrase is needed. Both the Command key and the old Ask key land
     /// here: the agent answers questions as well as acting.
+    pub async fn stop_and_agent(&self) -> Result<()> {
+        self.agent_utterance(next_utterance_id()).await
+    }
+
+    /// The id is minted by the caller, as for a dictation, because the history
+    /// row a run leaves has to be stamped with it.
     #[tracing::instrument(
         name = "utterance",
         skip_all,
         fields(
-            utterance_id = next_utterance_id(),
+            utterance_id = utterance_id,
             mode = "agent",
             ok = tracing::field::Empty,
         )
     )]
-    pub async fn stop_and_agent(&self) -> Result<()> {
+    async fn agent_utterance(&self, utterance_id: i64) -> Result<()> {
         // The panel is the feedback; the pill only stays for an error.
-        self.run_stage(Phase::Idle, |r| self.transcribe_and_agent(r))
+        self.run_stage(Phase::Idle, |r| self.transcribe_and_agent(r, utterance_id))
             .await
     }
 
-    async fn transcribe_and_agent(&self, captured: Captured) -> Result<()> {
+    async fn transcribe_and_agent(&self, captured: Captured, utterance_id: i64) -> Result<()> {
         let (command, settings, _) = self.capture(captured, false).await?;
 
         if command.trim().is_empty() {
+            // The press took an open card off screen, and its gate is still
+            // waiting: put it back.
+            crate::agent::answer_by_voice(&self.app, "");
             return Ok(());
         }
         // Tolerate a trigger phrase said out of habit while holding the key —
@@ -1110,7 +1163,7 @@ impl Pipeline {
         // abandon the loop mid-tool, and the loop wants to stop *between*
         // tools — after the one in flight, before the next.
         let generation = self.generation();
-        crate::agent::run(&self.app, command, &settings, false, || {
+        crate::agent::run(&self.app, command, utterance_id, &settings, false, || {
             self.generation() != generation
         })
         .await
@@ -1152,6 +1205,11 @@ impl Pipeline {
 
     pub fn history(&self, limit: usize) -> Result<Vec<aloud_store::history::Entry>> {
         self.history_db()?.recent(limit)
+    }
+
+    /// Dictations and commands together, for Agents › Voice.
+    pub fn voice_history(&self, limit: usize) -> Result<Vec<aloud_store::history::Entry>> {
+        self.history_db()?.recent_voice(limit)
     }
 
     /// The history store, for the Run Log's row-level edits. Hands out the

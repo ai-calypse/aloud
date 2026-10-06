@@ -1126,11 +1126,14 @@ pub const ACTIONS: &[Action] = &[
     },
     Action {
         name: "ALOUD_MENU",
-        description: "Run a command from an app's menu bar by name — anything in its File, Edit, \
-                      View… menus that no named tool covers: \"New Window\", \"Export as PDF\", \
-                      \"Show Sidebar\", \"Zoom In\". Give `item` (its name) or `path` [\"File\", \
-                      \"Export as PDF…\"]. Unsure of the name? Call with `list: true` first to see \
-                      the app's menu items. `app` defaults to the app in front.",
+        description: "Run a command from an app's menu bar by name, unseen: the app is not \
+                      brought forward, so this is not how to show a page of System Settings or \
+                      change a setting there (open it with ALOUD_OPEN_APP). Anything in an app's \
+                      File, Edit, View… menus that no named tool covers: \"New Window\", \
+                      \"Export as PDF\", \"Show Sidebar\", \"Zoom In\". Give `item` (its name) or \
+                      `path` [\"File\", \"Export as PDF…\"]. Unsure of the name? Call with \
+                      `list: true` first to see the app's menu items. `app` defaults to the app \
+                      in front.",
         app: crate::ALWAYS,
         read_only: false,
         repeatable: true,
@@ -1367,11 +1370,14 @@ pub const ACTIONS: &[Action] = &[
     Action {
         name: "ALOUD_OPEN_APP",
         description: "Open or switch to applications by name — \"TextEdit\", \"Safari\", \
-             \"System Settings\". Pass every app the user asked for in `names` and \
-             they all open in this ONE call; never call this repeatedly to open \
-             several. Use it to launch or focus an app; never drive Spotlight or \
-             the Dock on screen to do it. To open a file, folder or link IN an app \
-             (\"open components in Cursor\"), pass it as `open`.",
+             \"System Settings\" — and nothing more. When the user also asks to make \
+             something there (\"open Notes and create a note\", \"open Cursor and create \
+             todo.md\"), call the tool that makes it instead, alone: ALOUD_NOTES_CREATE, \
+             ALOUD_WRITE_FILE with open_with. Pass every app the user asked for in \
+             `names` and they all open in this ONE call; never call this repeatedly to \
+             open several. Use it to launch or focus an app; never drive Spotlight or \
+             the Dock on screen to do it. To open an existing file, folder or link IN \
+             an app (\"open components in Cursor\"), pass it as `open`.",
         app: crate::ALWAYS,
         read_only: false,
         repeatable: false,
@@ -1390,7 +1396,8 @@ pub const ACTIONS: &[Action] = &[
                         "type": "string",
                         "description": "What to open in the last app: a path, \
                                         ~/path or URL, or just the file or folder's \
-                                        name as said (\"components\") to look it up.",
+                                        name as said (\"components\") to look it up. \
+                                        Never a file to create.",
                     }
                 }
             })

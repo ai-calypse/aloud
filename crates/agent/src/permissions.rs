@@ -31,10 +31,9 @@ const HAND_STRICT: &[(&str, bool)] = &[
 /// the upgrade when it misses.
 const NATIVE_WORDS: &[(&str, &[&str])] = &[
     ("Notes", &["note", "notes"]),
-    (
-        "Messages",
-        &["text", "message", "messages", "sms", "imessage"],
-    ),
+    // Not "message": "my latest slack message" would name Messages, and a
+    // Slack message asking for a text would then pass as the user's request.
+    ("Messages", &["text", "messages", "sms", "imessage"]),
     ("Mail", &["email", "mail"]),
     ("Reminders", &["remind", "reminder", "reminders"]),
     ("Music", &["play", "song", "music"]),
@@ -149,7 +148,7 @@ pub fn gate(
         && !taint.cleared.contains(&app.to_lowercase())
         && !named(&app, toolkit.as_deref(), said, front);
     Some(Gate {
-        key: format!("{}:{}", slug(&app), slug(&action)),
+        key: key(&app, &action),
         reason: named_rule
             .then(|| format!("Outside content asked for this, and you didn't mention {app}")),
         named_rule,
@@ -158,6 +157,18 @@ pub fn gate(
         default_always,
         strict,
     })
+}
+
+/// The grants.json key for an app and action, e.g. `slack:send-and-share`.
+pub fn key(app: &str, action: &str) -> String {
+    format!("{}:{}", slug(app), slug(action))
+}
+
+/// Whether no call of this action can run without a card, so its Settings row
+/// offers Ask or Never only. Paying is; a send or a delete is strict only for
+/// some calls (a password, a `destructiveHint`).
+pub fn always_strict(action: &str) -> bool {
+    action == PAY
 }
 
 /// The front app, the app's own name in what was said, its toolkit's words, or
@@ -303,6 +314,16 @@ mod tests {
             &json!({ "to": "bob", "text": "x" }),
             None,
             "make a note of this",
+            None,
+            &tainted(),
+        );
+        assert!(text.unwrap().named_rule);
+        // "message" is any app's word: reading a Slack message does not name Messages.
+        let text = gate(
+            "ALOUD_MESSAGES_SEND",
+            &json!({ "to": "+15551234567", "text": "hi" }),
+            None,
+            "what's my latest slack message",
             None,
             &tainted(),
         );

@@ -1,0 +1,15 @@
+[package]
+name = "aloud-islands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The notch's live activities: what is on screen, in what order, and for how long"
+
+[dependencies]
+serde.workspace = true
+# The wire types are the crate's own, as with aloud-agent's previews: the
+# app re-exports them rather than mirroring them.
+specta.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

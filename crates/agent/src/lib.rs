@@ -8,6 +8,7 @@
 
 pub mod cache;
 pub mod composio;
+pub mod icons;
 pub mod permissions;
 pub mod preview;
 pub mod tool_loop;
@@ -38,19 +39,31 @@ const GROQ: (&str, &str) = ("https://api.groq.com/openai/v1", "openai/gpt-oss-12
 /// Off the default list while its account returns 402; kept for the eval.
 /// It answered in 0.34s with 450 requests a minute when paid.
 const CEREBRAS: (&str, &str) = ("https://api.cerebras.ai/v1", "qwen-3.8-27b");
-/// Behind it: headroom when Groq's per-minute budget trips. Flash-Lite, not
-/// Flash: on a free-tier key 3.5 Flash allows 20 requests a day, which one eval
-/// run exhausted for 14 hours; Flash-Lite answered in 0.58s on the same key.
+/// Last: fast (1.05s median, 55/59 first turns with its thinking off, which
+/// `aloud_llm` does) but it loses the thread over a run. In real use it ran 4-5
+/// rounds where 1-2 do, and spiralled "fix the grammar of this" through 12
+/// screen steps that Gemini answered in one turn. It also hangs now and then.
+/// ponytail: NVIDIA's free endpoint sends no rate-limit headers, so its budget
+/// is only known when it says 429. Measured 2026-10-04.
+const NVIDIA: (&str, &str) = (
+    "https://integrate.api.nvidia.com/v1",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
+);
+/// Second, and in practice the one most commands use: the full prompt is ~9,000
+/// tokens, past Groq's free 8,000 a minute. 16/16 whole runs with short tool
+/// chains (2026-10-04). Flash-Lite, not Flash: on a free-tier key 3.5 Flash
+/// allows 20 requests a day, which one eval run exhausted for 14 hours.
 const GEMINI: (&str, &str) = (
     "https://generativelanguage.googleapis.com/v1beta/openai",
     "gemini-3.5-flash-lite",
 );
 
 /// One named brain on its own, for the eval to compare them: "groq",
-/// "cerebras" or "gemini".
+/// "nvidia", "cerebras" or "gemini".
 pub fn brain(name: &str, key: &str) -> anyhow::Result<Brain> {
     let (base_url, model) = match name {
         "groq" => GROQ,
+        "nvidia" => NVIDIA,
         "cerebras" => CEREBRAS,
         "gemini" => GEMINI,
         other => anyhow::bail!("no brain called {other:?}"),
@@ -62,8 +75,8 @@ pub fn brain(name: &str, key: &str) -> anyhow::Result<Brain> {
 }
 
 /// The brains a command may use, best first, for whichever keys are set.
-pub fn brains(groq_key: &str, gemini_key: &str) -> anyhow::Result<Vec<Brain>> {
-    [(groq_key, GROQ), (gemini_key, GEMINI)]
+pub fn brains(groq_key: &str, gemini_key: &str, nvidia_key: &str) -> anyhow::Result<Vec<Brain>> {
+    [(groq_key, GROQ), (gemini_key, GEMINI), (nvidia_key, NVIDIA)]
         .into_iter()
         .filter(|(key, _)| !key.trim().is_empty())
         .map(|(key, (base_url, model))| {

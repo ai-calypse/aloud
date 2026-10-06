@@ -18,6 +18,7 @@ tauri-build = { version = "2", features = [] }
 chrono = "0.4"
 
 [dependencies]
+aloud-agenda = { path = "../../../crates/agenda" }
 aloud-agent = { path = "../../../crates/agent" }
 aloud-agent-spawn = { path = "../../../crates/agent-spawn" }
 aloud-audio = { path = "../../../crates/audio" }
@@ -26,16 +27,27 @@ aloud-meeting = { path = "../../../crates/meeting" }
 aloud-engine = { path = "../../../crates/engine" }
 aloud-native = { path = "../../../crates/native" }
 aloud-hotkey = { path = "../../../crates/hotkey" }
+aloud-focus = { path = "../../../crates/focus" }
+aloud-islands = { path = "../../../crates/islands" }
+aloud-launcher = { path = "../../../crates/launcher" }
 aloud-llm = { path = "../../../crates/llm" }
+aloud-media = { path = "../../../crates/media" }
+# notch-mac
+aloud-mac = { path = "../../../crates/mac" }
 aloud-notes = { path = "../../../crates/notes" }
+aloud-notify = { path = "../../../crates/notify" }
 aloud-quota = { path = "../../../crates/quota" }
 aloud-sessions = { path = "../../../crates/sessions" }
 aloud-bridge = { path = "../../../crates/bridge" }
+aloud-clipboard = { path = "../../../crates/clipboard" }
 aloud-paste = { path = "../../../crates/paste" }
 aloud-permissions = { path = "../../../crates/permissions" }
 aloud-volume = { path = "../../../crates/volume" }
+aloud-screens = { path = "../../../crates/screens" }
 aloud-selection = { path = "../../../crates/selection" }
+aloud-shelf = { path = "../../../crates/shelf" }
 aloud-store = { path = "../../../crates/store" }
+aloud-today = { path = "../../../crates/today" }
 aloud-transcribe = { path = "../../../crates/transcribe" }
 anyhow.workspace = true
 chrono = "0.4"
@@ -63,18 +75,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-opener = "2.5.4"
 
-# Reading the MacBook notch geometry (NSScreen) so the wings overlay welds to
-# it. Already a transitive dep via tauri/wry; pinned to the 0.2 line to share
-# objc2 0.5 rather than pulling a second major.
+# The overlay's own NSWindow: level, collection behaviour and placement. The
+# NSScreen reads live in `aloud-screens`.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.2", features = ["NSScreen", "NSWindow", "NSResponder"] }
-objc2-foundation = { version = "0.2", features = ["NSArray", "NSGeometry"] }
-# `NSScreen.screens` hands back a Swift-bridged array whose `count` reports an
-# unsigned `NSUInteger` ('Q'); objc2's debug-only encoding check expects the
-# signed 'q' and aborts the process at launch. This relaxes the sign check to
-# treat the two as compatible. Enabled here (a direct dep) so feature
-# unification turns it on for the objc2 the app-kit/foundation crates share.
-objc2 = { version = "0.5", features = ["relax-sign-encoding"] }
+objc2-app-kit = { version = "0.2", features = ["NSWindow", "NSResponder"] }
+objc2-foundation = { version = "0.2", features = ["NSGeometry"] }
 
 [dev-dependencies]
 hound = "3.5"

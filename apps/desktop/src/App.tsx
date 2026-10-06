@@ -56,6 +56,7 @@ const NAV: {
   { id: "runlog", title: "Run Log", group: "settings", tint: "var(--sys-purple)", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM8 8h8M8 12h8M8 16h5" },
   { id: "meetings", title: "Meetings", group: "settings", tint: "var(--sys-orange)", icon: "M15 10l5-3v10l-5-3v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1Z" },
   { id: "connectors", title: "Connectors", group: "settings", tint: "var(--sys-teal)", icon: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" },
+  { id: "permissions", title: "Permissions", group: "settings", tint: "var(--sys-red)", icon: "M12 3l7 3v6c0 4.5-3 8-7 9-4-1-7-4.5-7-9V6l7-3ZM9 12l2 2 4-4" },
   // Hidden unless "Developer tools" is on, for the same reason as Timings.
   { id: "debug", title: "Debug", group: "settings", tint: "var(--sys-grey)", icon: "M9 4h6M12 4v3M7 10a5 5 0 0 1 10 0v4a5 5 0 0 1-10 0v-4ZM3 11h4M17 11h4M3 17h4M17 17h4" },
 ];
@@ -68,6 +69,7 @@ const SETTINGS_IDS: SettingsSection[] = [
   "rules",
   "prompts",
   "connectors",
+  "permissions",
   "runlog",
   "meetings",
   "debug",

@@ -9,6 +9,12 @@ export const commands = {
 	/**  Persists settings and applies them to the running app. */
 	updateSettings: (settings: Settings) => typedError<null, string>(__TAURI_INVOKE("update_settings", { settings })),
 	getStats: () => __TAURI_INVOKE<StatsView>("get_stats"),
+	/**
+	 *  Time saved by dictating and by agent commands completing, today and all
+	 *  time. The formula and its assumed minutes per action live in
+	 *  `aloud_store::stats`.
+	 */
+	getTimeSaved: () => typedError<TimeSavedView, string>(__TAURI_INVOKE("get_time_saved")),
 	searchNotes: (query: string) => typedError<SearchResult[], string>(__TAURI_INVOKE("search_notes", { query })),
 	/**  Newest notes, for the empty-query state. */
 	recentNotes: (limit: number) => typedError<Note[], string>(__TAURI_INVOKE("recent_notes", { limit })),
@@ -64,6 +70,13 @@ export const commands = {
 	permissions: () => __TAURI_INVOKE<PermissionStatus[]>("permissions"),
 	/**  Opens the System Settings pane that grants `permission`. */
 	openPermissionSettings: (permission: Permission) => typedError<null, string>(__TAURI_INVOKE("open_permission_settings", { permission })),
+	/**
+	 *  Every write this Mac's apps offer, at its default unless saved otherwise,
+	 *  plus every saved grant — a connected service shows up once a card's
+	 *  "Always allow" has saved one.
+	 */
+	listPermissions: () => typedError<PermissionRow[], string>(__TAURI_INVOKE("list_permissions")),
+	setPermission: (key: string, app: string, action: string, grant: Grant) => typedError<null, string>(__TAURI_INVOKE("set_permission", { key, app, action, grant })),
 	buildInfo: () => __TAURI_INVOKE<BuildInfo>("build_info"),
 	/**
 	 *  Monitor names, to fill the overlay's "Show on" picker. Unnamed monitors are
@@ -77,6 +90,11 @@ export const commands = {
 	recentTimings: (utterances: number) => typedError<Span[], string>(__TAURI_INVOKE("recent_timings", { utterances })),
 	/**  The newest `limit` dictations, for the Run Log pane. */
 	historyRecent: (limit: number) => typedError<Entry[], string>(__TAURI_INVOKE("history_recent", { limit })),
+	/**
+	 *  The newest `limit` things said to Aloud, dictations and commands together,
+	 *  for Agents › Voice in the notch.
+	 */
+	historyVoiceRecent: (limit: number) => typedError<Entry[], string>(__TAURI_INVOKE("history_voice_recent", { limit })),
 	/**
 	 *  Row ids cross the boundary as i32 because specta refuses to export i64
 	 *  (see [`Entry`]). SQLite hands out ids by insertion count and retention caps
@@ -165,6 +183,8 @@ export const commands = {
 	disconnectConnector: (connectionId: string) => typedError<null, string>(__TAURI_INVOKE("disconnect_connector", { connectionId })),
 	/**  Records the panel's settled box, so the click region can be exactly it. */
 	setPanelBox: (width: number | null, height: number | null) => __TAURI_INVOKE<void>("set_panel_box", { width, height }),
+	/**  The webview reporting its hover-opened Home, see [`PEEKING`]. */
+	setNotchPeek: (open: boolean) => __TAURI_INVOKE<void>("set_notch_peek", { open }),
 	/**
 	 *  The webview declaring its interactive state; see [`INTERACTIVE`].
 	 * 
@@ -183,6 +203,114 @@ export const commands = {
 	 *  that dismiss a browse (cross, Escape, click-away) can all call it.
 	 */
 	closeBrowse: () => __TAURI_INVOKE<void>("close_browse"),
+	/**
+	 *  Everything on screen, ranked — for a webview that mounts after islands
+	 *  were pushed (the event only carries changes).
+	 */
+	islands: () => __TAURI_INVOKE<Island[]>("islands"),
+	/**
+	 *  The user is done with an island: its ×, an alert's clock running out, or
+	 *  an action that settles it. The action itself runs in the webview's
+	 *  registry; this is the half of it the queue has to hear.
+	 */
+	dismissIsland: (id: string) => __TAURI_INVOKE<void>("dismiss_island", { id }),
+	/**  What the Full Disk Access row shows. */
+	nudgeState: () => __TAURI_INVOKE<MirrorState>("nudge_state"),
+	/**
+	 *  Try again, after the user granted access: the watcher stops on a refusal
+	 *  rather than polling for the grant, so this is the way back.
+	 */
+	nudgeRecheck: () => __TAURI_INVOKE<void>("nudge_recheck"),
+	/**  System Settings at Full Disk Access, the one fix for `NeedsAccess`. */
+	nudgeOpenAccessSettings: () => __TAURI_INVOKE<void>("nudge_open_access_settings"),
+	/**
+	 *  The Open button: brings the app that sent a nudge forward. The webview
+	 *  names the bundle, so it is checked to be a bundle id and nothing else.
+	 */
+	nudgeOpen: (bundle: string) => typedError<null, string>(__TAURI_INVOKE("nudge_open", { bundle })),
+	focusState: () => __TAURI_INVOKE<FocusSnapshot>("focus_state"),
+	focusStart: (mode: TimerMode, preset: TimerPreset) => __TAURI_INVOKE<void>("focus_start", { mode, preset }),
+	focusPause: () => __TAURI_INVOKE<void>("focus_pause"),
+	focusResume: () => __TAURI_INVOKE<void>("focus_resume"),
+	focusSkip: () => __TAURI_INVOKE<void>("focus_skip"),
+	/**  Stops and clears. A stopwatch that ran a real while is kept for the streak. */
+	focusStop: () => __TAURI_INVOKE<void>("focus_stop"),
+	focusStats: () => typedError<FocusStats, string>(__TAURI_INVOKE("focus_stats")),
+	/**
+	 *  Keeps the Mac (and its display) awake for `minutes`, or until stopped.
+	 *  Off macOS there is no `caffeinate`, and the error says so.
+	 */
+	awakeStart: (minutes: number | null) => typedError<null, string>(__TAURI_INVOKE("awake_start", { minutes })),
+	awakeStop: () => __TAURI_INVOKE<void>("awake_stop"),
+	/**  The notch's own notes, newest first. */
+	quickNotes: () => typedError<Note[], string>(__TAURI_INVOKE("quick_notes")),
+	/**
+	 *  Saves a quick note, creating its file on the first call (`path` None) and
+	 *  returning the path to pass on the next. The notes folder is the only place
+	 *  it will write.
+	 */
+	saveQuickNote: (path: string | null, text: string) => typedError<string, string>(__TAURI_INVOKE("save_quick_note", { path, text })),
+	/**  Which quick notes the Notes app has a current copy of. */
+	noteSyncMarks: () => typedError<SyncMark[], string>(__TAURI_INVOKE("note_sync_marks")),
+	/**
+	 *  Copies quick notes that are new or edited into the Notes app's "Aloud"
+	 *  folder: just `path`, or all of them. `async` + `spawn_blocking` because
+	 *  osascript can take seconds, and a sync command would hold the main thread.
+	 *  The notes are looked up here by path rather than trusting the webview with
+	 *  a file name.
+	 */
+	syncQuickNotes: (path: string | null) => typedError<SyncReport, string>(__TAURI_INVOKE("sync_quick_notes", { path })),
+	/**  Brings the Notes app's copy of a quick note forward. */
+	openNoteInNotes: (path: string) => typedError<null, string>(__TAURI_INVOKE("open_note_in_notes", { path })),
+	/**
+	 *  The forecast for the saved city, else wherever this connection is. Served
+	 *  from a 30-minute cache unless `refresh`; the webview's `fahrenheit` is
+	 *  part of the key, so flipping units never shows the other unit's numbers.
+	 */
+	weather: (fahrenheit: boolean, refresh: boolean) => typedError<Weather, string>(__TAURI_INVOKE("weather", { fahrenheit, refresh })),
+	/**
+	 *  Pins the weather to a city by name, for a VPN or a Mac that is not where
+	 *  its IP says.
+	 */
+	setWeatherCity: (name: string, fahrenheit: boolean) => typedError<Weather, string>(__TAURI_INVOKE("set_weather_city", { name, fahrenheit })),
+	/**  Back to locating by IP. */
+	clearWeatherCity: (fahrenheit: boolean) => typedError<Weather, string>(__TAURI_INVOKE("clear_weather_city", { fahrenheit })),
+	/**  Quotes for the watchlist; empty when nothing is followed. */
+	stockQuotes: () => __TAURI_INVOKE<Ticker[]>("stock_quotes"),
+	addStock: (symbol: string) => typedError<Ticker[], string>(__TAURI_INVOKE("add_stock", { symbol })),
+	removeStock: (symbol: string) => typedError<Ticker[], string>(__TAURI_INVOKE("remove_stock", { symbol })),
+	/**
+	 *  Today's and tomorrow's events. `refresh` re-reads Calendar (about a
+	 *  second); otherwise a read from the last ten minutes is reused.
+	 * 
+	 *  This is also the only thing that may start Calendar.app: scripting an app
+	 *  that is not running launches it, which the background tick never does.
+	 */
+	calendarEvents: (refresh: boolean) => typedError<Event[], AgendaError>(__TAURI_INVOKE("calendar_events", { refresh })),
+	/**
+	 *  What the last read saw, from memory or the last run's file: the view paints
+	 *  this immediately and `reminders_due` corrects it. `None` only before the
+	 *  first read there has ever been.
+	 */
+	remindersCached: () => __TAURI_INVOKE<Reminder[] | null>("reminders_cached"),
+	/**
+	 *  Incomplete reminders due by the end of today, overdue ones first. EventKit
+	 *  when granted (this is the call that may raise its one-time prompt), else a
+	 *  script; either way the result becomes the cache.
+	 */
+	remindersDue: () => typedError<Reminder[], AgendaError>(__TAURI_INVOKE("reminders_due")),
+	/**
+	 *  One day's events for the month card's date picker. `day` is any instant on
+	 *  the day, in unix ms (a number, not a bigint: it is a day, not a count).
+	 */
+	calendarDay: (day: number | null) => typedError<Event[], AgendaError>(__TAURI_INVOKE("calendar_day", { day })),
+	/**  Ticks a reminder off. The only thing in Today that writes to the account. */
+	completeReminder: (id: string) => typedError<null, AgendaError>(__TAURI_INVOKE("complete_reminder", { id })),
+	/**
+	 *  Opens an event's video-call link in the browser. Re-checks the host: the
+	 *  webview names the URL, and this must not open anything but a call.
+	 */
+	openMeetingLink: (url: string) => typedError<null, string>(__TAURI_INVOKE("open_meeting_link", { url })),
 	agentHookStatus: () => typedError<HookStatus, string>(__TAURI_INVOKE("agent_hook_status")),
 	/**
 	 *  Installs our hooks, copying the sidecar out of the bundle first.
@@ -248,11 +376,152 @@ export const commands = {
 	 */
 	agentQuota: () => typedError<Quota, string>(__TAURI_INVOKE("agent_quota")),
 	/**
-	 *  Resolves the pending confirmation. Called by the panel's Cancel/Confirm
-	 *  buttons; `edits` carries any field the user filled in or corrected before
-	 *  approving, in the same flattened form the panel was given.
+	 *  What the players are doing right now, read fresh: a view that mounts
+	 *  should not wait up to a second for its first frame.
 	 */
-	confirmAgent: (approved: boolean, edits: { [key in string]: string } | null) => __TAURI_INVOKE<void>("confirm_agent", { approved, edits }),
+	mediaNowPlaying: () => __TAURI_INVOKE<Reading>("media_now_playing"),
+	/**  A Media view mounted (`true`) or went away (`false`). */
+	mediaWatch: (on: boolean) => __TAURI_INVOKE<void>("media_watch", { on }),
+	mediaControl: (player: Player, transport: Transport, target: {
+	app: string,
+	/**  Known for what MediaRemote reports. */
+	bundleId: string | null,
+	host: string | null,
+	tab: string | null,
+} | null) => typedError<null, string>(__TAURI_INVOKE("media_control", { player, transport, target })),
+	mediaSeek: (player: Player, positionMs: number) => typedError<null, string>(__TAURI_INVOKE("media_seek", { player, positionMs })),
+	/**  Playback speed of the browser tab on screen, in percent (100 is normal). */
+	mediaSetSpeed: (player: Player, speedPct: number) => typedError<null, string>(__TAURI_INVOKE("media_set_speed", { player, speedPct })),
+	/**  An app's icon as a `data:` URI, for the badge saying where a track plays. */
+	mediaSourceIcon: (app: string) => __TAURI_INVOKE<string | null>("media_source_icon", { app }),
+	/**
+	 *  "I turned it on": forget that a browser could not be read and look now,
+	 *  instead of waiting out the few minutes between checks.
+	 */
+	mediaRecheckBrowsers: () => __TAURI_INVOKE<void>("media_recheck_browsers"),
+	/**
+	 *  Brings a browser forward so its menu bar is within reach of the fix the
+	 *  view describes.
+	 */
+	mediaOpenBrowser: (app: string) => __TAURI_INVOKE<void>("media_open_browser", { app }),
+	/**  The cover of `now`, as a `data:` URI the overlay's CSP will load. */
+	mediaArtwork: (now: NowPlaying) => __TAURI_INVOKE<string | null>("media_artwork", { now }),
+	/**
+	 *  Lyrics for `now` from LRCLIB, cached per track. `None` is "none exist";
+	 *  an error is a network failure the view may retry.
+	 */
+	mediaLyrics: (now: NowPlaying) => typedError<{
+	/**  Timed lines, empty when LRCLIB only has plain text. */
+	lines: LyricLine[],
+	plain: string | null,
+	instrumental: boolean,
+} | null, string>(__TAURI_INVOKE("media_lyrics", { now })),
+	soundState: () => __TAURI_INVOKE<SoundState>("sound_state"),
+	soundSetDefault: (direction: Direction, id: number) => typedError<null, string>(__TAURI_INVOKE("sound_set_default", { direction, id })),
+	soundSetMicMuted: (muted: boolean) => typedError<null, string>(__TAURI_INVOKE("sound_set_mic_muted", { muted })),
+	/**
+	 *  Paired Bluetooth devices and their batteries. Slow (the profiler takes a
+	 *  second or two), so the view asks on a slow clock, not a fast one.
+	 */
+	bluetoothDevices: () => typedError<BtDevice[], string>(__TAURI_INVOKE("bluetooth_devices")),
+	bluetoothConnect: (address: string) => typedError<null, string>(__TAURI_INVOKE("bluetooth_connect", { address })),
+	/**
+	 *  Opens System Settings at Automation, where Spotify and Music are allowed
+	 *  or not: the one fix for a player that is running but says nothing.
+	 */
+	openAutomationSettings: () => __TAURI_INVOKE<void>("open_automation_settings"),
+	clipboardEnabled: () => __TAURI_INVOKE<boolean>("clipboard_enabled"),
+	clipboardSetEnabled: (on: boolean) => typedError<null, string>(__TAURI_INVOKE("clipboard_set_enabled", { on })),
+	clipboardList: (query: string) => typedError<ClipboardEntry[], string>(__TAURI_INVOKE("clipboard_list", { query })),
+	clipboardCopy: (id: number) => typedError<null, string>(__TAURI_INVOKE("clipboard_copy", { id })),
+	/**  Copies an entry and pastes it into the app behind the panel. */
+	clipboardPaste: (id: number) => typedError<null, string>(__TAURI_INVOKE("clipboard_paste", { id })),
+	/**  Runs one of an entry's smart actions; the answer is a few words for the row. */
+	clipboardAction: (id: number, action: string) => typedError<string, string>(__TAURI_INVOKE("clipboard_action", { id, action })),
+	clipboardPin: (id: number, pinned: boolean) => typedError<null, string>(__TAURI_INVOKE("clipboard_pin", { id, pinned })),
+	clipboardDelete: (id: number) => typedError<null, string>(__TAURI_INVOKE("clipboard_delete", { id })),
+	clipboardClear: () => typedError<null, string>(__TAURI_INVOKE("clipboard_clear")),
+	snippetList: () => typedError<Snippet[], string>(__TAURI_INVOKE("snippet_list")),
+	snippetSave: (id: number | null, name: string, trigger: string, body: string) => typedError<number, string>(__TAURI_INVOKE("snippet_save", { id, name, trigger, body })),
+	snippetDelete: (id: number) => typedError<null, string>(__TAURI_INVOKE("snippet_delete", { id })),
+	snippetCopy: (id: number) => typedError<null, string>(__TAURI_INVOKE("snippet_copy", { id })),
+	/**
+	 *  Pastes a snippet into the app behind the panel, putting the user's own
+	 *  clipboard back afterwards.
+	 */
+	snippetPaste: (id: number) => typedError<null, string>(__TAURI_INVOKE("snippet_paste", { id })),
+	/**
+	 *  Shows the system eyedropper; the picked colour is saved and its hex copied.
+	 *  None when the user cancelled.
+	 */
+	colorPick: () => typedError<string | null, string>(__TAURI_INVOKE("color_pick")),
+	colorList: () => typedError<PickedColor[], string>(__TAURI_INVOKE("color_list")),
+	/**  Copies a picked colour as `hex` or `rgb`. */
+	colorCopy: (hex: string, format: string) => typedError<null, string>(__TAURI_INVOKE("color_copy", { hex, format })),
+	colorClear: () => typedError<null, string>(__TAURI_INVOKE("color_clear")),
+	launcherPrefs: () => __TAURI_INVOKE<LauncherPrefs>("launcher_prefs"),
+	/**
+	 *  Opens an app and moves it to the front of the recents. The panel closes:
+	 *  the app is about to take the screen.
+	 */
+	launcherOpenApp: (name: string) => typedError<LauncherPrefs, string>(__TAURI_INVOKE("launcher_open_app", { name })),
+	launcherPin: (name: string, pinned: boolean) => typedError<LauncherPrefs, string>(__TAURI_INVOKE("launcher_pin", { name, pinned })),
+	shortcutList: () => typedError<string[], string>(__TAURI_INVOKE("shortcut_list")),
+	/**
+	 *  Runs a shortcut and answers when it finishes. A click in the panel is the
+	 *  user's own decision to run it, so there is no approval card.
+	 */
+	shortcutRun: (name: string) => typedError<null, string>(__TAURI_INVOKE("shortcut_run", { name })),
+	launcherFiles: (query: string) => typedError<LaunchFile[], string>(__TAURI_INVOKE("launcher_files", { query })),
+	launcherRecentFiles: () => typedError<LaunchFile[], string>(__TAURI_INVOKE("launcher_recent_files")),
+	/**  Opens a file or a note in its default app. */
+	launcherOpenPath: (path: string) => typedError<null, string>(__TAURI_INVOKE("launcher_open_path", { path })),
+	/**
+	 *  CPU, memory, disk, network and thermal pressure. Polled by Mac › Stats
+	 *  only while it is on screen.
+	 */
+	macStats: () => typedError<SystemStats, string>(__TAURI_INVOKE("mac_stats")),
+	/**  The battery, or None on a Mac without one. */
+	macBattery: () => __TAURI_INVOKE<{
+	percent: number,
+	state: ChargeState,
+	/**
+	 *  To empty while discharging, to full while charging; None while macOS
+	 *  is still estimating.
+	 */
+	minutes: number | null,
+	cycles: number | null,
+	/**  Capacity now over capacity when new, 0–100. */
+	health: number | null,
+} | null>("mac_battery"),
+	/**  Who holds the microphone and camera right now. */
+	macPrivacy: () => __TAURI_INVOKE<PrivacyUse>("mac_privacy"),
+	macFrontWindow: () => __TAURI_INVOKE<FrontWindowInfo>("mac_front_window"),
+	/**  Snaps the window the user was in. Returns the app's name. */
+	macSnap: (snap: Snap) => typedError<string, string>(__TAURI_INVOKE("mac_snap", { snap })),
+	macWatchers: () => __TAURI_INVOKE<Watchers>("mac_watchers"),
+	/**
+	 *  A watcher's on/off. Turning one off takes its island down at once rather
+	 *  than leaving it up until the next poll would have.
+	 */
+	setMacWatcher: (watcher: Watcher, on: boolean) => typedError<null, string>(__TAURI_INVOKE("set_mac_watcher", { watcher, on })),
+	/**
+	 *  The gate's buttons. `edits` carries the fields the user changed, keyed by
+	 *  the pointer each card field names; `revision` is the card's own, so a click
+	 *  meant for one gate can never answer the next.
+	 */
+	confirmAgent: (decision: GateDecision, edits: { [key in string]: string } | null, revision: number) => __TAURI_INVOKE<void>("confirm_agent", { decision, edits, revision }),
+	/**
+	 *  Starts an exact-words card's countdown once the card is on screen, so the
+	 *  bar the user watches and the deadline that sends run together. At the
+	 *  deadline it is "Allow once" — unless the user reached for the card first.
+	 */
+	armAgent: (revision: number) => __TAURI_INVOKE<void>("arm_agent", { revision }),
+	/**
+	 *  Stops a card's countdown for good: the pointer is on it, a field has focus,
+	 *  or the user is typing. It then waits for a click or a reply.
+	 */
+	holdAgent: (revision: number) => __TAURI_INVOKE<void>("hold_agent", { revision }),
 	/**
 	 *  Resolves the pending question. `None` is the user dismissing it, which the
 	 *  loop reports to the model as unanswered rather than as an error.
@@ -265,6 +534,45 @@ export const commands = {
 	 *  opened folder — from its row's Show button.
 	 */
 	showResult: (appName: string, target: string) => typedError<null, string>(__TAURI_INVOKE("show_result", { appName, target })),
+	/**
+	 *  Puts a tidied folder back as it was, from its finished row's Undo. The
+	 *  click is the yes, so no card: it reverses what the user already approved.
+	 */
+	undoTidy: (folder: string) => typedError<null, string>(__TAURI_INVOKE("undo_tidy", { folder })),
+	shelfItems: () => __TAURI_INVOKE<ShelfItem[]>("shelf_items"),
+	shelfAdd: (paths: string[]) => typedError<ShelfAdded, string>(__TAURI_INVOKE("shelf_add", { paths })),
+	shelfRemove: (id: string) => typedError<null, string>(__TAURI_INVOKE("shelf_remove", { id })),
+	shelfClear: () => typedError<null, string>(__TAURI_INVOKE("shelf_clear")),
+	shelfConvert: (id: string, to: ShelfImageFormat) => typedError<ShelfItem, string>(__TAURI_INVOKE("shelf_convert", { id, to })),
+	shelfZip: (ids: string[]) => typedError<ShelfItem, string>(__TAURI_INVOKE("shelf_zip", { ids })),
+	shelfUnzip: (id: string) => typedError<ShelfItem, string>(__TAURI_INVOKE("shelf_unzip", { id })),
+	/**
+	 *  Opens macOS's AirDrop picker for shelved items. AppKit sharing wants the
+	 *  main thread, so the job hops there and reports back.
+	 */
+	shelfAirdrop: (ids: string[]) => typedError<null, string>(__TAURI_INVOKE("shelf_airdrop", { ids })),
+	/**
+	 *  A `data:` thumbnail of a picture the Shelf shows — and only those: the
+	 *  path must sit in the shelf, the screenshot folder or Downloads.
+	 */
+	shelfThumbnail: (path: string) => typedError<string | null, string>(__TAURI_INVOKE("shelf_thumbnail", { path })),
+	shelfPrefs: () => __TAURI_INVOKE<ShelfPrefs>("shelf_prefs"),
+	/**
+	 *  Turns a watcher on or off and remembers it. A watcher that cannot start
+	 *  (a folder macOS has not allowed yet) leaves the switch off and says why.
+	 */
+	shelfSetWatch: (which: ShelfWatch, on: boolean) => typedError<ShelfPrefs, string>(__TAURI_INVOKE("shelf_set_watch", { which, on })),
+	shotsRecent: (limit: number) => typedError<ScreenShot[], string>(__TAURI_INVOKE("shots_recent", { limit })),
+	shotsCopy: (path: string) => typedError<null, string>(__TAURI_INVOKE("shots_copy", { path })),
+	/**  Starts macOS's region capture. It returns at once; the user finishes it. */
+	shotsCapture: (mode: ShotCapture) => typedError<null, string>(__TAURI_INVOKE("shots_capture", { mode })),
+	downloadsRecent: (limit: number) => typedError<ShelfDownload[], string>(__TAURI_INVOKE("downloads_recent", { limit })),
+	drivesList: () => typedError<ShelfDrive[], string>(__TAURI_INVOKE("drives_list")),
+	/**
+	 *  Ejects, then says it is safe — the only place that is said. A drive in
+	 *  use fails with whatever is holding it, in diskutil's words.
+	 */
+	driveEject: (mount: string) => typedError<null, string>(__TAURI_INVOKE("drive_eject", { mount })),
 };
 
 /** Events */
@@ -274,16 +582,24 @@ export const events = {
 	agentPermissionResolved: makeEvent<AgentPermissionResolved>("agent-permission-resolved"),
 	agentSessions: makeEvent<AgentSessions>("agent-sessions"),
 	audioLevel: makeEvent<AudioLevel>("audio-level"),
+	clipboardChanged: makeEvent<ClipboardChanged>("clipboard-changed"),
 	connectorsUpdated: makeEvent<ConnectorsUpdated>("connectors-updated"),
 	dictationPartial: makeEvent<DictationPartial>("dictation-partial"),
 	dictationPhase: makeEvent<Phase>("dictation-phase"),
+	focus: makeEvent<FocusSnapshot>("focus"),
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
+	island: makeEvent<IslandChanged>("island"),
+	islandsWaiting: makeEvent<IslandsWaiting>("islands-waiting"),
+	mediaNowPlaying: makeEvent<MediaNowPlaying>("media-now-playing"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
 	notchHover: makeEvent<NotchHover>("notch-hover"),
+	notchOpen: makeEvent<NotchOpen>("notch-open"),
+	nudgeState: makeEvent<NudgeStateChanged>("nudge-state"),
 	overlayDismiss: makeEvent<OverlayDismiss>("overlay-dismiss"),
 	overlayError: makeEvent<OverlayError>("overlay-error"),
 	overlayStyle: makeEvent<OverlayStyleChanged>("overlay-style"),
+	shelfChanged: makeEvent<ShelfChanged>("shelf-changed"),
 };
 
 /* Types */
@@ -313,6 +629,12 @@ export type ActionPreview = {
 };
 
 /**
+ *  Why a read failed, in the one distinction the view acts on: a missing
+ *  Automation grant has a button (System Settings), anything else is words.
+ */
+export type AgendaError = { kind: "notPermitted"; app: string } | { kind: "failed"; message: string };
+
+/**
  *  Which CLI to open in the worktree. Serde/specta so this is the one type the
  *  Tauri command and its TS binding use — no parallel enum to keep in sync.
  */
@@ -332,7 +654,13 @@ export type AgentEvent =
  */
 { kind: "planned"; value: PlannedCall[] } | 
 /**  A parsed action awaiting dispatch. A write pauses here for confirmation. */
-{ kind: "toolCall"; value: ToolCall } | { kind: "toolResult"; value: ToolResult } | 
+{ kind: "toolCall"; value: ToolCall } | 
+/**
+ *  The open gate was answered other than by its own buttons — the
+ *  countdown, or a spoken reply — so the panel can stop asking. `false` is
+ *  a decline.
+ */
+{ kind: "decided"; value: boolean } | { kind: "toolResult"; value: ToolResult } | 
 /**
  *  The model needs something only the user can give. The run is suspended
  *  until `answer_agent`; the panel shows an input rather than a gate.
@@ -542,6 +870,30 @@ export type AudioDevice = {
 /**  Live input level, 0.0–1.0, driving the pill's waveform. Only while recording. */
 export type AudioLevel = number | null;
 
+export type AwakeState = {
+	active: boolean,
+	/**  When it lets go, in unix ms; None while active means "until stopped". */
+	until: number | null,
+	/**
+	 *  The length it was started with, so the segmented control can show which
+	 *  choice is live after the panel was closed and reopened.
+	 */
+	minutes: number | null,
+};
+
+export type Battery = {
+	percent: number,
+	state: ChargeState,
+	/**
+	 *  To empty while discharging, to full while charging; None while macOS
+	 *  is still estimating.
+	 */
+	minutes: number | null,
+	cycles: number | null,
+	/**  Capacity now over capacity when new, 0–100. */
+	health: number | null,
+};
+
 /**
  *  What triggers a binding.
  * 
@@ -556,6 +908,42 @@ export type Binding = { kind: "disabled" } | { kind: "key"; key: Key; modifiers:
  */
 { kind: "modifierKey"; key: Key; modifiers: Modifier[]; exact_modifiers?: Key[] };
 
+export type BrowserIssue = {
+	app: string,
+	kind: BrowserIssueKind,
+};
+
+/**  Why a running browser could not be read. */
+export type BrowserIssueKind = 
+/**  "Allow JavaScript from Apple Events" is off. */
+"jsOff" | 
+/**  macOS Automation permission for the browser was refused. */
+"notPermitted";
+
+export type BtDevice = {
+	name: string,
+	/**  `aa:bb:cc:dd:ee:ff`, lowercase: what connecting names it by. */
+	address: string,
+	/**  `headphones`, `mouse`, `keyboard`, `trackpad` or `other`. */
+	kind: string,
+	connected: boolean,
+	/**  The raw parts, as the device reported them. */
+	batteries: DeviceBattery[],
+	/**
+	 *  The headline charge, never the case: the mean of left and right (the
+	 *  buds are worn as a pair), the one bud alone when only one reports, or
+	 *  the device's single battery. `None` when only a case reported.
+	 */
+	level: number | null,
+	/**  The charging case, shown small beside the headline. */
+	case: number | null,
+	/**
+	 *  "Left" or "Right" when `level` is that bud alone (the other is out of
+	 *  range or in the case), so the card can say so.
+	 */
+	singleBud: string | null,
+};
+
 /**
  *  Version, commit and build date, for pasting into a bug report. Baked in by
  *  `build.rs`; a tarball with no `.git` reports "unknown" rather than failing.
@@ -568,6 +956,38 @@ export type BuildInfo = {
 
 /**  Which card layout draws the preview. */
 export type CardKind = "message" | "email" | "event" | "task" | "note" | "issue" | "row" | "file" | "share" | "update" | "delete" | "money" | "fallback";
+
+export type ChargeState = "charging" | "discharging" | 
+/**  On the charger and at 100%. */
+"full" | 
+/**  On the charger but not charging: optimised charging holding at 80%. */
+"pluggedIn";
+
+/**
+ *  The history changed (a copy was recorded), so an open panel can refresh.
+ *  Carries no content: the event reaches every listener.
+ */
+export type ClipboardChanged = null;
+
+/**
+ *  One thing the user copied, as the panel lists it. The full text and the
+ *  image's pixels stay in Rust: the row needs a preview, and an action names
+ *  the entry by id.
+ */
+export type ClipboardEntry = {
+	id: number,
+	kind: ClipboardKind,
+	/**  First line or so of text, the file names, or "Image · 1200×800". */
+	preview: string,
+	/**  A small `data:` PNG for images; the CSP loads nothing else. */
+	thumbnail: string | null,
+	pinned: boolean,
+	/**  Unix seconds of the most recent copy of this content. */
+	copiedAt: number,
+	actions: SmartAction[],
+};
+
+export type ClipboardKind = "text" | "image" | "files";
 
 export type Config = {
 	hold: Binding | null,
@@ -602,6 +1022,14 @@ export type Connector = {
  */
 export type ConnectorsUpdated = Connector[];
 
+export type Day = {
+	/**  `YYYY-MM-DD` in the place's own timezone. */
+	day: string,
+	sky: Sky,
+	high: number | null,
+	low: number | null,
+};
+
 /**
  *  The shipped cleanup prompt and the date it last changed. `version` is what
  *  `Settings::seen_prompt_version` is compared against, to tell a user who
@@ -612,6 +1040,21 @@ export type DefaultPrompt = {
 	version: string,
 };
 
+export type Device = {
+	/**  CoreAudio's id: good for this boot, which is as long as a list lives. */
+	id: number,
+	name: string,
+	/**  What it is plugged in as: "Built-in", "Bluetooth", "USB", "HDMI"… */
+	transport: string,
+	isDefault: boolean,
+};
+
+export type DeviceBattery = {
+	/**  "Left", "Right", "Case", or "" for a single battery. */
+	label: string,
+	percent: number,
+};
+
 /**
  *  The words so far, while the live preview is on.
  * 
@@ -620,6 +1063,8 @@ export type DefaultPrompt = {
  *  pass over the whole recording once the key is up.
  */
 export type DictationPartial = string;
+
+export type Direction = "output" | "input";
 
 export type Engine = 
 /**  On-device whisper.cpp. No network, no API key. */
@@ -636,10 +1081,19 @@ export type Entry = {
 	id: number,
 	/**  Unix seconds. */
 	createdAt: number,
-	/**  What the transcriber returned. */
+	kind: EntryKind,
+	/**  What the transcriber returned. For a command, what the user said. */
 	rawTranscript: string,
-	/**  What was actually pasted, after cleanup. */
+	/**
+	 *  What was actually pasted, after cleanup. For a command, how the run
+	 *  ended: its answer, or the error that stopped it.
+	 */
 	finalTranscript: string,
+	/**
+	 *  False for a command that ended in an error. Dictations are always true:
+	 *  a failed one writes no row.
+	 */
+	success: boolean,
 	appName: string | null,
 	durationMs: number,
 	/**
@@ -652,6 +1106,26 @@ export type Entry = {
 	 *  The transcript outlives the WAV, so this is often null.
 	 */
 	audioPath: string | null,
+};
+
+/**
+ *  What a history row records. Dictations paste text; commands (agent and ask
+ *  runs, whichever key started them) end in an answer or an error.
+ */
+export type EntryKind = "dictation" | "command";
+
+export type Event = {
+	/**  Unique per occurrence: a recurring event's uid is shared by all of them. */
+	id: string,
+	title: string,
+	/**  Unix ms. An all-day event runs local midnight to the next. */
+	start: number,
+	end: number,
+	allDay: boolean,
+	location: string | null,
+	/**  A video-call link, from the event's URL or its location. */
+	joinUrl: string | null,
+	calendar: string,
 };
 
 export type Field = {
@@ -668,6 +1142,11 @@ export type Field = {
 	before: string | null,
 	origin: Origin | null,
 	editable: boolean,
+	/**
+	 *  A sheet's rows as the sheet draws them: column letters first, then the
+	 *  first few rows' cells. Empty for anything that is not rows of cells.
+	 */
+	cells: string[][],
 };
 
 /**
@@ -678,21 +1157,72 @@ export type Field = {
  */
 export type FinderResults = {
 	query: string,
+	/**  The list's header: "2025 Tax Returns — 10 items". */
+	heading: string,
 	/**  Total matches found, which may exceed `files.len()` when truncated. */
 	count: number,
 	files: FoundFile[],
 };
 
+/**  One day of the chart. */
+export type FocusDay = {
+	/**  `YYYY-MM-DD`, local. */
+	day: string,
+	/**  Finished sessions that day. */
+	sessions: number,
+	minutes: number,
+};
+
 /**
- *  One file the notch grid draws for a Finder search: its path, display name,
- *  and a Quick Look thumbnail if one could be rendered.
+ *  The timer and keep-awake as the webview draws them. Pushed whenever either
+ *  changes by anything other than the clock; the webview counts the seconds
+ *  itself against `TimerState`'s wall-clock fields.
+ */
+export type FocusSnapshot = {
+	timer: TimerState,
+	awake: AwakeState,
+};
+
+export type FocusStats = {
+	/**
+	 *  Consecutive days with a session, ending today — or yesterday, while
+	 *  today is still young.
+	 */
+	streak: number,
+	/**  Seven days, oldest first, ending today; empty days included. */
+	week: FocusDay[],
+};
+
+/**
+ *  One file the notch draws for a Finder search: its path, display name,
+ *  and a Quick Look thumbnail if one could be rendered. A document's row reads
+ *  like Finder's list view, so its name, size and date arrive formatted.
  */
 export type FoundFile = {
 	path: string,
 	name: string,
+	/**  The name cut in the middle to fit the list's Name column. */
+	label: string,
+	/**  "4.9 KB"; "--" for a folder. */
+	size: string,
+	/**  "8:02 PM" today, "Yesterday", then the date. */
+	modified: string,
 	/**  A `data:image/png;base64,…` preview, or None when Quick Look has none. */
 	thumbnail: string | null,
 };
+
+export type FrontWindowInfo = {
+	/**  Accessibility granted: without it a snap cannot move anything. */
+	trusted: boolean,
+	/**  The app whose window a snap would move. */
+	app: string | null,
+};
+
+/**  The panel's answer to a gate. */
+export type GateDecision = "allowOnce" | "allowAlways" | "decline";
+
+/**  What the user chose for one app and action. */
+export type Grant = "always" | "ask" | "never";
 
 /**
  *  What the settings pane needs to draw: whether ours are in, and who owns
@@ -727,6 +1257,172 @@ export type InstalledApp = {
 	icon: string | null,
 };
 
+/**  One live activity. */
+export type Island = {
+	/**
+	 *  Stable for the activity's life: pushing the same id again updates it
+	 *  in place. Namespace by owner — `agents`, `toast:3`, `download:<path>`.
+	 */
+	id: string,
+	kind: IslandKind,
+	priority: IslandPriority,
+	/**
+	 *  A `data:` image (an app's icon, as `aloud_selection::app_icon` and
+	 *  `aloud_agent::icons` make them), or the name of a glyph the webview
+	 *  knows (`agents`, `download`, `timer`…). None draws a neutral glyph.
+	 */
+	icon: string | null,
+	/**  What it is: "Claude · aloud-tauri", "Sent the email to David". */
+	title: string,
+	/**
+	 *  Its live value, short enough for the closed notch: "2 running",
+	 *  "18:42". For an alert, the app it happened in.
+	 */
+	detail: string | null,
+	actions: IslandAction[],
+	/**
+	 *  Milliseconds it lives after its last push; None lives until removed.
+	 *  `u32` and not a duration type: specta refuses 64-bit integers, which
+	 *  would reach the webview as a BigInt.
+	 */
+	expires: number | null,
+	/**
+	 *  Draws a × in Now › Overview that takes it down (`dismiss_island`). Only
+	 *  for an island whose owner remembers the dismissal, or its next poll
+	 *  puts it straight back.
+	 */
+	dismissible?: boolean,
+	/**
+	 *  The size of the takeover. None is what every push made before tiers
+	 *  means: an alert is a [`IslandTier::Peek`], and a live island is no takeover
+	 *  at all — see [`Island::takeover_tier`].
+	 */
+	tier?: IslandTier | null,
+	/**
+	 *  A level for a bar, 0–100: volume, brightness. Updates to it alone are
+	 *  rate-limited by [`Queue::push`].
+	 */
+	level?: number | null,
+	/**
+	 *  How long it stays, in milliseconds, before it leaves on its own. None
+	 *  is its tier's default ([`gate::dwell_ms`]); a card has none.
+	 */
+	dwellMs?: number | null,
+	/**
+	 *  A whisper's one word or number — "Sent", "20%" — which `detail`
+	 *  (the app, for an alert) cannot be.
+	 */
+	short?: string | null,
+	/**
+	 *  A peek or card's second line, after the bold title: what the message
+	 *  says, when the meeting starts. Shown and forgotten, like the rest.
+	 */
+	body?: string | null,
+	source?: IslandSource,
+	/**
+	 *  Set by the gate, never by a producer: a peek or card shown as a side
+	 *  capsule because the user is typing, opened by pointing at it.
+	 */
+	shrunk?: boolean,
+};
+
+/**  A button on an island. */
+export type IslandAction = {
+	/**  The button's word: "Show", "Undo", "Review". */
+	label: string,
+	/**
+	 *  An id in the webview's action registry (`features/notch/actions.ts`),
+	 *  the one ⌘K runs too — so an island never carries code, only a name.
+	 */
+	action: string,
+	/**  Its arguments. Strings, because specta will not export a JSON value. */
+	args: { [key in string]: string },
+};
+
+/**
+ *  What a push, a removal or the clock did to the queue — the `island`
+ *  event's payload, applied by the webview in order.
+ */
+export type IslandChange = { op: "add"; value: Island } | { op: "update"; value: Island } | 
+/**  By id. */
+{ op: "remove"; value: string };
+
+/**
+ *  One change to the queue, with the ranked order after it — so the webview
+ *  orders its copy by Rust's ranking rather than by a second one of its own.
+ */
+export type IslandChanged = {
+	change: IslandChange,
+	order: string[],
+};
+
+/**  How an island is drawn. */
+export type IslandKind = 
+/**
+ *  Ongoing: drawn beside the camera in the closed notch, and as a row in
+ *  Now › Overview while it lasts.
+ */
+"live" | 
+/**  Just happened: a takeover, drawn at its [`IslandTier`]'s size, then gone. */
+"alert";
+
+/**  What it costs to miss. Declared in rank order, so `Ord` is the ranking. */
+export type IslandPriority = 
+/**  Ambient: worth a glance if there is room. */
+"low" | "normal" | 
+/**  Time-bound: a timer about to end, a download finishing. */
+"high" | 
+/**  Waiting on the user: an agent asking, a call ringing. */
+"urgent";
+
+/**
+ *  Who raised a takeover, which decides the rules that apply to it and the
+ *  Settings switch that can silence it.
+ */
+export type IslandSource = 
+/**
+ *  Aloud's own: a confirmation, a timer, a failed action. Never held back
+ *  by Focus and never switched off here.
+ */
+"own" | 
+/**
+ *  The user pressed a key for it (volume, mic mute, Caps Lock): it draws
+ *  at once, even over a whisper or a card, because it was asked for.
+ */
+"hud" | 
+/**  Battery, charger, Low Power Mode. */
+"power" | 
+/**  Drives, displays, Wi-Fi, VPN, Bluetooth. */
+"connectivity" | 
+/**  Something that happened in another app: a screenshot, a download. */
+"banners";
+
+/**
+ *  How much of the notch a takeover takes: size follows the cost of missing it.
+ *  Declared smallest first, so `Ord` is the size.
+ */
+export type IslandTier = 
+/**
+ *  A side extension at the notch's own height: a glyph and one word or
+ *  number, 1.2–2 s, no buttons.
+ */
+"whisper" | 
+/**  One extra row: app, title, one line, 4 s, opens on hover. */
+"peek" | 
+/**
+ *  The big drop, sticky, with buttons. Only for something that needs the
+ *  user: a call, an approval, battery under 10%, a failed critical action.
+ */
+"card";
+
+/**
+ *  How many takeovers are waiting for their turn: the "+N" the webview draws
+ *  on whatever is showing. Distinct items, never repeats.
+ */
+export type IslandsWaiting = {
+	count: number,
+};
+
 /**
  *  A physical key, side-specific where the distinction matters — Right Option
  *  alone is a popular dictation binding.
@@ -734,6 +1430,24 @@ export type InstalledApp = {
 export type Key = "leftCommand" | "rightCommand" | "leftShift" | "rightShift" | "leftOption" | "rightOption" | "leftControl" | "rightControl" | 
 /**  macOS only; no Windows equivalent. */
 "fn" | "escape" | "space" | ({ char: string }) & { f?: never } | ({ f: number }) & { char?: never };
+
+export type Kind = "file" | "folder";
+
+/**  A file the panel can open. */
+export type LaunchFile = {
+	path: string,
+	name: string,
+	/**  Its folder, `~`-shortened, for the row's subtitle. */
+	folder: string,
+};
+
+/**  App names, as `installed_apps` reports them (what `open -a` takes). */
+export type LauncherPrefs = {
+	/**  In the order the user pinned them. */
+	pins: string[],
+	/**  Most recent first. */
+	recents: string[],
+};
 
 /**
  *  A local git repo the composer can offer, so the user picks instead of typing
@@ -744,11 +1458,33 @@ export type LocalRepo = {
 	path: string,
 };
 
+export type LyricLine = {
+	ms: number,
+	/**  Empty for an instrumental break; the view draws a rest. */
+	text: string,
+};
+
+export type Lyrics = {
+	/**  Timed lines, empty when LRCLIB only has plain text. */
+	lines: LyricLine[],
+	plain: string | null,
+	instrumental: boolean,
+};
+
 export type Macro = {
 	/**  The spoken phrase that triggers expansion, e.g. "my address". */
 	trigger: string,
 	expansion: string,
 };
+
+export type MarketState = "open" | "pre" | "after" | "closed";
+
+/**
+ *  The players, as of the last poll. Pushed whenever the track or state
+ *  changes, and on every poll while a Media view is on screen (the position
+ *  moves; the view interpolates between polls).
+ */
+export type MediaNowPlaying = Reading;
 
 export type MeetingPhase = 
 /**
@@ -756,6 +1492,18 @@ export type MeetingPhase =
  *  drifting off a single start event.
  */
 { phase: "recording"; elapsedSecs: number; words: number } | { phase: "saving" } | { phase: "idle" };
+
+/**  Where the watcher stands, for Settings to say in words. */
+export type MirrorState = 
+/**  Off, or not started yet. */
+{ kind: "off" } | { kind: "watching" } | 
+/**
+ *  The database is there and macOS will not let this app read it: Full
+ *  Disk Access is the one fix.
+ */
+{ kind: "needsAccess" } | 
+/**  Readable but not what this build knows how to read. */
+{ kind: "unsupported"; detail: string };
 
 /**
  *  Model download progress, 0.0–1.0. First use of the local engine fetches
@@ -765,6 +1513,47 @@ export type MeetingPhase =
 export type ModelDownload = number | null;
 
 export type Modifier = "command" | "control" | "option" | "shift" | "function";
+
+/**
+ *  What the notch's takeovers may do (`aloud_islands::gate`). Quiet is the
+ *  only one that is off by default: the rest are the notch doing its job.
+ */
+export type NotchEvents = {
+	/**  Everything one tier smaller: a card becomes a peek, a peek a whisper. */
+	quiet?: boolean,
+	/**  Hold ordinary system events while a macOS Focus is on. */
+	focusAware?: boolean,
+	/**  Volume, brightness, mic mute, Caps Lock: whispers for a key you pressed. */
+	huds?: boolean,
+	/**  Battery, charger and Low Power Mode. */
+	power?: boolean,
+	/**  Drives, displays, Wi-Fi, VPN and Bluetooth. */
+	connectivity?: boolean,
+	/**  What happened in another app: a screenshot, a finished download. */
+	banners?: boolean,
+	/**
+	 *  Eat the volume and brightness keys and draw the level in the notch
+	 *  instead of macOS's HUDs. Off: the keys are only watched and macOS draws
+	 *  its own. Needs `huds` on, or the keys would move the level with nothing
+	 *  to show it. Was `replaceVolumeHud` (volume only) before brightness
+	 *  joined it; `from_json` carries a saved choice over. (Not a serde alias:
+	 *  that makes specta emit split Serialize/Deserialize types for the whole
+	 *  of `Settings`.)
+	 */
+	replaceSystemHuds?: boolean,
+	/**
+	 *  Mirror other apps' notifications in the notch (Messages, a ringing
+	 *  FaceTime call, Slack…) by reading Notification Center's database.
+	 *  Off until chosen: it needs Full Disk Access and reads what other apps
+	 *  say. Distinct from `banners`, which is Aloud's own events.
+	 */
+	appNotifications?: boolean,
+	/**
+	 *  Bundle ids of the apps mirrored when `app_notifications` is on. Empty
+	 *  mirrors nothing.
+	 */
+	appNotificationAllow?: string[],
+};
 
 /**
  *  Whether the pointer is over the notch.
@@ -777,6 +1566,16 @@ export type NotchHover = {
 	over: boolean,
 };
 
+/**
+ *  Asks the overlay to open the notch panel at a section: what "show my agents"
+ *  resolves to on the fast path. `sub` is `None` for "wherever that section was
+ *  last left".
+ */
+export type NotchOpen = {
+	section: string,
+	sub: string | null,
+};
+
 export type Note = {
 	path: string,
 	title: string,
@@ -787,6 +1586,39 @@ export type Note = {
 	 */
 	date: number,
 	content: string,
+};
+
+export type NowPlaying = {
+	player: Player,
+	source: Source,
+	state: PlayState,
+	title: string,
+	artist: string,
+	album: string,
+	/**  `u32`: specta forbids 64-bit ints on the wire, and 49 days of track fit. */
+	durationMs: number,
+	positionMs: number,
+	/**
+	 *  Playback speed in percent (100 is normal). Only a web page has one; the
+	 *  players report 100.
+	 */
+	speedPct: number,
+	/**
+	 *  Spotify's own https cover URL, a YouTube thumbnail, or a page's
+	 *  `og:image`; Music has none and is read from the app. For MediaRemote an
+	 *  opaque `mediaremote:<n>` that changes when the cover does.
+	 */
+	artworkUrl: string | null,
+	/**
+	 *  Browser and MediaRemote only, and only when the title and artist are a
+	 *  track: a page that names its song cleanly, or a music app.
+	 */
+	song: Song | null,
+};
+
+/**  The watcher's state, sent when it changes: Settings says it in words. */
+export type NudgeStateChanged = {
+	state: MirrorState,
 };
 
 /**  Whose words a text field holds. */
@@ -845,7 +1677,21 @@ export type OverlayStyleChanged = {
 /**  A capability the app needs the OS to allow. */
 export type Permission = 
 /**  Global hotkeys, synthetic paste, and reading the focused selection. */
-"accessibility" | "microphone";
+"accessibility" | "microphone" | 
+/**  Control of Calendar.app (Automation): today's events in the notch. */
+"calendar" | 
+/**  Control of Reminders.app (Automation): today's reminders in the notch. */
+"reminders";
+
+/**  One app and action in the Settings pane, with what Aloud may do there. */
+export type PermissionRow = {
+	key: string,
+	app: string,
+	action: string,
+	grant: Grant,
+	/**  "Always allow" can never apply, so the row offers Ask or Never only. */
+	strict: boolean,
+};
 
 export type PermissionStatus = {
 	permission: Permission,
@@ -864,6 +1710,13 @@ export type Phase = "idle" |
  */
 "noSpeech" | "error";
 
+/**  A colour the eyedropper picked. */
+export type PickedColor = {
+	id: number,
+	hex: string,
+	pickedAt: number,
+};
+
 /**
  *  A tool the run intends to call. No arguments: they arrive with the call
  *  itself, which is where it stops being a plan and starts being an action.
@@ -871,6 +1724,25 @@ export type Phase = "idle" |
 export type PlannedCall = {
 	name: string,
 	app: string,
+};
+
+/**  Stopped is not here: a player with nothing loaded is "nothing playing". */
+export type PlayState = "playing" | "paused";
+
+export type Player = "spotify" | "music" | 
+/**  A tab in a browser; which one is [`NowPlaying::source`]. */
+"browser" | 
+/**  Whatever app macOS says is playing; which one is [`NowPlaying::source`]. */
+"mediaRemote";
+
+export type PrivacyUse = {
+	mic: boolean,
+	camera: boolean,
+	/**
+	 *  Apps holding the mic, sorted; empty when only the device-level answer
+	 *  was available.
+	 */
+	micApps: string[],
 };
 
 /**
@@ -887,7 +1759,42 @@ export type Quota = {
 	fiveHour: QuotaWindow | null,
 	sevenDay: QuotaWindow | null,
 	sevenDayOpus: QuotaWindow | null,
+	sevenDaySonnet: QuotaWindow | null,
+	sevenDayOauthApps: QuotaWindow | null,
+	sevenDayCowork: QuotaWindow | null,
+	sevenDayOmelette: QuotaWindow | null,
 	extraUsagePercent: number | null,
+	extra: QuotaExtra | null,
+	/**  The app's own readings of the last week, oldest first, this one last. */
+	history: QuotaSample[],
+};
+
+/**  The extra-usage credit pool, amounts in minor units (cents) of `currency`. */
+export type QuotaExtra = {
+	enabled: boolean,
+	monthlyLimit: number | null,
+	usedCredits: number | null,
+	currency: string | null,
+	utilization: number | null,
+};
+
+/**
+ *  One reading of the two windows that have a chart. See
+ *  [`crate::history::Entry`] on why the i64 exports as `number`.
+ * 
+ *  Each window carries the reset time it was reading. Two samples with the
+ *  same reset belong to one window, where use only climbs, so the chart can
+ *  join them across the hours the view was closed; a different reset means the
+ *  window rolled over in between, and the line must break there.
+ */
+export type QuotaSample = {
+	/**  Unix seconds. */
+	at: number,
+	fiveHour: number | null,
+	/**  Unix seconds. Absent in samples saved before this field existed. */
+	fiveHourResetsAt?: number | null,
+	sevenDay: number | null,
+	sevenDayResetsAt?: number | null,
 };
 
 /**  One rolling limit window, flattened for the webview. */
@@ -901,13 +1808,43 @@ export type QuotaWindow = {
 	resetsAt: string | null,
 };
 
+/**
+ *  One look at the players. `denied` is a player that is running but has not
+ *  granted the Automation permission: without it the view would say "nothing
+ *  playing" over a perfectly good song. `browsers` is the same for running
+ *  browsers, which have a second switch (JavaScript from Apple Events).
+ */
+export type Reading = {
+	now: NowPlaying | null,
+	/**
+	 *  Every distinct source that is playing, most recently started first,
+	 *  `now` among them when it plays. The view shows only `now`; the notch
+	 *  draws an island for each of these.
+	 */
+	playing?: NowPlaying[],
+	denied: Player | null,
+	browsers: BrowserIssue[],
+};
+
+export type Reminder = {
+	id: string,
+	title: string,
+	due: number,
+	/**  Due on a day, not at a time. */
+	allDay: boolean,
+	list: string,
+};
+
 /**  What a field is, which decides how the card draws it. */
 export type Role = 
 /**  Where a message goes: a channel or chat. */
 "destination" | 
 /**  Who it goes to: an address or attendee list. */
 "person" | "heading" | 
-/**  A date or time, already formatted. */
+/**
+ *  A date or time, already formatted. On an event, `items[0]` is the line
+ *  under it: time zone and length.
+ */
 "when" | 
 /**  Body text, shown in full and never truncated. */
 "text" | 
@@ -933,11 +1870,28 @@ export type Safer = {
 	tool: string,
 };
 
+export type ScreenShot = {
+	name: string,
+	path: string,
+	/**  Unix seconds. */
+	taken: number,
+};
+
 export type SearchResult = {
 	note: Note,
 	score: number,
 	/**  Text around the first body match, for the results list. */
 	snippet: string,
+};
+
+/**
+ *  One bar of the day's line. `x` is where it falls in the regular session
+ *  (0 at the open, 1 at the close), worked out here so the webview needs no
+ *  clock and a half-finished day draws as a half-finished line.
+ */
+export type SeriesPoint = {
+	x: number | null,
+	y: number | null,
 };
 
 /**
@@ -949,15 +1903,17 @@ export type Settings = {
 	groqApiKey?: string,
 	composioApiKey?: string,
 	/**
-	 *  Gemini key. Agent tool-call parsing runs here — Groq's tokens-per-minute
-	 *  limit is too low for the agent's heavier calls.
+	 *  Gemini key: the brain behind Groq — see `aloud_agent::brains` for the
+	 *  order.
 	 */
 	geminiApiKey?: string,
 	/**
-	 *  Cerebras key. Commands run here first — see `aloud_agent::brains` —
-	 *  and fall back to Gemini when it is unset or out of budget.
+	 *  Cerebras key. Off the brain list while its account is unpaid; the eval
+	 *  still reaches it by name.
 	 */
 	cerebrasApiKey?: string,
+	/**  NVIDIA key: the last brain, for when Groq's and Gemini's budgets trip. */
+	nvidiaApiKey?: string,
 	/**
 	 *  Deepgram key. Always-listening streams the mic to Deepgram's Flux, which
 	 *  decides where a spoken request ends; without it the mode falls back to a
@@ -1053,12 +2009,26 @@ export type Settings = {
 	showMenuBarIcon?: boolean,
 	/**  Drop-down pill or menu-bar wings; wings are macOS-only. */
 	overlayStyle?: OverlayStyle,
+	/**  How the notch's takeovers behave: Quiet mode, Focus, per-source switches. */
+	notchEvents?: NotchEvents,
 	/**
 	 *  Whether a coding agent's permission request opens the notch by itself.
 	 *  Off means the request waits quietly — the Agents surface flags it, and
 	 *  the user opens the notch when they hover. The hook waits either way.
 	 */
 	agentOpenOnPermission?: boolean,
+	/**
+	 *  Whether the notch's Now Playing also reads video and audio playing in a
+	 *  browser tab. It reads only media state (title, host, position), but it
+	 *  does script the browser, which asks macOS for Automation permission.
+	 */
+	browserMedia?: boolean,
+	/**
+	 *  Whether the notch's Now Playing shows whatever any app plays, through
+	 *  macOS's private MediaRemote interface (`aloud_media::mediaremote`). Off
+	 *  means the helper process is not running at all.
+	 */
+	anyAppMedia?: boolean,
 	overlayDisplay?: OverlayDisplay,
 	/**
 	 *  Put the previous clipboard back after pasting. Off leaves the dictated
@@ -1099,12 +2069,145 @@ export type Settings = {
 };
 
 /**
+ *  What a drop put on the shelf. `failed` names what could not be copied;
+ *  the rest are shelved.
+ */
+export type ShelfAdded = {
+	added: ShelfItem[],
+	failed: string[],
+};
+
+/**  Which list changed, so the view showing it can read it again. */
+export type ShelfArea = "files" | "shots" | "downloads" | "drives";
+
+export type ShelfChanged = ShelfArea;
+
+export type ShelfDownload = {
+	name: string,
+	path: string,
+	size: number,
+	/**  Unix seconds it last changed — when it finished, to the second. */
+	finished: number,
+};
+
+export type ShelfDrive = {
+	name: string,
+	/**  `/Volumes/<name>` — what `diskutil eject` is given. */
+	mount: string,
+	/**
+	 *  How it is attached, in diskutil's words: "USB", "Disk Image",
+	 *  "Secure Digital".
+	 */
+	bus: string,
+	size: number,
+	free: number,
+};
+
+/**
+ *  What `sips` can write. Declared with its extension, so a name and a format
+ *  never disagree.
+ */
+export type ShelfImageFormat = "png" | "jpeg" | "heic" | "tiff";
+
+/**  One thing on the shelf. */
+export type ShelfItem = {
+	id: string,
+	/**  Shown, and what a drag out is called. */
+	name: string,
+	/**  The shelf's copy — what is dragged out and shared. */
+	path: string,
+	/**
+	 *  Where it came from. Dropping the same original again replaces the copy
+	 *  rather than shelving a stale twin.
+	 */
+	original: string,
+	kind: Kind,
+	/**  Bytes; a folder's is its own entry size, not its contents'. */
+	size: number,
+	/**  Unix seconds when it was shelved. */
+	added: number,
+	/**  A picture `sips` can convert and the notch can preview. */
+	image: boolean,
+};
+
+/**
+ *  What the Shelf watches. Screenshots and Downloads read folders macOS
+ *  guards behind a permission prompt, so they start off: the first prompt
+ *  should come from the user turning the feature on, not from launch.
+ */
+export type ShelfPrefs = {
+	shots?: boolean,
+	downloads?: boolean,
+	/**  `/Volumes` is not protected, so this one needs no permission. */
+	drives?: boolean,
+};
+
+export type ShelfWatch = "shots" | "downloads" | "drives";
+
+/**  How `screencapture` is asked to capture. */
+export type ShotCapture = 
+/**
+ *  Drag a region; the picture lands in the screenshot folder, so the
+ *  shelf's watcher picks it up like any other.
+ */
+"region" | 
+/**  Drag a region; the picture goes to the clipboard only. */
+"clipboard";
+
+/**
  *  A note id in Notes, a saved file, a folder in the app that opened it — for
  *  [`show_result`]. The tools work in the background, so this is the way back.
  */
 export type ShowTarget = {
 	app: string,
 	target: string,
+};
+
+export type Sky = "clear" | "partlyCloudy" | "cloudy" | "fog" | "drizzle" | "rain" | "snow" | "storm";
+
+/**  Something worth doing with an entry, offered as a button on its row. */
+export type SmartAction = {
+	id: string,
+	label: string,
+};
+
+export type Snap = "left" | "right" | "top" | "bottom" | "topLeft" | "topRight" | "bottomLeft" | "bottomRight" | "maximize" | "center";
+
+/**  A snippet: text kept to be pasted again. */
+export type Snippet = {
+	id: number,
+	name: string,
+	/**  A short word to find it by ("sig", "addr"). Empty for none. */
+	trigger: string,
+	body: string,
+};
+
+/**  A track and artist the page names cleanly enough to ask for lyrics. */
+export type Song = {
+	title: string,
+	artist: string,
+};
+
+export type SoundState = {
+	outputs: Device[],
+	inputs: Device[],
+	/**
+	 *  None when the default input has neither a mute switch nor a level to
+	 *  pull to zero (some USB interfaces): the view hides the switch.
+	 */
+	micMuted: boolean | null,
+};
+
+/**
+ *  Where a track is playing: the app, and for a browser the page's host and
+ *  which tab (an opaque "window/tab" the controls hand back to the browser).
+ */
+export type Source = {
+	app: string,
+	/**  Known for what MediaRemote reports. */
+	bundleId: string | null,
+	host: string | null,
+	tab: string | null,
 };
 
 /**  One closed span. */
@@ -1143,6 +2246,68 @@ export type StatsView = {
 	timeSavedSeconds: number | null,
 } & Stats;
 
+export type SyncMark = {
+	path: string,
+	state: SyncState,
+};
+
+/**
+ *  How far a copy into the Notes app got. `permission` is the one failure the
+ *  webview answers differently: the fix is a switch in System Settings, not a
+ *  retry.
+ */
+export type SyncReport = {
+	pushed: number,
+	error: string | null,
+	permission: boolean,
+};
+
+/**  Where a note stands against its copy in Notes. */
+export type SyncState = 
+/**  Never copied. */
+"new" | 
+/**  The copy in Notes matches. */
+"synced" | 
+/**  Copied once, then changed here. */
+"edited";
+
+/**
+ *  One reading. Floats throughout: specta refuses 64-bit integers, and a
+ *  byte count shown as "11.2 GB" does not need exactness.
+ */
+export type SystemStats = {
+	/**  0–100, all cores. */
+	cpu: number | null,
+	memoryUsedGb: number | null,
+	memoryTotalGb: number | null,
+	diskUsedGb: number | null,
+	diskTotalGb: number | null,
+	/**  Bytes per second since the previous read, all non-loopback interfaces. */
+	netDown: number | null,
+	netUp: number | null,
+	thermal: Thermal,
+};
+
+export type Thermal = "nominal" | "fair" | "serious" | "critical";
+
+export type Ticker = {
+	symbol: string,
+	name: string,
+	price: number | null,
+	/**  Against the previous close. */
+	changePct: number | null,
+	state: MarketState | null,
+	/**  Open, but the last trade is old: do not read the price as now. */
+	delayed: boolean,
+	/**  Why there is no price, in a sentence. */
+	error: string | null,
+	currency: string | null,
+	/**  Yesterday's close: the baseline the day's line is drawn against. */
+	previousClose: number | null,
+	/**  The regular session so far, empty when there are fewer than two bars. */
+	series: SeriesPoint[],
+};
+
 /**
  *  How hard the card makes it to say yes. Default-Always grants never reach a
  *  card, so there is no tier below Confirm.
@@ -1151,6 +2316,62 @@ export type Tier = "confirm" |
 /**  Red, needs a click, never auto-runs, and "Always allow" cannot cover it. */
 "strict";
 
+/**  Time saved, split by where it came from. */
+export type TimeSaved = {
+	/**  Dictation plus actions. */
+	totalSeconds: number | null,
+	dictationSeconds: number | null,
+	actionSeconds: number | null,
+	/**  Agent commands that completed. */
+	actions: number,
+};
+
+/**  Today and all time, for the Agents › Voice tile. */
+export type TimeSavedView = {
+	allTime: TimeSaved,
+	today: TimeSaved,
+};
+
+export type TimerMode = "pomodoro" | "stopwatch";
+
+export type TimerPhase = "focus" | "shortBreak" | "longBreak";
+
+/**  Minutes, so the two common rhythms are one tap each. */
+export type TimerPreset = {
+	focus: number,
+	rest: number,
+};
+
+/**
+ *  Everything the webview needs to draw the timer, with no clock of its own to
+ *  drift: it reads `Date.now()` against `at` / `held_ms`.
+ */
+export type TimerState = {
+	mode: TimerMode,
+	phase: TimerPhase,
+	status: TimerStatus,
+	/**  1…=`rounds`. */
+	round: number,
+	rounds: number,
+	preset: TimerPreset,
+	/**
+	 *  Running: when a countdown ends, or when a stopwatch (net of pauses)
+	 *  began, in unix ms.
+	 */
+	at: number,
+	/**  Not running: milliseconds left (countdown) or elapsed (stopwatch). */
+	heldMs: number,
+	/**  The phase's full length, for the ring; 0 for a stopwatch. */
+	totalMs: number,
+};
+
+export type TimerStatus = "idle" | "running" | "paused" | 
+/**
+ *  A phase just ended and the next one waits for the user: coming back
+ *  from lunch must not find the whole break already spent.
+ */
+"ready";
+
 /**
  *  A tool call for display. Kept separate from `ParsedAction` so the UI
  *  contract does not leak parser internals.
@@ -1158,8 +2379,13 @@ export type Tier = "confirm" |
 export type ToolCall = {
 	/**  e.g. "github.create_issue". */
 	name: string,
-	/**  The target app, e.g. "github". */
+	/**
+	 *  The target app, e.g. "github". On a gate, the app as its permission
+	 *  names it: "Notes" rather than "macOS".
+	 */
 	app: string,
+	/**  The app's icon as a data URI, on a gate; None draws a neutral glyph. */
+	icon?: string | null,
 	/**
 	 *  Args as strings, not `serde_json::Value`: specta refuses to export its
 	 *  i64-backed number type. Non-string values keep their JSON form.
@@ -1173,6 +2399,16 @@ export type ToolCall = {
 	 *  event is not sized to the card.
 	 */
 	preview: ActionPreview | null,
+	/**
+	 *  The gate may offer "Always allow": false for strict actions and for a
+	 *  write outside content asked for.
+	 */
+	canAlways: boolean,
+	/**
+	 *  The loop's step for this call: a round's calls all start before any
+	 *  finishes, so a result finds its row by this. None on the fast path.
+	 */
+	id?: number | null,
 };
 
 export type ToolResult = {
@@ -1180,6 +2416,43 @@ export type ToolResult = {
 	message: string,
 	/**  What the row's Show button brings back, when the step made something. */
 	show: ShowTarget | null,
+	/**
+	 *  A line the row keeps under it: why a saved grant refused the step. A
+	 *  status line would be wiped by this very result.
+	 */
+	note: string | null,
+	/**  The folder a tidy-up sorted, which the row's Undo puts back. */
+	tidied: string | null,
+	/**  The [`ToolCall::id`] this result finishes. */
+	id?: number | null,
+};
+
+export type Transport = "play" | "pause" | "toggle" | "next" | "previous";
+
+/**  Which watcher a switch names. */
+export type Watcher = "privacy" | "battery";
+
+/**
+ *  The two background watchers, each with an on/off the user owns. Both
+ *  default on: they are quiet until there is something worth a glance.
+ */
+export type Watchers = {
+	/**  An island while any app is using the microphone or camera. */
+	privacy?: boolean,
+	/**  An island on a full charge, and while the battery is low. */
+	battery?: boolean,
+};
+
+export type Weather = {
+	place: string,
+	temperature: number | null,
+	feelsLike: number | null,
+	sky: Sky,
+	/**  "Partly cloudy". */
+	summary: string,
+	isDay: boolean,
+	/**  Today first, five days. */
+	days: Day[],
 };
 
 /* Tauri Specta runtime */

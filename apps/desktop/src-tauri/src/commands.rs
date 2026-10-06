@@ -39,12 +39,22 @@ pub fn update_settings(
     }
 
     crate::tray::set_visible(&app, settings.show_menu_bar_icon);
+    crate::keys::apply_settings(&settings.notch_events);
+    crate::nudges::apply(&app, &settings.notch_events);
 
     let mut current = state
         .settings
         .lock()
         .map_err(|_| "settings lock poisoned")?;
+    let browsers_changed = current.browser_media != settings.browser_media
+        || current.any_app_media != settings.any_app_media;
     *current = settings;
+    drop(current);
+    if browsers_changed {
+        // Now Playing should show or drop the browser tab, or start or stop the
+        // any-app helper, now and not at the next tick.
+        crate::media::poll_now();
+    }
     Ok(())
 }
 
@@ -66,6 +76,21 @@ pub struct StatsView {
     #[serde(flatten)]
     pub stats: Stats,
     pub time_saved_seconds: f64,
+}
+
+/// Time saved by dictating and by agent commands completing, today and all
+/// time. The formula and its assumed minutes per action live in
+/// `aloud_store::stats`.
+#[tauri::command]
+#[specta::specta]
+pub fn get_time_saved(state: State<'_, AppState>) -> CmdResult<aloud_store::stats::TimeSavedView> {
+    let stats = state.pipeline.stats();
+    let history = state.pipeline.history_db().map_err(|e| format!("{e:#}"))?;
+    to_string_err(aloud_store::stats::time_saved(
+        &stats,
+        &history,
+        chrono::Local::now(),
+    ))
 }
 
 #[tauri::command]
@@ -170,13 +195,20 @@ pub async fn installed_apps() -> CmdResult<Vec<aloud_selection::InstalledApp>> {
         .map_err(|e| format!("listing installed apps: {e}"))
 }
 
-/// One file the notch grid draws for a Finder search: its path, display name,
-/// and a Quick Look thumbnail if one could be rendered.
+/// One file the notch draws for a Finder search: its path, display name,
+/// and a Quick Look thumbnail if one could be rendered. A document's row reads
+/// like Finder's list view, so its name, size and date arrive formatted.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FoundFile {
     pub path: String,
     pub name: String,
+    /// The name cut in the middle to fit the list's Name column.
+    pub label: String,
+    /// "4.9 KB"; "--" for a folder.
+    pub size: String,
+    /// "8:02 PM" today, "Yesterday", then the date.
+    pub modified: String,
     /// A `data:image/png;base64,…` preview, or None when Quick Look has none.
     pub thumbnail: Option<String>,
 }
@@ -189,6 +221,8 @@ pub struct FoundFile {
 #[serde(rename_all = "camelCase")]
 pub struct FinderResults {
     pub query: String,
+    /// The list's header: "2025 Tax Returns — 10 items".
+    pub heading: String,
     /// Total matches found, which may exceed `files.len()` when truncated.
     pub count: u32,
     pub files: Vec<FoundFile>,
@@ -216,9 +250,16 @@ pub async fn finder_search(query: String, kind: String) -> CmdResult<FinderResul
                         let path = row["path"].as_str().unwrap_or_default().to_string();
                         let name = row["name"].as_str().unwrap_or_default().to_string();
                         let thumbnail = aloud_native::thumbnail(&path);
+                        // Gone since the search: still listed, with nothing
+                        // to say about its size or age.
+                        let (label, size, modified) = aloud_native::file_row(&path, &name)
+                            .unwrap_or_else(|| (name.clone(), String::new(), String::new()));
                         FoundFile {
                             path,
                             name,
+                            label,
+                            size,
+                            modified,
                             thumbnail,
                         }
                     })
@@ -227,6 +268,7 @@ pub async fn finder_search(query: String, kind: String) -> CmdResult<FinderResul
             .unwrap_or_default();
 
         Ok(FinderResults {
+            heading: aloud_native::search_heading(&query, count),
             query,
             count,
             files,
@@ -274,7 +316,20 @@ pub async fn finder_reveal(path: String) -> CmdResult<()> {
 /// dropped: the setting stores a name, so such a row could never match back.
 #[tauri::command]
 #[specta::specta]
-pub fn overlay_displays(app: AppHandle) -> CmdResult<Vec<String>> {
+pub fn overlay_displays(
+    #[cfg_attr(target_os = "macos", allow(unused_variables))] app: AppHandle,
+) -> CmdResult<Vec<String>> {
+    // The names the overlay matches on (`overlay::pick_screen`), which on macOS
+    // are AppKit's — tao's are "Monitor #<model number>", the same for two
+    // identical displays and not what System Settings shows.
+    #[cfg(target_os = "macos")]
+    {
+        Ok(aloud_screens::current()
+            .into_iter()
+            .map(|s| s.name)
+            .collect())
+    }
+    #[cfg(not(target_os = "macos"))]
     Ok(app
         .available_monitors()
         .map_err(|e| e.to_string())?
@@ -304,6 +359,93 @@ pub fn permissions() -> Vec<aloud_permissions::PermissionStatus> {
 #[specta::specta]
 pub fn open_permission_settings(permission: aloud_permissions::Permission) -> CmdResult<()> {
     to_string_err(aloud_permissions::open_settings(permission))
+}
+
+/// One app and action in the Settings pane, with what Aloud may do there.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionRow {
+    pub key: String,
+    pub app: String,
+    pub action: String,
+    pub grant: aloud_store::Grant,
+    /// "Always allow" can never apply, so the row offers Ask or Never only.
+    pub strict: bool,
+}
+
+/// Every write this Mac's apps offer, at its default unless saved otherwise,
+/// plus every saved grant — a connected service shows up once a card's
+/// "Always allow" has saved one.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_permissions() -> CmdResult<Vec<PermissionRow>> {
+    // Installed apps and the Shortcuts library are a disk scan and a subprocess.
+    tauri::async_runtime::spawn_blocking(|| {
+        let natives = aloud_native::tools(&aloud_selection::installed_apps());
+        permission_rows(&natives, aloud_store::grants::all())
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_permission(
+    key: String,
+    app: String,
+    action: String,
+    grant: aloud_store::Grant,
+) -> CmdResult<()> {
+    to_string_err(aloud_store::grants::set(&key, &app, &action, grant))
+}
+
+/// The native rows at their defaults, then the saved grants over them. A key
+/// several tools share reads Always only if every one of them defaults to it.
+fn permission_rows(
+    natives: &[aloud_native::NativeTool],
+    saved: aloud_store::Grants,
+) -> Vec<PermissionRow> {
+    use aloud_store::Grant;
+    let mut rows = std::collections::BTreeMap::new();
+    let permissions = natives
+        .iter()
+        .filter(|t| !t.read_only)
+        .filter_map(|t| aloud_native::permission(&t.name, &serde_json::json!({}), None));
+    for p in permissions {
+        let grant = if p.default_always {
+            Grant::Always
+        } else {
+            Grant::Ask
+        };
+        let key = aloud_agent::permissions::key(&p.app, &p.action);
+        rows.entry(key.clone())
+            .and_modify(|row: &mut PermissionRow| {
+                if grant == Grant::Ask {
+                    row.grant = Grant::Ask;
+                }
+            })
+            .or_insert(PermissionRow {
+                key,
+                app: p.app,
+                action: p.action,
+                grant,
+                strict: p.strict,
+            });
+    }
+    for (key, s) in saved {
+        let strict = aloud_agent::permissions::always_strict(&s.action);
+        rows.insert(
+            key.clone(),
+            PermissionRow {
+                key,
+                app: s.app,
+                action: s.action,
+                grant: s.grant,
+                strict,
+            },
+        );
+    }
+    rows.into_values().collect()
 }
 
 /// Version, commit and build date, for pasting into a bug report. Baked in by
@@ -463,7 +605,9 @@ fn warm_previews(app: &AppHandle, key: String) {
         .settings
         .lock()
         .ok()
-        .and_then(|s| aloud_agent::brains(&s.cerebras_api_key, &s.gemini_api_key).ok())
+        .and_then(|s| {
+            aloud_agent::brains(&s.groq_api_key, &s.gemini_api_key, &s.nvidia_api_key).ok()
+        })
         .unwrap_or_default();
     tauri::async_runtime::spawn(async move {
         if let Ok(composio) = client(&key) {
@@ -577,6 +721,14 @@ pub fn recent_timings(state: State<'_, AppState>, utterances: u32) -> CmdResult<
 #[specta::specta]
 pub fn history_recent(state: State<'_, AppState>, limit: u32) -> CmdResult<Vec<Entry>> {
     to_string_err(state.pipeline.history(limit as usize))
+}
+
+/// The newest `limit` things said to Aloud, dictations and commands together,
+/// for Agents › Voice in the notch.
+#[tauri::command]
+#[specta::specta]
+pub fn history_voice_recent(state: State<'_, AppState>, limit: u32) -> CmdResult<Vec<Entry>> {
+    to_string_err(state.pipeline.voice_history(limit as usize))
 }
 
 /// Row ids cross the boundary as i32 because specta refuses to export i64
@@ -726,5 +878,57 @@ pub fn debug_overlay(app: AppHandle, phase: crate::pipeline::Phase) {
             crate::overlay::send_error(&app, "Preview: something went wrong");
         }
         _ => crate::overlay::show(&app, phase),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aloud_store::{Grant, SavedGrant};
+
+    fn native(name: &str) -> aloud_native::NativeTool {
+        aloud_native::NativeTool {
+            name: name.into(),
+            description: String::new(),
+            parameters: serde_json::json!({}),
+            read_only: false,
+        }
+    }
+
+    /// Notes defaults to Always; a saved Ask must win, and a connected service
+    /// appears once it has a saved grant.
+    #[test]
+    fn a_saved_grant_replaces_the_default_row() {
+        let natives = [native("ALOUD_NOTES_CREATE"), native("ALOUD_MESSAGES_SEND")];
+        let saved = [
+            (
+                "notes:create-and-edit",
+                "Notes",
+                "create and edit",
+                Grant::Ask,
+            ),
+            (
+                "slack:send-and-share",
+                "Slack",
+                "send and share",
+                Grant::Always,
+            ),
+        ]
+        .into_iter()
+        .map(|(key, app, action, grant)| {
+            let saved = SavedGrant {
+                app: app.into(),
+                action: action.into(),
+                grant,
+            };
+            (key.to_string(), saved)
+        })
+        .collect();
+        let rows = permission_rows(&natives, saved);
+        let grant = |key: &str| rows.iter().find(|r| r.key == key).map(|r| r.grant);
+        assert_eq!(grant("notes:create-and-edit"), Some(Grant::Ask));
+        assert_eq!(grant("messages:send-messages"), Some(Grant::Ask));
+        assert_eq!(grant("slack:send-and-share"), Some(Grant::Always));
+        assert_eq!(rows.len(), 3);
     }
 }

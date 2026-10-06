@@ -1,0 +1,422 @@
+/* The notch system's few rules a utility cannot express: browser
+ * pseudo-elements, and the seams where the new panel hosts older surfaces.
+ * Everything else lives on the primitives in components/notch as utilities.
+ * Tokens only — colours from tokens.css, motion from motion.css.
+ */
+
+/* --- Slider (components/notch/controls.tsx) ------------------------------
+ * A native range input. WebKit's pseudo-elements, because the overlay is a
+ * WKWebView; the Chromium the tune page runs in reads the same ones. */
+.notch-slider {
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.notch-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    to right,
+    var(--notch-ink) var(--fill, 0%),
+    var(--notch-track) var(--fill, 0%)
+  );
+}
+
+/* shadcn's thumb: the ink, ringed in the panel's own black so it reads as
+   lifted off the fill without a shadow. */
+.notch-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 2px solid var(--notch-fill);
+  border-radius: 50%;
+  background: var(--notch-ink);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.notch-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+.notch-slider:active::-webkit-slider-thumb {
+  transform: scale(1.3);
+}
+
+.notch-slider:focus-visible {
+  outline: 2px solid var(--notch-focus);
+  outline-offset: 3px;
+  border-radius: var(--radius-pill);
+}
+
+.notch-slider:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.notch-slider:disabled::-webkit-slider-thumb {
+  transform: none;
+}
+
+/* --- The live pill (features/notch/IslandPill.tsx) -----------------------
+ * The closed notch with live activities. Its floor is the cutout itself, not
+ * the dropped panel's 1.5× (useNotchPanel reads --panel-floor): it hangs in
+ * the menu bar's row and only needs to clear the hole. */
+.drop-pill--live {
+  --panel-floor: 1;
+  cursor: pointer;
+}
+
+/* Pulled up into the notch's own row, over the cutout spacer, so the notch
+   widens beside the camera instead of dropping below it. useNotchPanel
+   counts this negative margin when it measures the height. On a screen with
+   no notch (--notch-h is 0) it is a slim pill of its own at the top edge. */
+.drop-pill__body--live {
+  height: max(var(--notch-h, 24px), 24px);
+  margin-top: calc(-1 * var(--notch-h, 24px));
+  padding: 0;
+  gap: 0;
+}
+
+.island-pill {
+  display: grid;
+  /* 1fr either side of a max-content body: both columns take the wider
+     side's width, so the camera stays centred whatever each side holds. */
+  grid-template-columns: 1fr var(--notch-w, 200px) 1fr;
+  align-items: center;
+  height: 100%;
+  color: var(--notch-ink);
+  font: 600 var(--text-notch-meta) / 1 var(--font-notch);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  /* After the shape has mostly arrived, so text never rides a moving edge. */
+  animation: peek-in var(--dur-base) var(--ease-out) 90ms both;
+}
+
+/* Gone before the collapse clips it, as the answer is. */
+.island-pill[data-leaving] {
+  animation: ask-out var(--dur-fast) var(--ease-in) both;
+}
+
+/* Tight on purpose: both sides take the wider one's width, so every px here
+   is paid twice across the closed notch. The camera side needs little, the
+   hardware notch already clears it. */
+.island-pill__side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 4px 0 9px;
+}
+
+.island-pill__side--right {
+  justify-content: flex-end;
+  padding: 0 9px 0 4px;
+}
+
+.island-pill__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.island-pill__detail {
+  max-width: 10ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.island-pill__detail[data-urgent] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--notch-warn);
+}
+
+.island-pill__detail[data-urgent]::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.island-pill__more {
+  color: var(--notch-ink-3);
+}
+
+/* The rest of the live activities: glyph discs overlapping like stacked
+   avatars. Each is ringed in the notch's black so the one under it reads as
+   tucked, not merged. The stack is positioned: useFlip measures against it.
+   Entering is a pop; a disc's neighbours slide to their slots on the live
+   spring (useFlip), so a disc arriving mid-slide does not stall them. */
+.island-pill__stack {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding-left: var(--disc-overlap);
+}
+
+.island-pill__disc {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  width: var(--disc);
+  height: var(--disc);
+  margin-left: calc(-1 * var(--disc-overlap));
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--notch-fill, #000);
+  animation: disc-in var(--spring-pop-dur) var(--spring-pop) both;
+}
+
+.island-pill__disc > [role="img"],
+.island-pill__disc > img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+.island-pill__disc > [role="img"] {
+  background: var(--w-track, var(--notch-well));
+  color: var(--w-ink, var(--notch-ink-2));
+}
+
+.island-pill__disc > img {
+  object-fit: cover;
+}
+
+/* --- The shell (features/notch/NotchShell.tsx) ---------------------------
+ * Its rows rise in behind the shape the way the answer's parts always have
+ * (the keyframes are overlay.css's), staggered top to bottom. */
+.notch-shell > * {
+  animation:
+    ask-rise var(--spring-pop-dur) var(--spring-pop) both,
+    ask-fade var(--dur-fast) var(--ease-out) both;
+}
+
+.notch-shell > :nth-child(2) {
+  animation-delay: calc(var(--ask-stagger, 45ms) * 0.5);
+}
+
+.notch-shell > :nth-child(3) {
+  animation-delay: var(--ask-stagger, 45ms);
+}
+
+.notch-shell > :nth-child(4) {
+  animation-delay: calc(var(--ask-stagger, 45ms) * 1.5);
+}
+
+/* The surfaces that predate the shell, hosted in its body. */
+
+/* The run's panel already sits in the shell's padding, and rises with it:
+   a second rise inside would double the throw. It still fades in order. */
+.notch-shell .ask {
+  padding: 0;
+}
+
+.notch-shell .ask > * {
+  animation: ask-fade var(--dur-fast) var(--ease-out) both;
+}
+
+/* Under the body's own ceiling, so a long run scrolls in one place. */
+.notch-shell .ask__answer {
+  max-height: 300px;
+}
+
+/* An approval card is drawn as the acting app's own window, so it keeps the
+   system face its app would use rather than taking the panel's Geist. */
+.notch-shell .preview {
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* The coding agents were monospace to read as a terminal echo; Geist Mono
+   keeps that and joins the panel's family. */
+.notch-shell .agents {
+  font-family: var(--font-notch-mono);
+}
+
+/* --- Widget boards (components/notch/widgets) ----------------------------
+ * Sizes are the one thing a utility cannot say without an arbitrary value, so
+ * they are rules over tokens: small, medium and large as Apple draws them,
+ * scaled together by --notch-w-scale. Colours are the `widget-*` utilities. */
+.notch-widget {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  translate: 0 0;
+  transition: translate var(--dur-fast) var(--ease-out);
+}
+
+.notch-widget[data-size="small"] {
+  width: var(--notch-w-small);
+  height: var(--notch-w-small);
+}
+
+.notch-widget[data-size="medium"] {
+  width: var(--notch-w-medium);
+  height: var(--notch-w-small);
+}
+
+.notch-widget[data-size="large"] {
+  width: var(--notch-w-medium);
+  height: var(--notch-w-large);
+}
+
+/* A board: four small tiles across, each row a tile and the label under it.
+   A board and its bar speak SF, as the widgets they imitate do, inside the
+   Geist panel: the rebind is scoped here, so a row, button or card a tile
+   holds (all `font-notch`) follows it and the chrome around does not. */
+.notch-board,
+.notch-board-bar,
+/* The islands, whispers, peeks, cards and nudges were picked as drawn in the
+   widgets look, so they speak SF too; the toast chip and the run stay Calm. */
+.island-pill,
+.peek,
+.toast[data-tier="card"],
+.nudge {
+  --font-notch: var(--font-notch-w);
+  font-family: var(--font-notch);
+}
+
+.notch-board {
+  display: grid;
+  grid-template-columns: repeat(4, var(--notch-w-small));
+  grid-auto-rows: calc(var(--notch-w-small) + 24px);
+  grid-auto-flow: dense;
+  gap: 12px var(--notch-w-gap);
+  justify-content: center;
+}
+
+/* A board of one large tile has two columns, so it centres instead of leaving
+   the other two empty. */
+.notch-board--solo {
+  grid-template-columns: repeat(2, var(--notch-w-small));
+}
+
+/* A bar over a board (a search pill) as wide as the board under it. */
+.notch-board-bar {
+  width: calc(var(--notch-w-small) * 4 + var(--notch-w-gap) * 3);
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+/* The coding agents' permission card is drawn for a 380pt column; inside a
+   tile it takes the tile's width instead. */
+.notch-widget .perm {
+  min-width: 0;
+  max-width: none;
+}
+
+/* A lift on the whole tile, for the ones that open something. */
+.notch-widget[data-actionable]:hover {
+  translate: 0 -1px;
+}
+
+/* The ring that drains in real time. Its fill is a spring (set from JS) in
+   every other mode. */
+.notch-ring__arc[data-motion="drain"] {
+  transition: stroke-dashoffset var(--dur-drain) linear;
+}
+
+/* --- Island accents ------------------------------------------------------
+ * An island with a role (islandRole) speaks in that accent's ink, the
+ * accent-ink rule that keeps words at AA. Colour only: the closed notch's
+ * geometry and behaviour are the shared ones above. */
+[data-w-role] .island-pill__detail:not([data-urgent]) {
+  color: var(--w-ink);
+}
+
+/* A rolling numeral: each digit is a window one em tall over a column of ten,
+   so the slide distance is the font's own em at any size. */
+.notch-numeral {
+  display: inline-flex;
+  height: 1em;
+  overflow: hidden;
+}
+
+.notch-numeral__digit {
+  display: inline-block;
+  height: 1em;
+  overflow: hidden;
+}
+
+.notch-numeral__cell {
+  display: block;
+  height: 1em;
+  line-height: 1;
+}
+
+/* --- Calm Home (components/notch/tile.tsx, views/CalmTiles.tsx) ----------
+ * Eight columns by three rows of 108px: the prototype's geometry, which a
+ * utility cannot say without arbitrary values. */
+.notch-calm-grid {
+  position: relative; /* the offset parent useFlip measures against */
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(3, 108px);
+  gap: 10px;
+  height: 344px;
+}
+
+.notch-tile {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  translate: 0 0;
+  transition:
+    translate var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+/* Only a tile that opens something lifts: a lift on a static one promises a click. */
+.notch-tile[data-actionable]:hover {
+  translate: 0 -1px;
+  background-color: var(--notch-tile-hi);
+}
+
+/* A size change is a crossfade of what is inside, never a scale of the tile:
+ * the tile snaps to its new cell (useFlip carries it there) and the words
+ * arrive over a beat. ask-fade is the shell's own entrance (overlay.css). */
+.notch-tile__in {
+  animation: ask-fade var(--dur-base) var(--ease-out) both;
+}
+
+/* The two-note audio bars of a playing track. scaleY only, so the compositor
+ * runs them; paused, they hold still, and reduced motion's 1ms switch stops them. */
+.notch-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.notch-bars > i {
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--w-acc);
+  transform-origin: bottom;
+  transform: scaleY(0.22);
+  animation: notch-bar 0.8s ease-in-out infinite alternate paused;
+}
+
+.notch-bars[data-playing] > i {
+  animation-play-state: running;
+}
+
+.notch-bars > i:nth-child(2) { animation-duration: 0.62s; animation-delay: -0.2s; }
+.notch-bars > i:nth-child(3) { animation-duration: 0.95s; animation-delay: -0.5s; }
+.notch-bars > i:nth-child(4) { animation-duration: 0.7s; animation-delay: -0.35s; }
+.notch-bars > i:nth-child(5) { animation-duration: 0.85s; animation-delay: -0.1s; }
+
+@keyframes notch-bar {
+  from { transform: scaleY(0.2); }
+  to { transform: scaleY(1); }
+}

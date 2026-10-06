@@ -164,6 +164,21 @@ pub fn installed_apps() -> Vec<InstalledApp> {
     }
 }
 
+/// The icon of the app called `name`, as a data URI, for the approval card and
+/// the toast. "macOS" — a Mac action no one app owns, like moving files — is
+/// Finder's.
+pub fn app_icon(name: &str) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::app_icon(name)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = name;
+        None
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod macos {
     //! `AXUIElementCopyAttributeValue(kAXSelectedTextAttribute)` on the focused
@@ -433,6 +448,39 @@ mod macos {
     /// How long a scan stays fresh. See [`installed_apps`].
     pub(super) const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
 
+    /// See [`super::app_icon`]. Kept per app once found: Finder lives outside
+    /// the scanned folders and costs a `sips` spawn, and an icon does not change
+    /// while the app runs. A miss is not kept, so an app installed later is found.
+    pub fn app_icon(name: &str) -> Option<String> {
+        static ICONS: std::sync::Mutex<std::collections::BTreeMap<String, String>> =
+            std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+        let name = if name.eq_ignore_ascii_case("macos") {
+            "Finder"
+        } else {
+            name
+        };
+        if let Some(hit) = ICONS.lock().ok().and_then(|i| i.get(name).cloned()) {
+            return Some(hit);
+        }
+        let icon = installed_apps()
+            .into_iter()
+            .find(|app| app.name.eq_ignore_ascii_case(name))
+            .and_then(|app| app.icon)
+            // A screen-control card names its app from the model's arguments,
+            // so the name never becomes a path that leaves the folder.
+            .or_else(|| {
+                let plain = !name.contains('/') && !name.starts_with('.');
+                plain
+                    .then(|| Path::new("/System/Library/CoreServices").join(format!("{name}.app")))
+                    .and_then(|bundle| icon_data_uri(&bundle))
+            })?;
+        if let Ok(mut icons) = ICONS.lock() {
+            icons.insert(name.to_string(), icon.clone());
+        }
+        Some(icon)
+    }
+
     fn scan() -> Vec<InstalledApp> {
         let mut roots = vec![
             PathBuf::from("/Applications"),
@@ -598,6 +646,18 @@ mod cache_tests {
         );
         assert_eq!(bundle_name("/usr/bin/vim").as_deref(), Some("vim"));
         assert_eq!(bundle_name(""), None);
+    }
+
+    /// A file move belongs to no one app; its card wears Finder's icon, which
+    /// lives outside every folder the app scan reads. A name that is a path
+    /// never reaches the disk.
+    #[test]
+    fn a_mac_action_wears_finders_icon_and_a_path_is_no_name() {
+        let finder = super::app_icon("Finder").expect("Finder is on every Mac");
+        assert!(finder.starts_with("data:image/png;base64,"));
+        assert_eq!(super::app_icon("macOS"), Some(finder));
+        assert_eq!(super::app_icon("../../../tmp/Evil"), None);
+        assert_eq!(super::app_icon("No Such App Anywhere"), None);
     }
 
     /// Reading the wrong `<string>` silently mis-keys every rule the picker

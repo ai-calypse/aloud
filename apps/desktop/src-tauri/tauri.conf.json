@@ -69,7 +69,8 @@
     },
     "resources": [
       "resources/*",
-      "resources/engine/**/*"
+      "resources/engine/**/*",
+      "resources/mediaremote/**/*"
     ]
   },
   "plugins": {

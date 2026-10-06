@@ -1,0 +1,186 @@
+/* --- Nudges (features/overlay/Nudge.tsx) ---------------------------------
+ * Other apps' notifications, an event about to start, a reminder come due, in
+ * the events design's Widgets look. The accent is `[data-w-role]` (tokens.css),
+ * set per app by Nudge.tsx, and applies in both looks: a nudge has no Calm form.
+ * Geometry is the peek's and the card's (events.css); this file only recolours
+ * and adds what a nudge has that they do not. */
+
+/* The app's icon: a real one is an <img> and needs nothing; a glyph stands in
+   as a tile in the accent. */
+.nudge [role="img"] {
+  background: var(--w-track);
+  color: var(--w-ink);
+}
+
+/* The app's name is the top row's headline on a peek, as in the design. */
+.nudge:not(.nudge--card) .peek__app {
+  color: var(--notch-ink);
+}
+
+/* A peek: the sender in bold, then what they said, dimmer, on one line. */
+.nudge__line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.nudge__line b {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nudge__body {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--notch-ink-2);
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+
+/* Pointing at it lets the line wrap, as every peek does. */
+.nudge[data-open] .nudge__line {
+  display: block;
+}
+
+.nudge[data-open] .nudge__body {
+  margin-left: 8px;
+}
+
+/* A calendar peek's Join: the accent, filled. Every nudge button is. */
+.nudge .app-pill {
+  background: var(--w-acc);
+  color: var(--notch-w-ink);
+}
+
+.nudge .app-pill:hover {
+  background: color-mix(in srgb, var(--w-acc) 85%, white);
+}
+
+/* The dwell, drawn as the time it has left: a track and a fill that drains over
+   exactly the takeover's dwell. Paused while pointed at, as the clock is
+   (useDwell holds rather than restarts), so the bar and the clock agree. */
+.nudge {
+  position: relative;
+}
+
+.nudge__dwell {
+  position: absolute;
+  right: 14px;
+  bottom: 3px;
+  left: 14px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--w-track);
+}
+
+.nudge__dwell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--w-acc);
+  transform-origin: left center;
+  animation: nudge-dwell linear both;
+  animation-duration: inherit;
+}
+
+.nudge[data-open] .nudge__dwell::after {
+  animation-play-state: paused;
+}
+
+@keyframes nudge-dwell {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* A card: a caller, who has to be answered, with the one thing Aloud can do.
+   Pulled up into the notch's row like a peek, so its header sits beside the
+   camera and the card adds only what is under it. */
+.drop-pill__body--toast:has(> .nudge--card) {
+  margin-top: calc(-1 * var(--notch-h, 24px));
+}
+
+.nudge--card {
+  display: grid;
+  gap: 10px;
+  width: 440px;
+  max-width: 100%;
+  padding: 0 14px 14px;
+}
+
+.nudge__head {
+  display: grid;
+  grid-template-columns: 1fr var(--notch-w, 200px) 1fr;
+  align-items: center;
+  height: max(var(--notch-h, 24px), 24px);
+  margin-inline: -14px;
+  color: var(--notch-ink-2);
+  font: 600 var(--text-notch-meta) / 1 var(--font-notch);
+}
+
+.nudge__head .peek__side {
+  padding-left: 14px;
+}
+
+.nudge__head .peek__side--end {
+  padding-right: 14px;
+}
+
+.nudge__who {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.nudge__avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--w-track);
+  color: var(--w-ink);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.nudge__text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  margin: 0;
+}
+
+.nudge__text b {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nudge__text span {
+  overflow: hidden;
+  color: var(--notch-ink-2);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nudge__acts {
+  display: flex;
+}
+
+.nudge__acts .app-pill {
+  flex: 1;
+  justify-content: center;
+  margin: 0;
+  padding-block: 7px;
+}

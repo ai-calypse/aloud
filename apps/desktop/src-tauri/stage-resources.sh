@@ -5,6 +5,7 @@
 # Two things do not survive bundling on their own:
 #
 #   - The browser engine and its axd helper (built here).
+#   - The Now Playing helper (`crates/media/mediaremote/build.sh`).
 #   - `.env`. A `.app` launched from Finder has a working directory of `/`, so
 #     the walk that finds it in dev finds nothing and every API key is empty.
 #
@@ -26,6 +27,8 @@ rsync -a --exclude node_modules --exclude data --exclude axd --exclude package-l
 (cd "$out/engine" && npm install --omit=dev --no-audit --no-fund --silent)
 swiftc -O "$repo/engine/axd/main.swift" -o "$out/axd"
 echo "staged engine ($(du -sh "$out/engine" | cut -f1)) and axd"
+
+sh "$repo/crates/media/mediaremote/build.sh" "$out/mediaremote"
 
 if [ -f "$repo/.env" ]; then
     cp "$repo/.env" "$out/.env"

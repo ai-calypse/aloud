@@ -1,0 +1,27 @@
+[package]
+name = "aloud-agenda"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Today's calendar events and reminders, read through Calendar.app and Reminders.app"
+
+[dependencies]
+aloud-islands = { path = "../islands" }
+aloud-native = { path = "../native" }
+aloud-notes = { path = "../notes" }
+chrono = "0.4"
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+specta-typescript = "0.0.12"
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# EventKit, the fast path for Reminders. The versions the clipboard and media
+# crates already build.
+block2 = "0.6"
+objc2 = "0.6"
+objc2-event-kit = { version = "0.3", default-features = false, features = ["std", "block2", "EKCalendar", "EKCalendarItem", "EKEventStore", "EKObject", "EKReminder", "EKTypes"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSBundle", "NSCalendar", "NSDate", "NSDictionary", "NSError", "NSPredicate", "NSString", "NSTimeZone", "NSValue"] }

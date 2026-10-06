@@ -15,6 +15,11 @@ specta = { version = "=2.0.0-rc.25", features = ["derive"] }
 thiserror = "2"
 tracing = "0.1"
 
+# Full debug info made target/ reach 159 GB across worktrees; line tables keep
+# file:line in backtraces at a fraction of the size.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 codegen-units = 1
 lto = true
