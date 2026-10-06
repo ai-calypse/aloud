@@ -23,7 +23,7 @@ function staticPages(site: string): Static[] {
     title: p.metaTitle,
     description: p.description,
     noindex: Boolean(p.draft),
-    body: `<article><h1>${esc(p.title)}</h1><p>by <a href="${AUTHOR.url}">${esc(AUTHOR.name)}</a>, ${p.date}${p.checked ? `. sources last checked ${p.checked} (<a href="/about">how we choose sources</a>).` : ""}</p><img src="${p.cover.src}" alt="${esc(p.cover.alt)}" width="1280" height="720" fetchpriority="high" decoding="async" />${postHtml(p)}</article>`,
+    body: `<article><h1>${esc(p.title)}</h1><p>by <a href="${AUTHOR.url}">${esc(AUTHOR.name)}</a>, ${p.date}${p.checked ? `. sources last checked ${p.checked} (<a href="/about">how we choose sources</a>).` : ""}</p><img src="${p.cover.src}" alt="${esc(p.cover.alt)}" width="1280" height="720" fetchpriority="high" decoding="async" loading="lazy" />${postHtml(p)}</article>`,
     image: `${site}${p.cover.src.replace(/\.webp$/, "-og.jpg")}`,
     imageAlt: p.cover.alt,
     published: p.date,

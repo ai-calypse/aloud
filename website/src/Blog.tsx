@@ -1,10 +1,11 @@
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import readingCat from "./assets/memes/reading-cat.webp";
 import { GlossyButton, MacWindow, PillLabel } from "./components/ds";
 import SmartLink from "./components/SmartLink";
 import Sticker from "./components/Sticker";
 import { useCopy } from "./copy";
-import { AUTHOR, POSTS, formatDate, postHtml, postPath, publicPosts } from "./blog/posts";
+import { AUTHOR, POSTS, extractHeadings, formatDate, postHtml, postPath, publicPosts } from "./blog/posts";
 import NotFound from "./NotFound";
 import { useMeta } from "./seo";
 
@@ -51,18 +52,86 @@ export function BlogIndex() {
   );
 }
 
+function OnThisPage({ headings, activeId }: { headings: { text: string; id: string }[]; activeId: string }) {
+  if (headings.length === 0) return null;
+  return (
+    <nav className="on-this-page" aria-label="On this page">
+      <p className="on-this-page-title">On this page</p>
+      <ul className="on-this-page-list">
+        {headings.map((h) => {
+          const isActive = h.id === activeId;
+          return (
+            <li key={h.id}>
+              <a
+                href={`#${h.id}`}
+                className={`on-this-page-link ${isActive ? "active" : ""}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  const target = document.getElementById(h.id);
+                  if (target) {
+                    target.scrollIntoView({ behavior: "smooth", block: "start" });
+                    history.pushState(null, "", `#${h.id}`);
+                  }
+                }}
+              >
+                {h.text}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
 export function BlogPost() {
   const { slug } = useParams();
   const post = POSTS.find((p) => p.slug === slug);
   const c = useCopy();
   const navigate = useNavigate();
+  const [activeId, setActiveId] = useState<string>("");
+
   useMeta(post ? post.metaTitle : c.blog.title, { description: post?.description, noindex: post?.draft });
+
+  const headings = post ? extractHeadings(post) : [];
+
+  useEffect(() => {
+    if (headings.length === 0) return;
+    setActiveId(headings[0].id);
+
+    const headingEls = headings
+      .map((h) => document.getElementById(h.id))
+      .filter((el): el is HTMLElement => Boolean(el));
+
+    if (headingEls.length === 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // Find visible heading with highest ratio or first intersecting
+        const visible = entries.filter((e) => e.isIntersecting);
+        if (visible.length > 0) {
+          // Sort by top offset
+          visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+          setActiveId(visible[0].target.id);
+        }
+      },
+      {
+        rootMargin: "-80px 0px -60% 0px",
+        threshold: [0, 0.5, 1],
+      },
+    );
+
+    for (const el of headingEls) observer.observe(el);
+
+    return () => observer.disconnect();
+  }, [slug]);
+
   if (!post) return <NotFound />;
   return (
     <main className={page} style={dots}>
       <Back href="/blog">{c.blog.all}</Back>
-      <header className="relative flex w-full max-w-[760px] flex-col items-start gap-5">
-        <Sticker rotate={5} className="absolute -top-2 right-0 w-[96px] md:-right-16 md:top-0 md:w-[150px]">
+      <header className="relative flex w-full max-w-[1140px] flex-col items-start gap-5">
+        <Sticker rotate={5} className="absolute -top-2 right-0 w-[96px] md:right-10 md:top-0 md:w-[150px]">
           <img src={readingCat} alt="A close-up of an orange cat with a question mark above its head" />
         </Sticker>
         <PillLabel>{c.blog.pill}</PillLabel>
@@ -78,23 +147,28 @@ export function BlogPost() {
           )}
         </p>
       </header>
-      <MacWindow title={`${post.slug}.md`} className="w-full max-w-[760px]">
-        <article
-          className="post flex flex-col gap-5 p-6 text-[17px] leading-[1.65] text-ink md:p-10"
-          // Our own copy, rendered by the same function that writes the static HTML. In-site links
-          // go through the router so they do not reload the page.
-          onClick={(e) => {
-            const a = (e.target as Element).closest("a");
-            const href = a?.getAttribute("href");
-            if (!a || !href?.startsWith("/") || e.metaKey || e.ctrlKey || e.shiftKey) return;
-            e.preventDefault();
-            navigate(href);
-          }}
-        >
-          <img src={post.cover.src} alt={post.cover.alt} width={1280} height={720} fetchPriority="high" className="block w-full rounded-[12px]" />
-          <div className="contents" dangerouslySetInnerHTML={{ __html: postHtml(post) }} />
-        </article>
-      </MacWindow>
+
+      <div className="relative flex w-full max-w-[1140px] items-start justify-center gap-10">
+        <MacWindow title={`${post.slug}.md`} className="w-full max-w-[760px] shrink-0">
+          <article
+            className="post flex flex-col gap-5 p-6 text-[17px] leading-[1.65] text-ink md:p-10"
+            onClick={(e) => {
+              const a = (e.target as Element).closest("a");
+              const href = a?.getAttribute("href");
+              if (!a || !href?.startsWith("/") || e.metaKey || e.ctrlKey || e.shiftKey) return;
+              e.preventDefault();
+              navigate(href);
+            }}
+          >
+            <img src={post.cover.src} alt={post.cover.alt} width={1280} height={720} fetchPriority="high" className="block w-full rounded-[12px]" />
+            <div className="contents" dangerouslySetInnerHTML={{ __html: postHtml(post) }} />
+          </article>
+        </MacWindow>
+
+        <aside className="sticky top-24 hidden w-[280px] shrink-0 xl:block">
+          <OnThisPage headings={headings} activeId={activeId} />
+        </aside>
+      </div>
     </main>
   );
 }
