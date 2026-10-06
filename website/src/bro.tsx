@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { useLocation } from "react-router";
 import { track } from "./analytics";
 
 // Bro mode is which of three copy sets the site reads (see copy.ts): 0 normal, 1 bro,
@@ -42,7 +43,14 @@ const options: [BroLevel, string][] = [
 ];
 
 export function BroToggle() {
+  const { pathname } = useLocation();
   const current = useBroLevel();
+
+  // Do not show bro mode toggle on any blog pages (/blog or /blog/*)
+  if (pathname.startsWith("/blog")) {
+    return null;
+  }
+
   return (
     <div
       role="radiogroup"

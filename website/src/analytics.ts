@@ -92,6 +92,8 @@ export function initAnalytics() {
       track(el.dataset.event!, {
         link_text: el.textContent?.trim().slice(0, 60),
         page_path: location.pathname,
+        // Blog CTAs also say which post and which slot (intro, mid, end) the click came from.
+        ...(el.dataset.cta && { cta: el.dataset.cta, post: el.dataset.post }),
       });
   });
   watchScroll();
