@@ -41,6 +41,7 @@ untestable; check the claim before repeating it.
 | Command mode overhaul — fast path, one brain, Mac intent tools | ✅ eval 44/44 on both brains; Notes/Reminders/Spotify/Cursor verified on hardware |
 | Screen control on Cua Driver (`crates/screen`) | ✅ TextEdit read/type/click through the full tool loop; eval 53/53 on Cerebras |
 | `crates/notes` — markdown + search | ✅ verified on real notes |
+| `crates/memory` — spoken thoughts + journal as daily markdown, FTS5 index rebuilt from the files | 🟡 15 unit tests on a temp dir; not wired to the app, no hotkey/command/notification yet |
 | `crates/store` — settings, history, stats | ✅ |
 | `crates/agent` — tool loop, Composio, cache | ✅ unit-tested; no live API |
 | Dictation pipeline | ✅ **verified end-to-end** |

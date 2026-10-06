@@ -214,6 +214,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "aloud-memory"
+version = "0.1.0"
+dependencies = [
+ "aloud-notes",
+ "anyhow",
+ "chrono",
+ "rusqlite",
+ "serde",
+ "specta",
+ "tempfile",
+]
+
+[[package]]
 name = "aloud-native"
 version = "0.1.0"
 dependencies = [
