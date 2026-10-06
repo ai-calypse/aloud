@@ -20,7 +20,6 @@ export const POSTS: Post[] = [
     description: "Most people speak faster than they type, and a spoken draft sounds like you. How to get words down first with SpeakOS and tidy them later.",
     date: "2026-10-05",
     minutes: 3,
-    draft: true,
     blocks: [
       { p: "you know what you want to say. the slow part is getting it out of your head and into a box, one key at a time. so say it first." },
       { h: "hold a key, talk" },

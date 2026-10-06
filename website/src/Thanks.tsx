@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import player from "./assets/thanks-player.webp";
 import thumbsCat from "./assets/memes/thumbs-cat.webp";
 import poster from "./assets/memes/ty-poster.webp";
@@ -6,27 +5,12 @@ import video from "./assets/memes/ty.mp4";
 import { GlossyButton } from "./components/ds";
 import MemeVideo from "./components/MemeVideo";
 import Sticker from "./components/Sticker";
-import { track } from "./analytics";
 import { useCopy } from "./copy";
 import { useMeta } from "./seo";
 
-// ponytail: the download is simulated (a 2s timer). The real one is an <a download>
-// to the signed .dmg once a release URL exists; the states below stay the same.
-type State = "downloading" | "done";
-
 export default function Thanks() {
   const c = useCopy().thanks;
-  const text: Record<State, string> = { downloading: c.downloading, done: c.done };
   const home = useCopy().common.backHome;
-  const [state, setState] = useState<State>("downloading");
-  const [run, setRun] = useState(0);
-  useMeta(c.title, { noindex: true });
-  useEffect(() => track("download_start"), []);
-  useEffect(() => {
-    setState("downloading");
-    const id = setTimeout(() => setState("done"), 2200);
-    return () => clearTimeout(id);
-  }, [run]);
 
   return (
     <main
@@ -53,15 +37,9 @@ export default function Thanks() {
 
       <div className="flex flex-col items-center gap-3 text-center">
         <h1 className="t-card">{c.h1}</h1>
-        <p role="status" key={state} className="pop flex min-h-6 items-center gap-2">
-          {state === "downloading" && <span className="inline-block size-2 animate-pulse bg-neutral-0" aria-hidden="true" />}
-          {text[state]}
-        </p>
+        <p>{c.body}</p>
       </div>
       <div className="flex flex-wrap justify-center gap-4">
-        <GlossyButton size="sm" tone="white" onClick={() => setRun((n) => n + 1)}>
-          {c.again}
-        </GlossyButton>
         <GlossyButton size="sm" tone="white" href="/">
           {home}
         </GlossyButton>

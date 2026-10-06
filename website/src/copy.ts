@@ -210,11 +210,9 @@ const normal = {
     unconfigured: "the waitlist isn’t connected yet. check back soon.",
   },
   thanks: {
-    title: "thanks for downloading · SpeakOS",
-    h1: "thanks for downloading.",
-    downloading: "downloading…",
-    done: "downloaded. open the .dmg and drag SpeakOS to applications.",
-    again: "download again",
+    title: "coming soon · SpeakOS",
+    h1: "coming soon.",
+    body: "SpeakOS isn’t downloadable yet. check back soon.",
   },
   bugs: {
     title: "report a bug · SpeakOS",
@@ -442,11 +440,9 @@ const bro1: Copy = {
     unconfigured: "the waitlist isn’t connected yet. check back soon.",
   },
   thanks: {
-    title: "thanks for downloading · SpeakOS",
-    h1: "you grabbed it. nice.",
-    downloading: "downloading… hang tight.",
-    done: "downloaded. open the .dmg and drag SpeakOS to applications. that’s your next move.",
-    again: "download again, i guess",
+    title: "coming soon · SpeakOS",
+    h1: "coming soon. hang tight.",
+    body: "SpeakOS isn’t downloadable yet. check back soon.",
   },
   bugs: {
     title: "report a bug · SpeakOS",
@@ -672,11 +668,9 @@ const bro2: Copy = {
     unconfigured: "the waitlist isn’t connected yet. check back soon. button enthusiasm only gets us so far.",
   },
   thanks: {
-    title: "thanks for downloading · SpeakOS",
-    h1: "good. now install the thing.",
-    downloading: "downloading… patience, champ.",
-    done: "downloaded. open the .dmg and drag SpeakOS to applications. don’t leave it rotting in downloads.",
-    again: "download it again",
+    title: "coming soon · SpeakOS",
+    h1: "coming soon. patience, champ.",
+    body: "SpeakOS isn’t downloadable yet. check back soon.",
   },
   bugs: {
     title: "report a bug · SpeakOS",
