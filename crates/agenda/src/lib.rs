@@ -34,8 +34,10 @@ use aloud_islands::{Island, IslandAction, IslandKind, IslandPriority};
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone};
 use serde::{Deserialize, Serialize};
 
-#[cfg(target_os = "macos")]
+// Plain files, no AppKit: gated, it broke `today.rs` on every other build.
 pub mod cache;
+// Its objc2 dependencies are macOS-only, so ungated it broke every other build.
+#[cfg(target_os = "macos")]
 pub mod eventkit;
 pub mod recur;
 
