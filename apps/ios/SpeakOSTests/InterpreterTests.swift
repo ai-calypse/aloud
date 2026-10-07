@@ -101,4 +101,12 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(model.visibleMeetings.allSatisfy { m in m.transcript.contains { $0.text.localizedCaseInsensitiveContains("press list") } })
         XCTAssertFalse(model.visibleMeetings.isEmpty)
     }
+
+    func testRelatedNotesShareAWordAndNeverIncludeTheNoteItself() {
+        let model = AppModel()
+        let pricing = model.items.first { $0.title.hasPrefix("Keep pricing") }!
+        let related = model.related(to: pricing)
+        XCTAssertFalse(related.contains { $0.id == pricing.id })
+        XCTAssertTrue(related.contains { $0.title == "Launch planning" }, "shares 'pricing' and 'launch'")
+    }
 }

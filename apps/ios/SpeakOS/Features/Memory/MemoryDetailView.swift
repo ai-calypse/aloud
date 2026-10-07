@@ -1,11 +1,16 @@
 import SwiftUI
 
+/// The page a note opens on: a calm reading surface, with rewriting and sending one tap away
+/// in a floating bar. The same page shows sent receipts and meeting summaries, without the editor.
 struct MemoryDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let itemID: UUID
 
     @State private var confirmForget = false
+
+    private let leadFont = Font.custom("Geist", size: 20, relativeTo: .title3)
+    private let titleFont = Font.custom("Bricolage Grotesque", size: 32, relativeTo: .title).weight(.heavy)
 
     var body: some View {
         Group {
@@ -19,38 +24,61 @@ struct MemoryDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    private func words(_ text: String) -> Int { text.split { $0.isWhitespace }.count }
+
     @ViewBuilder private func content(_ item: MemoryItem) -> some View {
+        // Notes get their title from their first words, so repeating it above the body would read twice.
+        let titleIsDerived = item.body.hasPrefix(item.title)
+        let count = words(item.body)
+
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 22) {
                 HStack {
                     KindTag(kind: item.kind)
+                    if item.pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(Theme.muted).accessibilityLabel("pinned") }
                     Spacer()
                     Text(item.date.formatted(date: .abbreviated, time: .shortened)).font(.brandMono).foregroundStyle(Theme.muted)
                 }
-                Text(item.title).font(.brandHeading).foregroundStyle(Theme.ink)
-                Text(item.body).font(.uiBody).foregroundStyle(Theme.ink)
+
+                if !titleIsDerived {
+                    Text(item.title).font(titleFont).foregroundStyle(Theme.ink)
+                        .accessibilityAddTraits(.isHeader)
+                }
+
+                Text(item.body)
+                    .font(titleIsDerived ? Font.custom("Bricolage Grotesque", size: 26, relativeTo: .title2).weight(.bold) : leadFont)
+                    .lineSpacing(titleIsDerived ? 4 : 7)
+                    .foregroundStyle(Theme.ink)
+                    .textSelection(.enabled)
+
+                HStack(spacing: 10) {
+                    Rectangle().fill(Theme.orange).frame(width: 9, height: 9).accessibilityHidden(true)
+                    Text("\(count) \(count == 1 ? "WORD" : "WORDS") · \(max(1, count / 200)) MIN READ")
+                        .font(.brandMono).tracking(0.8).foregroundStyle(Theme.muted)
+                }
+
                 if !item.tags.isEmpty {
-                    Text(item.tags.map { "#\($0)" }.joined(separator: "  ")).font(.brandMono).foregroundStyle(Theme.muted)
-                }
-                if item.kind == .note {
-                    // Same editor as after dictation, so a saved note can be rewritten too.
-                    Button { model.present(.note(NoteDraft(text: item.body, recipientName: nil, existingID: item.id))) } label: {
-                        Label("edit and rewrite", systemImage: "wand.and.stars").frame(maxWidth: .infinity)
+                    HStack(spacing: 8) {
+                        ForEach(item.tags, id: \.self) { tag in
+                            Text("#\(tag)").font(.uiSubheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(Theme.skySoft, in: Capsule())
+                        }
                     }
-                    .buttonStyle(.brandHot)
                 }
-                // Forgetting is permanent, so it stays quiet until chosen, then asks once.
-                Button("forget this one", role: .destructive) { confirmForget = true }
-                    .buttonStyle(.brandQuiet).padding(.top, 8)
+
+                related(item)
             }
-            .padding(20)
+            .padding(.horizontal, 22)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
         }
+        .safeAreaInset(edge: .bottom) { actionBar(item) }
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            ToolbarItem(placement: .topBarTrailing) {
                 Button { model.togglePin(item.id) } label: {
                     Label(item.pinned ? "Unpin" : "Pin", systemImage: item.pinned ? "pin.slash" : "pin")
                 }
-                ShareLink(item: item.body)
             }
         }
         .confirmationDialog("Forget this one for good?", isPresented: $confirmForget, titleVisibility: .visible) {
@@ -62,5 +90,62 @@ struct MemoryDetailView: View {
         } message: {
             Text("It can't be brought back.")
         }
+    }
+
+    @ViewBuilder private func related(_ item: MemoryItem) -> some View {
+        let others = model.related(to: item)
+        if !others.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(text: "from your memory")
+                ForEach(others) { other in
+                    NavigationLink(value: other.route) { ItemRow(item: other) }.buttonStyle(.plain)
+                }
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    /// Rewriting is the main thing to do with a note, so it is the one orange button.
+    private func actionBar(_ item: MemoryItem) -> some View {
+        HStack(spacing: 10) {
+            if item.kind == .note {
+                Button { model.present(.note(NoteDraft(text: item.body, recipientName: nil, existingID: item.id))) } label: {
+                    Label("edit and rewrite", systemImage: "wand.and.stars")
+                }
+                .buttonStyle(.brandHot)
+            }
+            ShareLink(item: item.body) {
+                Image(systemName: "square.and.arrow.up").frame(width: 48, height: 48)
+            }
+            .accessibilityLabel("Share")
+            Menu {
+                if item.kind == .note {
+                    Menu("send with…") {
+                        ForEach(ServiceKind.allCases) { service in
+                            Button { send(item, via: service) } label: { Label(service.name, systemImage: service.symbol) }
+                        }
+                    }
+                }
+                Button("forget this one", role: .destructive) { confirmForget = true }
+            } label: {
+                Image(systemName: "ellipsis").frame(width: 48, height: 48)
+            }
+            .accessibilityLabel("More")
+        }
+        .font(.system(size: 17, weight: .semibold))
+        .foregroundStyle(Theme.ink)
+        .padding(8)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .shadow(color: Theme.ink.opacity(0.18), radius: 18, x: 0, y: 8)
+        .padding(.horizontal, 22)
+        .padding(.bottom, 6)
+    }
+
+    private func send(_ item: MemoryItem, via service: ServiceKind) {
+        let candidates = Contacts.candidates(for: nil, service: service)
+        model.startAction(ActionRequest(
+            service: service, content: item.body,
+            recipient: candidates.count == 1 ? candidates[0] : nil, candidates: candidates
+        ))
     }
 }

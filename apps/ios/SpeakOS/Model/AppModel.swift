@@ -74,6 +74,18 @@ final class AppModel {
             .sorted { $0.date > $1.date }
     }
 
+    /// Notes that share a meaningful word with this one, for the "from your memory" strip.
+    func related(to item: MemoryItem, limit: Int = 2) -> [MemoryItem] {
+        let words = Set(Interpreter.words((item.title + " " + item.body).lowercased()).filter { $0.count >= 5 })
+        guard !words.isEmpty else { return [] }
+        return items
+            .filter { $0.id != item.id && $0.kind != .action }
+            .map { other in (other, Interpreter.words((other.title + " " + other.body).lowercased()).filter { words.contains($0) }.count) }
+            .filter { $0.1 > 0 }
+            .sorted { ($0.1, $0.0.date) > ($1.1, $1.0.date) }
+            .prefix(limit).map(\.0)
+    }
+
     func item(_ id: UUID) -> MemoryItem? { items.first { $0.id == id } }
     func meeting(_ id: UUID) -> Meeting? { meetings.first { $0.id == id } }
     func connection(for service: ServiceKind) -> Connection { connections.first { $0.service == service }! }
