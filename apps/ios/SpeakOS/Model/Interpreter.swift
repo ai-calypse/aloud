@@ -22,7 +22,7 @@ enum Interpreter {
         }
 
         let actionVerbs = ["send ", "post ", "email ", "message ", "slack ", "tell ", "dm ", "create ", "add ", "put "]
-        if let service = service(in: lower), actionVerbs.contains(where: { lower.hasPrefix($0) }) {
+        if let service = Self.service(in: lower), actionVerbs.contains(where: { lower.hasPrefix($0) }) {
             let content = payload(in: text) ?? text
             let name = recipientName(in: text)
             let candidates = Contacts.candidates(for: name, service: service)

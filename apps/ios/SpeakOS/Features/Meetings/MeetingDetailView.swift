@@ -72,7 +72,7 @@ struct MeetingDetailView: View {
             if lines.isEmpty {
                 Text(empty).foregroundStyle(Theme.muted)
             } else {
-                ForEach(lines, id: \.self) { line in
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                     HStack(alignment: .top, spacing: 8) {
                         if bullets { Text("•").foregroundStyle(Theme.primary).accessibilityHidden(true) }
                         Text(line).foregroundStyle(Theme.ink)

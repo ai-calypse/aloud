@@ -234,7 +234,7 @@ final class AppModel {
     }
 
     func deleteItem(_ id: UUID) {
-        guard let item = item(id) else { return }
+        guard let item = self.item(id) else { return }
         items.removeAll { $0.id == id }
         if let m = item.meetingID { meetings.removeAll { $0.id == m } }
         if lastSaved?.id == id { lastSaved = nil }
