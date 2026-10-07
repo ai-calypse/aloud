@@ -97,6 +97,9 @@ const SETTINGS = (): Settings => ({
   catImagesDictation: true,
   catImagesAgents: true,
   onboarded: true,
+  // Both on: the preview exists to show the notch and the agent. `?labs=off`
+  // shows the core app alone: the overlay as only the dictation pill.
+  labs: params.get("labs") === "off" ? { notch: false, voiceAgent: false } : { notch: true, voiceAgent: true },
   overlayStyle: "dropPill",
   hotkeys: {
     hold: { kind: "modifierKey", key: "fn", modifiers: [] },
@@ -106,6 +109,7 @@ const SETTINGS = (): Settings => ({
     rewrite: null,
     meeting_notes: null,
     agent: null,
+    journal: null,
   },
 });
 
@@ -242,6 +246,43 @@ const NOTES: Note[] = [
   { path: "/demo/notes/groceries.md", title: "Grocery list", date: SEC - 86_400, content: "Grocery list\nOats, coffee, lemons, eggs" },
   { path: "/demo/notes/notch-ideas.md", title: "Notch ideas", date: SEC - 9 * 86_400, content: "# Notch ideas\nWidgets are an option, not the default" },
 ];
+
+// ── journal ──────────────────────────────────────────────────────────────
+
+// Stateful, so saving, editing and deleting in the preview behave as they do
+// in the app. `?journal=empty` starts with nothing, for the empty state.
+const JOURNAL: Note[] =
+  params.get("journal") === "empty"
+    ? []
+    : [
+        {
+          path: "/demo/journal/2026-10-07 091200.md",
+          title: "Ask Maya whether the launch can slip a week",
+          date: SEC - 1800,
+          content:
+            "Ask Maya whether the launch can slip a week\nThe onboarding copy still needs a pass, and I would rather ship it right than ship it Thursday.",
+        },
+        {
+          path: "/demo/journal/2026-10-07 060500.md",
+          title: "Idea: a podcast about maps",
+          date: SEC - 5 * 3600,
+          content: "Idea: a podcast about maps\nEach episode, one map that changed how people thought. Start with the London cholera map.",
+        },
+        {
+          path: "/demo/journal/2026-10-06 190000.md",
+          title: "Grocery run: oats, coffee, lemons, eggs",
+          date: SEC - 26 * 3600,
+          content: "Grocery run: oats, coffee, lemons, eggs",
+        },
+        {
+          path: "/demo/journal/2026-10-03 081500.md",
+          title: "Felt good to finally fix the hotkey bug",
+          date: SEC - 4 * 86_400,
+          content:
+            "Felt good to finally fix the hotkey bug\nIt was the key-up being swallowed by capture. Wrote a test named after it so it stays fixed.",
+        },
+      ];
+let journalCapturing = false;
 
 // The one thing here that follows a click: a copy into Apple Notes, so the
 // "In Notes" and "Syncing" states can be seen. `?notesSync=denied` shows the
@@ -628,6 +669,30 @@ function handle(cmd: string, a: Record<string, unknown> = {}): unknown {
     case "search_notes":
       return NOTES.filter((n) => has(n.content, a.query)).map((note) => ({ note, score: 1, snippet: note.content.split("\n")[0] }));
 
+    case "journal_entries": return JOURNAL.slice(0, Number(a.limit) || JOURNAL.length);
+    case "journal_search":
+      return JOURNAL.filter((n) => has(n.content, a.query)).map((note) => ({ note, score: 1, snippet: note.content.split("\n")[0] }));
+    case "journal_save": {
+      const text = String(a.text ?? "");
+      const at = JOURNAL.findIndex((n) => n.path === a.path);
+      const entry: Note = {
+        path: at >= 0 ? JOURNAL[at].path : `/demo/journal/${Date.now()}.md`,
+        title: text.trim().split("\n")[0].slice(0, 80),
+        date: at >= 0 ? JOURNAL[at].date : Math.floor(Date.now() / 1000),
+        content: text,
+      };
+      if (at >= 0) JOURNAL[at] = entry;
+      else JOURNAL.unshift(entry);
+      return entry;
+    }
+    case "journal_delete": {
+      const at = JOURNAL.findIndex((n) => n.path === a.path);
+      if (at >= 0) JOURNAL.splice(at, 1);
+      return null;
+    }
+    case "journal_capturing": return journalCapturing;
+    case "journal_capture": return (journalCapturing = !journalCapturing);
+
     case "shelf_items": return SHELF;
     case "shelf_prefs": return { shots: true, downloads: true, drives: true };
     case "shelf_thumbnail": return art([...String(a.path)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 11));
@@ -685,7 +750,7 @@ function handle(cmd: string, a: Record<string, unknown> = {}): unknown {
   }
 }
 
-export function installPreviewBackend(): void {
-  mockWindows("overlay");
+export function installPreviewBackend(label = "overlay"): void {
+  mockWindows(label);
   mockIPC((cmd, args) => handle(cmd, args as Record<string, unknown> | undefined), { shouldMockEvents: true });
 }

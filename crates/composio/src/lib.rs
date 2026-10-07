@@ -12,6 +12,15 @@
 //! - `POST /connected_accounts/link` → {redirect_url} to send the user through OAuth
 //! - `POST /tools/execute/{slug}` (needs BOTH connected_account_id AND user_id) → {data,error,successful}
 
+//!
+//! Its own crate rather than part of the agent's: connecting an account is the
+//! core app's (Settings › Connectors), and running a tool is the voice agent's.
+//! Both reach Composio through this one client.
+
+pub mod cache;
+
+pub use cache::ResponseCache;
+
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Map, Value};
 use std::time::Duration;
@@ -662,7 +671,7 @@ impl ComposioClient {
     }
 
     /// A toolkit's logo, as its catalogue entry links it, for
-    /// [`crate::icons`]. Fetched without the API key: the logo sits on another
+    /// `aloud_agent::icons`. Fetched without the API key: the logo sits on another
     /// host, which has no business seeing it.
     pub async fn logo(&self, toolkit: &str) -> Result<Vec<u8>> {
         // A logo is a few KB; anything far past that is not one.
@@ -1087,7 +1096,7 @@ fn error_message(body: &str, status: u16) -> String {
 /// Composio schemas run ~5K tokens for six tools, enough alone to burst a small
 /// tokens-per-minute budget. Keep only the keys the model needs for arguments,
 /// plus `title`: a few tokens that give the action preview its field labels.
-pub(crate) fn slim_schema(schema: &Value) -> Value {
+pub fn slim_schema(schema: &Value) -> Value {
     let Some(obj) = schema.as_object() else {
         return schema.clone();
     };

@@ -355,12 +355,7 @@ impl Run {
         if !is_current(self.ticket) {
             return;
         }
-        let island = toast.island(self.ticket);
-        if own_panel {
-            crate::islands::takeover_from_run(app, island);
-        } else {
-            crate::islands::takeover(app, island);
-        }
+        crate::islands::run_toast(app, toast.island(self.ticket), own_panel);
     }
 }
 
@@ -667,6 +662,13 @@ pub async fn run(
     quiet: bool,
     cancelled: impl Fn() -> bool,
 ) -> Result<()> {
+    // The one funnel every command takes (the Command keys, "hey flow",
+    // always-listening), so the voice agent's switch in Labs is honoured here
+    // whatever let the utterance through.
+    if !crate::labs::voice_agent() {
+        tracing::info!("voice agent is off in Labs; not running a command");
+        return Ok(());
+    }
     // "Send it" answers the card on screen. Only speech that is not a reply to
     // it is a new command, which supersedes the run the card belongs to.
     if answer_by_voice(app, &transcript) {
@@ -698,7 +700,10 @@ pub async fn run(
     // must never flash a run panel first: it opens the shell there and is done.
     let installed = aloud_selection::installed_apps();
     let fast = aloud_native::fast::route(&transcript, &installed);
-    if let Some(aloud_native::fast::Fast::Notch { section, sub, done }) = fast {
+    // With the notch off there is no shell to open: the brain takes it.
+    if let Some(aloud_native::fast::Fast::Notch { section, sub, done }) =
+        fast.clone().filter(|_| crate::labs::notch())
+    {
         tracing::info_span!("agent_run", route = "fast").in_scope(|| {});
         crate::overlay::open_notch(app, section, sub);
         run.record_end(app, None, &done, true);

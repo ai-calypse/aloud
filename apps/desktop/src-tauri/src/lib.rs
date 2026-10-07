@@ -6,7 +6,9 @@ mod focus;
 mod today;
 // notch-today-focus: wiring ends
 mod islands;
+mod journal;
 mod keys; // notch-keys
+mod labs;
 mod launcher;
 mod listen;
 mod media; // notch-media
@@ -114,6 +116,13 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_time_saved,
             commands::search_notes,
             commands::recent_notes,
+            journal::journal_entries,
+            journal::journal_search,
+            journal::journal_save,
+            journal::journal_delete,
+            journal::journal_capture,
+            journal::journal_capturing,
+            journal::journal_reveal,
             commands::default_prompt,
             commands::test_prompt,
             commands::input_devices,
@@ -290,6 +299,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             overlay::OverlayDismiss,
             overlay::NotchHover,
             overlay::NotchOpen,
+            labs::LabsChanged,
+            journal::JournalChanged,
             islands::IslandChanged,
             islands::IslandsWaiting,
             nudges::NudgeStateChanged,
@@ -356,10 +367,11 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             pipeline.warm_up();
             meeting::recover_unsaved();
             let meeting: Arc<Mutex<Option<meeting::Meeting>>> = Arc::new(Mutex::new(None));
+            // The Command keys are left out while the voice agent is off.
             let hotkey_config = Arc::new(Mutex::new(
                 settings
                     .lock()
-                    .map(|s| s.hotkeys.clone())
+                    .map(|s| labs::hotkeys(&s))
                     .unwrap_or_default(),
             ));
             let hotkey_capture: aloud_hotkey::CaptureSlot = Default::default();
@@ -387,10 +399,6 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             // Drag-out for search results. Main thread, needs the overlay view.
             overlay::install_drag(app.handle());
 
-            // The notch is permanent: an agent can start at any time, and a
-            // notch that only exists during a dictation cannot show one.
-            overlay::show_notch(app.handle());
-
             // Outside-click closes the panel, popover-style: the overlay only
             // holds key focus while a panel is open, so losing it means the
             // user clicked elsewhere. The click reaches the app behind because
@@ -404,33 +412,22 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
                 });
             }
 
-            sessions::start(app.handle());
-            media::start(app.handle()); // notch-media
-
-            // -- notch Shelf --
+            // The notch's state, managed whatever Labs says: its commands read
+            // it with `app.state`, which panics on state never managed. Only
+            // `labs::apply` below starts anything that watches or polls.
+            sessions::manage(app.handle());
             shelf::init(app.handle());
-            // -- end notch Shelf --
-
-            // notch Clipboard section: the store, and the pasteboard watcher.
-            clipboard::start(app.handle());
-
-            // notch Launch section: pins and recents.
+            clipboard::manage(app.handle());
             launcher::start(app.handle());
-            // notch-mac: wiring begins
-            mac::start(app.handle());
-            // notch-mac: wiring ends
-
-            // notch-today-focus: setup begin
+            // Its ticker sleeps until a timer is started from the notch.
             focus::init(app.handle());
-            today::init(app.handle());
-            let state = app.state::<AppState>();
-            let events = state.settings.lock().ok().map(|s| s.notch_events.clone());
-            if let Some(events) = events {
-                nudges::apply(app.handle(), &events);
-            }
-            // notch-today-focus: setup end
 
             tray::init(app)?;
+
+            // The notch (resting window, watchers, the volume keys' stream)
+            // and the voice agent, as Settings › Labs has them.
+            let snapshot = settings.lock().map(|s| s.clone()).unwrap_or_default();
+            labs::apply(app.handle(), &snapshot);
 
             // Off the critical path: the App Rules picker otherwise pays for
             // ~70 `sips` spawns on first click.
@@ -439,11 +436,6 @@ fn build_app(builder: Builder<tauri::Wry>, timings: Arc<Mutex<aloud_store::Timin
             });
 
             commands::warm_connectors(app.handle().clone());
-
-            // notch-keys: wiring begins
-            // Before the key tap starts: it takes the tap's aux event stream.
-            keys::start(app.handle());
-            // notch-keys: wiring ends
 
             spawn_hotkey_listener(
                 app.handle().clone(),
@@ -637,6 +629,9 @@ fn handle_hotkey(
                 tracing::error!(%e, "could not start recording");
             }
         }
+        // Unbound while the voice agent is off (`labs::hotkeys`); checked here
+        // too, so a config that has not caught up yet cannot start a run.
+        Event::Activated(Role::Ask | Role::Agent) if !labs::voice_agent() => {}
         Event::Activated(Role::Ask) => {
             if let Err(e) = pipeline.start(Role::Ask) {
                 tracing::error!(%e, "could not start recording");
@@ -691,6 +686,24 @@ fn handle_hotkey(
                 }
             });
         }
+        // A thought from anywhere: recorded while held, kept in the journal,
+        // nothing pasted into the app in front.
+        Event::Activated(Role::Journal) => {
+            if let Err(e) = pipeline.start(Role::Journal) {
+                tracing::error!(%e, "could not start recording");
+            }
+        }
+        Event::Deactivated(Role::Journal) => {
+            if !pipeline.owns(Role::Journal) {
+                return;
+            }
+            let pipeline = pipeline.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = pipeline.stop_and_journal().await {
+                    tracing::error!(%e, "journal capture failed");
+                }
+            });
+        }
         Event::Activated(Role::CopyAgain) => {
             if let Err(e) = pipeline.paste_again() {
                 tracing::error!(%e, "could not paste again");
@@ -741,6 +754,10 @@ pub(crate) fn toggle_listening(app: &tauri::AppHandle) {
         return;
     };
     if slot.take().is_some() {
+        return;
+    }
+    // Turning it off always works; turning it on is the voice agent's.
+    if !labs::voice_agent() {
         return;
     }
     let settings = state.settings.lock().map(|s| s.clone()).unwrap_or_default();

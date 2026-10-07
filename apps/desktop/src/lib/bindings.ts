@@ -18,6 +18,32 @@ export const commands = {
 	searchNotes: (query: string) => typedError<SearchResult[], string>(__TAURI_INVOKE("search_notes", { query })),
 	/**  Newest notes, for the empty-query state. */
 	recentNotes: (limit: number) => typedError<Note[], string>(__TAURI_INVOKE("recent_notes", { limit })),
+	/**  The newest entries, for the timeline. */
+	journalEntries: (limit: number) => typedError<Note[], string>(__TAURI_INVOKE("journal_entries", { limit })),
+	/**  Every entry holding all of `query`'s words, best match first. */
+	journalSearch: (query: string) => typedError<SearchResult[], string>(__TAURI_INVOKE("journal_search", { query })),
+	/**
+	 *  Writes a typed entry, or the edit to one (`path`). Returns it as stored, so
+	 *  the view shows exactly what is on disk.
+	 */
+	journalSave: (text: string, path: string | null) => typedError<Note, string>(__TAURI_INVOKE("journal_save", { text, path })),
+	journalDelete: (path: string) => typedError<null, string>(__TAURI_INVOKE("journal_delete", { path })),
+	/**
+	 *  Starts a voice capture for the journal, or stops and keeps the one running.
+	 *  Returns whether a capture is now recording. A dictation in progress is left
+	 *  alone: one microphone, one session.
+	 */
+	journalCapture: () => typedError<boolean, string>(__TAURI_INVOKE("journal_capture")),
+	/**
+	 *  Whether a journal capture owns the microphone now, for a window that opens
+	 *  in the middle of one.
+	 */
+	journalCapturing: () => __TAURI_INVOKE<boolean>("journal_capturing"),
+	/**
+	 *  Opens the journal folder in Finder or Explorer: the entries are plain files,
+	 *  and seeing them there is how anyone checks that they are theirs.
+	 */
+	journalReveal: () => typedError<null, string>(__TAURI_INVOKE("journal_reveal")),
 	defaultPrompt: () => __TAURI_INVOKE<DefaultPrompt>("default_prompt"),
 	/**
 	 *  Runs a prompt against a sample without a dictation, for the Prompts pane.
@@ -590,6 +616,8 @@ export const events = {
 	hotkeysPermitted: makeEvent<HotkeysPermitted>("hotkeys-permitted"),
 	island: makeEvent<IslandChanged>("island"),
 	islandsWaiting: makeEvent<IslandsWaiting>("islands-waiting"),
+	journalChanged: makeEvent<JournalChanged>("journal-changed"),
+	labsChanged: makeEvent<LabsChanged>("labs-changed"),
 	mediaNowPlaying: makeEvent<MediaNowPlaying>("media-now-playing"),
 	meetingPhase: makeEvent<MeetingPhase>("meeting-phase"),
 	modelDownload: makeEvent<ModelDownload>("model-download"),
@@ -1002,6 +1030,11 @@ export type Config = {
 	rewrite: Binding | null,
 	meeting_notes: Binding | null,
 	agent: Binding | null,
+	/**
+	 *  Unbound by default: a new key is the user's to choose, and the journal
+	 *  is also one click away in the app and the menu bar.
+	 */
+	journal: Binding | null,
 };
 
 /**  One connectable service, for the Connectors pane. */
@@ -1424,6 +1457,15 @@ export type IslandsWaiting = {
 };
 
 /**
+ *  An entry was written by something other than the view showing it: a voice
+ *  capture, from the Journal key, the menu bar or the record button. Carries
+ *  the path only, so the words never ride an event every window receives.
+ */
+export type JournalChanged = {
+	path: string,
+};
+
+/**
  *  A physical key, side-specific where the distinction matters — Right Option
  *  alone is a popular dictation binding.
  */
@@ -1432,6 +1474,35 @@ export type Key = "leftCommand" | "rightCommand" | "leftShift" | "rightShift" | 
 "fn" | "escape" | "space" | ({ char: string }) & { f?: never } | ({ f: number }) & { char?: never };
 
 export type Kind = "file" | "folder";
+
+/**
+ *  Experiments that sit beside the core app (dictation, meetings, the journal)
+ *  rather than inside it. Off for a new install, so the first run is the core
+ *  app alone; `Settings::from_json` turns both on for an install that predates
+ *  the switches, which already had them and would otherwise lose them.
+ */
+export type Labs = {
+	/**
+	 *  The always-on notch: sections, islands, takeovers, and every watcher
+	 *  that feeds them. Off, the overlay is only the dictation pill.
+	 */
+	notch?: boolean,
+	/**
+	 *  The command brain: the Command keys, "hey flow" inside a dictation,
+	 *  and always-listening. Off, a spoken "hey flow" is just dictated.
+	 */
+	voiceAgent?: boolean,
+};
+
+/**
+ *  Sent to both windows when a switch flips, so the overlay can stop drawing
+ *  the notch and the main window can show or hide what belongs to it, without
+ *  waiting for the next settings read.
+ */
+export type LabsChanged = {
+	notch: boolean,
+	voiceAgent: boolean,
+};
 
 /**  A file the panel can open. */
 export type LaunchFile = {
@@ -1704,6 +1775,11 @@ export type Phase = "idle" |
  *  menu bar. Never set by a dictation; see `crate::listen`.
  */
 "listening" | "recording" | "transcribing" | "done" | 
+/**
+ *  A journal capture was kept: the dictation's "Pasted", for words that
+ *  went into the journal rather than into an app.
+ */
+"saved" | 
 /**
  *  Silence or filler only — a normal result, but its own phase rather than
  *  `Idle` so the overlay can say so instead of claiming "Pasted".
@@ -2011,6 +2087,8 @@ export type Settings = {
 	overlayStyle?: OverlayStyle,
 	/**  How the notch's takeovers behave: Quiet mode, Focus, per-source switches. */
 	notchEvents?: NotchEvents,
+	/**  The notch and the voice agent, each behind its own switch. */
+	labs?: Labs,
 	/**
 	 *  Whether a coding agent's permission request opens the notch by itself.
 	 *  Off means the request waits quietly — the Agents surface flags it, and

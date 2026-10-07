@@ -36,21 +36,28 @@ fn err(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
 
-/// Opens the store and starts the watcher. Called once from `setup`.
-pub fn start(app: &AppHandle) {
+/// Opens the store. Called from `setup` whatever Labs says, so the commands
+/// always find their state; nothing is watched until [`start`].
+pub fn manage(app: &AppHandle) {
     let opened = aloud_notes::data_dir()
         .and_then(|dir| Store::open(&dir.join("clipboard")))
         .map(Arc::new);
-    match &opened {
-        Ok(store) => {
-            let handle = app.clone();
-            aloud_clipboard::watch::spawn(store.clone(), move || {
-                let _ = ClipboardChanged.emit_to(&handle, "overlay");
-            });
-        }
-        Err(e) => tracing::warn!(error = %format!("{e:#}"), "clipboard history unavailable"),
+    if let Err(e) = &opened {
+        tracing::warn!(error = %format!("{e:#}"), "clipboard history unavailable");
     }
     app.manage(ClipboardStore(opened.ok()));
+}
+
+/// Starts the pasteboard watcher, once, when the notch is first switched on.
+/// History is the notch's: with the notch off again, nothing is recorded.
+pub fn start(app: &AppHandle) {
+    let Some(store) = app.state::<ClipboardStore>().0.clone() else {
+        return;
+    };
+    let handle = app.clone();
+    aloud_clipboard::watch::spawn(store, crate::labs::notch, move || {
+        let _ = ClipboardChanged.emit_to(&handle, "overlay");
+    });
 }
 
 /// Hands focus back before a paste: the panel is the key window while open.

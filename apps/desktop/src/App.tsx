@@ -8,6 +8,7 @@ import {
   type StatsView,
 } from "./lib/bindings";
 import { NotesView } from "./features/notes/NotesView";
+import { JournalView } from "./features/journal/JournalView";
 import {
   SettingsView,
   type SettingsSection,
@@ -24,12 +25,13 @@ const PHASE_LABEL: Record<Phase, string> = {
   recording: "Listening…",
   transcribing: "Transcribing…",
   done: "Pasted",
+  saved: "Saved to journal",
   noSpeech: "No speech detected",
   error: "Something went wrong",
 };
 
 /** A sidebar row: either a top-level view or one settings pane. */
-type Nav = "notes" | "status" | "timings" | SettingsSection;
+type Nav = "journal" | "notes" | "status" | "timings" | SettingsSection;
 
 // icon is an inline SVG path — no icon dependency. Each pane keeps one hue, so
 // a row is recognisable by colour before the label is read.
@@ -40,7 +42,9 @@ const NAV: {
   tint: string;
   group: "app" | "settings";
 }[] = [
-  { id: "notes", title: "Notes", group: "app", tint: "var(--sys-orange)", icon: "M4 4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4ZM14 2v6h6M8 13h8M8 17h8" },
+  { id: "journal", title: "Journal", group: "app", tint: "var(--sys-blue)", icon: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" },
+  { id: "meetings", title: "Meetings", group: "app", tint: "var(--sys-orange)", icon: "M15 10l5-3v10l-5-3v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1Z" },
+  { id: "notes", title: "Notes", group: "app", tint: "var(--sys-teal)", icon: "M4 4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4ZM14 2v6h6M8 13h8M8 17h8" },
   { id: "status", title: "Status", group: "app", tint: "var(--sys-green)", icon: "M3 12h4l3 8 4-16 3 8h4" },
   // Hidden unless "Developer tools" is on. Not import.meta.env.DEV, which
   // meant no release build could reach a finished, registered view.
@@ -54,9 +58,11 @@ const NAV: {
   { id: "rules", title: "App Rules", group: "settings", tint: "var(--sys-blue)", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM4 9h16M8 6h.01" },
   { id: "prompts", title: "Prompts", group: "settings", tint: "var(--sys-pink)", icon: "M4 4h16v12H7l-3 3V4ZM8 9h8M8 12h5" },
   { id: "runlog", title: "Run Log", group: "settings", tint: "var(--sys-purple)", icon: "M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5ZM8 8h8M8 12h8M8 16h5" },
-  { id: "meetings", title: "Meetings", group: "settings", tint: "var(--sys-orange)", icon: "M15 10l5-3v10l-5-3v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1Z" },
   { id: "connectors", title: "Connectors", group: "settings", tint: "var(--sys-teal)", icon: "M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" },
+  // The voice agent's: what it may do without asking. Hidden while it is off.
   { id: "permissions", title: "Permissions", group: "settings", tint: "var(--sys-red)", icon: "M12 3l7 3v6c0 4.5-3 8-7 9-4-1-7-4.5-7-9V6l7-3ZM9 12l2 2 4-4" },
+  // The notch and the voice agent, each behind a switch.
+  { id: "labs", title: "Labs", group: "settings", tint: "var(--sys-purple)", icon: "M9 3h6M10 3v6l-5.5 9.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3M7.5 15h9" },
   // Hidden unless "Developer tools" is on, for the same reason as Timings.
   { id: "debug", title: "Debug", group: "settings", tint: "var(--sys-grey)", icon: "M9 4h6M12 4v3M7 10a5 5 0 0 1 10 0v4a5 5 0 0 1-10 0v-4ZM3 11h4M17 11h4M3 17h4M17 17h4" },
 ];
@@ -72,6 +78,7 @@ const SETTINGS_IDS: SettingsSection[] = [
   "permissions",
   "runlog",
   "meetings",
+  "labs",
   "debug",
 ];
 
@@ -90,7 +97,7 @@ const isSettings = (n: Nav): n is SettingsSection =>
   (SETTINGS_IDS as string[]).includes(n);
 
 export default function App() {
-  const [nav, setNav] = useState<Nav>("notes");
+  const [nav, setNav] = useState<Nav>("journal");
   // The pill measures itself against the active row, so it needs the element,
   // not just the id — the sidebar's group divider makes row pitch uneven.
   const [activeRow, setActiveRow] = useState<HTMLElement | null>(null);
@@ -121,6 +128,10 @@ export default function App() {
       commands.getSettings().then(setSettings),
     );
 
+    // A switch flipped in Labs: the sidebar shows or hides what belongs to it.
+    const unlistenLabs = events.labsChanged.listen(() =>
+      commands.getSettings().then(setSettings),
+    );
     // Rust announces the Accessibility grant, so the banner clears without a restart.
     const unlistenPermission = events.hotkeysPermitted.listen((event) =>
       setHotkeysReady(event.payload),
@@ -131,6 +142,7 @@ export default function App() {
       unlistenPermission.then((off) => off());
       unlistenSettings.then((off) => off());
       unlistenSetup.then((off) => off());
+      unlistenLabs.then((off) => off());
     };
   }, []);
 
@@ -150,11 +162,12 @@ export default function App() {
   // group divider agree with what is actually rendered.
   const rows = NAV.filter(
     (n) =>
-      (n.id !== "timings" && n.id !== "debug") || settings.developerTools,
+      ((n.id !== "timings" && n.id !== "debug") || settings.developerTools) &&
+      (n.id !== "permissions" || settings.labs?.voiceAgent),
   );
-  // Turning developer tools off while one of them is open would otherwise
-  // strand the shell on a row that is no longer rendered.
-  const current: Nav = rows.some((n) => n.id === nav) ? nav : "notes";
+  // Turning developer tools (or the voice agent) off while one of its rows is
+  // open would otherwise strand the shell on a row that is no longer rendered.
+  const current: Nav = rows.some((n) => n.id === nav) ? nav : "journal";
   const active = rows.find((n) => n.id === current)!;
 
   return (
@@ -244,6 +257,12 @@ export default function App() {
           </p>
         )}
 
+        {current === "journal" && (
+          <JournalView
+            captureKey={settings.hotkeys?.journal}
+            onOpenHotkeys={() => setNav("hotkeys")}
+          />
+        )}
         {current === "notes" && <NotesView />}
         {current === "timings" && <TimingsView />}
         {isSettings(current) && (

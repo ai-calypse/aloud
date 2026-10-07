@@ -12,10 +12,10 @@ use tauri::{AppHandle, Manager};
 
 /// Tells the key tap whether to eat the volume and brightness keys. Called at
 /// launch and on every settings save, so the switch needs no restart.
-/// Replacement needs the key whispers on: an eaten key with nothing drawn is a
-/// dead key.
+/// Replacement needs the key whispers on, and the notch itself: an eaten key
+/// with nothing drawn is a dead key.
 pub fn apply_settings(events: &NotchEvents) {
-    let on = events.replace_system_huds && events.huds;
+    let on = crate::labs::notch() && events.replace_system_huds && events.huds;
     aux::set_replace_volume(on);
     aux::set_replace_brightness(on);
 }

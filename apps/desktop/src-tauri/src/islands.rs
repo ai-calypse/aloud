@@ -148,14 +148,27 @@ fn stage() -> std::sync::MutexGuard<'static, Stage> {
 /// shows now, waits its turn or is not worth showing — Quiet mode, Focus, the
 /// user typing and a panel being open all weigh in — and the stage holds the
 /// one on screen and the line behind it.
+///
+/// Dropped while the notch is off (Settings › Labs): every producer of these
+/// is part of the notch. A voice run's result goes through [`run_toast`].
 pub fn takeover(app: &AppHandle, island: Island) {
+    if !crate::labs::notch() {
+        return;
+    }
     offer(app, island, false);
 }
 
-/// [`takeover`] from a run that owns the open panel, which the takeover
-/// replaces in place rather than waiting for.
-pub fn takeover_from_run(app: &AppHandle, island: Island) {
-    offer(app, island, true);
+/// A voice run's toast. The agent is its own experiment, so this shows with
+/// the notch off too. `own_panel` is a run whose open panel the toast replaces
+/// in place rather than waits for.
+pub fn run_toast(app: &AppHandle, mut island: Island, own_panel: bool) {
+    // A whisper lives in the resting notch and claims no window. With the
+    // notch off there is no resting window, so "Sent" would land nowhere: one
+    // size up, it takes the window the way a toast does and is seen.
+    if !crate::labs::notch() && island.tier == Some(IslandTier::Whisper) {
+        island.tier = Some(IslandTier::Peek);
+    }
+    offer(app, island, own_panel);
 }
 
 fn offer(app: &AppHandle, island: Island, own_panel: bool) {
@@ -259,10 +272,17 @@ fn ensure_ticker(app: &AppHandle) {
 
 /// What the gate needs to know right now.
 fn env(app: &AppHandle, own_panel: bool) -> Env {
+    // The notch's own switches only mean something while it is on; with it
+    // off, the only takeover left is a run's toast, shown as it is.
     let events = app
         .try_state::<crate::AppState>()
         .and_then(|state| state.settings.lock().ok().map(|s| s.notch_events.clone()))
-        .unwrap_or_default();
+        .filter(|_| crate::labs::notch())
+        .unwrap_or_else(|| NotchEvents {
+            quiet: false,
+            focus_aware: false,
+            ..NotchEvents::default()
+        });
     Env {
         panel_open: !own_panel && crate::overlay::user_panel_open(),
         typing: aloud_hotkey::since_last_keystroke()

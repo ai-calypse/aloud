@@ -1,0 +1,18 @@
+[package]
+name = "aloud-composio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Composio: connected accounts, tool schemas and tool calls, shared by the core app and the voice agent"
+
+[dependencies]
+anyhow.workspace = true
+futures-util = "0.3"
+reqwest = { version = "0.13", default-features = false, features = [
+  "json",
+  "rustls",
+] }
+serde_json.workspace = true
+tracing.workspace = true
+# Only for `try_join!`.
+tokio = { version = "1", features = ["macros"] }

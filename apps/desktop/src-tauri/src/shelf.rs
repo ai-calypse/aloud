@@ -67,8 +67,8 @@ impl ShelfState {
     }
 }
 
-/// Opens the shelf and starts the watchers the user left on. Called from
-/// `setup`; nothing here blocks it — a watcher is a thread.
+/// Opens the shelf. Called from `setup` whatever Labs says: the commands read
+/// this state with `app.state`, which panics on state never managed.
 pub fn init(app: &AppHandle) {
     let dir = aloud_notes::data_dir()
         .unwrap_or_else(|_| std::env::temp_dir().join("Aloud"))
@@ -80,6 +80,16 @@ pub fn init(app: &AppHandle) {
         prefs: Mutex::new(prefs),
         watchers: Mutex::default(),
     });
+}
+
+/// Starts the watchers the user left on, each time the notch is switched on.
+/// Nothing here blocks — a watcher is a thread.
+pub fn start_watchers(app: &AppHandle) {
+    let prefs = *app
+        .state::<ShelfState>()
+        .prefs
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     for (which, on) in [
         (ShelfWatch::Shots, prefs.shots),
         (ShelfWatch::Downloads, prefs.downloads),
@@ -118,6 +128,14 @@ fn start(app: &AppHandle, which: ShelfWatch) -> anyhow::Result<()> {
         ShelfWatch::Drives => watchers.drives = Some(handle),
     }
     Ok(())
+}
+
+/// Stops every watcher, for the notch being switched off. The prefs are left
+/// as they are, so switching it back on restarts the same ones.
+pub fn stop_watchers(app: &AppHandle) {
+    for which in [ShelfWatch::Shots, ShelfWatch::Downloads, ShelfWatch::Drives] {
+        stop(app, which);
+    }
 }
 
 fn stop(app: &AppHandle, which: ShelfWatch) {

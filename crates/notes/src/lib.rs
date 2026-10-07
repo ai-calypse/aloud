@@ -5,6 +5,7 @@
 //! ponytail: linear scan of all note files per query — plenty for years of
 //! meetings; SQLite FTS is the upgrade path if it ever feels slow.
 
+pub mod journal;
 pub mod sync;
 
 use anyhow::{Context, Result};
@@ -114,7 +115,7 @@ pub fn note_from(path: &Path) -> Option<Note> {
     })
 }
 
-fn file_mtime(path: &Path) -> Option<i64> {
+pub(crate) fn file_mtime(path: &Path) -> Option<i64> {
     let modified = fs::metadata(path).ok()?.modified().ok()?;
     Some(DateTime::<Utc>::from(modified).timestamp())
 }

@@ -33,14 +33,13 @@ pub fn update_settings(
     to_string_err(settings.save())?;
 
     // Into the live config the listener reads, so a rebind takes effect on the
-    // next key event rather than at next launch.
+    // next key event rather than at next launch. The Command keys only while
+    // the voice agent is on.
     if let Ok(mut config) = state.hotkey_config.lock() {
-        *config = settings.hotkeys.clone();
+        *config = crate::labs::hotkeys(&settings);
     }
 
     crate::tray::set_visible(&app, settings.show_menu_bar_icon);
-    crate::keys::apply_settings(&settings.notch_events);
-    crate::nudges::apply(&app, &settings.notch_events);
 
     let mut current = state
         .settings
@@ -48,8 +47,11 @@ pub fn update_settings(
         .map_err(|_| "settings lock poisoned")?;
     let browsers_changed = current.browser_media != settings.browser_media
         || current.any_app_media != settings.any_app_media;
-    *current = settings;
+    *current = settings.clone();
     drop(current);
+    // After the lock is released: switching the notch on starts watchers that
+    // read the settings themselves, and a std Mutex is not reentrant.
+    crate::labs::apply(&app, &settings);
     if browsers_changed {
         // Now Playing should show or drop the browser tab, or start or stop the
         // any-app helper, now and not at the next tick.
@@ -500,7 +502,7 @@ pub struct Connector {
 
 /// Composio responses held between opens of the Connectors pane. The policy
 /// (credential scoping, single-flight revalidation) lives in `aloud_agent`.
-pub type ConnectorCache = std::sync::Arc<aloud_agent::ResponseCache<Connector>>;
+pub type ConnectorCache = std::sync::Arc<aloud_composio::ResponseCache<Connector>>;
 
 /// The configured Composio key, or the error the pane should show. Read before
 /// touching the cache: it doubles as the cache's scope, so an account swap
@@ -517,11 +519,11 @@ fn api_key(state: &State<'_, AppState>) -> CmdResult<String> {
     Ok(key)
 }
 
-fn client(key: &str) -> CmdResult<aloud_agent::ComposioClient> {
-    to_string_err(aloud_agent::ComposioClient::new(key))
+fn client(key: &str) -> CmdResult<aloud_composio::ComposioClient> {
+    to_string_err(aloud_composio::ComposioClient::new(key))
 }
 
-fn to_connector(toolkit: aloud_agent::Toolkit) -> Connector {
+fn to_connector(toolkit: aloud_composio::Toolkit) -> Connector {
     Connector {
         slug: toolkit.slug,
         name: toolkit.name,
@@ -535,7 +537,9 @@ fn to_connector(toolkit: aloud_agent::Toolkit) -> Connector {
 
 /// Fetches the connected toolkits and maps them to the pane's shape. Stops at
 /// toolkit metadata — one request, not one per connected service.
-async fn fetch_connected(composio: &aloud_agent::ComposioClient) -> anyhow::Result<Vec<Connector>> {
+async fn fetch_connected(
+    composio: &aloud_composio::ComposioClient,
+) -> anyhow::Result<Vec<Connector>> {
     Ok(composio
         .connected_toolkits()
         .await?
@@ -597,6 +601,11 @@ pub fn warm_connectors(app: AppHandle) {
 fn warm_previews(app: &AppHandle, key: String) {
     use tauri::Manager;
 
+    // The cards are the voice agent's, and each costs a model call: none
+    // while it is off. Connectors themselves stay live for the core app.
+    if !crate::labs::voice_agent() {
+        return;
+    }
     let Ok(path) = aloud_notes::data_dir().map(|dir| dir.join("action-previews.json")) else {
         return;
     };

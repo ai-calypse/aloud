@@ -76,6 +76,7 @@ const LABEL: Record<Phase, string> = {
   recording: "Listening…",
   transcribing: "Transcribing…",
   done: "Pasted",
+  saved: "Saved to journal",
   noSpeech: "No speech detected",
   // Only shown if an error arrives without a message; Rust normally sends one.
   error: "Failed",
@@ -164,6 +165,14 @@ function Overlay() {
   const [catImages, setCatImages] = useState(true);
   const [catImagesDictation, setCatImagesDictation] = useState(true);
   const [catImagesAgents, setCatImagesAgents] = useState(true);
+  // Settings › Labs. Off, this window is only the dictation pill and a voice
+  // run's panel: no shell, no resting islands, no hover. Off until read, so a
+  // notch-off install never flashes one; Rust shows the resting notch only
+  // after it is on, and the read lands well before a pointer can dwell. The
+  // ref is for the listeners below, which subscribe once.
+  const [notchOn, setNotchOn] = useState(false);
+  const notchRef = useRef(notchOn);
+  notchRef.current = notchOn;
   // The enlarged cat preview: the stage + session it belongs to (from which the
   // image and caption derive) and the on-screen box to grow it from. Rendered
   // fixed at the root so it escapes the list's scroll clip; a 48px avatar hover
@@ -393,6 +402,7 @@ function Overlay() {
         setCatImages(s.catImages ?? true);
         setCatImagesDictation(s.catImagesDictation ?? true);
         setCatImagesAgents(s.catImagesAgents ?? true);
+        setNotchOn(s.labs?.notch ?? false);
       });
     } catch {
       /* browser preview: no Tauri, keep the defaults */
@@ -429,7 +439,9 @@ function Overlay() {
       setPermissions((queue) => [e.payload, ...queue.filter((p) => p.id !== e.payload.id)]);
       // `open` is the "open notch for permissions" setting, decided in Rust
       // so this and the window agree. Off: the card queues behind the hover.
-      if (e.payload.open) {
+      // The cards live only in the shell, so never with the notch off (Rust
+      // does not park a request then; this covers one already in flight).
+      if (e.payload.open && notchRef.current) {
         setBrowsing(true);
         setSelected(e.payload.sessionId ?? e.payload.id);
       }
@@ -465,6 +477,7 @@ function Overlay() {
     // voice, not a place they chose, so the next click still opens where they
     // last were.
     const notchOpenOff = events.notchOpen.listen(({ payload }) => {
+      if (!notchRef.current) return;
       setAgent(null);
       setToast(null);
       setSelected(null);
@@ -550,15 +563,18 @@ function Overlay() {
   // A whisper takes the resting notch for its moment; over a toast it is part
   // of the toast instead (a peek's top row, an echo under a card), and while a
   // dictation or a panel has the window it waits, its clock stopped.
-  const whisperNow = resting && toast === null && whisper !== null;
+  const whisperNow = notchOn && resting && toast === null && whisper !== null;
   // Pointing at a whisper that has a button opens it into a peek. That is the
   // hover the user is answering, so it outranks Home's: Home opens once the
   // whisper has gone and the pointer is still there.
   const whisperOpen = whisperNow && hovering && whisper !== null && opensOnHover(whisper.value);
   // Resting under a pointer that has stayed: Home opens in place (`shellState`).
   // Only what is clicked or typed into stays when the pointer leaves.
-  const dwelled = useHoverIntent(resting && hovering, HOVER_INTENT_MS);
-  const shell = shellState({ browsing, resting, hovering, dwelled, whisperOpen });
+  const dwelled = useHoverIntent(notchOn && resting && hovering, HOVER_INTENT_MS);
+  // With the notch off in Labs there is no shell to open, however it is asked.
+  const shell = notchOn
+    ? shellState({ browsing, resting, hovering, dwelled, whisperOpen })
+    : "closed";
   const peeking = shell === "peek";
   // Held a beat after the pointer leaves, so Home collapses into the cutout on
   // the panel's spring rather than snapping (the same as the live pill's exit).
@@ -595,7 +611,7 @@ function Overlay() {
     return () => window.removeEventListener("keydown", commit);
   }, [peeking]);
   // Takeovers waiting their turn show as "+N" even on a bare notch.
-  const liveNow = resting && (live.length > 0 || whisperNow || waiting > 0);
+  const liveNow = notchOn && resting && (live.length > 0 || whisperNow || waiting > 0);
   // Held up a beat after the last one goes, so the pill collapses into the
   // cutout on the panel's spring (`pillLeaving` below) rather than snapping.
   const pillShown = useLinger(liveNow, 600);
@@ -637,6 +653,7 @@ function Overlay() {
   );
   // The compact run panel's one way into the sections: the same run, in Agents › Voice.
   const openVoice = useCallback(() => {
+    if (!notchRef.current) return;
     setBrowsing(true);
     takeFocus("agents", "voice");
   }, [takeFocus]);
@@ -818,7 +835,18 @@ function Overlay() {
     // with its own settings copy, so this is how a Cats toggle lands live
     // instead of only on the next overlay show.
     const unlistenSettings = listen("settings-changed", refreshCatSettings);
+    // Rust's own word that the notch went on or off. Off also closes a browse
+    // still open, which nothing could otherwise reach once the shell is gone.
+    const unlistenLabs = events.labsChanged.listen(({ payload }) => {
+      setNotchOn(payload.notch);
+      if (!payload.notch) {
+        setBrowsing(false);
+        setSelected(null);
+        setWhisper(null);
+      }
+    });
     return () => {
+      unlistenLabs.then((off) => off());
       unlistenPhase.then((off) => off());
       unlistenDismiss.then((off) => off());
       unlistenError.then((off) => off());
@@ -1215,6 +1243,7 @@ function Overlay() {
         action.action,
         {
           open: (section, sub) => {
+            if (!notchRef.current) return;
             setBrowsing(true);
             navigate(section, sub);
           },
@@ -1318,7 +1347,7 @@ function Overlay() {
         // resting notch opens the sections panel whatever is running, and a
         // click inside Home's hover-open keeps it: this is the commit.
         onClick={() => {
-          if (resting) setBrowsing(true);
+          if (resting && notchOn) setBrowsing(true);
         }}
       >
         {/* The panel's whole silhouette. A path and not a border-radius,
@@ -1389,7 +1418,8 @@ function Overlay() {
               key={agent.heard}
               run={agent}
               bodyRef={answerRef}
-              onExpand={openVoice}
+              // Agents › Voice is a section of the notch.
+              onExpand={notchOn ? openVoice : undefined}
               onDecide={decideRun}
             />
           ) : resting ? (

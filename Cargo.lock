@@ -48,6 +48,7 @@ dependencies = [
  "aloud-audio",
  "aloud-bridge",
  "aloud-clipboard",
+ "aloud-composio",
  "aloud-drag",
  "aloud-engine",
  "aloud-focus",
@@ -117,6 +118,7 @@ dependencies = [
 name = "aloud-agent"
 version = "0.1.0"
 dependencies = [
+ "aloud-composio",
  "aloud-engine",
  "aloud-llm",
  "aloud-native",
@@ -191,6 +193,18 @@ dependencies = [
  "serde_json",
  "specta",
  "tempfile",
+ "tracing",
+]
+
+[[package]]
+name = "aloud-composio"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "reqwest",
+ "serde_json",
+ "tokio",
  "tracing",
 ]
 

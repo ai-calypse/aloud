@@ -31,12 +31,13 @@ import { describeBinding } from "./binding-label";
  */
 
 /** The roles a user binds, and the Config key each writes to. */
-const ROLES: { key: keyof Config; label: string; mode: string; hint: string }[] = [
+const ROLES: { key: keyof Config; label: string; mode: string; hint: string; agent?: true }[] = [
   { key: "hold", label: "Dictate", mode: "hold", hint: "Hold to talk. With text selected, rewrites it instead" },
   { key: "toggle", label: "Dictate", mode: "tap", hint: "Tap to start, tap again to stop" },
-  { key: "ask", label: "Command (second key)", mode: "hold", hint: "Same as Command — was Ask" },
+  { key: "ask", label: "Command (second key)", mode: "hold", hint: "Same as Command — was Ask", agent: true },
   { key: "rewrite", label: "Rewrite", mode: "hold", hint: "Hold to change the selected text by voice" },
-  { key: "agent", label: "Command", mode: "hold", hint: "Hold, then ask anything or say what to do" },
+  { key: "agent", label: "Command", mode: "hold", hint: "Hold, then ask anything or say what to do", agent: true },
+  { key: "journal", label: "Capture thought", mode: "hold", hint: "Hold to speak a thought into your Journal" },
   { key: "meeting_notes", label: "Meeting notes", mode: "tap", hint: "Tap to start/stop a session" },
   { key: "copy_again", label: "Paste again", mode: "tap", hint: "Re-paste the last transcript" },
 ];
@@ -53,6 +54,7 @@ const DEFAULT_CONFIG: Config = {
   rewrite: null,
   meeting_notes: null,
   agent: null,
+  journal: null,
 };
 
 /**
@@ -103,10 +105,14 @@ function sameBinding(a: Binding | undefined, b: Binding): boolean {
  * clash: a strict overlap (`fn` vs `⌥fn`) is resolved by the pipeline, where
  * the more-specific role owns the session (`Session::owner`, `Pipeline::owns`).
  */
-function conflictsWith(config: Config, role: keyof Config): boolean {
+function conflictsWith(
+  config: Config,
+  role: keyof Config,
+  roles: typeof ROLES,
+): boolean {
   const mine = config[role];
   if (!mine || mine.kind === "disabled") return false;
-  return ROLES.some((other) => {
+  return roles.some((other) => {
     if (other.key === role) return false;
     const theirs = config[other.key];
     if (!theirs || theirs.kind === "disabled") return false;
@@ -141,10 +147,16 @@ function isSubset(a: Modifier[], b: Modifier[]): boolean {
 export function HotkeyEditor({
   config,
   onChange,
+  voiceAgent = true,
 }: {
   config: Config;
   onChange: (config: Config) => void;
+  /** Settings › Labs. Off, the Command rows are hidden: Rust unbinds those
+   * keys anyway (`labs::hotkeys`), and a row that does nothing reads as broken.
+   * The saved bindings are kept, so turning the agent back on restores them. */
+  voiceAgent?: boolean;
 }) {
+  const roles = voiceAgent ? ROLES : ROLES.filter((r) => !r.agent);
   const [recording, setRecording] = useState<keyof Config | null>(null);
   const [customs, setCustoms] = useState<Binding[]>(loadCustoms);
   // Ignores a capture that lands after the user moved on to another role.
@@ -212,11 +224,11 @@ export function HotkeyEditor({
   return (
     <>
     <Group>
-      {ROLES.map((role) => {
+      {roles.map((role) => {
         const binding = config[role.key] ?? DISABLED;
         const isRecording = recording === role.key;
         const bound = binding.kind !== "disabled";
-        const clash = conflictsWith(config, role.key);
+        const clash = conflictsWith(config, role.key, roles);
 
         // A hand-edited binding not in `customs` is added so it still renders
         // as the selected value rather than a blank trigger.
@@ -228,7 +240,7 @@ export function HotkeyEditor({
         // Options taken by another role drop out, so two commands cannot be
         // aimed at one hold. This role's own binding stays, to render as value.
         const takenElsewhere = new Set(
-          ROLES.filter((r) => r.key !== role.key)
+          roles.filter((r) => r.key !== role.key)
             .map((r) => config[r.key])
             .filter((b): b is Binding => !!b && b.kind !== "disabled")
             .map(describeBinding),

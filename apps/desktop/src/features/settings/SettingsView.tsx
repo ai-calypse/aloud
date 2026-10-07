@@ -69,6 +69,8 @@ export type SettingsSection =
   | "permissions"
   | "runlog"
   | "meetings"
+  /** The notch and the voice agent, each behind a switch. */
+  | "labs"
   /** Behind `developer_tools`; the sidebar hides the row when it is off. */
   | "debug";
 
@@ -195,6 +197,7 @@ export function SettingsView({
     rewrite: null,
     meeting_notes: null,
     agent: null,
+    journal: null,
   };
   const preservePhrases = settings.preservePhrases ?? [];
   const macros = settings.macros ?? [];
@@ -213,6 +216,10 @@ export function SettingsView({
   const catImages = settings.catImages ?? true;
   const catImagesDictation = settings.catImagesDictation ?? true;
   const catImagesAgents = settings.catImagesAgents ?? true;
+  const labs = {
+    notch: settings.labs?.notch ?? false,
+    voiceAgent: settings.labs?.voiceAgent ?? false,
+  };
 
   /** Applies one field and persists immediately — no Save button to forget. */
   async function update(patch: Partial<Settings>) {
@@ -664,61 +671,6 @@ export function SettingsView({
           </Group>
 
           <Group title="Overlay">
-            <Row
-              label="Open notch for permissions"
-              hint="A coding agent asking to run something opens the notch by itself so the request is not missed. Off: the request waits quietly — hovering the notch shows it, and the agent keeps waiting either way."
-              className="py-[11px]"
-            >
-              <Toggle
-                checked={settings.agentOpenOnPermission ?? true}
-                label="Open notch for permissions"
-                onChange={(c) => update({ agentOpenOnPermission: c })}
-              />
-            </Row>
-
-            {IS_MAC &&
-              EVENT_ROWS.map(({ key, label, hint }) => (
-                <Row key={key} label={label} hint={hint} className="py-[11px]">
-                  <Toggle
-                    checked={events[key]}
-                    label={label}
-                    onChange={(c) => update({ notchEvents: { ...events, [key]: c } })}
-                  />
-                </Row>
-              ))}
-
-            {IS_MAC && (
-              <NudgeSettings value={events} onChange={(notchEvents) => update({ notchEvents })} />
-            )}
-
-            {IS_MAC && (
-              <Row
-                label="Any app in the notch (uses a private macOS interface)"
-                hint="Now Playing shows whatever is playing in any app (Podcasts, VLC, browsers, and more) with no setup, and the notch's play, pause, skip and seek buttons drive it. It uses a private macOS interface that Apple does not document and a macOS update can break; if that happens Now Playing falls back to Spotify, Music and browsers. It reads only the title, artist, cover and the app's name. Off: nothing runs."
-                className="py-[11px]"
-              >
-                <Toggle
-                  checked={settings.anyAppMedia ?? true}
-                  label="Any app in the notch"
-                  onChange={(c) => update({ anyAppMedia: c })}
-                />
-              </Row>
-            )}
-
-            {IS_MAC && (
-              <Row
-                label="Web video in the notch"
-                hint="Now Playing also shows video and audio playing in Brave, Chrome, Edge and Safari, and the notch's play, pause, skip and speed buttons drive that tab. It reads only the tab's title, site and position. Each browser needs its Allow JavaScript from Apple Events switch on (View › Developer, or Safari's Develop menu); the Now Playing view says when one is off."
-                className="py-[11px]"
-              >
-                <Toggle
-                  checked={settings.browserMedia ?? true}
-                  label="Web video in the notch"
-                  onChange={(c) => update({ browserMedia: c })}
-                />
-              </Row>
-            )}
-
             {IS_MAC && (
               <Row
                 label="Style"
@@ -808,6 +760,106 @@ export function SettingsView({
                 </Button>
               </Row>
             </Group>
+          )}
+        </>
+      )}
+
+      {section === "labs" && (
+        <>
+          <PaneTitle
+            title="Labs"
+            subtitle="Experiments beside the core app. Turn either on or off at any time: nothing restarts, and nothing you made is lost."
+          />
+
+          <Group title="Experiments">
+            <Row
+              label="Notch"
+              hint="Turns the notch into a home for your Mac: Now Playing, timers, clipboard history, a shelf for files, today’s calendar, your coding agents and system alerts. Off, Aloud only shows a small pill while you dictate, and nothing watches your Mac in the background."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={labs.notch}
+                label="Notch"
+                onChange={(c) => update({ labs: { ...labs, notch: c } })}
+              />
+            </Row>
+            <Row
+              label="Voice agent"
+              hint="Say what to do and Aloud does it across your Mac and connected apps: a Command key, “hey flow” while dictating, and always-listening. Anything that writes asks first, as set in Permissions. Off, everything you say is dictated."
+              className="py-[11px]"
+            >
+              <Toggle
+                checked={labs.voiceAgent}
+                label="Voice agent"
+                onChange={(c) => update({ labs: { ...labs, voiceAgent: c } })}
+              />
+            </Row>
+          </Group>
+
+          {labs.notch && (
+            <Group title="Notch">
+              <Row
+                label="Open notch for permissions"
+                hint="A coding agent asking to run something opens the notch by itself so the request is not missed. Off: the request waits quietly — hovering the notch shows it, and the agent keeps waiting either way."
+                className="py-[11px]"
+              >
+                <Toggle
+                  checked={settings.agentOpenOnPermission ?? true}
+                  label="Open notch for permissions"
+                  onChange={(c) => update({ agentOpenOnPermission: c })}
+                />
+              </Row>
+
+              {IS_MAC &&
+                EVENT_ROWS.map(({ key, label, hint }) => (
+                  <Row key={key} label={label} hint={hint} className="py-[11px]">
+                    <Toggle
+                      checked={events[key]}
+                      label={label}
+                      onChange={(c) => update({ notchEvents: { ...events, [key]: c } })}
+                    />
+                  </Row>
+                ))}
+
+              {IS_MAC && (
+                <NudgeSettings value={events} onChange={(notchEvents) => update({ notchEvents })} />
+              )}
+
+              {IS_MAC && (
+                <Row
+                  label="Any app in the notch (uses a private macOS interface)"
+                  hint="Now Playing shows whatever is playing in any app (Podcasts, VLC, browsers, and more) with no setup, and the notch's play, pause, skip and seek buttons drive it. It uses a private macOS interface that Apple does not document and a macOS update can break; if that happens Now Playing falls back to Spotify, Music and browsers. It reads only the title, artist, cover and the app's name. Off: nothing runs."
+                  className="py-[11px]"
+                >
+                  <Toggle
+                    checked={settings.anyAppMedia ?? true}
+                    label="Any app in the notch"
+                    onChange={(c) => update({ anyAppMedia: c })}
+                  />
+                </Row>
+              )}
+
+              {IS_MAC && (
+                <Row
+                  label="Web video in the notch"
+                  hint="Now Playing also shows video and audio playing in Brave, Chrome, Edge and Safari, and the notch's play, pause, skip and speed buttons drive that tab. It reads only the tab's title, site and position. Each browser needs its Allow JavaScript from Apple Events switch on (View › Developer, or Safari's Develop menu); the Now Playing view says when one is off."
+                  className="py-[11px]"
+                >
+                  <Toggle
+                    checked={settings.browserMedia ?? true}
+                    label="Web video in the notch"
+                    onChange={(c) => update({ browserMedia: c })}
+                  />
+                </Row>
+              )}
+            </Group>
+          )}
+
+          {labs.voiceAgent && (
+            <p className="px-1 text-ui text-ink-2">
+              Bind a Command key in Hotkeys, choose what the agent may do
+              without asking in Permissions, and connect apps in Connectors.
+            </p>
           )}
         </>
       )}
@@ -1007,6 +1059,7 @@ export function SettingsView({
           <HotkeyEditor
             config={hotkeys}
             onChange={(hotkeys) => update({ hotkeys })}
+            voiceAgent={labs.voiceAgent}
           />
 
           <Group title="Command mode">

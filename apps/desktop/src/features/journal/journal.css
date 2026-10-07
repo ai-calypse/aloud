@@ -1,0 +1,36 @@
+/* The journal's record button while it hears you. Colours are tokens; the
+ * ring is the danger colour thinned, so it follows light and dark. */
+.journal-rec[data-state="recording"] {
+  background: var(--danger);
+  color: var(--accent-fg);
+  animation: journal-rec 1.6s var(--ease-out) infinite;
+}
+
+/* A ring that leaves the button and fades: something live, not a blink. Both
+ * ends stated, in the same function, so it interpolates. Reduced motion
+ * collapses it to one 1ms pass (motion.css), leaving a still red button. */
+@keyframes journal-rec {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--danger) 0%, transparent);
+  }
+}
+
+/* Waiting on the words: the same breath the pill's dot takes. */
+.journal-rec[data-state="saving"] {
+  animation: journal-saving 1.1s ease-in-out infinite;
+}
+
+@keyframes journal-saving {
+  from {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
+}

@@ -87,12 +87,16 @@ pub fn start(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut shown = Shown::default();
         loop {
-            let watched = WATCHERS.load(Ordering::Relaxed) > 0;
+            // The notch off parks all of it, the helper process included:
+            // the reading only ever feeds the notch.
+            let notch = crate::labs::notch();
+            let watched = notch && WATCHERS.load(Ordering::Relaxed) > 0;
+            let active = notch && (watched || enabled());
             let browsers = browsers_on(&app);
             // The helper runs only for a user who has asked for Media (the same
             // gate as the polling) and has not switched it off.
-            aloud_media::mediaremote::set_enabled(any_app_on(&app) && (watched || enabled()));
-            let reading = if watched || enabled() {
+            aloud_media::mediaremote::set_enabled(any_app_on(&app) && active);
+            let reading = if active {
                 tauri::async_runtime::spawn_blocking(move || {
                     aloud_media::now_playing::read(browsers)
                 })

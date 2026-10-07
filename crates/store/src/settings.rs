@@ -64,6 +64,21 @@ pub struct NotchEvents {
     pub app_notification_allow: Vec<String>,
 }
 
+/// Experiments that sit beside the core app (dictation, meetings, the journal)
+/// rather than inside it. Off for a new install, so the first run is the core
+/// app alone; `Settings::from_json` turns both on for an install that predates
+/// the switches, which already had them and would otherwise lose them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Labs {
+    /// The always-on notch: sections, islands, takeovers, and every watcher
+    /// that feeds them. Off, the overlay is only the dictation pill.
+    pub notch: bool,
+    /// The command brain: the Command keys, "hey flow" inside a dictation,
+    /// and always-listening. Off, a spoken "hey flow" is just dictated.
+    pub voice_agent: bool,
+}
+
 /// The apps mirrored once the user turns app notifications on, until they
 /// choose their own.
 pub fn default_notification_allow() -> Vec<String> {
@@ -216,6 +231,8 @@ pub struct Settings {
     pub overlay_style: OverlayStyle,
     /// How the notch's takeovers behave: Quiet mode, Focus, per-source switches.
     pub notch_events: NotchEvents,
+    /// The notch and the voice agent, each behind its own switch.
+    pub labs: Labs,
     /// Whether a coding agent's permission request opens the notch by itself.
     /// Off means the request waits quietly — the Agents surface flags it, and
     /// the user opens the notch when they hover. The hook waits either way.
@@ -294,6 +311,7 @@ impl Default for Settings {
             show_menu_bar_icon: true,
             overlay_style: OverlayStyle::DropPill,
             notch_events: NotchEvents::default(),
+            labs: Labs::default(),
             // On: a blocked agent is usually why the user looks up. The
             // toggle exists for people who find the self-opening notch rude.
             agent_open_on_permission: true,
@@ -385,6 +403,20 @@ impl Settings {
         if let Some(events) = raw.get_mut("notchEvents").and_then(|e| e.as_object_mut()) {
             if let Some(old) = events.remove("replaceVolumeHud") {
                 events.entry("replaceSystemHuds").or_insert(old);
+            }
+        }
+        // An onboarded install with no `labs` predates the switches and has
+        // been running the notch and the agent all along: off by default would
+        // take both away on upgrade with nothing said. A fresh install (not yet
+        // onboarded) keeps the defaults and starts as the core app alone.
+        let predates_labs = raw.get("labs").is_none()
+            && raw.get("onboarded").and_then(|o| o.as_bool()) == Some(true);
+        if predates_labs {
+            if let Some(object) = raw.as_object_mut() {
+                object.insert(
+                    "labs".into(),
+                    serde_json::json!({ "notch": true, "voiceAgent": true }),
+                );
             }
         }
         // An unrecognised `overlayStyle` (from a newer build) is dropped so the field defaults. Asking serde whether it parses
@@ -791,6 +823,36 @@ mod rename_tests {
         let reloaded = Settings::from_json(&format!(r#"{{ "overlayStyle": {saved} }}"#))
             .expect("settings must parse");
         assert_eq!(reloaded.overlay_style, OverlayStyle::DropPill);
+    }
+
+    /// A new install is the core app alone: the notch and the agent wait in
+    /// Labs until someone turns them on.
+    #[test]
+    fn a_new_install_starts_with_the_notch_and_agent_off() {
+        assert_eq!(Settings::default().labs, Labs::default());
+        let first_run = Settings::from_json(r#"{ "onboarded": false }"#).expect("must parse");
+        assert!(!first_run.labs.notch && !first_run.labs.voice_agent);
+        let empty = Settings::from_json("{}").expect("must parse");
+        assert!(!empty.labs.notch && !empty.labs.voice_agent);
+    }
+
+    /// The failure guarded: an upgrade silently removing the notch and the
+    /// Command key from someone who had been using both.
+    #[test]
+    fn an_install_from_before_labs_keeps_the_notch_and_agent() {
+        let upgraded =
+            Settings::from_json(r#"{ "onboarded": true, "groqApiKey": "keep-me" }"#).unwrap();
+        assert!(upgraded.labs.notch && upgraded.labs.voice_agent);
+        assert_eq!(upgraded.groq_api_key, "keep-me");
+
+        // Once chosen, the choice is what loads — off stays off.
+        let chosen = Settings::from_json(
+            r#"{ "onboarded": true, "labs": { "notch": false, "voiceAgent": true } }"#,
+        )
+        .unwrap();
+        assert!(!chosen.labs.notch && chosen.labs.voice_agent);
+        let saved = serde_json::to_string(&chosen).unwrap();
+        assert_eq!(Settings::from_json(&saved).unwrap().labs, chosen.labs);
     }
 
     #[test]

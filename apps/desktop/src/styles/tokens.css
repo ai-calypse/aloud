@@ -11,6 +11,9 @@
   --sys-green: #34c759;
   --sys-red: #ff3b30;
   --sys-orange: #ff9f0a;
+  /* Named by the Memes row since it was added, and never defined: its icon
+     drew white on nothing. */
+  --sys-yellow: #ffcc00;
   --sys-pink: #ff375f;
   --sys-indigo: #5856d6;
   --sys-teal: #64d2ff;
@@ -92,6 +95,7 @@
     /* Tint-only colours (sidebar icons, Timings bars); the light-mode indigo
        is unreadably muddy on a #2c2c2e card. */
     --sys-orange: #ff9f0a;
+    --sys-yellow: #ffd60a;
     --sys-pink: #ff375f;
     --sys-indigo: #5e5ce6;
     --sys-grey: #98989d;

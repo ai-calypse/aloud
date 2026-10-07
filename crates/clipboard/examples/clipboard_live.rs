@@ -40,7 +40,7 @@ fn main() {
 
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(Store::open(dir.path()).unwrap());
-    aloud_clipboard::watch::spawn(store.clone(), || {});
+    aloud_clipboard::watch::spawn(store.clone(), || true, || {});
 
     sleep(Duration::from_millis(800));
     board.set_text("live-test text from the user").unwrap();

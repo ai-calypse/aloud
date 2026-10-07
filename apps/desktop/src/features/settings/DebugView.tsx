@@ -8,6 +8,7 @@ const PHASES: { phase: Phase; label: string; hint: string }[] = [
   { phase: "recording", label: "Recording", hint: "The pill (or wings) with the live level meter." },
   { phase: "transcribing", label: "Transcribing", hint: "The waiting state, after the key is released." },
   { phase: "done", label: "Done", hint: "The confirmation shown as the text lands." },
+  { phase: "saved", label: "Saved", hint: "The confirmation for a thought kept in the journal." },
   { phase: "error", label: "Error", hint: "Forces the pill, whatever the style setting says." },
   { phase: "idle", label: "Hide", hint: "Dismisses the overlay." },
 ];
