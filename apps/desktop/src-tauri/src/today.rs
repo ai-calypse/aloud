@@ -269,6 +269,12 @@ pub fn init(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut ticks = 0u32;
         loop {
+            // Parked while the notch is off: the agenda and its nudges are
+            // only ever shown there, and a read can launch Calendar's scripting.
+            if !crate::labs::notch() {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                continue;
+            }
             let due = agenda().as_ref().is_none_or(|a| {
                 a.day != aloud_agenda::day_start(0) || a.at.elapsed() >= CALENDAR_TTL
             });

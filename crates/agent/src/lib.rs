@@ -6,8 +6,10 @@
 //! The invariant throughout: an action never fires without explicit approval,
 //! and every write requires confirmation.
 
-pub mod cache;
-pub mod composio;
+// The client lives in `aloud-composio`, which the core app shares. Re-exported
+// under the old paths so the loop, the previews and the evals read as before.
+pub use aloud_composio as composio;
+pub use aloud_composio::cache;
 pub mod icons;
 pub mod permissions;
 pub mod preview;

@@ -101,15 +101,29 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
 
+    // A journal capture is a recording too, but its stop keeps the words
+    // instead of pasting them: it gets its own row, and the dictate row waits.
+    let capturing = state.pipeline.owns(aloud_hotkey::model::Role::Journal);
     menu.append(&MenuItem::with_id(
         app,
         "dictate",
-        if recording {
+        if recording && !capturing {
             "Stop Recording"
         } else {
             "Start Dictating"
         },
-        true,
+        !capturing,
+        None::<&str>,
+    )?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "journal",
+        if capturing {
+            "Stop & Save Thought"
+        } else {
+            "Capture a Thought"
+        },
+        capturing || !recording,
         None::<&str>,
     )?)?;
     menu.append(&MenuItem::with_id(
@@ -124,17 +138,21 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         None::<&str>,
     )?)?;
 
-    menu.append(&MenuItem::with_id(
-        app,
-        "listen",
-        if listening {
-            "Stop Always Listening"
-        } else {
-            "Always Listening"
-        },
-        true,
-        None::<&str>,
-    )?)?;
+    // Always-listening hears commands, so it is the voice agent's. A listener
+    // still running keeps its row, so it can always be stopped from here.
+    if settings.labs.voice_agent || listening {
+        menu.append(&MenuItem::with_id(
+            app,
+            "listen",
+            if listening {
+                "Stop Always Listening"
+            } else {
+                "Always Listening"
+            },
+            true,
+            None::<&str>,
+        )?)?;
+    }
 
     // Greyed out before the first dictation rather than silently doing nothing.
     menu.append(&MenuItem::with_id(
@@ -263,6 +281,12 @@ fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
 
     match id {
         "dictate" => toggle_dictation(app),
+        "journal" => {
+            if let Err(e) = crate::journal::toggle(&app.state::<AppState>().pipeline) {
+                tracing::warn!(%e, "journal capture did not start");
+            }
+            refresh(app);
+        }
         "meeting" => {
             let state = app.state::<AppState>();
             crate::toggle_meeting(app, &state.settings, &state.meeting);
@@ -391,6 +415,7 @@ fn status_line(app: &AppHandle) -> String {
         Phase::Transcribing => "Transcribing…",
         Phase::Error => "Last dictation failed",
         Phase::NoSpeech => "No speech detected",
+        Phase::Saved => "Saved to your journal",
         Phase::Idle | Phase::Done | Phase::Listening => "Ready",
     }
     .to_string()

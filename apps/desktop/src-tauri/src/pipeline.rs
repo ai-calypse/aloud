@@ -44,6 +44,9 @@ pub enum Phase {
     Recording,
     Transcribing,
     Done,
+    /// A journal capture was kept: the dictation's "Pasted", for words that
+    /// went into the journal rather than into an app.
+    Saved,
     /// Silence or filler only — a normal result, but its own phase rather than
     /// `Idle` so the overlay can say so instead of claiming "Pasted".
     NoSpeech,
@@ -59,6 +62,14 @@ enum Outcome {
     /// Silence or filler only — a normal result, not a failure.
     NoSpeech,
     /// Escape landed while the work was in flight.
+    Cancelled,
+}
+
+/// How a journal capture ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kept {
+    Saved,
+    NoSpeech,
     Cancelled,
 }
 
@@ -119,10 +130,11 @@ impl Session {
 }
 
 /// Whether a role's capture gets the live transcript in the pill. Dictation
-/// only: for every other role the running words contradict what the panel is
-/// there to say, and the preview behind them is a core spent on nothing.
+/// and a journal capture, where the words are the result: for every other role
+/// the running words contradict what the panel is there to say, and the
+/// preview behind them is a core spent on nothing.
 fn shows_transcript(role: Option<Role>) -> bool {
-    matches!(role, Some(Role::Hold | Role::Toggle))
+    matches!(role, Some(Role::Hold | Role::Toggle | Role::Journal))
 }
 
 /// What a stop takes out of the session.
@@ -210,7 +222,7 @@ impl Pipeline {
             Phase::Transcribing => Some(crate::sound::Chime::Stop),
             Phase::Error => Some(crate::sound::Chime::Error),
             // Silence is not a failure, so no error chime.
-            Phase::Done | Phase::Idle | Phase::NoSpeech | Phase::Listening => None,
+            Phase::Done | Phase::Saved | Phase::Idle | Phase::NoSpeech | Phase::Listening => None,
         };
         if let Some(chime) = chime {
             let settings = self.settings();
@@ -230,7 +242,7 @@ impl Pipeline {
             Phase::Transcribing => crate::overlay::show(&self.app, phase),
             // Re-shown rather than left visible: an error in the wings style
             // has to move to the pill's anchor, and only `show` repositions.
-            Phase::Done | Phase::NoSpeech | Phase::Error => {
+            Phase::Done | Phase::Saved | Phase::NoSpeech | Phase::Error => {
                 crate::overlay::show(&self.app, phase);
                 let app = self.app.clone();
                 let linger = if matches!(phase, Phase::Error) {
@@ -675,10 +687,13 @@ impl Pipeline {
             return Ok(Outcome::NoSpeech);
         }
 
-        // "Hey flow, what does this mean?" is a command, not dictation.
-        if let Some(command) = aloud_llm::ask::question_from_trigger(&raw) {
-            tracing::info!(%command, "spoken command trigger");
-            return Ok(Outcome::Command(command));
+        // "Hey flow, what does this mean?" is a command, not dictation — while
+        // the voice agent is on. Off, the words are simply dictated.
+        if crate::labs::voice_agent() {
+            if let Some(command) = aloud_llm::ask::question_from_trigger(&raw) {
+                tracing::info!(%command, "spoken command trigger");
+                return Ok(Outcome::Command(command));
+            }
         }
 
         // Applied to a working copy: history still records against the real
@@ -952,15 +967,21 @@ impl Pipeline {
                 tracing::warn!(%e, "could not record history");
             }
         }
+        self.count_words(final_text);
+    }
+
+    /// Adds a session's words to the lifetime stats and the streak. A journal
+    /// entry counts the same as a dictation: both are words spoken, not typed.
+    fn count_words(&self, text: &str) {
         if let Ok(mut stats) = self.stats.lock() {
-            let words = Stats::word_count(final_text);
+            let words = Stats::word_count(text);
             stats.record_session(
                 words,
                 Stats::estimated_spoken_seconds(words),
                 chrono::Local::now(),
             );
-            // Persist immediately: dictation is the only writer, and the app is
-            // routinely quit without a clean shutdown hook.
+            // Persist immediately: the app is routinely quit without a clean
+            // shutdown hook.
             if let Err(e) = stats.save() {
                 tracing::warn!(%e, "could not save stats");
             }
@@ -1167,6 +1188,90 @@ impl Pipeline {
             self.generation() != generation
         })
         .await
+    }
+
+    /// Stops capturing and keeps what was said as a journal entry, tidied the
+    /// way a dictation is, instead of pasting it anywhere. The Journal key, the
+    /// journal's record button and the menu bar all land here.
+    pub async fn stop_and_journal(&self) -> Result<()> {
+        self.journal_utterance(next_utterance_id()).await
+    }
+
+    #[tracing::instrument(
+        name = "utterance",
+        skip_all,
+        fields(
+            utterance_id = utterance_id,
+            mode = "journal",
+            outcome = tracing::field::Empty,
+            ok = tracing::field::Empty,
+        )
+    )]
+    async fn journal_utterance(&self, utterance_id: i64) -> Result<()> {
+        let captured = self.take_recorder();
+        if captured.recorder.is_none() {
+            // Stopped inside the start delay: the pill already says Recording
+            // and the record button waits on a phase, so both are settled.
+            self.emit(Phase::Idle);
+            return Ok(());
+        }
+        let span = tracing::Span::current();
+        let generation = self.generation();
+        self.emit(Phase::Transcribing);
+        let result = tokio::select! {
+            result = self.transcribe_and_journal(captured, generation) => result,
+            // Dropping the work future aborts the in-flight request.
+            _ = self.cancelled.notified() => {
+                span.record("outcome", "cancelled");
+                self.emit(Phase::Idle);
+                return Ok(());
+            }
+        };
+        match &result {
+            Ok(Kept::Saved) => {
+                span.record("outcome", "saved");
+                self.emit(Phase::Saved);
+            }
+            Ok(Kept::NoSpeech) => {
+                span.record("outcome", "nospeech");
+                self.emit(Phase::NoSpeech);
+            }
+            Ok(Kept::Cancelled) => {
+                span.record("outcome", "cancelled");
+                self.emit(Phase::Idle);
+            }
+            Err(e) => {
+                span.record("outcome", "error");
+                span.record("ok", false);
+                tracing::error!(%e, "journal capture failed");
+                self.emit_error(e);
+            }
+        }
+        result.map(|_| ())
+    }
+
+    async fn transcribe_and_journal(&self, captured: Captured, generation: u64) -> Result<Kept> {
+        // Not kept as a recording: the entry is the record, and a WAV beside it
+        // would be a second copy of a thought nobody chose to store as audio.
+        let (raw, settings, _) = self.capture(captured, false).await?;
+        if raw.trim().is_empty() {
+            return Ok(Kept::NoSpeech);
+        }
+        // No app rule and no command trigger: a thought is neither aimed at an
+        // app nor an instruction, whatever it happens to say.
+        let text = self.post_process(&raw, &settings).await;
+        if text.trim().is_empty() {
+            return Ok(Kept::NoSpeech);
+        }
+        // An Escape that raced the `select!` is honoured before anything lands.
+        if self.generation() != generation {
+            return Ok(Kept::Cancelled);
+        }
+        let dir = aloud_notes::journal::directory()?;
+        let path = aloud_notes::journal::save(&dir, None, &text, chrono::Utc::now())?;
+        self.count_words(&text);
+        crate::journal::announce(&self.app, &path);
+        Ok(Kept::Saved)
     }
 
     /// Cancels an in-flight session, discarding the audio and abandoning any
@@ -1493,12 +1598,12 @@ mod tests {
         );
     }
 
-    /// The panel is dictation's alone. Every role is named here so adding one
-    /// is a decision, not a default.
+    /// The panel is for roles whose words are the result. Every role is named
+    /// here so adding one is a decision, not a default.
     #[test]
-    fn only_dictation_gets_the_transcript_panel() {
+    fn only_dictation_and_journal_get_the_transcript_panel() {
         for role in Role::ALL {
-            let expected = matches!(role, Role::Hold | Role::Toggle);
+            let expected = matches!(role, Role::Hold | Role::Toggle | Role::Journal);
             assert_eq!(
                 shows_transcript(Some(role)),
                 expected,

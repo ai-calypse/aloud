@@ -1,4 +1,5 @@
-//! The recording pill: a small always-on-top window showing dictation state.
+//! The overlay window: the dictation pill, a voice run's panel, and — with the
+//! notch on in Labs — the resting notch that holds the window between them.
 
 use crate::pipeline::Phase;
 use aloud_screens::Notch;
@@ -312,6 +313,10 @@ pub fn show_panel(app: &AppHandle) {
 /// land: the webview takes that as a temporary jump, so the next click on the
 /// notch still opens where the user last chose.
 pub fn open_notch(app: &AppHandle, section: &str, sub: Option<&str>) {
+    // With the notch off in Labs there is no shell to open.
+    if !crate::labs::notch() {
+        return;
+    }
     show_panel(app);
     let open = NotchOpen {
         section: section.to_string(),
@@ -575,6 +580,27 @@ pub fn show_notch(app: &AppHandle) {
 
     send_style(app, OverlayStyle::DropPill, notch);
     track_cursor(app);
+}
+
+/// Takes the resting notch away, for the notch being switched off in Labs.
+/// The window stays the dictation pill's and a voice run's: [`show`] and
+/// [`show_panel`] still bring it up, and [`hide`] now really hides it after.
+pub fn hide_notch(app: &AppHandle) {
+    NOTCH_RESTING.store(false, Ordering::SeqCst);
+    PEEKING.store(false, Ordering::SeqCst);
+    // A dictation still running keeps its pill: its own end comes back through
+    // `rest`, which hides the window now that nothing rests in it. Only these
+    // two: the phase stays `Done` (or `Saved`…) long after the pill's linger
+    // has rested it, and waiting on that would leave the notch up for good.
+    let busy = app.try_state::<crate::AppState>().is_some_and(|state| {
+        matches!(
+            state.pipeline.phase(),
+            Phase::Recording | Phase::Transcribing
+        )
+    });
+    if !busy {
+        rest(app);
+    }
 }
 
 /// Whether the pointer is inside the panel's box. Just the OS reads; the

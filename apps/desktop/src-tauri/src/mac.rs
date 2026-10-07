@@ -50,6 +50,12 @@ pub fn start(app: &AppHandle) {
         .spawn(move || {
             let mut privacy = privacy::Watch::default();
             loop {
+                // Parked while the notch is off: what these find is only
+                // ever shown there.
+                if !crate::labs::notch() {
+                    std::thread::sleep(PRIVACY_EVERY);
+                    continue;
+                }
                 let on = watchers();
                 if on.privacy {
                     let read = privacy::read();

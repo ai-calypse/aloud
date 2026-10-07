@@ -244,9 +244,32 @@ const POLL: Duration = Duration::from_secs(3);
 /// noticing a stuck card.
 const PENDING_PROBE: Duration = Duration::from_secs(5);
 
-/// Starts the socket server and the discovery poll.
-pub fn start(app: &AppHandle) {
+/// The sessions table, managed at launch whatever Labs says: the commands
+/// below read it with `app.state`, which panics on state never managed.
+pub fn manage(app: &AppHandle) {
     app.manage(Arc::new(Agents::default()));
+}
+
+/// Hands every parked approval back to its agent's own prompt, for the notch
+/// being switched off: dropping a sender wakes its thread, which answers the
+/// hook "no directive".
+pub fn release_all(app: &AppHandle) {
+    let Some(state) = app.try_state::<Arc<Agents>>() else {
+        return;
+    };
+    let released: Vec<String> = match state.pending.lock() {
+        Ok(mut pending) => pending.drain().map(|(id, _)| id).collect(),
+        Err(_) => return,
+    };
+    for id in released {
+        let _ = (AgentPermissionResolved { id }).emit(app);
+    }
+    sync_island(app);
+}
+
+/// Starts the socket server and the discovery poll. Once, when the notch is
+/// first switched on; see `crate::labs`.
+pub fn start(app: &AppHandle) {
     refresh_hook_binary(app);
     serve(app.clone());
     poll(app.clone());
@@ -308,6 +331,12 @@ fn replace_binary(source: &std::path::Path, target: &std::path::Path) -> anyhow:
 fn poll(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
+            // Parked while the notch is off: `ps` and `lsof` every few seconds
+            // for a list nothing draws.
+            if !crate::labs::notch() {
+                tokio::time::sleep(POLL).await;
+                continue;
+            }
             let handle = app.clone();
             // `ps` and `lsof` are blocking subprocesses; they have no business
             // on a runtime worker.
@@ -476,6 +505,12 @@ fn await_decision(
     let Some(id) = event.session_id.clone() else {
         return Reply::default();
     };
+    // The card is drawn only by the notch. With it off, parking would hold the
+    // agent for a card nobody can see; "no directive" lets it ask in its own
+    // terminal, as it does when Aloud is not running at all.
+    if !crate::labs::notch() {
+        return Reply::default();
+    }
     let token = TOKEN.fetch_add(1, Ordering::Relaxed);
     let (tx, rx) = std::sync::mpsc::channel::<Reply>();
 
@@ -585,7 +620,9 @@ fn await_decision(
             // or the app is shutting down. No directive in every case.
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break Reply::default(),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                if hook_gone(stream) {
+                // The notch going off releases every card (`release_all`);
+                // this catches one parked in the instant after it ran.
+                if hook_gone(stream) || !crate::labs::notch() {
                     break Reply::default();
                 }
             }

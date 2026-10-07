@@ -162,10 +162,13 @@ pub enum Role {
     MeetingNotes,
     /// Record while held, then execute the spoken command across apps.
     Agent,
+    /// Record while held, then keep it as a journal entry instead of pasting:
+    /// a thought captured from anywhere, without leaving the app in front.
+    Journal,
 }
 
 impl Role {
-    pub const ALL: [Role; 7] = [
+    pub const ALL: [Role; 8] = [
         Role::Hold,
         Role::Toggle,
         Role::CopyAgain,
@@ -173,6 +176,7 @@ impl Role {
         Role::Rewrite,
         Role::MeetingNotes,
         Role::Agent,
+        Role::Journal,
     ];
 
     /// One-shots fire on the leading edge and emit no deactivation.
@@ -193,6 +197,9 @@ pub struct Config {
     pub rewrite: Option<Binding>,
     pub meeting_notes: Option<Binding>,
     pub agent: Option<Binding>,
+    /// Unbound by default: a new key is the user's to choose, and the journal
+    /// is also one click away in the app and the menu bar.
+    pub journal: Option<Binding>,
 }
 
 impl Config {
@@ -205,6 +212,7 @@ impl Config {
             Role::Rewrite => &self.rewrite,
             Role::MeetingNotes => &self.meeting_notes,
             Role::Agent => &self.agent,
+            Role::Journal => &self.journal,
         };
         slot.as_ref().unwrap_or(&Binding::Disabled)
     }

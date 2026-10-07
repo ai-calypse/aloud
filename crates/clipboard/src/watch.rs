@@ -41,11 +41,16 @@ fn read_clipboard() -> Option<Captured> {
 }
 
 /// Starts the watcher thread. `on_change` runs after an entry was stored or
-/// bumped, so the panel can refresh. The thread also tracks `changeCount`
-/// while history is off, so turning it on never swallows what was already on
-/// the clipboard.
+/// bumped, so the panel can refresh. `active` is the app's own off switch on
+/// top of the store's (the notch being off, in Aloud): while it says no,
+/// nothing is recorded. The thread also tracks `changeCount` while history is
+/// off, so turning it on never swallows what was already on the clipboard.
 #[cfg(target_os = "macos")]
-pub fn spawn(store: Arc<Store>, on_change: impl Fn() + Send + 'static) {
+pub fn spawn(
+    store: Arc<Store>,
+    active: impl Fn() -> bool + Send + 'static,
+    on_change: impl Fn() + Send + 'static,
+) {
     use objc2_app_kit::NSPasteboard;
 
     std::thread::spawn(move || {
@@ -58,7 +63,7 @@ pub fn spawn(store: Arc<Store>, on_change: impl Fn() + Send + 'static) {
                 continue;
             }
             seen = count;
-            if !store.enabled() || aloud_paste::wrote_within(OWN_WRITE_WINDOW) {
+            if !active() || !store.enabled() || aloud_paste::wrote_within(OWN_WRITE_WINDOW) {
                 continue;
             }
             let types: Vec<String> = pasteboard
@@ -82,7 +87,11 @@ pub fn spawn(store: Arc<Store>, on_change: impl Fn() + Send + 'static) {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn spawn(_store: Arc<Store>, _on_change: impl Fn() + Send + 'static) {
+pub fn spawn(
+    _store: Arc<Store>,
+    _active: impl Fn() -> bool + Send + 'static,
+    _on_change: impl Fn() + Send + 'static,
+) {
     // ponytail: no watcher off macOS. Windows has GetClipboardSequenceNumber,
     // the same cheap counter, and the same loop would sit on top of it.
 }

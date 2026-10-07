@@ -20,6 +20,24 @@ use macos as backend;
 #[cfg(target_os = "windows")]
 use windows as backend;
 
+/// No hook elsewhere — just enough for the workspace to build and its tests to
+/// run on Linux (CI, a cloud dev box). `listen` reports it and returns.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+mod backend {
+    // Read by `listen`'s handler, never built: no hook ever delivers one.
+    #[allow(dead_code)]
+    pub struct RawEvent {
+        pub key: crate::model::Key,
+        pub down: bool,
+    }
+
+    /// True, so the listener reaches `listen`'s error at once rather than
+    /// polling forever for a permission that does not exist here.
+    pub fn is_trusted() -> bool {
+        true
+    }
+}
+
 use anyhow::Result;
 use matcher::{Consume, Input, State};
 use model::{Binding, Config, Event};

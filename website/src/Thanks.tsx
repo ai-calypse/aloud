@@ -11,6 +11,7 @@ import { useMeta } from "./seo";
 export default function Thanks() {
   const c = useCopy().thanks;
   const home = useCopy().common.backHome;
+  useMeta(c.title, { noindex: true });
 
   return (
     <main
