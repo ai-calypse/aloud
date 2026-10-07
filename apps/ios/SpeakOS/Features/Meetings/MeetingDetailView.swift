@@ -63,7 +63,7 @@ struct MeetingDetailView: View {
         section("decisions", empty: "No decisions came up.", lines: meeting.decisions, bullets: true)
         section("action items", empty: "No action items came up.", lines: meeting.actionItems, bullets: true)
         // The wording is the model's reading of the transcript, so say so.
-        Text("Notes are written from the transcript below. Check them against it.").font(.footnote).foregroundStyle(Theme.muted)
+        Text("Notes are written from the transcript below. Check them against it.").font(.uiFootnote).foregroundStyle(Theme.muted)
     }
 
     private func section(_ title: String, empty: String, lines: [String], bullets: Bool = false) -> some View {
@@ -87,7 +87,7 @@ struct MeetingDetailView: View {
 
     private func recovery(_ meeting: Meeting, stoppedAt: Int) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("this session didn't finish.", systemImage: "exclamationmark.circle").font(.headline).foregroundStyle(Theme.ink)
+            Label("this session didn't finish.", systemImage: "exclamationmark.circle").font(.uiHeadline).foregroundStyle(Theme.ink)
             Text("We kept \(meeting.transcript.count) lines up to \(clock(stoppedAt)). Recording stopped there, and nothing after it was captured.")
                 .foregroundStyle(Theme.ink)
             if preparing {
@@ -100,9 +100,9 @@ struct MeetingDetailView: View {
                         preparing = false
                     }
                 } label: { Text("finish with what we have").frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.brandPrimary)
                 Button(role: .destructive) { confirmDiscard = true } label: { Text("discard").frame(maxWidth: .infinity) }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.brandQuiet)
             }
         }
         .controlSize(.large)

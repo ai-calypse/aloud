@@ -42,10 +42,10 @@ struct MemoryView: View {
                 ForEach(MemoryFilter.allCases) { f in
                     Button { model.filter = f } label: {
                         Text(f.rawValue)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.uiSubheadline.weight(.semibold))
                             .padding(.horizontal, 14).padding(.vertical, 8)
                             .foregroundStyle(model.filter == f ? Color.white : Theme.ink)
-                            .background(model.filter == f ? Theme.primary : Theme.surface, in: Capsule())
+                            .background(model.filter == f ? Theme.ink : Theme.surface, in: Capsule())
                             .overlay(Capsule().stroke(Theme.border))
                     }
                     .accessibilityAddTraits(model.filter == f ? .isSelected : [])
@@ -62,7 +62,7 @@ struct MemoryView: View {
             } description: {
                 Text("Your memories are safe. Try again in a moment.")
             } actions: {
-                Button("clear search") { model.query = "" }.buttonStyle(.bordered)
+                Button("clear search") { model.query = "" }.buttonStyle(.brandQuiet)
             }
         } else if searching {
             HStack(spacing: 8) { ProgressView(); Text("searching…").foregroundStyle(Theme.muted) }
@@ -73,7 +73,7 @@ struct MemoryView: View {
             } description: {
                 Text("Say a thought and it will land here.")
             } actions: {
-                Button("go say something") { model.selectedTab = .speak }.buttonStyle(.borderedProminent)
+                Button("go say something") { model.selectedTab = .speak }.buttonStyle(.brandPrimary)
             }
         } else if results.isEmpty {
             ContentUnavailableView {
@@ -81,7 +81,7 @@ struct MemoryView: View {
             } description: {
                 Text("No matches. Try a different word, or another filter.")
             } actions: {
-                Button("clear search") { model.query = ""; model.filter = .everything }.buttonStyle(.bordered)
+                Button("clear search") { model.query = ""; model.filter = .everything }.buttonStyle(.brandQuiet)
             }
         } else {
             LazyVStack(spacing: 12) {

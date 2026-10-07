@@ -26,30 +26,30 @@ struct ConnectionDetailView: View {
 
                 if status != .connected {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("what speakos will be able to do").font(.headline).foregroundStyle(Theme.ink)
+                        Text("what speakos will be able to do").font(.uiHeadline).foregroundStyle(Theme.ink)
                         ForEach(service.access, id: \.self) { line in
                             Label(line, systemImage: "checkmark.circle").foregroundStyle(Theme.ink)
                         }
-                        Text("Nothing goes out without you reviewing it first.").font(.footnote).foregroundStyle(Theme.muted)
+                        Text("Nothing goes out without you reviewing it first.").font(.uiFootnote).foregroundStyle(Theme.muted)
                     }
                     .card()
                 }
 
                 if let message {
                     Label(message, systemImage: "exclamationmark.triangle.fill")
-                        .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.error)
+                        .font(.uiSubheadline.weight(.semibold)).foregroundStyle(Theme.error)
                 }
 
                 if connecting {
                     HStack(spacing: 8) { ProgressView(); Text("handing off to \(service.name)…").foregroundStyle(Theme.muted) }
                 } else if status == .connected {
                     Button("disconnect", role: .destructive) { confirmDisconnect = true }
-                        .buttonStyle(.bordered).controlSize(.large)
+                        .buttonStyle(.brandQuiet).controlSize(.large)
                 } else {
                     Button { connect() } label: {
                         Text(status == .expired ? "reconnect \(service.name)" : "connect \(service.name)").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .buttonStyle(.brandPrimary).controlSize(.large)
                 }
             }
             .padding(20)

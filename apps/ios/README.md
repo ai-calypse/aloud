@@ -60,15 +60,24 @@ SpeakOSTests/          Interpreter and AppModel behaviour
 
 ## Decisions worth knowing
 
-- **Logo:** the supplied SVG, rasterised once at 1024 px, shown intact in a rounded tile with pixel
-  sharpness (`interpolation(.none)`). Only the ring and halo around it change when listening.
-  It is opaque, so it is used as a tile, not a cut-out. The app icon is the same artwork.
+- **Look:** night-sky ink and cool paper, drawn from the logo. The signature is the *sky window*:
+  the supplied art runs edge to edge across the top of Home as the hold-to-talk target. It dims
+  under a night veil while listening and a pixel-block meter rises in front of it. A small orange
+  pixel marks section headings, and nothing else repeats it. This replaces the guide's warm cream
+  canvas, which read as a generic template next to the artwork.
+- **Type:** Bricolage Grotesque for headings and key labels, Geist for reading, Geist Mono for
+  small status labels (all OFL, bundled in `Resources/Fonts`, registered at launch). They are
+  variable fonts: if a face falls back to the system font on device, check `UIFont.familyNames`
+  against the names in `Theme.swift`.
+- **Logo:** the supplied SVG, rasterised once at 1024 px, kept pixel-sharp (`interpolation(.none)`)
+  and never redrawn or animated. It is opaque, so it is used as a full-bleed image, not a cut-out.
+  The app icon is the same artwork.
 - **Light appearance only** (`preferredColorScheme(.light)`), as the guide specifies. A reviewed
   dark pass is open work, and Apple's guidance is not to ship an app-only appearance switch.
 - **Voice is simulated:** holding plays a scripted sentence into the live transcript.
 - **Intent is rules, not a model** (`Interpreter`): remember → thought, write → draft, send/email/post
   → action, question → answer, otherwise it asks one question. Answers only quote saved items.
-- **Orange and yellow are fills under dark labels**, never text on white.
+- **Orange and yellow are fills under ink labels**, never text on white. At most one orange button per screen.
 
 ## Not done
 

@@ -13,7 +13,7 @@ struct AnswerSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("“\(answer.question)”").font(.subheadline).foregroundStyle(Theme.muted)
+                    Text("“\(answer.question)”").font(.uiSubheadline).foregroundStyle(Theme.muted)
                     switch answer.state {
                     case .answer(let text): found(text)
                     case .noMatch: noMatch
@@ -34,7 +34,7 @@ struct AnswerSheet: View {
         return VStack(alignment: .leading, spacing: 16) {
             Text("here's what you said.").font(.brandHeading).foregroundStyle(Theme.ink)
                 .accessibilityAddTraits(.isHeader)
-            Text(text).font(.body).foregroundStyle(Theme.ink).card()
+            Text(text).font(.uiBody).foregroundStyle(Theme.ink).card()
             Text("\(sources.count) \(sources.count == 1 ? "memory" : "memories") used").font(.brandMono).foregroundStyle(Theme.muted)
             ForEach(sources) { item in
                 NavigationLink(value: item.route) { ItemRow(item: item) }.buttonStyle(.plain)
@@ -47,14 +47,14 @@ struct AnswerSheet: View {
             Text("not ringing a bell.").font(.brandHeading).foregroundStyle(Theme.ink)
             Text("We found nothing saved that matches. try a different word or question.").foregroundStyle(Theme.muted)
             Button { model.present(.typed(prefill: answer.question)) } label: { Text("ask it differently").frame(maxWidth: .infinity) }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.brandPrimary)
             Button {
                 model.query = ""
                 model.filter = .everything
                 model.selectedTab = .memory
                 dismiss()
             } label: { Text("search Memory").frame(maxWidth: .infinity) }
-                .buttonStyle(.bordered)
+                .buttonStyle(.brandQuiet)
         }
         .controlSize(.large)
     }
@@ -67,7 +67,7 @@ struct AnswerSheet: View {
             Button {
                 answer = Interpreter.answer(to: answer.question, items: model.items, searchUnavailable: model.demo.searchUnavailable)
             } label: { Text("try again").frame(maxWidth: .infinity) }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.brandPrimary)
         }
         .controlSize(.large)
     }

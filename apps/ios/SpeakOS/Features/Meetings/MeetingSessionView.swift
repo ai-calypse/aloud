@@ -57,10 +57,10 @@ struct MeetingSessionView: View {
                     .textFieldStyle(.roundedBorder).controlSize(.large)
                     .accessibilityLabel("Meeting title")
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Uses your microphone", systemImage: "mic").font(.headline).foregroundStyle(Theme.ink)
+                    Label("Uses your microphone", systemImage: "mic").font(.uiHeadline).foregroundStyle(Theme.ink)
                     Text("Recording starts only when you tap start. It captures people nearby, in person. It can't record phone calls or another app's audio.")
                         .foregroundStyle(Theme.muted)
-                    Text("Let everyone in the room know you're recording.").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    Text("Let everyone in the room know you're recording.").font(.uiSubheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                 }
                 .card()
                 Button {
@@ -70,7 +70,7 @@ struct MeetingSessionView: View {
                     case .denied: model.showToast("microphone access is off. enable it in Settings.")
                     }
                 } label: { Label("start recording", systemImage: "record.circle").frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .buttonStyle(.brandHot)
             }
             .padding(20)
         }
@@ -82,7 +82,7 @@ struct MeetingSessionView: View {
         VStack(spacing: 16) {
             VStack(spacing: 6) {
                 Text(model.session?.title.isEmpty == false ? model.session!.title : "Untitled meeting")
-                    .font(.headline).foregroundStyle(Theme.ink)
+                    .font(.uiHeadline).foregroundStyle(Theme.ink)
                 Text(clock(model.session?.elapsed ?? 0))
                     .font(.system(size: 56, weight: .bold, design: .monospaced)).foregroundStyle(Theme.ink)
                     .contentTransition(.numericText())
@@ -110,7 +110,7 @@ struct MeetingSessionView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if phase == .interrupted {
                         Text("Something interrupted the microphone at \(clock(model.session?.elapsed ?? 0)). We kept \(model.session?.lines.count ?? 0) lines. Nothing was recorded since.")
-                            .font(.subheadline).foregroundStyle(Theme.ink).card()
+                            .font(.uiSubheadline).foregroundStyle(Theme.ink).card()
                     }
                     ForEach(model.session?.lines ?? []) { line in
                         HStack(alignment: .top, spacing: 10) {
@@ -138,23 +138,23 @@ struct MeetingSessionView: View {
         case .recording:
             HStack(spacing: 12) {
                 Button { model.pauseMeeting() } label: { Label("pause", systemImage: "pause.fill").frame(maxWidth: .infinity) }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.brandQuiet)
                 Button { model.finishMeeting() } label: { Label("finish", systemImage: "checkmark").frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.brandPrimary)
             }.controlSize(.large)
         case .paused:
             HStack(spacing: 12) {
                 Button { model.resumeMeeting() } label: { Label("resume", systemImage: "play.fill").frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.brandPrimary)
                 Button { model.finishMeeting() } label: { Label("finish", systemImage: "checkmark").frame(maxWidth: .infinity) }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.brandQuiet)
             }.controlSize(.large)
         default:
             VStack(spacing: 12) {
                 Button { model.resumeMeeting() } label: { Text("resume").frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.brandPrimary)
                 Button { model.finishMeeting() } label: { Text("finish with what we have").frame(maxWidth: .infinity) }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.brandQuiet)
             }.controlSize(.large)
         }
     }
@@ -188,9 +188,9 @@ struct MeetingSessionView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             Button { model.retryNotes() } label: { Text("try again").frame(maxWidth: .infinity) }
-                .buttonStyle(.borderedProminent).controlSize(.large)
+                .buttonStyle(.brandPrimary).controlSize(.large)
             Button { model.saveUnfinishedSession() } label: { Text("save and finish later").frame(maxWidth: .infinity) }
-                .buttonStyle(.bordered).controlSize(.large)
+                .buttonStyle(.brandQuiet).controlSize(.large)
         }
         .padding(20)
     }
@@ -200,7 +200,7 @@ struct MeetingSessionView: View {
             PixelSpark(color: Theme.orange, cell: 8)
             Text("notes are ready.").font(.brandTitle).foregroundStyle(Theme.ink)
             Button { model.openFinishedMeeting() } label: { Text("open notes").frame(maxWidth: .infinity) }
-                .buttonStyle(.borderedProminent).controlSize(.large)
+                .buttonStyle(.brandPrimary).controlSize(.large)
         }
         .padding(20)
     }

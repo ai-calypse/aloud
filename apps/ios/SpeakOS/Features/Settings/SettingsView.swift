@@ -28,7 +28,7 @@ struct SettingsView: View {
                             HStack {
                                 Label(connection.service.name, systemImage: connection.service.symbol)
                                 Spacer()
-                                Text(connection.status.label).font(.subheadline).foregroundStyle(Theme.muted)
+                                Text(connection.status.label).font(.uiSubheadline).foregroundStyle(Theme.muted)
                             }
                         }
                     }
@@ -36,7 +36,7 @@ struct SettingsView: View {
 
                 Section("Your words") {
                     Text("Thoughts, drafts and notes are stored on this iPhone. Speech and the words you send to be understood are processed in the cloud, and only while you use a feature.")
-                        .font(.subheadline).foregroundStyle(Theme.muted)
+                        .font(.uiSubheadline).foregroundStyle(Theme.muted)
                     ShareLink(item: model.exportText.isEmpty ? "Nothing saved yet." : model.exportText) { Label("export your memory", systemImage: "square.and.arrow.up") }
                     Button("forget everything", role: .destructive) { confirmDelete = true }
                 }
@@ -44,12 +44,12 @@ struct SettingsView: View {
                 Section("Help") {
                     DisclosureGroup("things you can say") {
                         VStack(alignment: .leading, spacing: 6) {
-                            ForEach(DemoScript.samples, id: \.self) { Text("“\($0)”").font(.subheadline) }
+                            ForEach(DemoScript.samples, id: \.self) { Text("“\($0)”").font(.uiSubheadline) }
                         }
                     }
                     DisclosureGroup("what gets saved") {
                         Text("Thoughts are saved on their own. Drafts only when you tap save draft. Finished meetings land in Meetings. A receipt appears after a connected action succeeds. Questions aren't saved.")
-                            .font(.subheadline)
+                            .font(.uiSubheadline)
                     }
                 }
 

@@ -62,10 +62,10 @@ struct ActionPreviewSheet: View {
     private var destination: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(service.name, systemImage: service.symbol).font(.brandMono).foregroundStyle(Theme.primary)
-            Text("\(service.destinationLabel) \(request.recipient?.name ?? "—")").font(.headline).foregroundStyle(Theme.ink)
-            if let detail = request.recipient?.detail { Text(detail).font(.subheadline).foregroundStyle(Theme.muted) }
+            Text("\(service.destinationLabel) \(request.recipient?.name ?? "—")").font(.uiHeadline).foregroundStyle(Theme.ink)
+            if let detail = request.recipient?.detail { Text(detail).font(.uiSubheadline).foregroundStyle(Theme.muted) }
             let account = model.connection(for: service).account
-            if !account.isEmpty { Text("from \(account)").font(.footnote).foregroundStyle(Theme.muted) }
+            if !account.isEmpty { Text("from \(account)").font(.uiFootnote).foregroundStyle(Theme.muted) }
         }
         .card()
         .accessibilityElement(children: .combine)
@@ -94,11 +94,11 @@ struct ActionPreviewSheet: View {
             Text("\(service.doneLine) · \(ago(.now))").font(.brandMono).foregroundStyle(Theme.muted)
         case .failed:
             Label("couldn't \(service.verb). review it and try again.", systemImage: "exclamationmark.triangle.fill")
-                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.error)
+                .font(.uiSubheadline.weight(.semibold)).foregroundStyle(Theme.error)
         case .unknown:
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) { ProgressView(); Text("checking whether it went through…").foregroundStyle(Theme.ink) }
-                Text("Please don't \(service.verb) it again. It may already have gone.").font(.footnote).foregroundStyle(Theme.muted)
+                Text("Please don't \(service.verb) it again. It may already have gone.").font(.uiFootnote).foregroundStyle(Theme.muted)
             }
         }
     }
@@ -107,17 +107,17 @@ struct ActionPreviewSheet: View {
         switch stage {
         case .review, .failed:
             Button { send() } label: { Text(stage == .failed ? "try again" : service.verb).frame(maxWidth: .infinity) }
-                .buttonStyle(.borderedProminent).controlSize(.large)
+                .buttonStyle(.brandHot)
                 .disabled(content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Button("cancel", role: .cancel) { dismiss() }.buttonStyle(.bordered).controlSize(.large)
+            Button("cancel", role: .cancel) { dismiss() }.buttonStyle(.brandQuiet).controlSize(.large)
         case .pending:
             EmptyView()
         case .unknown:
             Button { check() } label: { Text("check again").frame(maxWidth: .infinity) }
-                .buttonStyle(.bordered).controlSize(.large)
+                .buttonStyle(.brandQuiet).controlSize(.large)
         case .sent:
             Button { dismiss() } label: { Text("done").frame(maxWidth: .infinity) }
-                .buttonStyle(.borderedProminent).controlSize(.large)
+                .buttonStyle(.brandPrimary).controlSize(.large)
         }
     }
 

@@ -32,7 +32,7 @@ struct MemoryDetailView: View {
                     Text(item.date.formatted(date: .abbreviated, time: .shortened)).font(.brandMono).foregroundStyle(Theme.muted)
                 }
                 if isEditing {
-                    TextField("Title", text: $title).font(.title2.weight(.bold)).textFieldStyle(.roundedBorder)
+                    TextField("Title", text: $title).font(.brandHeading).textFieldStyle(.roundedBorder)
                     TextEditor(text: $text)
                         .frame(minHeight: 200)
                         .scrollContentBackground(.hidden)
@@ -40,14 +40,14 @@ struct MemoryDetailView: View {
                         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.border))
                 } else {
-                    Text(item.title).font(.title2.weight(.bold)).foregroundStyle(Theme.ink)
-                    Text(item.body).font(.body).foregroundStyle(Theme.ink)
+                    Text(item.title).font(.brandHeading).foregroundStyle(Theme.ink)
+                    Text(item.body).font(.uiBody).foregroundStyle(Theme.ink)
                     if !item.tags.isEmpty {
                         Text(item.tags.map { "#\($0)" }.joined(separator: "  ")).font(.brandMono).foregroundStyle(Theme.muted)
                     }
                     // Forgetting is permanent, so it stays quiet until chosen, then asks once.
                     Button("forget this one", role: .destructive) { confirmForget = true }
-                        .buttonStyle(.bordered).padding(.top, 12)
+                        .buttonStyle(.brandQuiet).padding(.top, 12)
                 }
             }
             .padding(20)

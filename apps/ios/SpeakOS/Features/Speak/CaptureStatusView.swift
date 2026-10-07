@@ -1,18 +1,21 @@
 import SwiftUI
 
-/// What sits under the control: idle prompt, listening, processing or the retry card.
+/// What sits under the hero: examples while idle, the live transcript, processing, or the retry card.
+/// The state itself (listening, got it) is named by the pill on the hero.
 struct CaptureStatusView: View {
     @Environment(AppModel.self) private var model
 
     private static let examples = [
-        "try: “what did I say about pricing?”",
-        "try: “remember that Sarah likes the green version”",
-        "try: “write Sarah a message saying I'll be there at eight”",
-        "try: “send Sarah a Slack saying I'm running late”",
+        "“what did I say about pricing?”",
+        "“remember that Sarah likes the green version”",
+        "“write Sarah a message saying I'll be there at eight”",
+        "“send Sarah a Slack saying I'm running late”",
     ]
 
+    private let transcriptFont = Font.custom("Bricolage Grotesque", size: 25, relativeTo: .title2).weight(.bold)
+
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             switch model.phase {
             case .idle: idle
             case .listening(let armed): listening(armed: armed)
@@ -20,84 +23,74 @@ struct CaptureStatusView: View {
             case .failed(let text): failed(text)
             }
         }
-        .frame(maxWidth: .infinity)
-        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var idle: some View {
-        VStack(spacing: 6) {
-            Text(model.tapToRecord ? "tap to talk" : "hold to talk")
-                .font(.brandHeading).foregroundStyle(Theme.ink)
-            Text("we'll figure out what you mean.").font(.subheadline).foregroundStyle(Theme.muted)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("TRY SAYING").font(.brandMono).tracking(1).foregroundStyle(Theme.muted)
             // Rotates only while idle, so it never competes with a transcript or a result.
             TimelineView(.periodic(from: .now, by: 6)) { ctx in
                 let i = Int(ctx.date.timeIntervalSinceReferenceDate / 6) % Self.examples.count
-                Text(Self.examples[i]).font(.brandMono).foregroundStyle(Theme.muted)
+                Text(Self.examples[i])
+                    .font(.custom("Geist Mono", size: 13, relativeTo: .footnote))
+                    .foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 11).padding(.vertical, 8)
+                    .background(Theme.skySoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .id(i)
                     .transition(.opacity)
             }
-            .padding(.top, 2)
             if model.tapToRecord {
                 Button { model.beginCapture() } label: { Label("start", systemImage: "mic.fill") }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
-                    .padding(.top, 6)
+                    .buttonStyle(.brandPrimary).padding(.top, 6)
             }
         }
+        .frame(minHeight: 84, alignment: .top)
     }
 
     private func listening(armed: Bool) -> some View {
-        VStack(spacing: 10) {
-            if armed {
-                Label("release to cancel", systemImage: "xmark.circle.fill")
-                    .font(.brandMono).foregroundStyle(Theme.error)
-            } else {
-                Label("listening…", systemImage: "record.circle")
-                    .font(.brandMono).foregroundStyle(Theme.ink)
-            }
-            Waveform(active: !armed)
+        VStack(alignment: .leading, spacing: 8) {
             // Reserved height so words arriving never move what is below.
             Text(model.liveTranscript.isEmpty ? " " : model.liveTranscript)
-                .font(.body).foregroundStyle(Theme.ink)
+                .font(transcriptFont).foregroundStyle(Theme.ink)
                 .lineLimit(3, reservesSpace: true)
                 .accessibilityHidden(true) // partial words are not announced one by one
             if model.tapToRecord {
                 HStack(spacing: 12) {
                     Button { model.releaseCapture() } label: { Label("stop", systemImage: "stop.fill") }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.brandPrimary)
                     Button("cancel", role: .cancel) { model.cancelCapture() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.brandQuiet)
                 }
-                .controlSize(.large)
             } else {
-                Text(armed ? "slide back to keep going" : "release when you're done")
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
-                if !armed { Text("slide left to cancel").font(.footnote).foregroundStyle(Theme.muted) }
+                Text((armed ? "slide back to keep going" : "release when you're done · slide left to cancel").uppercased())
+                    .font(.brandMono).tracking(0.8).foregroundStyle(Theme.muted)
             }
         }
+        .frame(minHeight: 84, alignment: .top)
     }
 
     private var processing: some View {
-        VStack(spacing: 8) {
-            Text("got it.").font(.brandHeading).foregroundStyle(Theme.ink)
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
                 ProgressView()
-                Text(model.processingSlow ? "still working on that…" : "one sec…").foregroundStyle(Theme.muted)
+                Text(model.processingSlow ? "still working on that…" : "one sec…").font(transcriptFont).foregroundStyle(Theme.ink)
             }
-            Button("cancel") { model.cancelProcessing() }.buttonStyle(.bordered).padding(.top, 4)
+            Button("cancel") { model.cancelProcessing() }.buttonStyle(.brandQuiet).fixedSize()
         }
+        .frame(minHeight: 84, alignment: .top)
         .accessibilityElement(children: .combine)
     }
 
     private func failed(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("couldn't finish that. your text is still here.")
-                .font(.headline).foregroundStyle(Theme.ink)
-            Text(text).font(.body).foregroundStyle(Theme.ink)
+                .font(.brandCard).foregroundStyle(Theme.ink)
+            Text(text).font(.uiBody).foregroundStyle(Theme.ink)
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             InlineActions {
-                Button("try again") { model.submit(text) }
-                    .buttonStyle(.borderedProminent)
+                Button("try again") { model.submit(text) }.buttonStyle(.brandHot)
                 Button("edit text") { model.discardFailed(); model.present(.typed(prefill: text)) }
                 Button("discard", role: .destructive) { model.discardFailed() }
             }
@@ -115,18 +108,21 @@ struct RememberedCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                PixelSpark(color: Theme.orange)
-                Text("remembered.").font(.brandHeading).foregroundStyle(Theme.ink)
+                Rectangle().fill(Theme.orange).frame(width: 10, height: 10).accessibilityHidden(true)
+                Text("remembered.").font(.brandHeading).foregroundStyle(.white)
             }
-            Text(item.body).font(.body).foregroundStyle(Theme.ink)
-            Text("thought · \(ago(item.date))").font(.brandMono).foregroundStyle(Theme.muted)
+            Text(item.body).font(.uiBody).foregroundStyle(.white)
+            Text("THOUGHT · \(ago(item.date).uppercased())").font(.brandMono).tracking(0.8).foregroundStyle(Color(hex: 0xAAB6DC))
             InlineActions {
                 Button("edit") { model.present(.thoughtEditor(item.id)) }
                 Button("undo") { model.undoLastSaved() }
-                Button("done") { model.lastSaved = nil }.buttonStyle(.borderedProminent)
+                Button("done") { model.lastSaved = nil }.buttonStyle(.brandHot)
             }
+            .padding(.top, 4)
         }
-        .card()
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.ink, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .contain)
     }
 }

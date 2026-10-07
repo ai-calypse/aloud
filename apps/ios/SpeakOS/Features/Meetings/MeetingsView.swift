@@ -14,12 +14,12 @@ struct MeetingsView: View {
                     Button { model.startMeeting() } label: {
                         Label("start a meeting", systemImage: "record.circle").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .buttonStyle(.brandHot)
 
                     if model.meetings.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(model.warm("no meetings. lucky you.", bro: "no meetings. lucky you, bro.")).font(.headline).foregroundStyle(Theme.ink)
-                            Text("your notes will live here after a session.").font(.subheadline).foregroundStyle(Theme.muted)
+                            Text(model.warm("no meetings. lucky you.", bro: "no meetings. lucky you, bro.")).font(.uiHeadline).foregroundStyle(Theme.ink)
+                            Text("your notes will live here after a session.").font(.uiSubheadline).foregroundStyle(Theme.muted)
                         }
                         .card()
                         .accessibilityElement(children: .combine)
@@ -54,17 +54,17 @@ private struct MeetingRow: View {
                 Spacer()
                 Text(ago(meeting.date)).font(.brandMono).foregroundStyle(Theme.muted)
             }
-            Text(meeting.title).font(.headline).foregroundStyle(Theme.ink)
+            Text(meeting.title).font(.uiHeadline).foregroundStyle(Theme.ink)
             switch meeting.status {
             case .finished:
                 if !meeting.summary.isEmpty {
-                    Text(meeting.summary).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2).multilineTextAlignment(.leading)
+                    Text(meeting.summary).font(.uiSubheadline).foregroundStyle(Theme.muted).lineLimit(2).multilineTextAlignment(.leading)
                 }
                 Text("\(meeting.decisions.count) decisions · \(meeting.actionItems.count) action items · \(clock(meeting.duration))")
                     .font(.brandMono).foregroundStyle(Theme.muted)
             case .unfinished(let at):
                 Label("unfinished. recording stopped at \(clock(at)).", systemImage: "exclamationmark.circle")
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    .font(.uiSubheadline.weight(.semibold)).foregroundStyle(Theme.ink)
             }
         }
         .card()

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import CoreText
 
 enum Haptics {
     static func start() { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
@@ -7,42 +8,130 @@ enum Haptics {
     static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
 }
 
+enum Fonts {
+    /// Registers the bundled variable fonts so no Info.plist entry is needed.
+    /// If a face looks like the system font on device, print `UIFont.familyNames` and match the names in Theme.
+    static func register() {
+        let urls = Bundle.main.urls(forResourcesWithExtension: "ttf", subdirectory: nil) ?? []
+        for url in urls { CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil) }
+    }
+}
+
+// MARK: Buttons
+
+/// The one loud action on a screen: ink fill, white label.
+struct BrandPrimaryStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.uiHeadline)
+            .foregroundStyle(.white)
+            .padding(.vertical, 14).padding(.horizontal, 18)
+            .frame(maxWidth: .infinity)
+            .background(Theme.ink, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .opacity(enabled ? (configuration.isPressed ? 0.85 : 1) : 0.4)
+    }
+}
+
+/// White, hairline, ink label. Destructive role turns the label red.
+struct BrandQuietStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.uiHeadline)
+            .foregroundStyle(configuration.role == .destructive ? Theme.error : Theme.ink)
+            .padding(.vertical, 12).padding(.horizontal, 16)
+            .frame(maxWidth: .infinity)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Theme.border, lineWidth: 1))
+            .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.4)
+    }
+}
+
+/// Orange, ink label. At most one per screen (the moment of commitment: send, start, go).
+struct BrandHotStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.custom("Bricolage Grotesque", size: 17, relativeTo: .headline).weight(.bold))
+            .foregroundStyle(Theme.ink)
+            .padding(.vertical, 15).padding(.horizontal, 18)
+            .frame(maxWidth: .infinity)
+            .background(Theme.orange, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .opacity(enabled ? (configuration.isPressed ? 0.85 : 1) : 0.4)
+    }
+}
+
+extension ButtonStyle where Self == BrandPrimaryStyle { static var brandPrimary: BrandPrimaryStyle { .init() } }
+extension ButtonStyle where Self == BrandQuietStyle { static var brandQuiet: BrandQuietStyle { .init() } }
+extension ButtonStyle where Self == BrandHotStyle { static var brandHot: BrandHotStyle { .init() } }
+
+// MARK: Pieces
+
 struct Wordmark: View {
     var body: some View {
         Text("speakos")
-            .font(.system(.title3, design: .rounded, weight: .heavy))
+            .font(.custom("Bricolage Grotesque", size: 22, relativeTo: .title3).weight(.heavy))
             .foregroundStyle(Theme.ink)
     }
 }
 
-/// Kind label for a memory: icon plus text, so it never relies on colour.
+/// Kind label for a memory: a small chip glyph plus the word, so it never relies on colour.
 struct KindTag: View {
     let kind: MemoryKind
+
+    private var chip: (fill: Color, ink: Color) {
+        switch kind {
+        case .thought: (Theme.skySoft, Theme.ink)
+        case .draft: (Color(hex: 0xFFE0B8), Theme.ink)
+        case .meeting: (Theme.ink, .white)
+        case .action: (Theme.yellow, Theme.ink)
+        }
+    }
+
     var body: some View {
-        Label(kind.label, systemImage: kind.symbol)
-            .font(.brandMono)
-            .foregroundStyle(Theme.primary)
-            .labelStyle(.titleAndIcon)
+        HStack(spacing: 8) {
+            Image(systemName: kind.symbol)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(chip.ink)
+                .frame(width: 20, height: 20)
+                .background(chip.fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .accessibilityHidden(true)
+            Text(kind.label.uppercased()).font(.brandMono).tracking(0.8).foregroundStyle(Theme.ink)
+        }
     }
 }
 
 struct ItemRow: View {
     let item: MemoryItem
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             HStack {
                 KindTag(kind: item.kind)
-                if item.pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(Theme.muted).accessibilityLabel("pinned") }
+                if item.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Theme.muted).accessibilityLabel("pinned") }
                 Spacer()
                 Text(ago(item.date)).font(.brandMono).foregroundStyle(Theme.muted)
             }
-            Text(item.title).font(.headline).foregroundStyle(Theme.ink).multilineTextAlignment(.leading)
+            Text(item.title).font(.brandCard).foregroundStyle(Theme.ink).multilineTextAlignment(.leading)
             if !item.body.isEmpty, item.body != item.title {
-                Text(item.body).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2).multilineTextAlignment(.leading)
+                Text(item.body).font(.uiSubheadline).foregroundStyle(Theme.muted).lineLimit(2).multilineTextAlignment(.leading)
             }
         }
         .card()
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Section heading with the brand's one repeated mark: a small orange pixel.
+struct SectionTitle: View {
+    let text: String
+    var body: some View {
+        HStack(spacing: 9) {
+            Rectangle().fill(Theme.orange).frame(width: 9, height: 9).accessibilityHidden(true)
+            Text(text).font(.brandHeading).foregroundStyle(Theme.ink)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -63,30 +152,40 @@ struct PixelSpark: View {
     private func row(_ a: Int, _ b: Int, _ c: Int) -> some View {
         HStack(spacing: 0) {
             ForEach([a, b, c].indices, id: \.self) { i in
-                Rectangle().fill([a, b, c][i] == 1 ? color : .clear).frame(width: cell, height: cell)
+                Rectangle().fill([a, b, c][i] == 1 ? color : Color.clear).frame(width: cell, height: cell)
             }
         }
     }
 }
 
-/// Live input level. Static when reduced motion is on; the label carries the state.
+/// Live input level drawn as stacks of square pixels, like the logo's own art.
+/// Static when reduced motion is on; the label carries the state.
 struct Waveform: View {
     var active: Bool
+    var color: Color = Theme.orange
+    var height: CGFloat = 80
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private let columns = 22
+    private let cell: CGFloat = 7
+    private let gap: CGFloat = 2
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.07, paused: !active || reduceMotion)) { context in
+        TimelineView(.animation(minimumInterval: 0.09, paused: !active || reduceMotion)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
-            HStack(spacing: 4) {
-                ForEach(0..<26, id: \.self) { i in
-                    let wave = abs(sin(t * 6 + Double(i) * 0.6)) * abs(cos(Double(i) * 0.9))
-                    let level = (active && !reduceMotion) ? 0.15 + 0.85 * wave : 0.25
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(active ? Theme.orange : Theme.border)
-                        .frame(width: 4, height: 6 + 34 * level)
+            HStack(alignment: .bottom, spacing: 5) {
+                ForEach(0..<columns, id: \.self) { i in
+                    let wave = abs(sin(t * 5 + Double(i) * 0.7)) * abs(cos(Double(i) * 0.55 + t))
+                    let blocks = (active && !reduceMotion) ? 1 + Int((wave * 9).rounded()) : 3
+                    VStack(spacing: gap) {
+                        ForEach(0..<blocks, id: \.self) { _ in
+                            Rectangle().fill(active ? color : Theme.border).frame(height: cell)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
             }
-            .frame(height: 44)
+            .frame(height: height, alignment: .bottom)
         }
         .accessibilityHidden(true)
     }
@@ -96,17 +195,17 @@ struct ToastView: View {
     let text: String
     var body: some View {
         Text(text)
-            .font(.subheadline.weight(.semibold))
+            .font(.uiSubheadline.weight(.bold))
             .foregroundStyle(Theme.ink)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 18)
             .padding(.vertical, 10)
             .background(Theme.yellow, in: Capsule())
-            .overlay(Capsule().stroke(Theme.ink.opacity(0.15), lineWidth: 1))
+            .shadow(color: Theme.ink.opacity(0.25), radius: 10, x: 0, y: 6)
             .padding(.top, 8)
     }
 }
 
-/// Small bordered action row used under cards (edit · undo · done).
+/// Small action row used under cards (edit · undo · done).
 struct InlineActions<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
@@ -114,7 +213,6 @@ struct InlineActions<Content: View>: View {
             HStack(spacing: 8) { content }
             VStack(alignment: .leading, spacing: 8) { content }
         }
-        .buttonStyle(.bordered)
-        .controlSize(.regular)
+        .buttonStyle(.brandQuiet)
     }
 }

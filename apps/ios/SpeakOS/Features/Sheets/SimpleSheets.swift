@@ -27,7 +27,7 @@ struct TypedInputSheet: View {
                     model.sheet = nil
                     model.submit(t)
                 } label: { Text("go on, then →").frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .buttonStyle(.brandHot)
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Spacer(minLength: 0)
             }
@@ -59,17 +59,17 @@ struct PermissionSheet: View {
                 if denied {
                     Button { if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) } } label: {
                         Text("open Settings").frame(maxWidth: .infinity)
-                    }.buttonStyle(.borderedProminent)
+                    }.buttonStyle(.brandPrimary)
                 } else {
                     // Prototype: the real app calls the system permission prompt here.
                     Button {
                         model.micAccess = .granted
                         dismiss()
                     } label: { Text("allow microphone").frame(maxWidth: .infinity) }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.brandPrimary)
                 }
                 Button { model.present(.typed(prefill: "")) } label: { Text("type instead").frame(maxWidth: .infinity) }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.brandQuiet)
                 Spacer(minLength: 0)
             }
             .controlSize(.large)
@@ -99,11 +99,11 @@ struct ClarifySheet: View {
                     dismiss()
                     model.saveThought(Interpreter.sentence(clarification.text))
                 } label: { Text("save as a thought").frame(maxWidth: .infinity) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.brandPrimary)
                 Button {
                     model.present(.draft(DraftModel(text: Interpreter.sentence(clarification.text), recipientName: nil)))
                 } label: { Text("make it a message").frame(maxWidth: .infinity) }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.brandQuiet)
                 Spacer(minLength: 0)
             }
             .controlSize(.large)
@@ -128,8 +128,8 @@ struct RecipientSheet: View {
                     ForEach(request.candidates) { person in
                         Button { model.choose(person, for: request) } label: {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(person.name).font(.headline).foregroundStyle(Theme.ink)
-                                Text("\(request.service.name) · \(person.detail)").font(.subheadline).foregroundStyle(Theme.muted)
+                                Text(person.name).font(.uiHeadline).foregroundStyle(Theme.ink)
+                                Text("\(request.service.name) · \(person.detail)").font(.uiSubheadline).foregroundStyle(Theme.muted)
                             }
                         }
                     }

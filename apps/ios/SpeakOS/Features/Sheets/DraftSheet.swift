@@ -51,11 +51,11 @@ struct DraftSheet: View {
                             Button { sendWith(service) } label: { Label(service.name, systemImage: service.symbol) }
                         }
                     } label: { Label("send with…", systemImage: "paperplane").frame(maxWidth: .infinity) }
-                        .buttonStyle(.borderedProminent).controlSize(.large)
+                        .buttonStyle(.brandPrimary).controlSize(.large)
                         .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                     Text("Sharing or copying doesn't send anything. Sending asks you to review first.")
-                        .font(.footnote).foregroundStyle(Theme.muted)
+                        .font(.uiFootnote).foregroundStyle(Theme.muted)
                 }
                 .padding(20)
             }
