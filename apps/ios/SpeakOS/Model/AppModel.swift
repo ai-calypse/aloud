@@ -234,7 +234,7 @@ final class AppModel {
 
     // MARK: Tags
 
-    static func cleanTag(_ raw: String) -> String {
+    nonisolated static func cleanTag(_ raw: String) -> String {
         raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
             .lowercased()

@@ -147,7 +147,7 @@ struct TagsView: View {
                                 Spacer()
                                 Text("\(tag.count) \(tag.count == 1 ? "note" : "notes")").font(.brandMono).foregroundStyle(Theme.muted)
                                 Menu {
-                                    Button("Show notes") { model.tagFilter = tag.name; model.filter = .everything; model.selectedTab = .memory }
+                                    Button("Show notes") { model.tagFilter = tag.name; model.filter = .everything; model.selectedTab = .memory; model.sheet = nil }
                                     Button("Rename") { newName = tag.name; renaming = tag.name }
                                     Button("Delete tag", role: .destructive) { deleting = tag.name }
                                 } label: {

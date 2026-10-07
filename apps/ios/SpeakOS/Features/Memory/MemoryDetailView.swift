@@ -112,7 +112,7 @@ struct MemoryDetailView: View {
     private func actionBar(_ item: MemoryItem) -> some View {
         HStack(spacing: 10) {
             if item.kind == .note {
-                Button { model.present(.note(NoteDraft(text: item.body, recipientName: nil, existingID: item.id))) } label: {
+                Button { model.present(.note(NoteDraft(text: item.body, recipientName: nil, existingID: item.id, tags: item.tags))) } label: {
                     Label("edit and rewrite", systemImage: "wand.and.stars")
                 }
                 .buttonStyle(.brandHot)
