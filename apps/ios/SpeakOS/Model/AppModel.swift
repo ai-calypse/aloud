@@ -5,12 +5,17 @@ final class AppModel {
     // MARK: Content
     var items: [MemoryItem] = []
     var meetings: [Meeting] = []
-    var connections: [Connection] = Fixtures.connections()
+    var integrations: [Integration] = Fixtures.integrations()
 
     // MARK: Preferences
     var broMode = false
     var haptics = true
     var tapToRecord = false
+    var language: SpeechLanguage = .enUS
+    var defaultTone: RewriteStyle?
+    var keepAudio = false
+    var account: String?
+    var replacements: [TextReplacement] = [TextReplacement(from: "my email", to: "you@example.com")]
     var micAccess: MicAccess = .notDetermined
     var demo = DemoControls()
 
@@ -25,6 +30,7 @@ final class AppModel {
     // Search state lives here so a detail view and back keeps the query and filter.
     var query = ""
     var filter: MemoryFilter = .everything
+    var tagFilter: String?
 
     // MARK: Capture
     var phase: CapturePhase = .idle
@@ -57,7 +63,11 @@ final class AppModel {
     var recent: [MemoryItem] { Array(items.sorted { $0.date > $1.date }.prefix(3)) }
 
     /// Memory applies its kind filter; pages without filter chips use `searchResults`.
-    var results: [MemoryItem] { searchResults.filter { filter.kind == nil || $0.kind == filter.kind } }
+    var results: [MemoryItem] {
+        searchResults
+            .filter { filter.kind == nil || $0.kind == filter.kind }
+            .filter { tagFilter == nil || $0.tags.contains(tagFilter!) }
+    }
 
     var searchResults: [MemoryItem] {
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -88,7 +98,9 @@ final class AppModel {
 
     func item(_ id: UUID) -> MemoryItem? { items.first { $0.id == id } }
     func meeting(_ id: UUID) -> Meeting? { meetings.first { $0.id == id } }
-    func connection(for service: ServiceKind) -> Connection { connections.first { $0.service == service }! }
+    func integration(_ id: String) -> Integration? { integrations.first { $0.id == id } }
+    func connection(for service: ServiceKind) -> Integration { integration(service.id)! }
+    var connectedCount: Int { integrations.filter { $0.status == .connected }.count }
 
     var exportText: String {
         items.sorted { $0.date < $1.date }.map { "[\($0.kind.label)] \($0.title)\n\($0.body)" }.joined(separator: "\n\n")
@@ -215,28 +227,85 @@ final class AppModel {
         phase = .idle
         liveTranscript = ""
         switch Interpreter.interpret(text, items: items, searchUnavailable: demo.searchUnavailable) {
-        case .note(let t, let name): present(.note(NoteDraft(text: t, recipientName: name, existingID: nil)))
+        case .note(let t, let name): present(.note(NoteDraft(text: applyReplacements(t), recipientName: name, existingID: nil, tags: [], style: defaultTone)))
         case .answer(let answer): present(.answer(answer))
         }
+    }
+
+    // MARK: Tags
+
+    static func cleanTag(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+            .lowercased()
+            .split(whereSeparator: { $0.isWhitespace }).joined(separator: "-")
+    }
+
+    var allTags: [(name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for t in items.flatMap(\.tags) { counts[t, default: 0] += 1 }
+        return counts.map { (name: $0.key, count: $0.value) }.sorted { ($0.count, $1.name) > ($1.count, $0.name) }
+    }
+
+    func setTags(_ id: UUID, _ tags: [String]) {
+        guard let i = items.firstIndex(where: { $0.id == id }) else { return }
+        var seen = Set<String>()
+        items[i].tags = tags.map(Self.cleanTag).filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// Renaming onto an existing tag merges the two.
+    func renameTag(_ old: String, to new: String) {
+        let target = Self.cleanTag(new)
+        guard !target.isEmpty, target != old else { return }
+        for i in items.indices where items[i].tags.contains(old) {
+            var tags = items[i].tags.map { $0 == old ? target : $0 }
+            var seen = Set<String>()
+            tags = tags.filter { seen.insert($0).inserted }
+            items[i].tags = tags
+        }
+        if tagFilter == old { tagFilter = target }
+    }
+
+    func deleteTag(_ name: String) {
+        for i in items.indices { items[i].tags.removeAll { $0 == name } }
+        if tagFilter == name { tagFilter = nil }
+    }
+
+    /// Existing tags whose word appears in the text, then the most used, minus ones already applied.
+    func suggestTags(for text: String, excluding applied: [String], limit: Int = 6) -> [String] {
+        let words = Set(Interpreter.words(text.lowercased()))
+        let mentioned = allTags.map(\.name).filter { words.contains($0) }
+        let popular = allTags.map(\.name)
+        var out: [String] = []
+        for t in mentioned + popular where !applied.contains(t) && !out.contains(t) { out.append(t) }
+        return Array(out.prefix(limit))
     }
 
     // MARK: Notes
 
     /// Saves a new note, or updates the one being edited. Returns its id.
     @discardableResult
-    func saveNote(id: UUID?, text: String) -> UUID {
+    func saveNote(id: UUID?, text: String, tags: [String] = []) -> UUID {
         let title = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
         if let id, let i = items.firstIndex(where: { $0.id == id }) {
             items[i].title = title
             items[i].body = text
+            items[i].tags = tags
             showToast("note updated.")
             return id
         }
-        let item = MemoryItem(kind: .note, title: title, body: text)
+        let item = MemoryItem(kind: .note, title: title, body: text, tags: tags)
         items.insert(item, at: 0)
         if haptics { Haptics.success() }
         showToast("saved to Memory.")
         return item.id
+    }
+
+    /// Your shortcuts ("my email" → an address) are applied to what you dictate, never to saved notes.
+    func applyReplacements(_ text: String) -> String {
+        replacements.reduce(text) { out, r in
+            r.from.isEmpty ? out : out.replacingOccurrences(of: r.from, with: r.to, options: .caseInsensitive)
+        }
     }
 
     func rewrite(_ text: String, style: RewriteStyle) async -> String {
@@ -282,12 +351,20 @@ final class AppModel {
         }
     }
 
-    func setStatus(_ status: ConnectionStatus, for service: ServiceKind) {
-        guard let i = connections.firstIndex(where: { $0.service == service }) else { return }
-        connections[i].status = status
-        if status == .connected, connections[i].account.isEmpty {
-            connections[i].account = service == .notion ? "Personal workspace" : "you@example.com"
+    func setStatus(_ status: ConnectionStatus, for service: ServiceKind) { setStatus(status, forID: service.id) }
+
+    func setStatus(_ status: ConnectionStatus, forID id: String) {
+        guard let i = integrations.firstIndex(where: { $0.id == id }) else { return }
+        integrations[i].status = status
+        if status == .connected, integrations[i].account.isEmpty {
+            integrations[i].account = id == "notion" ? "Personal workspace" : "you@example.com"
         }
+    }
+
+    func setAsksFirst(_ asks: Bool, tool: String, in id: String) {
+        guard let i = integrations.firstIndex(where: { $0.id == id }), let t = integrations[i].tools.firstIndex(where: { $0.name == tool }) else { return }
+        // Writes always ask: the switch only exists for reads.
+        integrations[i].tools[t].asksFirst = asks || integrations[i].tools[t].writes
     }
 
     enum SendResult { case sent, failed, unknown }
@@ -323,10 +400,10 @@ final class AppModel {
     }
 
     /// Attempt to link a service. Returns the simulated result.
-    func connect(_ service: ServiceKind) async -> ConnectionResult {
+    func connect(_ id: String) async -> ConnectionResult {
         try? await Task.sleep(for: .milliseconds(1300))
         let result = demo.connectionResult
-        if result == .connected { setStatus(.connected, for: service) }
+        if result == .connected { setStatus(.connected, forID: id) }
         return result
     }
 

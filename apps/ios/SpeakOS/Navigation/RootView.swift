@@ -37,6 +37,7 @@ enum AppSheet: Identifiable {
     case action(ActionRequest)
     case answer(AnswerModel)
     case connect(ServiceKind, resume: ActionRequest?)
+    case tags(UUID)
     case settings
 
     var id: String {
@@ -48,6 +49,7 @@ enum AppSheet: Identifiable {
         case .action(let r): "action-\(r.id)"
         case .answer(let a): "answer-\(a.id)"
         case .connect(let s, _): "connect-\(s.id)"
+        case .tags(let id): "tags-\(id)"
         case .settings: "settings"
         }
     }
@@ -110,7 +112,11 @@ private struct SheetContent: View {
             AnswerSheet(answer: a)
                 .presentationDetents([.large])
         case .connect(let s, let resume):
-            NavigationStack { ConnectionDetailView(service: s, resume: resume, isSheet: true) }
+            NavigationStack { IntegrationDetailView(integrationID: s.id, resume: resume, isSheet: true) }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        case .tags(let id):
+            TagSheet(itemID: id)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         case .settings:

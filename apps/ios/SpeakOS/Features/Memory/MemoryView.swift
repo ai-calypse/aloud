@@ -14,6 +14,7 @@ struct MemoryView: View {
                         .accessibilityAddTraits(.isHeader)
                     SearchField(text: $model.query)
                     filters
+                    tagChips
                     content
                 }
                 .padding(.horizontal, 20)
@@ -54,6 +55,27 @@ struct MemoryView: View {
         }
     }
 
+    @ViewBuilder private var tagChips: some View {
+        let tags = model.allTags
+        if !tags.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(tags, id: \.name) { tag in
+                        let on = model.tagFilter == tag.name
+                        Button { model.tagFilter = on ? nil : tag.name } label: {
+                            Text("#\(tag.name) \(tag.count)")
+                                .font(.uiSubheadline.weight(.semibold))
+                                .padding(.horizontal, 12).padding(.vertical, 7)
+                                .foregroundStyle(Theme.ink)
+                                .background(on ? Theme.yellow : Theme.skySoft, in: Capsule())
+                        }
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                    }
+                }
+            }
+        }
+    }
+
     @ViewBuilder private var content: some View {
         let results = model.results
         if model.demo.searchUnavailable && !model.query.isEmpty {
@@ -81,7 +103,7 @@ struct MemoryView: View {
             } description: {
                 Text("No matches. Try a different word, or another filter.")
             } actions: {
-                Button("clear search") { model.query = ""; model.filter = .everything }.buttonStyle(.brandQuiet)
+                Button("clear search") { model.query = ""; model.filter = .everything; model.tagFilter = nil }.buttonStyle(.brandQuiet)
             }
         } else {
             LazyVStack(spacing: 12) {

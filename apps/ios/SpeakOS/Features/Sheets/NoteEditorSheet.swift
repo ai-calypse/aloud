@@ -15,18 +15,26 @@ struct NoteEditorSheet: View {
     @State private var rewriting = false
     @State private var savedID: UUID?
     @State private var savedText: String?
+    @State private var savedTags: [String]
     @State private var confirmClose = false
+    @State private var tags: [String]
+    @State private var tagDraft = ""
 
     init(note: NoteDraft) {
         self.note = note
-        _text = State(initialValue: note.text)
+        // A default tone from Settings opens the note already rewritten; revert still restores the words as spoken.
+        let styled = note.style.map { Rewriter.apply(note.text, style: $0) } ?? note.text
+        _text = State(initialValue: styled)
         _base = State(initialValue: note.text)
+        _active = State(initialValue: note.style)
+        _tags = State(initialValue: note.tags)
+        _savedTags = State(initialValue: note.tags)
         _savedID = State(initialValue: note.existingID)
-        _savedText = State(initialValue: note.existingID == nil ? nil : note.text)
+        _savedText = State(initialValue: note.existingID == nil ? nil : styled)
     }
 
     private var isBlank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    private var hasUnsaved: Bool { savedText != text && !isBlank }
+    private var hasUnsaved: Bool { (savedText != text || savedTags != tags) && !isBlank }
 
     /// Typing replaces the rewrite baseline, so a style always applies to what you last wrote.
     private var editable: Binding<String> {
@@ -57,6 +65,7 @@ struct NoteEditorSheet: View {
                         .accessibilityLabel("Note text")
 
                     rewriteSection
+                    tagsSection
 
                     VStack(spacing: 12) {
                         InlineActions {
@@ -150,11 +159,53 @@ struct NoteEditorSheet: View {
         }
     }
 
+    // MARK: Tags
+
+    private var tagsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionTitle(text: "tags")
+            TagFlow {
+                ForEach(tags, id: \.self) { tag in TagChip(tag: tag) { tags.removeAll { $0 == tag } } }
+            }
+            HStack(spacing: 8) {
+                Text("#").font(.brandCard).foregroundStyle(Theme.muted)
+                TextField("add a tag", text: $tagDraft)
+                    .font(.uiBody).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .submitLabel(.done).onSubmit(addTag)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.border))
+            let suggestions = model.suggestTags(for: text, excluding: tags, limit: 4)
+            if !suggestions.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(suggestions, id: \.self) { tag in
+                            Button { tags.append(tag) } label: {
+                                Text("+ #\(tag)").font(.uiSubheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                                    .padding(.horizontal, 12).padding(.vertical, 7)
+                                    .background(Theme.surface, in: Capsule()).overlay(Capsule().stroke(Theme.border))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func addTag() {
+        let tag = AppModel.cleanTag(tagDraft)
+        if !tag.isEmpty, !tags.contains(tag) { tags.append(tag) }
+        tagDraft = ""
+    }
+
     // MARK: Save and send
 
     private func save() {
-        savedID = model.saveNote(id: savedID, text: text)
+        addTag()
+        savedID = model.saveNote(id: savedID, text: text, tags: tags)
         savedText = text
+        savedTags = tags
     }
 
     private func sendWith(_ service: ServiceKind) {

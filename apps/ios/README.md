@@ -37,11 +37,21 @@ from the guide exist; the nine flows are reachable like this.
 | F06 meeting | Speak → *start meeting* → start recording → pause/finish → notes. |
 | F07 recover a meeting | *Customer call* in Meetings is an unfinished session; or turn on *interrupt next meeting*. |
 | F08 type instead | *type instead* on Home. Typed text opens the same note editor as voice. |
-| F09 manage connections | Settings → Connected apps → Notion (starts unconnected). |
+| F09 integrations | Settings → Integrations. Browse by category, open an app, connect through Composio (handoff is simulated), and set which reads ask first. Writes always ask. Notion starts unconnected; Google Calendar needs reconnecting. |
+| F10 tags | Note page → **#** (or the tag row in the editor) to add, remove and pick suggested tags. Memory shows tag chips that filter; Settings → Tags renames (merging), deletes the label, or jumps to its notes. |
+| F11 settings | Settings is a card page: account, capture (tap to record, haptics, keep audio, language), rewriting (default tone, text replacements), organise (tags, integrations), your words (export, forget everything), help, and the prototype controls. |
 
 Settings → **prototype controls** switch every state in the guide on demand: first-use account,
 microphone ask/denied, a failed capture, unavailable search, send outcomes, connection results,
 meeting interruption and failed notes. They simulate outcomes and would not ship.
+
+Composio: connections are modelled as a catalogue of toolkits (`Integration`) with a status and
+a per-tool permission. The handoff in `AppModel.connect` is simulated; the real one starts a Composio
+connection for the person and returns when the app's own sign-in page finishes. The privacy copy
+on the Integrations page ("SpeakOS never sees your password") describes OAuth and should be
+confirmed against the final Composio setup before shipping.
+
+Settings leaves out an Appearance switch for now: the app is light-only until a dark pass is designed.
 
 ## Layout
 

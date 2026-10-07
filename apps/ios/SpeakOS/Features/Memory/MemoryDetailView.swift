@@ -57,13 +57,16 @@ struct MemoryDetailView: View {
                         .font(.brandMono).tracking(0.8).foregroundStyle(Theme.muted)
                 }
 
-                if !item.tags.isEmpty {
-                    HStack(spacing: 8) {
-                        ForEach(item.tags, id: \.self) { tag in
-                            Text("#\(tag)").font(.uiSubheadline.weight(.semibold)).foregroundStyle(Theme.ink)
-                                .padding(.horizontal, 12).padding(.vertical, 6)
-                                .background(Theme.skySoft, in: Capsule())
-                        }
+                TagFlow {
+                    ForEach(item.tags, id: \.self) { tag in
+                        Button { model.tagFilter = tag; model.filter = .everything; model.selectedTab = .memory; model.memoryPath = [] } label: { TagChip(tag: tag) }
+                            .accessibilityHint("Shows notes with this tag")
+                    }
+                    Button { model.present(.tags(item.id)) } label: {
+                        Label(item.tags.isEmpty ? "add tags" : "edit", systemImage: "number")
+                            .font(.uiSubheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(Theme.surface, in: Capsule()).overlay(Capsule().stroke(Theme.border))
                     }
                 }
 
@@ -114,6 +117,8 @@ struct MemoryDetailView: View {
                 }
                 .buttonStyle(.brandHot)
             }
+            Button { model.present(.tags(item.id)) } label: { Image(systemName: "number").frame(width: 48, height: 48) }
+                .accessibilityLabel("Tags")
             ShareLink(item: item.body) {
                 Image(systemName: "square.and.arrow.up").frame(width: 48, height: 48)
             }

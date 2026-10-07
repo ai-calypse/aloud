@@ -109,4 +109,40 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(related.contains { $0.id == pricing.id })
         XCTAssertTrue(related.contains { $0.title == "Launch planning" }, "shares 'pricing' and 'launch'")
     }
+
+    func testCleanTagNormalises() {
+        XCTAssertEqual(AppModel.cleanTag("  #Launch Plan "), "launch-plan")
+        XCTAssertEqual(AppModel.cleanTag("###"), "")
+    }
+
+    func testRenamingOntoAnExistingTagMergesWithoutDuplicates() {
+        let model = AppModel()
+        model.renameTag("team", to: "launch")
+        let note = model.items.first { $0.title.hasPrefix("Note to the team") }!
+        XCTAssertEqual(note.tags, ["launch"])
+        XCTAssertNil(model.allTags.first { $0.name == "team" })
+    }
+
+    func testDeletingATagLeavesTheNotes() {
+        let model = AppModel()
+        let before = model.items.count
+        model.tagFilter = "pricing"
+        model.deleteTag("pricing")
+        XCTAssertEqual(model.items.count, before)
+        XCTAssertNil(model.tagFilter)
+        XCTAssertFalse(model.items.contains { $0.tags.contains("pricing") })
+    }
+
+    func testWritesAlwaysAskEvenIfTheSwitchIsTurnedOff() {
+        let model = AppModel()
+        model.setAsksFirst(false, tool: "Send message", in: "slack")
+        XCTAssertTrue(model.integration("slack")!.tools.first { $0.name == "Send message" }!.asksFirst)
+        model.setAsksFirst(false, tool: "Read channels", in: "slack")
+        XCTAssertFalse(model.integration("slack")!.tools.first { $0.name == "Read channels" }!.asksFirst)
+    }
+
+    func testReplacementsApplyToDictationOnly() {
+        let model = AppModel()
+        XCTAssertEqual(model.applyReplacements("Send it to my email please"), "Send it to you@example.com please")
+    }
 }

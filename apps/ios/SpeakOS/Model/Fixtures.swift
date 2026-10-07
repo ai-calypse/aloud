@@ -49,9 +49,9 @@ enum Fixtures {
 
     static func items(meetings: [Meeting]) -> [MemoryItem] {
         var out: [MemoryItem] = [
-            MemoryItem(kind: .note, title: "Keep pricing at $12 a month", body: "Pricing should stay at twelve dollars a month through launch. Review a yearly option after.", date: ago(30), pinned: true, tags: ["pricing"]),
+            MemoryItem(kind: .note, title: "Keep pricing at $12 a month", body: "Pricing should stay at twelve dollars a month through launch. Review a yearly option after.", date: ago(30), pinned: true, tags: ["pricing", "launch"]),
             MemoryItem(kind: .note, title: "Ask Priya about the press list", body: "Ask Priya whether the press list includes the podcast people.", date: ago(52), tags: ["launch"]),
-            MemoryItem(kind: .note, title: "Note to the team", body: "Hey team, the launch is on the 14th. Shout if anything blocks you.", date: ago(8)),
+            MemoryItem(kind: .note, title: "Note to the team", body: "Hey team, the launch is on the 14th. Shout if anything blocks you.", date: ago(8), tags: ["launch", "team"]),
             MemoryItem(kind: .action, title: "Sent to Priya Nair on Slack", body: "Can you send the press list by Friday?", date: ago(100)),
         ]
         for m in meetings where m.status == .finished {
@@ -60,11 +60,39 @@ enum Fixtures {
         return out
     }
 
-    static func connections() -> [Connection] {
+    private static func tool(_ name: String, write: Bool = false) -> IntegrationTool {
+        IntegrationTool(name: name, writes: write, asksFirst: true)
+    }
+
+    static func integrations() -> [Integration] {
         [
-            Connection(service: .slack, status: .connected, account: "Acme workspace"),
-            Connection(service: .gmail, status: .connected, account: "you@example.com"),
-            Connection(service: .notion, status: .notConnected, account: ""),
+            Integration(id: "slack", name: "Slack", symbol: "number.square", category: .messaging,
+                        summary: "Send messages to people and channels.",
+                        tools: [tool("Send message", write: true), tool("Read channels")], status: .connected, account: "Acme workspace"),
+            Integration(id: "gmail", name: "Gmail", symbol: "envelope", category: .email,
+                        summary: "Draft and send email.",
+                        tools: [tool("Create draft", write: true), tool("Send email", write: true), tool("Search mail")], status: .connected, account: "you@example.com"),
+            Integration(id: "notion", name: "Notion", symbol: "doc.text", category: .docs,
+                        summary: "Save notes to a page.",
+                        tools: [tool("Create note", write: true), tool("Search pages")]),
+            Integration(id: "gcal", name: "Google Calendar", symbol: "calendar", category: .calendar,
+                        summary: "Add events from what you say.",
+                        tools: [tool("Create event", write: true), tool("List events")], status: .expired, account: "you@example.com"),
+            Integration(id: "gdrive", name: "Google Drive", symbol: "externaldrive", category: .docs,
+                        summary: "Save a note as a document.",
+                        tools: [tool("Save as document", write: true), tool("Search files")]),
+            Integration(id: "todoist", name: "Todoist", symbol: "checklist", category: .tasks,
+                        summary: "Turn a note into a task.",
+                        tools: [tool("Add task", write: true), tool("List tasks")]),
+            Integration(id: "linear", name: "Linear", symbol: "square.stack.3d.up", category: .dev,
+                        summary: "File an issue from a note.",
+                        tools: [tool("Create issue", write: true), tool("Search issues")]),
+            Integration(id: "github", name: "GitHub", symbol: "chevron.left.forwardslash.chevron.right", category: .dev,
+                        summary: "Open an issue or comment.",
+                        tools: [tool("Create issue", write: true), tool("Comment", write: true), tool("Read pull requests")]),
+            Integration(id: "hubspot", name: "HubSpot", symbol: "person.crop.rectangle", category: .sales,
+                        summary: "Log a note on a contact.",
+                        tools: [tool("Log note", write: true), tool("Find contact")]),
         ]
     }
 }

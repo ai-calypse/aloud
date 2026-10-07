@@ -156,11 +156,41 @@ enum ConnectionStatus: String, CaseIterable, Identifiable {
     }
 }
 
-struct Connection: Identifiable {
-    var service: ServiceKind
-    var status: ConnectionStatus
-    var account: String
-    var id: String { service.id }
+enum IntegrationCategory: String, CaseIterable, Identifiable {
+    case messaging, email, docs, calendar, tasks, dev, sales
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .messaging: "Messaging"
+        case .email: "Email"
+        case .docs: "Notes & docs"
+        case .calendar: "Calendar"
+        case .tasks: "Tasks"
+        case .dev: "Developer"
+        case .sales: "Sales"
+        }
+    }
+}
+
+/// One thing an app connection can do. Writes always ask first; reads can be allowed.
+struct IntegrationTool: Identifiable, Hashable {
+    var name: String
+    var writes: Bool
+    var asksFirst: Bool
+    var id: String { name }
+}
+
+/// A connectable app. Connections run through Composio, so this list is a catalogue of
+/// toolkits and the status of the person's link to each, never a credential.
+struct Integration: Identifiable {
+    var id: String
+    var name: String
+    var symbol: String
+    var category: IntegrationCategory
+    var summary: String
+    var tools: [IntegrationTool]
+    var status: ConnectionStatus = .notConnected
+    var account: String = ""
 }
 
 struct Recipient: Identifiable, Hashable {
@@ -185,6 +215,20 @@ struct NoteDraft: Identifiable {
     var text: String
     var recipientName: String?
     var existingID: UUID?
+    var tags: [String] = []
+    /// A default tone the person set in Settings; the editor opens already rewritten.
+    var style: RewriteStyle?
+}
+
+struct TextReplacement: Identifiable, Hashable {
+    var id = UUID()
+    var from: String
+    var to: String
+}
+
+enum SpeechLanguage: String, CaseIterable, Identifiable {
+    case enUS = "English (US)", enGB = "English (UK)", es = "Español", fr = "Français", de = "Deutsch", hi = "हिन्दी", pt = "Português"
+    var id: String { rawValue }
 }
 
 enum AnswerState {
