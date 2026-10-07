@@ -82,8 +82,7 @@ struct KindTag: View {
 
     private var chip: (fill: Color, ink: Color) {
         switch kind {
-        case .thought: (Theme.skySoft, Theme.ink)
-        case .draft: (Color(hex: 0xFFE0B8), Theme.ink)
+        case .note: (Theme.skySoft, Theme.ink)
         case .meeting: (Theme.ink, .white)
         case .action: (Theme.yellow, Theme.ink)
         }
@@ -214,5 +213,53 @@ struct InlineActions<Content: View>: View {
             VStack(alignment: .leading, spacing: 8) { content }
         }
         .buttonStyle(.brandQuiet)
+    }
+}
+
+/// The search field every root page carries. One query, shared by all pages, so a search follows you.
+struct SearchField: View {
+    @Binding var text: String
+    var prompt = "find a note, name, or phrase…"
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
+            TextField(prompt, text: $text)
+                .font(.uiBody)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+            if !text.isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted) }
+                    .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Theme.border))
+    }
+}
+
+/// Results for the shared query, with its own empty state. Used by pages that are not Memory.
+struct SearchResults: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let results = model.searchResults
+        VStack(alignment: .leading, spacing: 12) {
+            if model.demo.searchUnavailable {
+                Text("couldn't search right now.").font(.brandHeading).foregroundStyle(Theme.ink)
+                Text("Your notes are safe. Try again in a moment.").foregroundStyle(Theme.muted)
+            } else if results.isEmpty {
+                Text("not ringing a bell.").font(.brandHeading).foregroundStyle(Theme.ink)
+                Text("No matches. Try a different word.").foregroundStyle(Theme.muted)
+            } else {
+                Text("\(results.count) \(results.count == 1 ? "match" : "matches")").font(.brandMono).foregroundStyle(Theme.muted)
+                ForEach(results) { item in
+                    NavigationLink(value: item.route) { ItemRow(item: item) }.buttonStyle(.plain)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

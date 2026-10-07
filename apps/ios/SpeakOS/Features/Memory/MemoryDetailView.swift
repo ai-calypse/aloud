@@ -5,10 +5,6 @@ struct MemoryDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let itemID: UUID
 
-    @State private var isEditing = false
-    @State private var title = ""
-    @State private var text = ""
-    @State private var confirmDiscard = false
     @State private var confirmForget = false
 
     var body: some View {
@@ -31,52 +27,31 @@ struct MemoryDetailView: View {
                     Spacer()
                     Text(item.date.formatted(date: .abbreviated, time: .shortened)).font(.brandMono).foregroundStyle(Theme.muted)
                 }
-                if isEditing {
-                    TextField("Title", text: $title).font(.brandHeading).textFieldStyle(.roundedBorder)
-                    TextEditor(text: $text)
-                        .frame(minHeight: 200)
-                        .scrollContentBackground(.hidden)
-                        .padding(10)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.border))
-                } else {
-                    Text(item.title).font(.brandHeading).foregroundStyle(Theme.ink)
-                    Text(item.body).font(.uiBody).foregroundStyle(Theme.ink)
-                    if !item.tags.isEmpty {
-                        Text(item.tags.map { "#\($0)" }.joined(separator: "  ")).font(.brandMono).foregroundStyle(Theme.muted)
-                    }
-                    // Forgetting is permanent, so it stays quiet until chosen, then asks once.
-                    Button("forget this one", role: .destructive) { confirmForget = true }
-                        .buttonStyle(.brandQuiet).padding(.top, 12)
+                Text(item.title).font(.brandHeading).foregroundStyle(Theme.ink)
+                Text(item.body).font(.uiBody).foregroundStyle(Theme.ink)
+                if !item.tags.isEmpty {
+                    Text(item.tags.map { "#\($0)" }.joined(separator: "  ")).font(.brandMono).foregroundStyle(Theme.muted)
                 }
+                if item.kind == .note {
+                    // Same editor as after dictation, so a saved note can be rewritten too.
+                    Button { model.present(.note(NoteDraft(text: item.body, recipientName: nil, existingID: item.id))) } label: {
+                        Label("edit and rewrite", systemImage: "wand.and.stars").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.brandHot)
+                }
+                // Forgetting is permanent, so it stays quiet until chosen, then asks once.
+                Button("forget this one", role: .destructive) { confirmForget = true }
+                    .buttonStyle(.brandQuiet).padding(.top, 8)
             }
             .padding(20)
         }
-        .navigationBarBackButtonHidden(isEditing)
         .toolbar {
-            if isEditing {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { if title != item.title || text != item.body { confirmDiscard = true } else { isEditing = false } }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button { model.togglePin(item.id) } label: {
+                    Label(item.pinned ? "Unpin" : "Pin", systemImage: item.pinned ? "pin.slash" : "pin")
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        model.updateItem(item.id, title: title, body: text)
-                        isEditing = false
-                    }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            } else {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { model.togglePin(item.id) } label: {
-                        Label(item.pinned ? "Unpin" : "Pin", systemImage: item.pinned ? "pin.slash" : "pin")
-                    }
-                    ShareLink(item: item.body)
-                    Button("Edit") { title = item.title; text = item.body; isEditing = true }
-                }
+                ShareLink(item: item.body)
             }
-        }
-        .confirmationDialog("Discard your changes?", isPresented: $confirmDiscard, titleVisibility: .visible) {
-            Button("Discard changes", role: .destructive) { isEditing = false }
-            Button("Keep editing", role: .cancel) {}
         }
         .confirmationDialog("Forget this one for good?", isPresented: $confirmForget, titleVisibility: .visible) {
             Button("Forget it", role: .destructive) {

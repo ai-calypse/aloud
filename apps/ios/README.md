@@ -29,14 +29,14 @@ from the guide exist; the nine flows are reachable like this.
 
 | Flow | Try it |
 | --- | --- |
-| F01 speak and remember | Hold the logo → release. First sample is a thought. |
-| F02 speak and compose | Set *next voice sample* to Draft (Settings → prototype controls), or type "write Sarah a message saying …". |
-| F03 connected action | Sample *Slack action* → pick Sarah → review → send. Try *next send* = fails once / outcome unknown, or set Slack to *needs reconnecting*. |
+| F01 speak a note | Hold the sky window → release. The note editor opens with your words. Save to Memory, or close and choose discard. |
+| F02 rewrite | In the editor, tap a tone (Professional, Friendly, Casual, Confident, Formal, Empathetic) or an edit (Fix grammar, Shorter, Bullet points). Styles rewrite from your last typed text, never stack. *revert* restores it. Set *next voice sample* to "Rambling note" for a good one. |
+| F03 connected action | In the editor, *send with…* → Slack, Gmail or Notion → pick the recipient → review → send. Try *next send* = fails once / outcome unknown, or set Slack to *needs reconnecting*. |
 | F04 memory question | Sample *Memory question* → open a source → back returns to the answer. |
-| F05 browse and search | Memory tab → search and filter → open → back keeps query and filter. |
+| F05 search from any page | Speak, Memory and Meetings each carry the search bar and share one query. Memory adds kind filters; Meetings narrows only meetings. Open a note → back keeps the search. |
 | F06 meeting | Speak → *start meeting* → start recording → pause/finish → notes. |
 | F07 recover a meeting | *Customer call* in Meetings is an unfinished session; or turn on *interrupt next meeting*. |
-| F08 type instead | *type instead* on Home. Typed text takes the same path as voice. |
+| F08 type instead | *type instead* on Home. Typed text opens the same note editor as voice. |
 | F09 manage connections | Settings → Connected apps → Notion (starts unconnected). |
 
 Settings → **prototype controls** switch every state in the guide on demand: first-use account,
@@ -75,8 +75,8 @@ SpeakOSTests/          Interpreter and AppModel behaviour
 - **Light appearance only** (`preferredColorScheme(.light)`), as the guide specifies. A reviewed
   dark pass is open work, and Apple's guidance is not to ship an app-only appearance switch.
 - **Voice is simulated:** holding plays a scripted sentence into the live transcript.
-- **Intent is rules, not a model** (`Interpreter`): remember → thought, write → draft, send/email/post
-  → action, question → answer, otherwise it asks one question. Answers only quote saved items.
+- **Everything you say becomes a note** (`Interpreter`), except a question, which is answered from saved notes and only quotes them. "Write Sarah a message saying …" keeps Sarah as the recipient for *send with…*. Rules, not a model.
+- **Rewrites are string rules** (`Rewriter`) standing in for a model, so the editor's states can be reviewed. Meetings are a separate flow and never become notes.
 - **Orange and yellow are fills under ink labels**, never text on white. At most one orange button per screen.
 
 ## Not done

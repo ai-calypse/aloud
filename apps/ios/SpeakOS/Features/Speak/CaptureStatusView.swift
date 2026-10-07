@@ -99,30 +99,3 @@ struct CaptureStatusView: View {
         .card()
     }
 }
-
-/// "remembered." stays until dismissed or the next capture starts; edit and undo never race a timeout.
-struct RememberedCard: View {
-    @Environment(AppModel.self) private var model
-    let item: MemoryItem
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Rectangle().fill(Theme.orange).frame(width: 10, height: 10).accessibilityHidden(true)
-                Text("remembered.").font(.brandHeading).foregroundStyle(.white)
-            }
-            Text(item.body).font(.uiBody).foregroundStyle(.white)
-            Text("THOUGHT · \(ago(item.date).uppercased())").font(.brandMono).tracking(0.8).foregroundStyle(Color(hex: 0xAAB6DC))
-            InlineActions {
-                Button("edit") { model.present(.thoughtEditor(item.id)) }
-                Button("undo") { model.undoLastSaved() }
-                Button("done") { model.lastSaved = nil }.buttonStyle(.brandHot)
-            }
-            .padding(.top, 4)
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.ink, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .accessibilityElement(children: .contain)
-    }
-}

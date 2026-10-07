@@ -81,40 +81,6 @@ struct PermissionSheet: View {
     }
 }
 
-/// One short question about the one thing we could not tell, never a classification quiz.
-struct ClarifySheet: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    let clarification: Clarification
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("save this thought or make it a message?").font(.brandHeading).foregroundStyle(Theme.ink)
-                Text(clarification.text).foregroundStyle(Theme.ink)
-                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.border))
-                Button {
-                    dismiss()
-                    model.saveThought(Interpreter.sentence(clarification.text))
-                } label: { Text("save as a thought").frame(maxWidth: .infinity) }
-                    .buttonStyle(.brandPrimary)
-                Button {
-                    model.present(.draft(DraftModel(text: Interpreter.sentence(clarification.text), recipientName: nil)))
-                } label: { Text("make it a message").frame(maxWidth: .infinity) }
-                    .buttonStyle(.brandQuiet)
-                Spacer(minLength: 0)
-            }
-            .controlSize(.large)
-            .padding(20)
-            .screenBackground()
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-        }
-    }
-}
-
 /// Several people match, so the person picks. We never show a final approval with a guessed recipient.
 struct RecipientSheet: View {
     @Environment(AppModel.self) private var model
@@ -143,51 +109,6 @@ struct RecipientSheet: View {
             .screenBackground()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-        }
-    }
-}
-
-struct ThoughtEditorSheet: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    let itemID: UUID
-    @State private var text = ""
-    @State private var original = ""
-    @State private var confirmDiscard = false
-
-    private var dirty: Bool { text != original }
-
-    var body: some View {
-        NavigationStack {
-            TextEditor(text: $text)
-                .scrollContentBackground(.hidden)
-                .padding(12)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .padding(20)
-                .screenBackground()
-                .navigationTitle("Edit thought")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { if dirty { confirmDiscard = true } else { dismiss() } }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") {
-                            model.updateItem(itemID, title: String(text.prefix(60)), body: text)
-                            dismiss()
-                        }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                }
-                .confirmationDialog("Discard your changes?", isPresented: $confirmDiscard, titleVisibility: .visible) {
-                    Button("Discard changes", role: .destructive) { dismiss() }
-                    Button("Keep editing", role: .cancel) {}
-                }
-        }
-        .interactiveDismissDisabled(dirty)
-        .onAppear {
-            let body = model.item(itemID)?.body ?? ""
-            text = body
-            original = body
         }
     }
 }

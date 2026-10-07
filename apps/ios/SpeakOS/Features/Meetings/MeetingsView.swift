@@ -11,12 +11,18 @@ struct MeetingsView: View {
                     Text(model.warm("be there. we'll take notes.", bro: "be there, bro. we'll take notes."))
                         .font(.brandTitle).foregroundStyle(Theme.ink)
                         .accessibilityAddTraits(.isHeader)
+                    SearchField(text: $model.query, prompt: "search meetings…")
                     Button { model.startMeeting() } label: {
                         Label("start a meeting", systemImage: "record.circle").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.brandHot)
 
-                    if model.meetings.isEmpty {
+                    if !model.query.isEmpty && model.visibleMeetings.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("not ringing a bell.").font(.brandHeading).foregroundStyle(Theme.ink)
+                            Text("No meeting matches. Try a different word.").foregroundStyle(Theme.muted)
+                        }
+                    } else if model.meetings.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(model.warm("no meetings. lucky you.", bro: "no meetings. lucky you, bro.")).font(.uiHeadline).foregroundStyle(Theme.ink)
                             Text("your notes will live here after a session.").font(.uiSubheadline).foregroundStyle(Theme.muted)
@@ -24,7 +30,7 @@ struct MeetingsView: View {
                         .card()
                         .accessibilityElement(children: .combine)
                     } else {
-                        ForEach(model.meetings.sorted { $0.date > $1.date }) { meeting in
+                        ForEach(model.visibleMeetings) { meeting in
                             NavigationLink(value: Route.meeting(meeting.id)) { MeetingRow(meeting: meeting) }
                                 .buttonStyle(.plain)
                         }

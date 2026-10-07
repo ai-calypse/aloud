@@ -32,26 +32,22 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
 enum AppSheet: Identifiable {
     case typed(prefill: String)
     case permission(denied: Bool)
-    case clarify(Clarification)
     case recipient(ActionRequest)
-    case draft(DraftModel)
+    case note(NoteDraft)
     case action(ActionRequest)
     case answer(AnswerModel)
     case connect(ServiceKind, resume: ActionRequest?)
-    case thoughtEditor(UUID)
     case settings
 
     var id: String {
         switch self {
         case .typed: "typed"
         case .permission: "permission"
-        case .clarify(let c): "clarify-\(c.id)"
         case .recipient(let r): "recipient-\(r.id)"
-        case .draft(let d): "draft-\(d.id)"
+        case .note(let n): "note-\(n.id)"
         case .action(let r): "action-\(r.id)"
         case .answer(let a): "answer-\(a.id)"
         case .connect(let s, _): "connect-\(s.id)"
-        case .thoughtEditor(let id): "thought-\(id)"
         case .settings: "settings"
         }
     }
@@ -100,16 +96,12 @@ private struct SheetContent: View {
             PermissionSheet(denied: denied)
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
-        case .clarify(let c):
-            ClarifySheet(clarification: c)
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
         case .recipient(let r):
             RecipientSheet(request: r)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-        case .draft(let d):
-            DraftSheet(draft: d)
+        case .note(let n):
+            NoteEditorSheet(note: n)
                 .presentationDetents([.large])
         case .action(let r):
             ActionPreviewSheet(request: r)
@@ -119,10 +111,6 @@ private struct SheetContent: View {
                 .presentationDetents([.large])
         case .connect(let s, let resume):
             NavigationStack { ConnectionDetailView(service: s, resume: resume, isSheet: true) }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        case .thoughtEditor(let id):
-            ThoughtEditorSheet(itemID: id)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         case .settings:

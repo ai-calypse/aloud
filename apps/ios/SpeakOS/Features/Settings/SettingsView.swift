@@ -35,7 +35,7 @@ struct SettingsView: View {
                 }
 
                 Section("Your words") {
-                    Text("Thoughts, drafts and notes are stored on this iPhone. Speech and the words you send to be understood are processed in the cloud, and only while you use a feature.")
+                    Text("Notes are stored on this iPhone. Speech and the words you send to be understood are processed in the cloud, and only while you use a feature.")
                         .font(.uiSubheadline).foregroundStyle(Theme.muted)
                     ShareLink(item: model.exportText.isEmpty ? "Nothing saved yet." : model.exportText) { Label("export your memory", systemImage: "square.and.arrow.up") }
                     Button("forget everything", role: .destructive) { confirmDelete = true }
@@ -48,7 +48,7 @@ struct SettingsView: View {
                         }
                     }
                     DisclosureGroup("what gets saved") {
-                        Text("Thoughts are saved on their own. Drafts only when you tap save draft. Finished meetings land in Meetings. A receipt appears after a connected action succeeds. Questions aren't saved.")
+                        Text("After you speak, your words open as a note. It is saved only when you tap save to Memory. Meetings are kept separately in Meetings. A receipt appears after a connected action succeeds. Questions aren't saved.")
                             .font(.uiSubheadline)
                     }
                 }
@@ -64,7 +64,7 @@ struct SettingsView: View {
                 Button("Forget everything", role: .destructive) { model.deleteAll() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This removes every thought, draft and meeting. It can't be undone. Connected apps stay connected.")
+                Text("This removes every note and meeting. It can't be undone. Connected apps stay connected.")
             }
         }
     }

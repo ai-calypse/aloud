@@ -49,9 +49,9 @@ enum Fixtures {
 
     static func items(meetings: [Meeting]) -> [MemoryItem] {
         var out: [MemoryItem] = [
-            MemoryItem(kind: .thought, title: "Keep pricing at $12 a month", body: "Pricing should stay at twelve dollars a month through launch. Review a yearly option after.", date: ago(30), pinned: true, tags: ["pricing"]),
-            MemoryItem(kind: .thought, title: "Ask Priya about the press list", body: "Ask Priya whether the press list includes the podcast people.", date: ago(52), tags: ["launch"]),
-            MemoryItem(kind: .draft, title: "Note to the team", body: "Hey team, the launch is on the 14th. Shout if anything blocks you.", date: ago(8)),
+            MemoryItem(kind: .note, title: "Keep pricing at $12 a month", body: "Pricing should stay at twelve dollars a month through launch. Review a yearly option after.", date: ago(30), pinned: true, tags: ["pricing"]),
+            MemoryItem(kind: .note, title: "Ask Priya about the press list", body: "Ask Priya whether the press list includes the podcast people.", date: ago(52), tags: ["launch"]),
+            MemoryItem(kind: .note, title: "Note to the team", body: "Hey team, the launch is on the 14th. Shout if anything blocks you.", date: ago(8)),
             MemoryItem(kind: .action, title: "Sent to Priya Nair on Slack", body: "Can you send the press list by Friday?", date: ago(100)),
         ]
         for m in meetings where m.status == .finished {

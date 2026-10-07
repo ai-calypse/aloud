@@ -12,6 +12,7 @@ struct MemoryView: View {
                     Text(model.warm("you said it. we kept it.", bro: "you said it, bro. we kept it."))
                         .font(.brandTitle).foregroundStyle(Theme.ink)
                         .accessibilityAddTraits(.isHeader)
+                    SearchField(text: $model.query)
                     filters
                     content
                 }
@@ -20,7 +21,6 @@ struct MemoryView: View {
             }
             .screenBackground()
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $model.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "find a thought, name, or phrase…")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Wordmark() }
                 SettingsToolbar()
@@ -71,7 +71,7 @@ struct MemoryView: View {
             ContentUnavailableView {
                 Label(model.warm("nothing here yet.", bro: "nothing here yet, bro."), systemImage: "tray")
             } description: {
-                Text("Say a thought and it will land here.")
+                Text("Say something and a note will land here.")
             } actions: {
                 Button("go say something") { model.selectedTab = .speak }.buttonStyle(.brandPrimary)
             }

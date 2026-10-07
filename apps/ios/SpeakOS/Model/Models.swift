@@ -4,14 +4,13 @@ import Foundation
 // every outcome is a simulated fixture (see AppModel and DemoControls).
 
 enum MemoryKind: String, CaseIterable, Identifiable, Hashable {
-    case thought, draft, meeting, action
+    case note, meeting, action
 
     var id: String { rawValue }
     var label: String { rawValue }
     var symbol: String {
         switch self {
-        case .thought: "lightbulb"
-        case .draft: "square.and.pencil"
+        case .note: "note.text"
         case .meeting: "person.2"
         case .action: "paperplane"
         }
@@ -19,14 +18,13 @@ enum MemoryKind: String, CaseIterable, Identifiable, Hashable {
 }
 
 enum MemoryFilter: String, CaseIterable, Identifiable {
-    case everything, thoughts, drafts, meetings, actions
+    case everything, notes, meetings, actions
 
     var id: String { rawValue }
     var kind: MemoryKind? {
         switch self {
         case .everything: nil
-        case .thoughts: .thought
-        case .drafts: .draft
+        case .notes: .note
         case .meetings: .meeting
         case .actions: .action
         }
@@ -181,15 +179,12 @@ struct ActionRequest: Identifiable, Hashable {
 
 // MARK: Results
 
-struct DraftModel: Identifiable {
+/// What the note editor opens with: fresh dictation, or a saved note being edited.
+struct NoteDraft: Identifiable {
     var id = UUID()
     var text: String
     var recipientName: String?
-}
-
-struct Clarification: Identifiable {
-    var id = UUID()
-    var text: String
+    var existingID: UUID?
 }
 
 enum AnswerState {

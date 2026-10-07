@@ -30,7 +30,6 @@ final class AppModel {
     var phase: CapturePhase = .idle
     var liveTranscript = ""
     var processingSlow = false
-    var lastSaved: MemoryItem?
     var session: MeetingSession?
 
     @ObservationIgnored private var listenTask: Task<Void, Never>?
@@ -49,7 +48,6 @@ final class AppModel {
             meetings = Fixtures.meetings()
             items = Fixtures.items(meetings: meetings)
         }
-        lastSaved = nil
     }
 
     func warm(_ plain: String, bro: String) -> String { broMode ? bro : plain }
@@ -58,12 +56,22 @@ final class AppModel {
 
     var recent: [MemoryItem] { Array(items.sorted { $0.date > $1.date }.prefix(3)) }
 
-    var results: [MemoryItem] {
+    /// Memory applies its kind filter; pages without filter chips use `searchResults`.
+    var results: [MemoryItem] { searchResults.filter { filter.kind == nil || $0.kind == filter.kind } }
+
+    var searchResults: [MemoryItem] {
         let q = query.trimmingCharacters(in: .whitespaces)
         return items
-            .filter { filter.kind == nil || $0.kind == filter.kind }
             .filter { q.isEmpty || ($0.title + " " + $0.body + " " + $0.tags.joined(separator: " ")).localizedCaseInsensitiveContains(q) }
             .sorted { ($0.pinned ? 1 : 0, $0.date) > ($1.pinned ? 1 : 0, $1.date) }
+    }
+
+    /// Meetings stay their own list; the shared query narrows it by title, notes and transcript.
+    var visibleMeetings: [Meeting] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        return meetings
+            .filter { q.isEmpty || ($0.title + " " + $0.summary + " " + $0.transcript.map(\.text).joined(separator: " ")).localizedCaseInsensitiveContains(q) }
+            .sorted { $0.date > $1.date }
     }
 
     func item(_ id: UUID) -> MemoryItem? { items.first { $0.id == id } }
@@ -107,7 +115,6 @@ final class AppModel {
         case .denied: present(.permission(denied: true)); return
         case .granted: break
         }
-        lastSaved = nil
         liveTranscript = ""
         captureStart = .now
         phase = .listening(armed: false)
@@ -139,7 +146,7 @@ final class AppModel {
         listenTask?.cancel()
         if armed { cancelCapture(); return }
         let text = liveTranscript.trimmingCharacters(in: .whitespaces)
-        // A brush of the control is a no-op, never an empty saved thought.
+        // A brush of the control is a no-op, never an empty note.
         if text.isEmpty || (!tapToRecord && Date.now.timeIntervalSince(captureStart) < 0.4) {
             phase = .idle
             liveTranscript = ""
@@ -196,36 +203,33 @@ final class AppModel {
         phase = .idle
         liveTranscript = ""
         switch Interpreter.interpret(text, items: items, searchUnavailable: demo.searchUnavailable) {
-        case .thought(let t): saveThought(t)
-        case .draft(let t, let name): present(.draft(DraftModel(text: t, recipientName: name)))
-        case .action(let request): startAction(request)
+        case .note(let t, let name): present(.note(NoteDraft(text: t, recipientName: name, existingID: nil)))
         case .answer(let answer): present(.answer(answer))
-        case .unclear: present(.clarify(Clarification(text: text)))
         }
     }
 
-    // MARK: Thoughts and drafts
+    // MARK: Notes
 
-    func saveThought(_ text: String) {
-        let item = MemoryItem(kind: .thought, title: String(text.prefix(60)), body: text)
+    /// Saves a new note, or updates the one being edited. Returns its id.
+    @discardableResult
+    func saveNote(id: UUID?, text: String) -> UUID {
+        let title = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
+        if let id, let i = items.firstIndex(where: { $0.id == id }) {
+            items[i].title = title
+            items[i].body = text
+            showToast("note updated.")
+            return id
+        }
+        let item = MemoryItem(kind: .note, title: title, body: text)
         items.insert(item, at: 0)
-        lastSaved = item
         if haptics { Haptics.success() }
-        AccessibilityNotification.Announcement("remembered. \(text)").post()
+        showToast("saved to Memory.")
+        return item.id
     }
 
-    func undoLastSaved() {
-        guard let saved = lastSaved else { return }
-        items.removeAll { $0.id == saved.id }
-        lastSaved = nil
-        showToast("undone. it's gone.")
-    }
-
-    func updateItem(_ id: UUID, title: String, body: String) {
-        guard let i = items.firstIndex(where: { $0.id == id }) else { return }
-        items[i].title = title
-        items[i].body = body
-        if lastSaved?.id == id { lastSaved = items[i] }
+    func rewrite(_ text: String, style: RewriteStyle) async -> String {
+        try? await Task.sleep(for: .milliseconds(800))
+        return Rewriter.apply(text, style: style)
     }
 
     func togglePin(_ id: UUID) {
@@ -237,22 +241,12 @@ final class AppModel {
         guard let item = self.item(id) else { return }
         items.removeAll { $0.id == id }
         if let m = item.meetingID { meetings.removeAll { $0.id == m } }
-        if lastSaved?.id == id { lastSaved = nil }
         showToast("forgotten.")
-    }
-
-    @discardableResult
-    func saveDraft(_ text: String) -> UUID {
-        let item = MemoryItem(kind: .draft, title: String(text.prefix(60)), body: text)
-        items.insert(item, at: 0)
-        showToast("draft saved.")
-        return item.id
     }
 
     func deleteAll() {
         items = []
         meetings = []
-        lastSaved = nil
         showToast("everything's forgotten.")
     }
 

@@ -19,10 +19,14 @@ struct SpeakView: View {
                         .accessibilityElement(children: .combine)
                         .accessibilityAddTraits(.isHeader)
 
-                        CaptureStatusView()
-                        if let saved = model.lastSaved { RememberedCard(item: saved) }
-                        SecondaryActions()
-                        RecentSection()
+                        SearchField(text: $model.query)
+                        if model.phase != .idle || model.query.isEmpty { CaptureStatusView() }
+                        if model.query.isEmpty {
+                            SecondaryActions()
+                            RecentSection()
+                        } else {
+                            SearchResults()
+                        }
                     }
                     .padding(.horizontal, 22)
                     .padding(.top, 48)
@@ -94,7 +98,7 @@ private struct RecentSection: View {
                     PixelSpark()
                     VStack(alignment: .leading, spacing: 2) {
                         Text(model.warm("a little quiet in here.", bro: "a little quiet in here, bro.")).font(.uiHeadline).foregroundStyle(Theme.ink)
-                        Text("say a thought. we'll keep it.").font(.uiSubheadline).foregroundStyle(Theme.muted)
+                        Text("say something. we'll keep the note.").font(.uiSubheadline).foregroundStyle(Theme.muted)
                     }
                 }
                 .card()

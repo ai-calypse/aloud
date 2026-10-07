@@ -66,7 +66,7 @@ struct ConnectionDetailView: View {
             Button("Disconnect", role: .destructive) { model.setStatus(.notConnected, for: service) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("speakos won't be able to use \(service.name) any more. Your saved thoughts and drafts stay.")
+            Text("speakos won't be able to use \(service.name) any more. Your saved notes stay.")
         }
     }
 
@@ -89,6 +89,6 @@ struct ConnectionDetailView: View {
 
     /// Cancelling a connection keeps the person's draft: back to the message, not to Home.
     private func cancel() {
-        if let resume { model.present(.draft(DraftModel(text: resume.content, recipientName: resume.recipient?.name))) } else { dismiss() }
+        if let resume { model.present(.note(NoteDraft(text: resume.content, recipientName: resume.recipient?.name, existingID: nil))) } else { dismiss() }
     }
 }

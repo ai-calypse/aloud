@@ -1,51 +1,36 @@
 import Foundation
 
 enum Interpretation {
-    case thought(String)
-    case draft(text: String, recipientName: String?)
-    case action(ActionRequest)
+    case note(text: String, recipientName: String?)
     case answer(AnswerModel)
-    case unclear
 }
 
-/// Stands in for the intent model. The prototype only needs the *shape* of each
-/// outcome (thought, draft, action, answer, ask-me) to be believable, so this is a
-/// handful of rules, not language understanding.
+/// Stands in for the intent model. After you speak, the result is a note you can rewrite and
+/// send; the only other outcome is a question, which is answered from saved notes. Rules, not
+/// language understanding: the prototype only needs both outcomes to be believable.
 enum Interpreter {
     static func interpret(_ raw: String, items: [MemoryItem], searchUnavailable: Bool) -> Interpretation {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = text.lowercased()
-        guard !text.isEmpty else { return .unclear }
-
-        if let rest = strip(lower, text, prefixes: ["remember that ", "remember to ", "remember ", "note that "]) {
-            return .thought(sentence(rest))
-        }
-
-        let actionVerbs = ["send ", "post ", "email ", "message ", "slack ", "tell ", "dm ", "create ", "add ", "put "]
-        if let service = Self.service(in: lower), actionVerbs.contains(where: { lower.hasPrefix($0) }) {
-            let content = payload(in: text) ?? text
-            let name = recipientName(in: text)
-            let candidates = Contacts.candidates(for: name, service: service)
-            return .action(ActionRequest(
-                service: service,
-                content: sentence(content),
-                recipient: candidates.count == 1 ? candidates[0] : nil,
-                candidates: candidates
-            ))
-        }
-
-        if ["write ", "draft ", "compose "].contains(where: { lower.hasPrefix($0) }) {
-            let name = recipientName(in: text)
-            let body = payload(in: text).map(sentence)
-            if let name, let body { return .draft(text: "Hey \(name), \(body)", recipientName: name) }
-            return .draft(text: body ?? sentence(text), recipientName: name)
-        }
 
         let questionStarts = ["what ", "when ", "where ", "who ", "how ", "which ", "did i", "do i", "have i", "find ", "search "]
         if text.hasSuffix("?") || questionStarts.contains(where: { lower.hasPrefix($0) }) {
             return .answer(answer(to: text, items: items, searchUnavailable: searchUnavailable))
         }
-        return .unclear
+
+        if let rest = strip(lower, text, prefixes: ["remember that ", "remember to ", "remember ", "note that "]) {
+            return .note(text: sentence(rest), recipientName: nil)
+        }
+
+        // "Write Sarah a message saying …" and "Send Sarah a Slack saying …" both become the words to send.
+        let addressing = ["write ", "draft ", "compose ", "send ", "email ", "message ", "tell ", "slack ", "dm "]
+        if addressing.contains(where: { lower.hasPrefix($0) }) {
+            let name = recipientName(in: text)
+            let body = payload(in: text).map(sentence)
+            if let name, let body { return .note(text: "Hey \(name), \(body)", recipientName: name) }
+            return .note(text: body ?? sentence(text), recipientName: name)
+        }
+        return .note(text: sentence(text), recipientName: nil)
     }
 
     // MARK: Answers
@@ -154,10 +139,10 @@ enum DemoScript {
     static let samples = [
         "Remember that Sarah likes the green version.",
         "Write Sarah a message saying I'll be there around eight.",
-        "Send Sarah a Slack saying I'll be there around eight.",
+        "I think we should maybe just move the launch to the fourteenth, it's really the best date.",
         "What did I say about pricing last week?",
     ]
-    static let sampleLabels = ["Thought", "Draft", "Slack action", "Memory question"]
+    static let sampleLabels = ["Note", "Note for Sarah", "Rambling note (try rewrites)", "Memory question"]
 
     static let meetingLines = [
         "Let's lock the launch for the 14th.",
