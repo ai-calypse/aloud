@@ -1,0 +1,98 @@
+# SpeakOS for iPhone — UI and user flows
+
+SwiftUI prototype of the SpeakOS iPhone UI, built from `speakos_ios_ui_creation_guide.md`
+and the final logo. **UI only:** no audio, no network, no accounts, no model. Every outcome is a
+simulated fixture, so this is a clickable prototype, not an app that records or sends anything.
+
+## Run it
+
+Needs Xcode 15+ (iOS 17 deployment target) and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+
+```sh
+cd apps/ios
+brew install xcodegen   # once
+xcodegen                # writes SpeakOS.xcodeproj (gitignored)
+open SpeakOS.xcodeproj
+```
+
+Built with the iOS 26 SDK, the tab bar and sheets pick up Liquid Glass on their own; the app
+draws no glass of its own.
+
+> ⚠️ **Not compiled yet.** This was written in a Linux container with no Swift toolchain.
+> Expect a first-build pass to fix small compiler errors before it runs, and nothing here has been
+> seen on a simulator or device.
+
+## Screens and flows
+
+Tabs: **Memory · Speak · Meetings**, Speak first. Settings is top-right. All seven screen families
+from the guide exist; the nine flows are reachable like this.
+
+| Flow | Try it |
+| --- | --- |
+| F01 speak a note | Hold the sky window → release. The note editor opens with your words. Save to Memory, or close and choose discard. |
+| F02 rewrite | In the editor, tap a tone (Professional, Friendly, Casual, Confident, Formal, Empathetic) or an edit (Fix grammar, Shorter, Bullet points). Styles rewrite from your last typed text, never stack. *revert* restores it. Set *next voice sample* to "Rambling note" for a good one. |
+| F03 connected action | In the editor, *send with…* → Slack, Gmail or Notion → pick the recipient → review → send. Try *next send* = fails once / outcome unknown, or set Slack to *needs reconnecting*. |
+| F04 memory question | Sample *Memory question* → open a source → back returns to the answer. |
+| F05 search from any page | Speak, Memory and Meetings each carry the search bar and share one query. Memory adds kind filters; Meetings narrows only meetings. Open a note → back keeps the search. |
+| F06 meeting | Speak → *start meeting* → start recording → pause/finish → notes. |
+| F07 recover a meeting | *Customer call* in Meetings is an unfinished session; or turn on *interrupt next meeting*. |
+| F08 type instead | *type instead* on Home. Typed text opens the same note editor as voice. |
+| F09 integrations | Settings → Integrations. Browse by category, open an app, connect through Composio (handoff is simulated), and set which reads ask first. Writes always ask. Notion starts unconnected; Google Calendar needs reconnecting. |
+| F10 tags | Note page → **#** (or the tag row in the editor) to add, remove and pick suggested tags. Memory shows tag chips that filter; Settings → Tags renames (merging), deletes the label, or jumps to its notes. |
+| F11 settings | Settings is a card page: account, capture (tap to record, haptics, keep audio, language), rewriting (default tone, text replacements), organise (tags, integrations), your words (export, forget everything), help, and the prototype controls. |
+
+Settings → **prototype controls** switch every state in the guide on demand: first-use account,
+microphone ask/denied, a failed capture, unavailable search, send outcomes, connection results,
+meeting interruption and failed notes. They simulate outcomes and would not ship.
+
+Composio: connections are modelled as a catalogue of toolkits (`Integration`) with a status and
+a per-tool permission. The handoff in `AppModel.connect` is simulated; the real one starts a Composio
+connection for the person and returns when the app's own sign-in page finishes. The privacy copy
+on the Integrations page ("SpeakOS never sees your password") describes OAuth and should be
+confirmed against the final Composio setup before shipping.
+
+Settings leaves out an Appearance switch for now: the app is light-only until a dark pass is designed.
+
+## Layout
+
+```
+project.yml            XcodeGen spec
+SpeakOS/
+  Design/              Theme (palette, type), Components
+  Model/               value types, Interpreter (intent stand-in), AppModel, Fixtures
+  Navigation/          tabs, the one AppSheet enum, RootView
+  Features/            Speak, Sheets, Memory, Meetings, Settings
+  Assets.xcassets/     SpeakosLogo + AppIcon, both the supplied logo, unmodified
+SpeakOSTests/          Interpreter and AppModel behaviour
+```
+
+`AppModel` is one `@Observable` store; `AppSheet` keeps a single modal on screen at a time.
+
+## Decisions worth knowing
+
+- **Look:** night-sky ink and cool paper, drawn from the logo. The signature is the *sky window*:
+  the supplied art runs edge to edge across the top of Home as the hold-to-talk target. It dims
+  under a night veil while listening and a pixel-block meter rises in front of it. A small orange
+  pixel marks section headings, and nothing else repeats it. This replaces the guide's warm cream
+  canvas, which read as a generic template next to the artwork.
+- **Type:** Bricolage Grotesque for headings and key labels, Geist for reading, Geist Mono for
+  small status labels (all OFL, bundled in `Resources/Fonts`, registered at launch). They are
+  variable fonts: if a face falls back to the system font on device, check `UIFont.familyNames`
+  against the names in `Theme.swift`.
+- **Logo:** the supplied SVG, rasterised once at 1024 px, kept pixel-sharp (`interpolation(.none)`)
+  and never redrawn or animated. It is opaque, so it is used as a full-bleed image, not a cut-out.
+  The app icon is the same artwork.
+- **Light appearance only** (`preferredColorScheme(.light)`), as the guide specifies. A reviewed
+  dark pass is open work, and Apple's guidance is not to ship an app-only appearance switch.
+- **Voice is simulated:** holding plays a scripted sentence into the live transcript.
+- **Everything you say becomes a note** (`Interpreter`), except a question, which is answered from saved notes and only quotes them. "Write Sarah a message saying …" keeps Sarah as the recipient for *send with…*. Rules, not a model.
+- **Rewrites are string rules** (`Rewriter`) standing in for a model, so the editor's states can be reviewed. Meetings are a separate flow and never become notes.
+- **Orange and yellow are fills under ink labels**, never text on white. At most one orange button per screen.
+
+## Not done
+
+Real audio, speech-to-text, the model, Slack/Gmail/Notion, persistence (everything resets on
+relaunch), dark mode, iPad, large-text and contrast verification on device, VoiceOver pass, and the
+guide's usability walkthrough (S04-T02). The guide's open decisions (gesture threshold, large-text sheet
+behaviour, background recording) are unresolved: the recording UI shows interruption honestly and
+promises no background capture.
